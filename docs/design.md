@@ -40,7 +40,7 @@ there's code that depends on it. Decisions already made are recorded in
 | **Entity** | A single note about one thing: a character, a planet, a faction, a plot thread. Every entity has a **type**. |
 | **Type** | A schema for entities: frontmatter fields, standard sections, and a template. |
 | **Pack** | A bundle of types for a genre or purpose (core, space opera, epic fantasy, ...). |
-| **Story position** | A point in the story: a book key plus a chapter key, written `ember:14`. v0 positions are chapter-level. `ember:14.2` (scene 2 of chapter 14) is reserved for later. |
+| **Story position** | A point in the story: a book key plus a chapter key, written `ember:14`. v0 positions are chapter-level. `ember:14.2` (scene 2 of chapter 14) is reserved for later. **Decided (#2):** a bare `ember` means the start of that book. |
 
 ### Scope and inheritance
 
@@ -78,6 +78,9 @@ is a file move, since ids don't depend on paths.
 
 ## 3. On-disk format
 
+The normative rules for §3 and §5 are in [`format.md`](format.md). This
+section explains the shape. Where the two differ, `format.md` wins.
+
 ### Den layout
 
 ```text
@@ -110,18 +113,20 @@ my-den/
 ```
 
 Folder names are slugs for humans. **Identity comes from the `id` in
-frontmatter, not from the path**, so files can be renamed or moved between
-scopes without breaking links.
+frontmatter, not from the path** (once a file has one; tools add it), so files
+can be renamed or moved between scopes without breaking links. The app rewrites
+slug links and positions when it renames something. After a rename by hand,
+links by id, name, or alias still work (format.md F-RT-5).
 
 ### An entity file
 
 ```markdown
 ---
-id: 01JA7Q8M4XK3V9               # ULID, assigned on creation, never changes
+id: 01JA7Q8M4XK3V9R2D5W8HN6TQB   # ULID, assigned on creation, never changes
 type: character
 name: Mara Voss
 aliases: [Voss, "the Commander"]
-status: canon                    # idea | draft | canon | retconned
+status: canon                    # see format.md §9.3 for all six
 fields:
   species: "[[velari]]"
   rank:
@@ -151,7 +156,8 @@ Key points:
 - **Fields can change over time.** A plain value means it's always true. A list
   of `{value, from, until?}` entries means it's true at story positions.
 - **Sections can carry positions too.** A `<!-- wolfden: from=... -->`
-  comment on the line directly under a heading (with an optional `until=`)
+  comment on the line under a heading (one blank line allowed; with an
+  optional `until=`)
   marks the whole section as entering canon at that point. GitHub,
   Obsidian, and VS Code hide HTML comments, so headings render cleanly and
   heading links keep working. Other HTML comments are left alone. This is a
@@ -159,9 +165,25 @@ Key points:
   hand-kept character file.
 - **Links** are wiki-style: `[[mara-voss]]`, `[[Mara Voss]]`, or an alias.
   They resolve by slug, name, or alias to an `id` within the same universe
-  (§2), and the index stores the id. Ambiguous links are flagged.
+  (§2), and the index stores the id (or the path, for a file that has
+  no id yet). Ambiguous links are flagged.
 - **Status** keeps undecided material out of canon views without moving it
   elsewhere. `idea` entities are what a hand-kept "idea bank" holds.
+- **Entities enter canon at a position.** An optional top-level `from`
+  says where the reader first meets the entity. It defaults to the start of
+  the entity's book, series, or the story, by scope, and canon-as-of views
+  leave the entity out before it.
+- **Sections and field values have a status too.** The section comment
+  takes `status=` (`<!-- wolfden: status=candidate from=ember:19 -->`), and
+  a field entry takes `status:`. Entities and facts share one vocabulary:
+  `idea`, `undecided` (a question with options banked), `candidate` (one
+  option), `draft`, `canon`, and `retconned`. An entity or outline row
+  without a status is `draft`. Canon views leave out
+  non-canon sections and values, and a section can't be more canon than its
+  entity.
+- **Pinned facts are hard canon.** `pin=true` on a section or `pin: true`
+  on a field entry marks the facts most important to check before drafting.
+  A **pinned canon** view lists them for a scope as of a position.
 - Unknown frontmatter keys and sections are kept intact. The app must never
   discard what a human or an agent wrote.
 
@@ -200,6 +222,9 @@ adding fields and sections.
 
 ## 5. Structure and time
 
+The normative rules for books, chapters, positions, and outlines are in
+[`format.md`](format.md) §6, §8, and §11.
+
 ### Books and chapters
 
 `book.md` frontmatter holds the ordered chapter list. Each chapter has a
@@ -212,7 +237,14 @@ can't contain `:` or `.`, which the position syntax uses as separators.
 An outline is a list of **rows** (beats) with stable IDs that keep counting
 across books in a series. Book 1 might end at row 36, so Book 2 starts at row
 37. That way a reference like "row 69a" is never ambiguous. Rows can be
-split (`69a`, `69b`) without renumbering anything.
+split (`69a`, `69b`) without renumbering anything. **Decided (#2):** an
+outline is a set of GFM tables with `row` and `beat` columns, plus
+`chapter`, `pov`, `status`, and any custom columns. Rows stay one line, and
+details live in an entity linked from the row.
+
+Positions stay `book:chapter`: rows aren't positions in v0. An event can
+point at rows with a plain `row:` field, and `ember:r75` is reserved for
+row positions later, the same way `ember:14.2` is reserved for scenes.
 
 ### Timeline
 
@@ -295,6 +327,10 @@ library the API uses. Draft tool surface:
 Writes go through the same validation as the UI. An agent can't save a file
 the parser would reject.
 
+`canon_as_of` and `get_entity` serve **pinned canon** first
+([`format.md`](format.md) §9.4), so an agent sees the hard facts before
+the rest.
+
 ## 9. Architecture
 
 ```text
@@ -369,3 +405,16 @@ demos, and test fixtures.
 5. **Desktop packaging:** is a localhost web app enough, or wrap it later
    (Tauri, Electron, .NET MAUI)?
 6. **Name for the invented sample universe.**
+7. ~~**Undecided and must-check material inside an entity:** how to mark a
+   section or field value as an option still being weighed, or as a fact
+   that must not be broken?~~ **Decided (#2):** sections and field entries
+   carry their own `status`, from one vocabulary shared with entities that
+   now includes `undecided` and `candidate`, capped by the entity's status.
+   `pin` marks hard canon, served first as **pinned canon**. Positions stay
+   `book:chapter`, and `ember:r75` is reserved for outline-row positions,
+   which v0 rejects. A bare `ember` means the start of
+   the book. A section headed like a change log or session notes
+   (built-in patterns plus any in `den.yaml`), or one marked `canon=false`, is
+   bookkeeping and stays out of canon views. There's no separate "locked"
+   state in v0: writers use `status: canon` plus `pin`. If agents need write
+   protection, it belongs to the MCP write tools (M2), not the format.

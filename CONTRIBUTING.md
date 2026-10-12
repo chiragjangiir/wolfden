@@ -64,5 +64,5 @@ users' notes depend on, so changes to it get discussed first.
    `CLAUDE.md` or a "Decided" note in `docs/design.md`) or opens a new design
    question, the maintainer adds the `decision` label. Those always need the
    maintainer's approval.
-3. Once agreed, the PR updates `docs/design.md` (and later `docs/format.md`,
-   once the format spec exists) in the same change.
+3. Once agreed, the PR updates `docs/format.md` (the normative spec) and
+   `docs/design.md` in the same change.
