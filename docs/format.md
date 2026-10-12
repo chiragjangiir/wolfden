@@ -801,9 +801,10 @@ qchar      = <any character except DQUOTE, CR, LF,
 "Unicode whitespace" is as CommonMark defines it, so it includes tabs and
 no-break spaces. The comment ends at its first `-->`, and no value can
 contain the sequence `-->` (single `-` and `>` characters are fine, as in
-`from=a-quiet-moon:2b`), so an unquoted value stops there: `from=ember:19-->` is `from=ember:19`. A line with anything but
-whitespace after its first `-->`, such as `from=ember:19--> -->`, doesn't
-match `pos-line` (F-SEC-10). Unquoted values can be any characters except
+`from=a-quiet-moon:2b`), so an unquoted value stops there:
+`from=ember:19-->` is `from=ember:19`. A line with anything but whitespace
+after its first `-->`, such as `from=ember:19--> -->`, doesn't match
+`pos-line` (F-SEC-10). Unquoted values can be any characters except
 whitespace and `"`, so `pov=Zoë` works. Values with spaces need quotes:
 `pov="Mara Voss"`.
 
@@ -820,11 +821,11 @@ order, and a value MAY be double-quoted. A section's comment takes:
 - `from` and `until`: positions (§8).
 - `status`: the section's status (F-STAT-1).
 - `pin`: `true` or `false` (F-PIN-1).
-- `canon`: `false` marks the section as bookkeeping (F-SEC-12). `true`
-  keeps a section out of bookkeeping even if its name matches a
-  bookkeeping pattern, unless its parent section is bookkeeping, in which
-  case it's a [warning] and does nothing. Without it, F-SEC-12 decides. Any other value is an
-  [error].
+- `canon`: `false` marks the section as bookkeeping (F-SEC-12). `true` keeps
+  a section out of bookkeeping even if its name matches a bookkeeping
+  pattern, unless its parent section is bookkeeping, in which case it's a
+  [warning] and does nothing. Without it, F-SEC-12 decides. Any other value
+  is an [error].
 
 A repeated attribute is an [error]. Any other attribute is a [warning], and
 is kept as written.
@@ -880,14 +881,14 @@ own comments say.
 The built-in patterns are `Change log`, `Changelog`, `Revision history`,
 `Session note`, and `Session notes`, each alone or followed by ` *`, and
 `* session note` and `* session notes`, each also followed by ` *` or not.
-`den.yaml` can add more (F-DEN-6). In a pattern, `*` matches any text, including none,
-and everything else matches literally. A pattern is matched against the
-section's name as plain text, that is, the CommonMark text content of the
-heading with emphasis, code, and link markup removed (`## **Change log**`
-matches),
-and both sides get F-LINK-4 normalization first, so case doesn't matter.
-`## v12 session notes (merged)` and `## Changelog 2026` are bookkeeping.
-`## Session`, `## Change logistics`, and `## Possession notes` are not.
+`den.yaml` can add more (F-DEN-6). In a pattern, `*` matches any text,
+including none, and everything else matches literally. A pattern is matched
+against the section's name as plain text, that is, the CommonMark text
+content of the heading with emphasis, code, and link markup removed
+(`## **Change log**` matches), and both sides get F-LINK-4 normalization
+first, so case doesn't matter. `## v12 session notes (merged)` and
+`## Changelog 2026` are bookkeeping. `## Session`, `## Change logistics`,
+and `## Possession notes` are not.
 
 Bookkeeping sections are kept, indexed, and searchable, but
 canon-as-of views, pinned canon, and the MCP server's canon context leave
