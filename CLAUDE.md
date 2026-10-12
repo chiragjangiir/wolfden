@@ -117,6 +117,13 @@ working alone uses plain `Claude`. The marker goes first so it shows in
 notifications and email previews. PR bodies also end with the "Generated with
 Claude Code" footer, and commits keep the `Co-Authored-By` trailer.
 
+### Commit messages
+
+Commits and PR titles use Conventional Commits (`type(scope): summary`),
+as `CONTRIBUTING.md` describes, for example
+`docs(format): make a missing id a warning`. Branch names keep the
+`kind/topic` form (`docs/format-spec`). Don't rewrite older commits to match.
+
 ### Privacy check
 
 `.github/workflows/privacy-check.yml` fails a PR or push to `main` when any
