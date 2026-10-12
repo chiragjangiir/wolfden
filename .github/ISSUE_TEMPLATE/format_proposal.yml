@@ -1,0 +1,49 @@
+name: Format or design proposal
+description: Propose a change to the on-disk format or the design in docs/design.md.
+labels: ["area: format"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The on-disk format is what people's notes depend on, so changes are
+        discussed here before any PR. If the proposal changes a decision
+        already recorded in `docs/design.md`, or opens a new design question,
+        the maintainer will add the `decision` label. This form applies
+        `area: format`; the maintainer may change the area if the proposal is
+        about something else (packs, the index, MCP, and so on).
+  - type: textarea
+    id: summary
+    attributes:
+      label: Proposal
+      description: The change in a few sentences.
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Why
+      description: What problem it solves, or what the current design gets wrong.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example
+      description: A before-and-after example (folder layout, frontmatter, section markers). Use invented or public-domain content.
+      render: markdown
+  - type: textarea
+    id: affected
+    attributes:
+      label: Sections of docs/design.md affected
+      placeholder: "§3 On-disk format, §12 Open questions"
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and migration
+      description: Would existing dens need changes? Can old and new forms both be read?
+  - type: checkboxes
+    id: decision
+    attributes:
+      label: Recorded decisions
+      options:
+        - label: This changes a decision already recorded in docs/design.md.

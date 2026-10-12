@@ -1,0 +1,11 @@
+name: Question
+description: Ask about the design, the plans, or how something is meant to work.
+labels: ["question"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: Link the part of the docs it's about, if there is one.
+    validations:
+      required: true

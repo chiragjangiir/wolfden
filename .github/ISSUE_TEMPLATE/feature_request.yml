@@ -1,0 +1,28 @@
+name: Feature or idea
+description: Suggest a feature, an improvement, or something a story bible should do.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the writing or worldbuilding situation where you'd want this.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like?
+      description: How you picture it working. Rough is fine.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+      description: Other ways you've solved this, in Wolfden or another tool.
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Links, sketches, or examples. Please use invented examples, not real manuscripts.
