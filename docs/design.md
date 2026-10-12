@@ -54,6 +54,28 @@ a character introduced in a standalone book in the same universe. A reference
 to a *later* book is allowed, but the continuity check (§7) flags it, since
 it's usually a spoiler or a mistake.
 
+### Entities don't span universes
+
+A universe is the boundary for story entities, links, and story positions.
+Positions are ordered only among one universe's books, so an entity shared
+between universes would have no clear "canon as of" answer.
+
+- **Crossovers mean it's one universe.** If two series share characters and
+  their history matters (a Cosmere-style shared cosmology), model them as two
+  Series in one Universe.
+- **Incarnations are copies.** The same idea recast per setting (an
+  archetype, a recurring narrator voice) is a separate entity in each
+  universe. A `see_also` field can point between the copies.
+- **Links resolve within the universe.** A link that would match only an
+  entity in another universe is flagged, not resolved.
+
+**Planned (#45): Author and den notes.** Timeless material that isn't story
+canon, such as voice and style rules or real-world research, will be able to
+live above Universe: at Author Identity scope (`authors/<slug>/notes/`) or
+den scope (`notes/`). Universes will inherit them, and they can't carry story
+positions. Until then, keep such notes at Universe scope. Moving one up later
+is a file move, since ids don't depend on paths.
+
 ## 3. On-disk format
 
 ### Den layout
@@ -62,6 +84,7 @@ it's usually a spoiler or a mistake.
 my-den/
   den.yaml                      # den settings, author identities, enabled packs
   packs/                        # den-local custom types (optional)
+  # notes/ and authors/ are reserved for Author and den notes (§2, #45)
   universes/
     starfall/
       universe.md               # frontmatter + overview prose
@@ -131,11 +154,12 @@ Key points:
   comment on the line directly under a heading (with an optional `until=`)
   marks the whole section as entering canon at that point. GitHub,
   Obsidian, and VS Code hide HTML comments, so headings render cleanly and
-  heading links keep working. Other HTML comments are left alone. This is a structured version of "Book 3, chapter 23 additions"
-  sections in a hand-kept character file.
+  heading links keep working. Other HTML comments are left alone. This is a
+  structured version of "Book 3, chapter 23 additions" sections in a
+  hand-kept character file.
 - **Links** are wiki-style: `[[mara-voss]]`, `[[Mara Voss]]`, or an alias.
-  They resolve by slug, name, or alias to an `id`, and the index stores the id.
-  Ambiguous links are flagged.
+  They resolve by slug, name, or alias to an `id` within the same universe
+  (§2), and the index stores the id. Ambiguous links are flagged.
 - **Status** keeps undecided material out of canon views without moving it
   elsewhere. `idea` entities are what a hand-kept "idea bank" holds.
 - Unknown frontmatter keys and sections are kept intact. The app must never
@@ -238,7 +262,8 @@ reference and continuity checks all build on it.
 
 **`wolfden check`** (continuity lint), v0 rules:
 
-- Broken or ambiguous links.
+- Broken or ambiguous links, including a link that matches only an entity
+  in another universe.
 - Missing required fields or sections.
 - Positions that refer to books or chapters that don't exist.
 - Overlapping temporal values for the same field.
@@ -334,8 +359,11 @@ demos, and test fixtures.
    **Decided (#4):** no. v0 positions are chapter-level. The syntax
    `ember:14.2` is reserved for scenes, and v0 rejects it with a clear
    "scenes not supported yet" error instead of misreading it.
-3. **Entities that span universes** (the same author's recurring narrator,
-   say): are they needed, or are copies across universes fine?
+3. ~~**Entities that span universes** (the same author's recurring
+   narrator, say): are they needed, or are copies across universes fine?~~
+   **Decided (#5):** not in v0. Crossovers mean one universe, incarnations
+   are copies, and links resolve within a universe (§2). Timeless Author and
+   den notes are planned (#45), and their folder names are reserved now.
 4. **Auto-checkpoint defaults:** an idle-time commit, or manual only by
    default?
 5. **Desktop packaging:** is a localhost web app enough, or wrap it later
