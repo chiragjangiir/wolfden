@@ -63,23 +63,45 @@ brought in only when a change needs human judgment.
 rounds. If the Reviewer is satisfied and CI is green, the Orchestrator merges
 (merge commit). Otherwise it escalates.
 
-**Always escalate to the maintainer (never auto-merge):**
+The maintainer's time goes to writing first, so the default is to merge.
+Escalate only when a change needs the maintainer's judgment or can't be
+undone.
 
-- issues labeled `decision`, or any change to a recorded decision in
-  `docs/design.md`
-- changes to this file or other agent rules
-- licensing
-- CI workflows, secrets, and permissions
-- new dependencies
-- README and other public-facing wording
-- anything touching identity or privacy
-- disagreement between Developer and Reviewer after the round limit
+**Escalate to the maintainer (never auto-merge):**
 
-**Auto-merge is allowed** for implementation of an already-scoped issue, with
-CI green and the Reviewer satisfied.
+- **Design decisions with real tradeoffs:** choosing between options that
+  differ in what writers see or type (the on-disk format, the domain model,
+  query semantics), or changing a recorded decision in `docs/design.md`.
+  Present the options with a recommendation.
+- **Agent rules:** changes to this file or other agent instructions.
+- **Licensing,** including adding a dependency that isn't under MIT, Apache
+  2.0, BSD, or a similar permissive license.
+- **Security and access:** secrets, tokens, repo settings, Actions
+  permissions, and workflows that use secrets or deploy anything.
+- **Identity and privacy:** anything that could expose the maintainer's real
+  identity or private notes.
+- **The project's public voice:** the README pitch and positioning, the repo
+  description, and anything posted outside this repo.
+- **Outward or irreversible actions:** releases, tags, publishing packages,
+  and deleting branches that aren't merged.
+- **Disagreement** between Developer and Reviewer after the round limit.
 
-To escalate, leave the PR open, say in a PR comment what needs deciding, and
-move the card to In Review.
+**Auto-merge everything else** once CI is green and the Reviewer is
+satisfied. That covers implementation, tests, refactors, docs that follow
+recorded decisions (including typo and accuracy fixes to the README), CI
+that doesn't touch secrets, and permissively licensed dependencies (the
+Reviewer checks the license). Small design choices made while implementing
+are fine. Record them in the PR description so the maintainer can revisit
+them.
+
+**To escalate,** leave the PR open, say in a PR comment what needs deciding
+(with a recommendation), and move the card to In Review. Batch decisions
+where possible. One digest of three questions is better than three
+interruptions. Work that doesn't depend on the answer keeps going.
+
+**At the end of a session,** the Orchestrator gives the maintainer a short
+summary: what merged, which design calls were made along the way, and what's
+waiting on the maintainer.
 
 ### Marking AI-authored content
 
