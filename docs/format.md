@@ -232,10 +232,11 @@ add a `wolfden new-id` command (#17).
 
 **F-ID-6.** Reading and indexing MUST NOT write to files, so they never add
 a missing `id`. A writer that creates a file MUST give it an `id`. When the
-app or an MCP tool edits a file that has no `id`, it SHOULD add one in the
-same write, as the first frontmatter key, after any YAML comment lines
-that open the frontmatter. That is the one exception to
-F-RT-2 and F-RT-4. A write that changes nothing (F-RT-3) never adds one.
+app or an MCP tool edits a file that has no `id`, it SHOULD add one in
+the same write (and MUST when moving it, F-RT-5), as the first frontmatter
+key, after any YAML comment lines that open the frontmatter. That is the
+one exception to F-RT-2 and F-RT-4. A write that changes nothing (F-RT-3)
+never adds one.
 `wolfden check --fix` (#17) adds missing ids in bulk.
 
 Valid: `01JA7Q8M4XK3V9R2D5W8HN6TQB`. Invalid: `01ja7q8m4xk3v9r2d5w8hn6tqb`
