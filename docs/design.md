@@ -165,6 +165,15 @@ Key points:
   (§2), and the index stores the id. Ambiguous links are flagged.
 - **Status** keeps undecided material out of canon views without moving it
   elsewhere. `idea` entities are what a hand-kept "idea bank" holds.
+- **Sections and field values have a status too.** The section comment
+  takes `status=` (`<!-- wolfden: status=candidate from=ember:19 -->`), and
+  a field entry takes `status:`. Sections and entries add `open` (an
+  undecided question, options banked) and `candidate` (one option) to the
+  entity statuses. Canon views leave out non-canon sections and values, and
+  a section can't be more canon than its entity.
+- **Pinned facts are hard canon.** `pin=true` on a section or `pin: true`
+  on a field entry marks the facts most important to check before drafting.
+  A **pinned canon** view lists them for a scope as of a position.
 - Unknown frontmatter keys and sections are kept intact. The app must never
   discard what a human or an agent wrote.
 
@@ -218,7 +227,12 @@ can't contain `:` or `.`, which the position syntax uses as separators.
 An outline is a list of **rows** (beats) with stable IDs that keep counting
 across books in a series. Book 1 might end at row 36, so Book 2 starts at row
 37. That way a reference like "row 69a" is never ambiguous. Rows can be
-split (`69a`, `69b`) without renumbering anything.
+split (`69a`, `69b`) without renumbering anything. A row can map to a
+chapter and carry custom fields such as POV or tags.
+
+Positions stay `book:chapter`: rows aren't positions in v0. An event can
+point at rows with a plain `row:` field, and `ember:r75` is reserved for
+row positions later, the same way `ember:14.2` is reserved for scenes.
 
 ### Timeline
 
@@ -301,6 +315,10 @@ library the API uses. Draft tool surface:
 Writes go through the same validation as the UI. An agent can't save a file
 the parser would reject.
 
+`canon_as_of` and `get_entity` serve **pinned canon** first
+([`format.md`](format.md) §9.4), so an agent sees the hard facts before
+the rest.
+
 ## 9. Architecture
 
 ```text
@@ -375,3 +393,10 @@ demos, and test fixtures.
 5. **Desktop packaging:** is a localhost web app enough, or wrap it later
    (Tauri, Electron, .NET MAUI)?
 6. **Name for the invented sample universe.**
+7. ~~**Undecided and must-check material inside an entity:** how to mark a
+   section or field value as an option still being weighed, or as a fact
+   that must not be broken?~~ **Decided (#2):** sections and field entries
+   carry their own `status` (adding `open` and `candidate`), capped by the
+   entity's status, and `pin` marks hard canon, served first as **pinned
+   canon**. Positions stay `book:chapter`, and `ember:r75` is reserved for
+   outline-row positions, which v0 rejects.
