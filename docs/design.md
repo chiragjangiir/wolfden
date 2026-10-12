@@ -114,7 +114,9 @@ my-den/
 
 Folder names are slugs for humans. **Identity comes from the `id` in
 frontmatter, not from the path**, so files can be renamed or moved between
-scopes without breaking links.
+scopes without breaking links. The app rewrites slug links and positions
+when it renames something. After a rename by hand, links by id, name, or
+alias still work (format.md F-RT-5).
 
 ### An entity file
 
@@ -165,12 +167,17 @@ Key points:
   (§2), and the index stores the id. Ambiguous links are flagged.
 - **Status** keeps undecided material out of canon views without moving it
   elsewhere. `idea` entities are what a hand-kept "idea bank" holds.
+- **Entities enter canon at a position.** An optional top-level `from`
+  says where the reader first meets the entity. It defaults to the start of
+  the entity's book, series, or the story, by scope, and canon-as-of views
+  leave the entity out before it.
 - **Sections and field values have a status too.** The section comment
   takes `status=` (`<!-- wolfden: status=candidate from=ember:19 -->`), and
-  a field entry takes `status:`. Sections and entries add `open` (an
-  undecided question, options banked) and `candidate` (one option) to the
-  entity statuses. Canon views leave out non-canon sections and values, and
-  a section can't be more canon than its entity.
+  a field entry takes `status:`. Entities and facts share one vocabulary:
+  `idea`, `undecided` (a question with options banked), `candidate` (one
+  option), `draft`, `canon`, and `retconned`. Canon views leave out
+  non-canon sections and values, and a section can't be more canon than its
+  entity.
 - **Pinned facts are hard canon.** `pin=true` on a section or `pin: true`
   on a field entry marks the facts most important to check before drafting.
   A **pinned canon** view lists them for a scope as of a position.
@@ -396,7 +403,7 @@ demos, and test fixtures.
 7. ~~**Undecided and must-check material inside an entity:** how to mark a
    section or field value as an option still being weighed, or as a fact
    that must not be broken?~~ **Decided (#2):** sections and field entries
-   carry their own `status` (adding `open` and `candidate`), capped by the
-   entity's status, and `pin` marks hard canon, served first as **pinned
-   canon**. Positions stay `book:chapter`, and `ember:r75` is reserved for
+   carry their own `status`, from one vocabulary shared with entities that
+   now includes `undecided` and `candidate`, capped by the entity's status.
+   `pin` marks hard canon, served first as **pinned canon**. Positions stay `book:chapter`, and `ember:r75` is reserved for
    outline-row positions, which v0 rejects.

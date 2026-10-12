@@ -69,6 +69,13 @@ interpreted. An error in `den.yaml` means the den can't be loaded.
 first. Each diagnostic SHOULD carry the rule id, the file path, and a line
 number when there is one.
 
+**F-GEN-4.** An [error] MUST be decidable from the file itself, `den.yaml`,
+and the set of enabled types. A problem that depends on another file, such
+as chapter order, another book's outline, or a second file with the same
+id, is a [warning], and the rule says how views handle it. So editing one
+file never makes a different file invalid. (A container folder that lacks
+its container file, F-LAY-4, is a problem with the folder itself.)
+
 ### 1.4 Notation and terms
 
 Grammars use ABNF ([RFC 5234]), except that quoted strings are
@@ -120,7 +127,9 @@ explicit tags (`!x`, `!!str`) MUST NOT be used. [error]
 **F-YAML-5.** Keys, positions, `name`, `aliases`, chapter `title`, and
 `row` values (F-FLD-7) are read as the scalar's text as written, not after
 type resolution. So `14`, `"14"`, and `'14'` are the same chapter key,
-`014` stays `014`, and `name: 1984` is the name "1984".
+`014` stays `014`, and `name: 1984` is the name "1984". A YAML null (`~`,
+`null`, or nothing) is still null, not the text "null": `name: ~` is a
+missing name (F-ENT-3), and a null `aliases` item is an error (F-ENT-4).
 
 **F-FM-1.** Frontmatter starts on the file's first line (after any byte order
 mark) with a line that is exactly `---`, and ends at the next line that is
@@ -168,8 +177,11 @@ indexed but has no slug, so links reach it only by id, name, or alias.
 **F-KEY-5.** Book keys MUST be unique within a universe, across all of its
 series and standalone books, since positions name a book without its
 series. A series key MUST NOT equal a standalone book key in the same
-universe, since `order` (F-UNI-1) mixes them. Chapter keys MUST be unique
-within a book. Each is an [error], reported on every file involved.
+universe, since `order` (F-UNI-1) mixes them. Either clash spans files, so
+it's a [warning] on every container involved (F-GEN-4). While it lasts,
+positions naming a duplicated book key don't resolve (F-POS-4), and an
+`order` entry naming a clashing key is ignored (F-UNI-2). Chapter keys MUST
+be unique within a book (F-BOOK-4).
 
 | Key | Valid? |
 |---|---|
@@ -197,12 +209,19 @@ uppercase Crockford base32. Lowercase, hyphens, or any other length is an
 
 **F-ID-2.** Every container file and entity file MUST have an `id`. [error]
 
-**F-ID-3.** An `id` MUST be unique within the den. A duplicate is an
-[error] on every file that has it, and none of them is indexed until it's
-fixed. (This is how a file copied by hand gets caught.)
+**F-ID-3.** An `id` MUST be unique within the den. A duplicate is a
+[warning] on every file that has it (F-GEN-4). While it lasts, the files
+are indexed and listed, so they can be found and fixed, but every copy is
+left out of views and link resolution, and links that would reach one of
+them are broken (F-LINK-8). (This is how a file copied by hand gets
+caught.)
 
 **F-ID-4.** An `id` never changes. Writers MUST NOT change an existing
 `id`. Moving or renaming a file keeps its `id`, and a copy needs a new one.
+
+**F-ID-5.** Writers generating ids by hand can use any implementation
+listed in the [ULID] spec, uppercasing the result if needed. The CLI will
+add a `wolfden new-id` command (#17).
 
 Valid: `01JA7Q8M4XK3V9R2D5W8HN6TQB`. Invalid: `01ja7q8m4xk3v9r2d5w8hn6tqb`
 (lowercase), `01JA7Q8M4XK3V9` (too short), `01JA7Q8M4XK3V9R2D5W8HN6TQI`
@@ -244,9 +263,13 @@ a source of truth (design.md §7).
 Author and den notes (#45). If either exists, v0 ignores its contents and
 reports a [warning].
 
-**F-LAY-4.** Every folder directly under the den's `universes/`, or under
-a container's `series/` or `books/`, is a container and MUST hold its
-container file. A folder that doesn't is an [error], and it is skipped.
+**F-LAY-4.** These folders are containers: every folder directly in the
+den's `universes/`, directly in a universe's `series/`, and directly in a
+universe's or a series' `books/`. A `series/` folder counts only directly
+in a universe, and a `books/` folder only directly in a universe or a
+series. Anywhere else they are ordinary folders (F-LAY-7). A container MUST
+hold its container file. A container folder that doesn't is an [error],
+and it is skipped.
 
 **F-LAY-5.** Every `.md` file under an `entities/` folder, at any depth, is
 an entity file. An `entities/` folder counts only directly inside a
@@ -300,8 +323,8 @@ from several packs combine are defined in the core pack spec (#6).
 
 ### 6.1 Common rules
 
-**F-CTR-1.** A container file's frontmatter MUST have an `id` (F-ID) and a
-non-empty string `name`. [error]
+**F-CTR-1.** A container file's frontmatter MUST have an `id` (F-ID-1,
+F-ID-2) and a non-empty string `name`. [error]
 
 **F-CTR-2.** `authors` is an optional list of author keys from `den.yaml`.
 A book without `authors` takes its series' list, and a series without one
@@ -331,8 +354,8 @@ book keys, in **story order**: the order in which a reader is meant to meet
 the works. Positions are ordered by it (§8.2).
 
 **F-UNI-2.** An `order` entry that names no series or standalone book of
-this universe is a [warning] and is ignored. A repeated entry is an
-[error].
+this universe, or a key that clashes (F-KEY-5), is a [warning] and is
+ignored. A repeated entry is an [error].
 
 **F-UNI-3.** `order` MAY be omitted when the universe has at most one series
 or standalone book. Otherwise each series or standalone book missing from
@@ -396,11 +419,15 @@ positions in it don't resolve (F-POS-4).
   out.
 - `title`, optional: a string.
 
-Other keys are kept. An item MAY instead be a plain scalar, short for
-`{ key: <scalar> }`, so `chapters: [prologue, 1, 2, 3]` is valid. An item of
-any other shape, or one with no `key`, is an [error].
+A `number` that isn't a non-negative integer (`"3"`, `3.5`, `-1`) is a
+[warning], and the chapter is treated as having no number. Other keys are
+kept but not indexed in v0. Chapter-level fields such as POV or an
+in-world date are for the core pack spec (#6) to define. An item MAY
+instead be a plain scalar, short for `{ key: <scalar> }`, so
+`chapters: [prologue, 1, 2, 3]` is valid. An item of any other shape, or one
+with no `key`, is an [error].
 
-**F-BOOK-4.** A repeated chapter key is an [error] (F-KEY-5).
+**F-BOOK-4.** A repeated chapter key is an [error].
 
 **F-BOOK-5.** `number` values, where present, SHOULD increase strictly down
 the list. A `number` that doesn't is a [warning].
@@ -429,11 +456,14 @@ x-color: teal
 ---
 ```
 
-**F-ENT-1.** `id` is REQUIRED (F-ID).
+**F-ENT-1.** `id` is REQUIRED (F-ID-1, F-ID-2).
 
 **F-ENT-2.** `type` is REQUIRED and names a type enabled in the den: from
-`core`, an enabled pack, or `packs/` (#6). A missing or unknown type is an
-[error] ("unknown type 'charcter'").
+`core`, an enabled pack, or `packs/` (#6). A missing `type` is an [error].
+An unknown type is a [warning] ("unknown type 'charcter'"), and the entity
+is indexed **untyped**: its fields are kept and indexed as written, it
+takes part in links and views like any other entity, and the checks that
+need a type (F-LAY-6, F-FLD-2, F-FLD-3, F-SEC-5) are skipped for it.
 
 **F-ENT-3.** `name` is REQUIRED and is a non-empty string after trimming.
 [error]
@@ -441,21 +471,21 @@ x-color: teal
 **F-ENT-4.** `aliases` is an optional list of non-empty strings. Any other
 shape, including a single string, is an [error].
 
-**F-ENT-5.** `status` is optional and defaults to `canon`. Any value other
-than the four below is an [error]. Sections, field entries, and outline
-rows have their own status, with two more values (§9.3).
+**F-ENT-5.** `status` is optional and defaults to `canon`. Its values are
+the status vocabulary shared by entities, sections, field entries, and
+outline rows (F-STAT-1, §9.3). Any other value is an [error]. A `candidate`
+entity, such as one of several possible minor characters, is left out of
+canon views like any other out-of-canon fact.
 
-| `status` | Meaning | In canon-as-of views |
-|---|---|---|
-| `idea` | Undecided material (an idea bank) | left out |
-| `draft` | Meant as canon, not settled | included, marked as draft |
-| `canon` | Settled | included |
-| `retconned` | Was canon, has been replaced | left out, kept for history |
+Note: `status` says whether something is canon, not where it stands in the
+story. A plot thread that is still open is canon. Its open, planted, or
+resolved state is a field of the `thread` type (#6), not its `status`.
 
 **F-ENT-6.** `from` is an optional position (§8) where the entity enters
 canon, that is, where the reader first meets it. Without `from`, a
-book-scope entity enters at the start of its book, and any other entity at
-the start of the story (F-ORD-3). A canon-as-of view at position `p` leaves
+book-scope entity enters at the start of its book, a series-scope entity at
+the start of its series, and a universe-scope entity at the start of the
+story (F-ORD-3). A canon-as-of view at position `p` leaves
 out an entity whose `from` is after `p`. A book-scope entity whose `from`
 is outside its own book is a [warning]. There is no entity-level `until`:
 use `status` for material that leaves canon.
@@ -493,14 +523,16 @@ a list, not a link. A value that is a one-item list whose only item is a
 list of strings is a [warning] that suggests quoting it:
 `species: "[[velari]]"`.
 
-**F-FLD-7.** A field named `row`, on any type, ties an entity (usually an
-`event`) to outline rows. Its value is a row id (F-OUT-2) or a list of row
-ids. A `row` entry with `from` or `until` is a [warning]. A row id resolves
-among the outlines of the entity's series, or of its standalone book. For a
-universe-scope entity it resolves among every outline in the universe, and
-a row id found in more than one series is ambiguous. A row id that doesn't
-resolve, or is ambiguous, is a [warning]. `row` is not a position: v0
-positions stay `book:chapter` (F-POS-6).
+**F-FLD-7.** A field named `row` ties an entity (usually an `event`) to
+outline rows. It is defined on every type, so it never triggers F-FLD-2.
+Its value is a row id (F-OUT-2) or a list of row ids. A `row` entry with
+`from` or `until` is a [warning]. A row id resolves among the outlines of
+the entity's series, or of its standalone book. For a universe-scope entity
+it resolves among every outline in the universe, and a row id found in more
+than one series is ambiguous. So is a row id that appears twice in the
+outlines it resolves among (F-OUT-5). A row id that doesn't resolve, or is
+ambiguous, is a [warning]. `row` is not a position: v0 positions stay
+`book:chapter` (F-POS-6).
 
 ### 7.3 Entries and temporal values
 
@@ -526,7 +558,8 @@ is a single entry, a **temporal list** (a non-empty list in which every
 item is an entry), or else a plain value. A list in which some items are
 entries and others aren't is an [error]. A single entry means the same as a
 one-item temporal list. The shape decides, not the type, so a parser can
-tell these apart without loading packs.
+tell these apart without loading packs. As a result, a plain value that is
+a mapping can't use a key named `value`.
 
 **F-TMP-2.** An entry has:
 
@@ -544,19 +577,23 @@ Other keys in an entry are a [warning], and are kept.
 
 **F-TMP-3.** An entry holds at positions `p` with `from <= p < until`.
 `from` is inclusive and `until` is exclusive. An `until` that isn't after
-its `from` is an [error].
+its `from` is a [warning], not an error, since it depends on chapter order
+in `book.md` (F-GEN-4). Such an entry is never in effect and is left out of
+views.
 
-**F-TMP-4.** An in-canon entry (F-STAT-3) without `until` holds until the
-`from` of the next in-canon entry in story order, or to the end of the
-story if there is none. So in the example above, Lieutenant and Commander
-don't overlap. An out-of-canon entry without `until` runs to the end of
-the story.
+**F-TMP-4.** Only **live** entries take part in this rule and F-TMP-5: an
+entry is live if it's in canon (F-STAT-3), its positions resolve (F-POS-4),
+and its range isn't empty (F-TMP-3). A live entry without `until` holds
+until the
+`from` of the next live entry in story order, or to the end of the story
+if there is none. So in the example above, Lieutenant and Commander don't
+overlap. Any other entry without `until` runs to the end of the story.
 
-**F-TMP-5.** Two in-canon entries **overlap** if they share a `from` (two
+**F-TMP-5.** Two live entries **overlap** if they share a `from` (two
 entries without `from` included), or if an explicit `until` reaches past
-the next in-canon entry's `from`. Overlap is a [warning]. Where entries
+the next live entry's `from`. Overlap is a [warning]. Where entries
 overlap, a canon-as-of view uses the one with the later `from`, and for
-equal `from`s, the one later in the file. Out-of-canon entries never
+equal `from`s, the one later in the file. Entries that aren't live never
 overlap, so several `candidate` values can share a `from`.
 
 **F-TMP-6.** An explicit `until` that comes before the next entry's `from`
@@ -599,14 +636,15 @@ with a `.` after the `:` gets this error.
 to (any series or standalone) and a chapter in that book's `chapters`. A
 book or chapter that doesn't exist is a [warning], not an error, so writers
 can plan ahead. The fact that uses it (a temporal entry, a section, or an
-entity's `from`) stays indexed but is left out of canon-as-of views, and
-range checks (F-TMP-3) skip it.
+entity's `from`) stays indexed but is left out of canon views. It isn't
+live (F-TMP-4), and range checks (F-TMP-3) skip it.
 
 **F-POS-5.** Positions don't cross universes (design.md §2). A book key
 from another universe doesn't resolve, even if it exists there.
 
-**F-POS-6.** A position whose chapter part is `r` followed by a digit
-(`ember:r75`) is in the reserved row form. It is an [error] with the
+**F-POS-6.** A position's **chapter part** is the text after its first
+`:`. A position whose chapter part is `r` followed by a digit (`ember:r75`,
+`ember:r7:2`) is in the reserved row form. It is an [error] with the
 message "outline-row positions are not supported yet; v0 positions are
 chapter-level". This check comes before F-POS-2, so `ember:r75.1` gets this
 error too. F-KEY-2 keeps chapter keys out of this form. To tie a fact to a
@@ -635,10 +673,11 @@ every book in the universe.
 in story order, or if both are in the same book and `a`'s chapter is
 earlier in that book's `chapters` list.
 
-**F-ORD-3.** Three more points complete the order. The **start of the
-story** comes before every position. The **start of a book** comes after
-every chapter of earlier books and before the book's first chapter. The
-**end of the story** comes after every position. Positions can't name these
+**F-ORD-3.** Four more points complete the order. The **start of the
+story** comes before every position. The **start of a series** is the start
+of its first book in story order. The **start of a book** comes after every
+chapter of earlier books and before the book's first chapter. The **end of
+the story** comes after every position. Positions can't name these
 points. They are only what a missing `from` or `until` means.
 
 **F-ORD-4.** Story order is reading order, not in-world chronology. When
@@ -678,20 +717,24 @@ headings count. Text inside code blocks and HTML blocks is never a heading.
 **F-SEC-2.** Content before the first level-2 heading is the **lead**. A
 level-1 heading in the lead is the display title. It's optional and doesn't
 have to match `name`. A level-1 heading after the first level-2 heading is
-a [warning].
+a [warning], and is treated as a level-2 heading, so the content under it
+is a section named by it rather than content with no owner.
 
 **F-SEC-3.** A section's **name** is its heading text, without the `#`
-markers or closing `#`s, trimmed, with any inline markup kept as written.
+markers or closing `#`s, and without any trailing HTML comments (F-SEC-10),
+trimmed, with any inline markup kept as written.
 Names match (against a type's standard sections, and in `[[target#Heading]]`
 links) under the normalization in F-LINK-4. The `Custom:` prefix in
 design.md's example has no special meaning. Any section that the type
 doesn't define is a custom section, and it's kept like any other (§12).
 
 **F-SEC-4.** Two sections MAY have the same name, for example one
-`## Appearance` per era, each with its own position. Two sections with the
-same name and level, under the same parent, that are both in canon and in
-effect at some position are a [warning]. Out-of-canon sections don't count,
-so `open` and `candidate` sections can share a name.
+`## Appearance` per era, each with its own position. For a section the
+entity's type defines (#6), where a new section usually replaces the old
+one, two level-2 sections with that name that are both in canon and in
+effect at some position are a [warning]. Custom sections never get this
+warning, so cumulative ones such as `## Additions` or `## Session notes`
+can repeat freely, and out-of-canon sections don't count either.
 
 **F-SEC-5.** A required section (#6) that's missing is a [warning].
 
@@ -700,11 +743,15 @@ so `open` and `candidate` sections can share a name.
 ```abnf
 pos-line   = *WSP "<!--" *WSP "wolfden:" 1*(1*WSP attr) 1*WSP "-->" *WSP
 attr       = attr-name "=" attr-value
-attr-name  = lower *(lower / DIGIT / "-")
+attr-name  = lower *(lower / DIGIT / "-" / "_")
 attr-value = 1*vchar / DQUOTE *qchar DQUOTE
 vchar      = %x21 / %x23-7E            ; visible ASCII except " and space
 qchar      = <any character except DQUOTE, CR, LF>
 ```
+
+A quoted value MUST NOT contain `-->`, since that ends the HTML comment.
+Unquoted values are ASCII only, so `pov=Zoë` is malformed (F-SEC-10), and
+the diagnostic SHOULD suggest quoting it: `pov="Zoë"`.
 
 **F-SEC-6.** A **section comment** is a line matching `pos-line`, placed on
 the line directly after a heading of level 2 to 6 (after the underline, for
@@ -730,20 +777,26 @@ is kept as written.
 `p` with `from <= p < until`, the same as F-TMP-3. A missing `from` means
 from the entity's own `from` (F-ENT-6). A missing `until` means to the end
 of the story: unlike temporal entries, sections never end on their own when
-a later section starts. An `until` that isn't after its `from` is an
-[error]. A section with neither is in effect wherever its
-entity is.
+a later section starts. An `until` that isn't after its `from` is a
+[warning] (F-GEN-4), and the section is never in effect. A section with
+neither is in effect wherever its entity is.
 
 **F-SEC-9.** A subsection is in effect only where both it and every section
-that holds it are in effect. A subsection whose range reaches outside its
-parent's range is a [warning].
+that holds it are in effect. So a subsection's **effective `from`** is the
+later of its own `from` and its parent's effective `from`, and the same
+goes for `until` with the earlier of the two. A subsection whose range
+reaches outside its parent's range is a [warning].
 
-**F-SEC-10.** Outside code blocks, any line starting with `<!-- wolfden:`
-(after optional whitespace, with optional whitespace after `<!--`) that
-doesn't match `pos-line`, including one that doesn't close on the same
-line, is an [error]. A well-formed one that isn't directly under a level 2
-to 6 heading, or under an outline row (F-OUT-9), is a [warning] and does
-nothing.
+**F-SEC-10.** Outside code blocks and code spans, `<!--` followed by
+optional whitespace and `wolfden:` starts a **wolfden comment**. Its valid
+places are a line of its own directly under a level 2 to 6 heading (F-SEC-6)
+and the fields line of an outline row or the line under an outline heading
+(F-OUT-9). In a valid place, a line that doesn't match `pos-line`,
+including one that doesn't close on the same line, is an [error]. A
+wolfden comment anywhere else, whether well-formed or not, is a [warning]
+and does nothing. That includes one at the end of a heading or row line
+(`## Shoulder injury <!-- wolfden: from=ember:19 -->`), and the warning
+says to move it to the next line.
 
 **F-SEC-11.** All other HTML comments are kept and ignored, wherever they
 are, including directly under a heading. A comment inside a code block or
@@ -759,44 +812,55 @@ code span is just text.
 | `<!-- wolfden: from=ember:19` (no `-->`) | [error] F-SEC-10 |
 | `<!-- wolfden: from=ember:19-->` | [error] F-SEC-10, needs a space |
 | `<!-- wolfden: -->` | [error] F-SEC-10, no attributes |
-| `<!-- wolfden: status=open pin=true -->` | valid ([warning] F-PIN-3) |
+| `<!-- wolfden: status=undecided pin=true -->` | valid ([warning] F-PIN-3) |
 | `<!-- wolfden: status=maybe -->` | [error] F-STAT-1 |
 | `<!-- wolfden: pin=yes -->` | [error] F-PIN-1 |
 | `<!-- wolfden: pov=mara -->` | [warning] F-SEC-7 |
 | a blank line, then `<!-- wolfden: from=ember:19 -->` | [warning] F-SEC-10 |
+| `## Shoulder injury <!-- wolfden: from=ember:19 -->` | [warning] F-SEC-10 |
 | `<!-- todo: check the date -->` | kept, ignored |
 
 ### 9.3 Status and pins
 
-Sections, field entries (§7.3), and outline rows (§11) are **facts**. Each
-can carry its own status, and sections and entries can be pinned.
+Entities, sections, field entries (§7.3), and outline rows (§11) share one
+status vocabulary. Sections, entries, and rows are **facts**, and sections
+and entries can be pinned.
 
 | `status` | Meaning | In canon |
 |---|---|---|
-| `idea` | Undecided material | no |
-| `open` | An open question, with options banked under it | no |
-| `candidate` | One option for an open question | no |
+| `idea` | Undecided material (an idea bank) | no |
+| `undecided` | An open question, with options banked under it | no |
+| `candidate` | One option for an undecided question | no |
 | `draft` | Meant as canon, not settled | yes, marked as draft |
 | `canon` | Settled | yes |
 | `retconned` | Was canon, has been replaced | no |
 
-**F-STAT-1.** A fact's `status` MUST be one of the six values above.
-[error] Entities use only four of them (F-ENT-5).
+**F-STAT-1.** A `status` MUST be one of the six values above. [error]
 
 **F-STAT-2.** A fact without a `status` takes the status of what holds it:
 a subsection its parent section's, a section or field entry its entity's.
-An outline row without one is `canon`.
+An outline row without one is `canon`, unless a heading default gives one
+(F-OUT-9).
 
-**F-STAT-3.** A fact can't be more canon than what holds it. Its
-**effective status** is its own, except that inside a holder whose
-effective status is out of canon the fact is out of canon too, and inside
-a `draft` holder a `canon` fact counts as `draft`. A fact that says `draft`
-or `canon` inside an out-of-canon holder is a [warning]. "In canon" always
-means effective status `draft` or `canon`.
+**F-STAT-3.** A fact can't be more canon than what holds it. Write
+`own(f)` for a fact's written status, or what F-STAT-2 gives it, and
+`eff(f)` for its **effective status**. For an entity or a row, `eff` is
+`own`. For any other fact, with `h` the fact's holder:
+
+1. If `own(f)` is out of canon, `eff(f)` is `own(f)`.
+2. Otherwise, if `eff(h)` is out of canon, `eff(f)` is `eff(h)`.
+3. Otherwise, if `eff(h)` is `draft`, `eff(f)` is `draft`.
+4. Otherwise, `eff(f)` is `own(f)`.
+
+So a `candidate` section in an `idea` entity stays `candidate`, and a
+`canon` section in an `idea` entity is `idea`. A fact whose written status
+is `draft` or `canon` inside an out-of-canon holder (rule 2) is a
+[warning]. "In canon" always means an effective status of `draft` or
+`canon`.
 
 **F-STAT-4.** Out-of-canon facts are kept and indexed, and views that ask
-for them (an idea bank, a list of open questions) show them. Canon views
-leave them out (§9.4), just as they leave out out-of-canon entities.
+for them (an idea bank, a list of undecided questions) show them. Canon
+views leave them out (§9.4), just as they leave out out-of-canon entities.
 
 **F-PIN-1.** A **pinned** fact is hard canon: one of the facts most
 important to check before drafting. A section is pinned with `pin=true` in
@@ -813,16 +877,23 @@ written as a single entry (`born: { value: "2291", pin: true }`). `pin` is
 
 **F-VIEW-1.** A **canon-as-of** view for scope `S` at position `p` covers
 the entities of `S` and of the scopes that enclose it (design.md §2). It
-includes an entity if its `status` is `draft` or `canon` (F-ENT-5) and `p`
-isn't before its `from` (F-ENT-6). For each included entity it shows the
-lead, each field's value at `p` from its in-canon entries (§7.3), and the
-in-canon sections in effect at `p` (F-SEC-8, F-SEC-9). Facts whose
-positions don't resolve are left out (F-POS-4).
+includes an entity if its `status` is `draft` or `canon` and `p` isn't
+before its `from` (F-ENT-6). For each included entity it shows the lead,
+each field's value at `p` from its live entries (F-TMP-4), and the in-canon
+sections in effect at `p` (F-SEC-8, F-SEC-9). Facts whose positions don't
+resolve are left out (F-POS-4). `p` MAY be omitted, which means the end of
+the story: all canon so far.
 
 **F-VIEW-2.** A **pinned canon** view for `S` at `p` is the part of the
 canon-as-of view that is pinned: every pinned section and field entry that
 the canon-as-of view includes, grouped by entity. The MCP server serves it
 ahead of the rest of canon (design.md §8).
+
+**F-VIEW-3.** Views list entities in a fixed order, so output can be
+compared in tests: by scope (the universe, then series and books in story
+order), then by type key, then by normalized `name` (F-LINK-4), then by
+file path. Within an entity, fields come in frontmatter order and sections
+in file order.
 
 ## 10. Links
 
@@ -892,8 +963,8 @@ at any level, whose name matches (F-LINK-4). No match is a [warning], and
 the link still resolves to the entity.
 
 **F-LINK-10.** The index stores each resolved link's `id` (design.md §3).
-Indexing MUST NOT rewrite link text. Writers MAY update link text when a
-user renames or moves an entity, as part of that action.
+Indexing MUST NOT rewrite link text. Renames and moves made in the app
+rewrite slug links (F-RT-5).
 
 **F-LINK-11.** A `ref` field (#6) holds a single link per value, with
 nothing else in the string. A resolved entity whose type isn't the one the
@@ -904,37 +975,53 @@ field names is a [warning].
 **F-LINK-12.** A link in an in-canon fact (F-STAT-3) to an `idea` or
 `retconned` entity is a [warning].
 
-**F-LINK-13.** A link's **position** is the effective `from` of the
-temporal entry or section that holds it, or else the linking entity's
-`from` (F-ENT-6). A link whose target enters canon after the link's
-position is a [warning], since it's usually a spoiler or a mistake
-(design.md §7). Links whose position is the start of the story aren't
-checked.
+**F-LINK-13.** A link's **position** depends on where it is:
+
+- In a temporal entry: the entry's `from`.
+- In a section: the section's effective `from` (F-SEC-9).
+- Elsewhere in an entity (the lead, or a plain field): the entity's `from`
+  (F-ENT-6).
+- In an outline row: its chapter (from `chapter`, F-OUT-9), or else the
+  start of its book.
+- In a container body: none.
+
+A link whose target enters canon after the link's position is a [warning],
+since it's usually a spoiler or a mistake (design.md §7). Links with no
+position, or whose position is the start of the story, aren't checked.
 
 ## 11. Outlines
 
 ```markdown
 # Ember outline
 
-## Act one
+## Chapter 1
+<!-- wolfden: chapter=1 pov="[[mara-voss]]" -->
 
 - 37: Mara wakes aboard the *Tessaly* to a distress call.
-  <!-- wolfden: chapter=1 pov="[[mara-voss]]" -->
-- 38: The away team lands at [[kessan-reach]].
-  <!-- wolfden: chapter=2 pov="[[mara-voss]]" progress=drafted -->
-  A continuation line is part of row 38.
+- 38: The away team lands at [[kessan-reach]], and the beat runs long
+  enough to wrap onto a second line.
+  <!-- wolfden: chapter=2 progress=drafted -->
+  A paragraph after the fields line is part of row 38.
   - So is a nested list.
+
+## Chapter 2
+<!-- wolfden: chapter=2 -->
+
 - 39a: The ambush.
-  <!-- wolfden: chapter=2 tags="action, ambush" -->
+  <!-- wolfden: tags="action, ambush" -->
 - 39b: Mara is hit.
   <!-- wolfden: chapter=2b status=candidate -->
 - 40:
+
+Loose notes:
+
+- Check the ship's deck plan before drafting 39b.
 ```
 
 ```abnf
 row-id     = row-number *lower         ; 37, 69a, 69ab
 row-number = %x31-39 *DIGIT            ; no leading zeros
-row-start  = list-marker 1*WSP row-id ":" [ 1*WSP text ]
+row-start  = list-marker 1*WSP row-id ":" ( 1*WSP text / *WSP EOL )
 list-marker = "-" / "*" / "+"
 ```
 
@@ -942,22 +1029,27 @@ list-marker = "-" / "*" / "+"
 Frontmatter is optional, needs no `id`, and its keys are kept. An outline
 isn't an entity.
 
-**F-OUT-2.** A **row** is a top-level bullet list item that starts with
-`row-id ":"`. The row's text is the rest of the item, including
-continuation lines and nested blocks, except its fields line (F-OUT-9).
-Headings and prose between rows are free-form grouping and are ignored.
+**F-OUT-2.** A **row** is a top-level bullet list item whose first line
+matches `row-start`: the id and colon, then whitespace and text, or the end
+of the line. `- 37:text`, with no space, isn't a row. The row's text is the
+rest of the item, including wrapped lines, continuation paragraphs, and
+nested blocks, except its fields line (F-OUT-9). Headings and prose
+between rows are free-form grouping and are ignored.
 
-**F-OUT-3.** A top-level list item that isn't a row is a [warning]. This
-includes ordered list items (`37. ...`), which markdown renumbers when it
-renders them.
+**F-OUT-3.** In a top-level list that holds at least one row, an item that
+isn't a row is a [warning]. A list with no rows is a free-form note and
+gets no diagnostic. An ordered list item (`37. ...`) is never a row, since
+markdown renumbers ordered lists when it renders them, and in a list of
+rows it gets this warning.
 
 **F-OUT-4.** Rows are ordered by number, then by letter suffix as an ASCII
 string, with no suffix first: `69 < 69a < 69aa < 69b < 70`. Rows that
 aren't in ascending order in the file are a [warning].
 
-**F-OUT-5.** Row ids MUST be unique across all outlines of a series, or
-within the outline of a standalone book. A repeated row id is an [error] on
-every outline involved.
+**F-OUT-5.** Row ids SHOULD be unique across all outlines of a series, or
+within the outline of a standalone book. A repeated row id is a [warning]
+on every outline involved (F-GEN-4). The rows stay indexed, and a `row`
+field naming that id is ambiguous (F-FLD-7).
 
 **F-OUT-6.** Row ids keep counting across a series: every row of a book
 SHOULD come after every row of the book before it in series order. A book
@@ -972,10 +1064,10 @@ existing rows, and SHOULD NOT reuse the id of a deleted row.
 such as "row 69a" in prose is plain text in v0. Rows don't have positions
 (F-POS-6). Entities point at rows with a `row` field (F-FLD-7).
 
-**F-OUT-9.** A row's **fields** are an optional comment in the `pos-line`
-grammar (§9.2) on the line directly after the row's first line, indented
-as part of the item. Each `key=value` pair is a field, kept in the order
-written:
+**F-OUT-9.** A row's **fields** are an optional wolfden comment in the
+`pos-line` grammar (§9.2), on the line directly after the row's first
+paragraph (so after any wrapped lines), indented as part of the item. Each
+`key=value` pair is a field, kept in the order written:
 
 - `chapter`: a chapter key of this book, mapping the row to that chapter.
   A chapter that doesn't exist is a [warning].
@@ -987,11 +1079,20 @@ written:
   (F-LINK-1). Wolfden doesn't split values, so a list such as
   `tags="action, ambush"` stays one string in v0.
 
-A repeated key is an [error]. A `<!-- wolfden:` line anywhere else in an
-outline is a [warning] and does nothing (F-SEC-10).
+A repeated key is an [error]. A `<!-- wolfden:` comment anywhere else in
+an outline is a [warning] and does nothing (F-SEC-10), except for heading
+defaults (F-OUT-11).
 
 **F-OUT-10.** Rows with a `chapter` SHOULD follow chapter order: a row
 mapped to an earlier chapter than a row above it is a [warning].
+
+**F-OUT-11.** A wolfden comment on the line directly under a heading in an
+outline sets **default fields** for the rows below that heading, up to the
+next heading of the same or a higher level. It takes the same keys as a
+row's fields. A row's own fields override the defaults key by key, and a
+default from a deeper heading overrides one from a shallower heading. In
+the example above, row 37 gets `chapter=1` and its `pov` from the heading,
+row 38 overrides `chapter`, and row 39a has chapter `2`.
 
 ## 12. Preservation
 
@@ -1009,17 +1110,34 @@ same bytes (#18 tests this).
 **F-RT-4.** A writer that adds a frontmatter key puts it after the existing
 keys, unless the type's template gives an order (#6).
 
+**F-RT-5.** When the app or an MCP tool renames or moves something, it MUST
+rewrite, in the same change, every reference that depends on the old name:
+
+- Renaming a book or chapter key: every position that names it, in
+  frontmatter and in wolfden comments, and every `order` or `books` entry.
+- Renaming an entity file: every link that matched it by slug.
+- Moving an entity to another scope: any link that would no longer resolve
+  to it (F-LINK-7) is rewritten to its id or another unique form.
+
+A rename made outside the app, by hand or in another tool, is a refactor
+Wolfden can't see. Positions that name the old key become F-POS-4
+warnings, and slug links to the old name become broken links (F-LINK-8).
+Links by id, name, or alias keep working. That is the sense in which files
+can be renamed by hand "without breaking links" (design.md §3).
+
 ## 13. Appendix: a minimal den
 
-A complete, valid den with one universe, one series, one book, and two
-entities.
+A complete den with one universe, one series, one book, and two entities.
+It uses only the core pack and loads with no errors. Until the core pack
+spec (#6) defines the character type's fields, `rank` gets an F-FLD-2
+warning.
 
 ```text
 starfall-den/
   den.yaml
   universes/starfall/
     universe.md
-    entities/species/velari.md
+    entities/locations/kessan-reach.md
     series/long-dark/
       series.md
       entities/characters/mara-voss.md
@@ -1034,7 +1152,6 @@ starfall-den/
 format: 1
 authors:
   wren-calder: { name: Wren Calder }
-packs: [space-opera]
 ```
 
 `universes/starfall/universe.md`:
@@ -1069,17 +1186,18 @@ chapters: [prologue, 1, 2, 3, 4]
 ---
 ```
 
-`universes/starfall/entities/species/velari.md`:
+`universes/starfall/entities/locations/kessan-reach.md`:
 
 ```markdown
 ---
-id: 01JANPZX45HY43KWJRP1XPA7Z3
-type: species
-name: Velari
+id: 01JADJ8FSSZ5AWSH8VHTPRE95B
+type: location
+name: Kessan Reach
+aliases: [the Reach]
 ---
 
 ## Overview
-Long-lived, silver-haired, and rarely seen off their homeworld.
+A contested belt of mining stations at the edge of settled space.
 ```
 
 `universes/starfall/series/long-dark/entities/characters/mara-voss.md`:
@@ -1092,7 +1210,6 @@ name: Mara Voss
 aliases: [Voss]
 from: "ember:1"
 fields:
-  species: "[[velari]]"
   rank:
     - { value: Lieutenant, from: "ember:1" }
     - { value: Commander, from: "ember:4" }
@@ -1105,7 +1222,8 @@ Executive officer of the *Tessaly*.
 
 ## Shoulder injury
 <!-- wolfden: from=ember:3 -->
-Takes a flechette round in the ambush. The arm never fully recovers.
+Takes a flechette round in the ambush at [[kessan-reach]]. The arm never
+fully recovers.
 ```
 
 `universes/starfall/series/long-dark/books/ember/outline.md`:
@@ -1117,6 +1235,6 @@ Takes a flechette round in the ambush. The arm never fully recovers.
 - 4: Voss takes command.
 ```
 
-As of `ember:2`, Mara Voss is a Velari lieutenant with an Overview and no
-Shoulder injury. As of `ember:4`, she's a commander and the injury section
-is in effect. As of `ember:prologue`, she isn't in canon yet (F-ENT-6).
+As of `ember:2`, Mara Voss is a lieutenant with an Overview and no Shoulder
+injury. As of `ember:4`, she's a commander and the injury section is in
+effect. As of `ember:prologue`, she isn't in canon yet (F-ENT-6).
