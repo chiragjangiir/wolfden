@@ -40,8 +40,67 @@ fiction. See `README.md` for the pitch. Design docs live in `docs/`.
   public-domain works or fully invented.
 - Commits are authored as Gavin Wolfe (the git config is handled by the
   machine). Don't change the git identity.
-- Contributions from AI agents arrive on branches and through pull requests,
-  so a human reviews every change.
+- Contributions from AI agents arrive on branches and through pull requests.
+  See "Agent workflow" below for who reviews and merges them.
+
+## Agent workflow
+
+Agents may develop, review, and merge routine changes. The maintainer is
+brought in only when a change needs human judgment.
+
+**Roles**
+
+- **Orchestrator:** picks the next Ready issue from the project board,
+  moves its card, and assigns the work.
+- **Developer:** implements the change on a branch (in its own git worktree
+  when running alongside other agents) and opens the PR with `Closes #N`.
+- **Reviewer:** a separate agent with fresh context. It sees the issue, the
+  diff, and the repo, but not the Developer's reasoning. Its brief is
+  adversarial: try to break the change, check it against `docs/design.md`
+  and this file, and rank findings by severity.
+
+**Loop:** the Developer fixes or rebuts each finding, for at most three
+rounds. If the Reviewer is satisfied and CI is green, the Orchestrator merges
+(merge commit). Otherwise it escalates.
+
+**Always escalate to the maintainer (never auto-merge):**
+
+- issues labeled `decision`, or any change to a recorded decision in
+  `docs/design.md`
+- changes to this file or other agent rules
+- licensing
+- CI workflows, secrets, and permissions
+- new dependencies
+- README and other public-facing wording
+- anything touching identity or privacy
+- disagreement between Developer and Reviewer after the round limit
+
+**Auto-merge is allowed** for implementation of an already-scoped issue, with
+CI green and the Reviewer satisfied.
+
+To escalate, leave the PR open, say in a PR comment what needs deciding, and
+move the card to In Review.
+
+### Marking AI-authored content
+
+Agents post as the maintainer's GitHub account, so everything they post must
+be visibly marked. Issue and PR bodies, comments, and reviews **start** with:
+
+```markdown
+> 🤖 **Claude (<Role>)**, on Gavin's behalf
+```
+
+`<Role>` is Orchestrator, Developer, or Reviewer. An interactive session
+working alone uses plain `Claude`. The marker goes first so it shows in
+notifications and email previews. PR bodies also end with the "Generated with
+Claude Code" footer, and commits keep the `Co-Authored-By` trailer.
+
+### Privacy check
+
+`.github/workflows/privacy-check.yml` fails a PR or push to `main` when any
+tracked file contains a personal user path or a term from the
+`PRIVACY_DENYLIST` repository secret. In docs, write `%USERPROFILE%` or `~`
+instead of a real user path.
 
 ## Environment notes
 
