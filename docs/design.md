@@ -175,7 +175,8 @@ Key points:
   takes `status=` (`<!-- wolfden: status=candidate from=ember:19 -->`), and
   a field entry takes `status:`. Entities and facts share one vocabulary:
   `idea`, `undecided` (a question with options banked), `candidate` (one
-  option), `draft`, `canon`, and `retconned`. Canon views leave out
+  option), `draft`, `canon`, and `retconned`. An entity or outline row
+  without a status is `draft`. Canon views leave out
   non-canon sections and values, and a section can't be more canon than its
   entity.
 - **Pinned facts are hard canon.** `pin=true` on a section or `pin: true`

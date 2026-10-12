@@ -485,9 +485,13 @@ need a type (F-LAY-6, F-FLD-2, F-FLD-3, F-SEC-5) are skipped for it.
 **F-ENT-4.** `aliases` is an optional list of non-empty strings. Any other
 shape, including a single string, is an [error].
 
-**F-ENT-5.** `status` is optional and defaults to `canon`. Its values are
-the status vocabulary shared by entities, sections, field entries, and
-outline rows (F-STAT-1, §9.3). Any other value is an [error]. A `candidate`
+**F-ENT-5.** `status` is optional and defaults to `draft`, so nothing
+counts as settled until the writer says so: an unmarked note still shows in
+canon views, marked as draft. Its values are the status vocabulary shared
+by entities, sections, field entries, and outline rows (F-STAT-1, §9.3).
+Any other value is an [error]. A missing `status` has no diagnostic.
+Templates and writers that create an entity (#6) SHOULD write its `status`
+explicitly. A `candidate`
 entity, such as one of several possible minor characters, is left out of
 canon views like any other out-of-canon fact.
 
@@ -887,7 +891,7 @@ except in an outline table cell, where it's a [warning] (F-OUT-9).
 
 **F-STAT-2.** A fact without a `status` takes the status of what holds it:
 a subsection its parent section's, a section or field entry its entity's.
-An outline row without one is `canon`.
+An outline row without one is `draft`, like an entity (F-ENT-5).
 
 **F-STAT-3.** A fact can't be more canon than what holds it. Write
 `own(f)` for a fact's written status, or what F-STAT-2 gives it, and
@@ -1115,8 +1119,8 @@ associated with it, so views can show the entity alongside the row.
   A chapter that doesn't exist is a [warning].
 - `pov`: the point-of-view character, usually a link.
 - `status`: the row's status (F-STAT-1), matched case-insensitively, so
-  `Candidate` works. It defaults to `canon`. A value outside the vocabulary
-  is a [warning], and the row is read as `canon`.
+  `Candidate` works. It defaults to `draft` (F-STAT-2). A value outside the
+  vocabulary is a [warning], and the row is read as `draft`.
 - `notes`: optional, conventionally a link to an entity that holds the
   row's details.
 - Any other column is a **custom field** (`progress`, `tags`), with no
