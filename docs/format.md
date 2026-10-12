@@ -207,7 +207,13 @@ uppercase Crockford base32. Lowercase, hyphens, or any other length is an
 
 [ULID]: https://github.com/ulid/spec
 
-**F-ID-2.** Every container file and entity file MUST have an `id`. [error]
+**F-ID-2.** Every container file and entity file SHOULD have an `id`. A
+file without one is a [warning] ("no id; run `wolfden check --fix` to add
+one"), not an error, so a note written by hand loads before anyone
+generates an id for it. The file is indexed and works like any other,
+except that links can't reach it by id. Until it has an id, the index
+identifies it by its path. An `id` that is present but malformed is still
+an [error] (F-ID-1).
 
 **F-ID-3.** An `id` MUST be unique within the den. A duplicate is a
 [warning] on every file that has it (F-GEN-4). While it lasts, the files
@@ -222,6 +228,11 @@ caught.)
 **F-ID-5.** Writers generating ids by hand can use any implementation
 listed in the [ULID] spec, uppercasing the result if needed. The CLI will
 add a `wolfden new-id` command (#17).
+
+**F-ID-6.** Reading and indexing MUST NOT write to files, so they never add
+a missing `id`. A writer that creates a file gives it an `id`. The app and
+MCP tools add a missing `id` when they next write that file, and
+`wolfden check --fix` (#17) adds missing ids in bulk.
 
 Valid: `01JA7Q8M4XK3V9R2D5W8HN6TQB`. Invalid: `01ja7q8m4xk3v9r2d5w8hn6tqb`
 (lowercase), `01JA7Q8M4XK3V9` (too short), `01JA7Q8M4XK3V9R2D5W8HN6TQI`
@@ -323,8 +334,9 @@ from several packs combine are defined in the core pack spec (#6).
 
 ### 6.1 Common rules
 
-**F-CTR-1.** A container file's frontmatter MUST have an `id` (F-ID-1,
-F-ID-2) and a non-empty string `name`. [error]
+**F-CTR-1.** A container file's frontmatter SHOULD have an `id` (F-ID-1,
+F-ID-2) and MUST have a non-empty string `name`. [error] for a missing or
+empty `name`.
 
 **F-CTR-2.** `authors` is an optional list of author keys from `den.yaml`.
 A book without `authors` takes its series' list, and a series without one
@@ -457,7 +469,8 @@ x-color: teal
 ---
 ```
 
-**F-ENT-1.** `id` is REQUIRED (F-ID-1, F-ID-2).
+**F-ENT-1.** `id` is expected (F-ID-1, F-ID-2). A missing `id` is a
+[warning], and a malformed one is an [error].
 
 **F-ENT-2.** `type` is REQUIRED and names a type enabled in the den: from
 `core`, an enabled pack, or `packs/` (#6). A missing `type` is an [error].
