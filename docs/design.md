@@ -40,7 +40,7 @@ there's code that depends on it. Decisions already made are recorded in
 | **Entity** | A single note about one thing: a character, a planet, a faction, a plot thread. Every entity has a **type**. |
 | **Type** | A schema for entities: frontmatter fields, standard sections, and a template. |
 | **Pack** | A bundle of types for a genre or purpose (core, space opera, epic fantasy, ...). |
-| **Story position** | A point in the story: a book key plus a chapter key, written `ember:14`. v0 positions are chapter-level. `ember:14.2` (scene 2 of chapter 14) is reserved for later. |
+| **Story position** | A point in the story: a book key plus a chapter key, written `ember:14`. v0 positions are chapter-level. `ember:14.2` (scene 2 of chapter 14) is reserved for later. **Decided (#2):** a bare `ember` is shorthand for the book's first chapter. |
 
 ### Scope and inheritance
 
@@ -234,8 +234,10 @@ can't contain `:` or `.`, which the position syntax uses as separators.
 An outline is a list of **rows** (beats) with stable IDs that keep counting
 across books in a series. Book 1 might end at row 36, so Book 2 starts at row
 37. That way a reference like "row 69a" is never ambiguous. Rows can be
-split (`69a`, `69b`) without renumbering anything. A row can map to a
-chapter and carry custom fields such as POV or tags.
+split (`69a`, `69b`) without renumbering anything. **Decided (#2):** an
+outline is a set of GFM tables with `row` and `beat` columns, plus
+`chapter`, `pov`, `status`, and any custom columns. Rows stay one line, and
+details live in an entity linked from the row.
 
 Positions stay `book:chapter`: rows aren't positions in v0. An event can
 point at rows with a plain `row:` field, and `ember:r75` is reserved for
@@ -405,5 +407,10 @@ demos, and test fixtures.
    that must not be broken?~~ **Decided (#2):** sections and field entries
    carry their own `status`, from one vocabulary shared with entities that
    now includes `undecided` and `candidate`, capped by the entity's status.
-   `pin` marks hard canon, served first as **pinned canon**. Positions stay `book:chapter`, and `ember:r75` is reserved for
-   outline-row positions, which v0 rejects.
+   `pin` marks hard canon, served first as **pinned canon**. Positions stay
+   `book:chapter`, and `ember:r75` is reserved for outline-row positions,
+   which v0 rejects. A bare `ember` means the book's
+   first chapter. A `Change log` section, or one marked `canon=false`, is
+   bookkeeping and stays out of canon views. There's no separate "locked"
+   state in v0: writers use `status: canon` plus `pin`. If agents need write
+   protection, it belongs to the MCP write tools (M2), not the format.

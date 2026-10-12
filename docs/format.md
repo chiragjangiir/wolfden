@@ -477,6 +477,9 @@ outline rows (F-STAT-1, §9.3). Any other value is an [error]. A `candidate`
 entity, such as one of several possible minor characters, is left out of
 canon views like any other out-of-canon fact.
 
+A name that is still a placeholder, waiting on a name check, is marked with
+an optional `placeholder: true` field that the core pack spec (#6) defines.
+
 Note: `status` says whether something is canon, not where it stands in the
 story. A plot thread that is still open is canon. Its open, planted, or
 resolved state is a field of the `thread` type (#6), not its `status`.
@@ -525,7 +528,8 @@ list of strings is a [warning] that suggests quoting it:
 
 **F-FLD-7.** A field named `row` ties an entity (usually an `event`) to
 outline rows. It is defined on every type, so it never triggers F-FLD-2.
-Its value is a row id (F-OUT-2) or a list of row ids. A `row` entry with
+Its value is a row id (§11) or a list of row ids, and views can show the
+entity with the rows it names (F-OUT-8). A `row` entry with
 `from` or `until` is a [warning]. A row id resolves among the outlines of
 the entity's series, or of its standalone book. For a universe-scope entity
 it resolves among every outline in the universe, and a row id found in more
@@ -613,7 +617,7 @@ any field.
 ### 8.1 Position syntax
 
 ```abnf
-position   = book-key ":" chapter-key
+position   = book-key [ ":" chapter-key ]
 book-key   = key                       ; starts with a letter (F-KEY-2)
 chapter-key = key
 scene-form = book-key ":" chapter-key "." 1*DIGIT   ; reserved for scenes
@@ -623,6 +627,14 @@ row-form   = book-key ":" "r" row-id             ; reserved for rows
 **F-POS-1.** A position is a string matching `position`, with no
 whitespace. Positions appear in `from` and `until` values in frontmatter and
 in section comments (§9.2). In YAML they SHOULD be quoted.
+
+**F-POS-7.** A **bare book position** (`ember`) is shorthand for the first
+chapter of that book, whatever it is when the den is read, so it moves if a
+prologue is added later. It's for facts that "became true in Book 2" and
+for imports where only the book is known. Writers SHOULD use chapter-level
+positions wherever they know the chapter, but `wolfden check` doesn't warn
+on the bare form. A bare position in a book with no chapters doesn't
+resolve (F-POS-4).
 
 **F-POS-2.** A position in the scene form (`ember:14.2`) is an [error] with
 the message "scenes are not supported yet; v0 positions are chapter-level".
@@ -653,9 +665,10 @@ row in v0, use a `row` field (F-FLD-7).
 | Position | Result |
 |---|---|
 | `ember:14`, `ember:prologue`, `a-quiet-moon:2b` | valid |
+| `ember` | valid, the first chapter of `ember` (F-POS-7) |
 | `ember:14.2` | [error] F-POS-2, scenes not supported yet |
 | `ember:r75`, `ember:r69a` | [error] F-POS-6, rows not supported yet |
-| `ember`, `ember:`, `:14` | [error] F-POS-3, needs a book and a chapter |
+| `ember:`, `:14` | [error] F-POS-3 |
 | `Ember:14`, `ember: 14`, `ember:14:2` | [error] F-POS-3 |
 | `ember:99`, where `ember` has no chapter `99` | [warning] F-POS-4 |
 
@@ -678,7 +691,9 @@ story** comes before every position. The **start of a series** is the start
 of its first book in story order. The **start of a book** comes after every
 chapter of earlier books and before the book's first chapter. The **end of
 the story** comes after every position. Positions can't name these
-points. They are only what a missing `from` or `until` means.
+points. They are only what a missing `from` or `until` means. (A bare book
+position, F-POS-7, names the book's first chapter, which comes right after
+the start of the book.)
 
 **F-ORD-4.** Story order is reading order, not in-world chronology. When
 something happens in-world is a field of `event` entities (#6).
@@ -764,6 +779,8 @@ order, and a value MAY be double-quoted. A section's comment takes:
 - `from` and `until`: positions (§8).
 - `status`: the section's status (F-STAT-1).
 - `pin`: `true` or `false` (F-PIN-1).
+- `canon`: `false` marks the section as bookkeeping (F-SEC-12). `true` is
+  the default. Any other value is an [error].
 
 A repeated attribute is an [error]. Any other attribute is a [warning], and
 is kept as written.
@@ -788,19 +805,27 @@ goes for `until` with the earlier of the two. A subsection whose range
 reaches outside its parent's range is a [warning].
 
 **F-SEC-10.** Outside code blocks and code spans, `<!--` followed by
-optional whitespace and `wolfden:` starts a **wolfden comment**. Its valid
-places are a line of its own directly under a level 2 to 6 heading (F-SEC-6)
-and the fields line of an outline row or the line under an outline heading
-(F-OUT-9). In a valid place, a line that doesn't match `pos-line`,
-including one that doesn't close on the same line, is an [error]. A
+optional whitespace and `wolfden:` starts a **wolfden comment**. Its only
+valid place is a line of its own directly under a level 2 to 6 heading of
+an entity or container file (F-SEC-6). In a valid place, a line that
+doesn't match `pos-line`, including one that doesn't close on the same
+line, is an [error]. A
 wolfden comment anywhere else, whether well-formed or not, is a [warning]
-and does nothing. That includes one at the end of a heading or row line
-(`## Shoulder injury <!-- wolfden: from=ember:19 -->`), and the warning
-says to move it to the next line.
+and does nothing. That includes one at the end of a heading line
+(`## Shoulder injury <!-- wolfden: from=ember:19 -->`), where the warning
+says to move it to the next line, and any in `outline.md`.
 
 **F-SEC-11.** All other HTML comments are kept and ignored, wherever they
 are, including directly under a heading. A comment inside a code block or
 code span is just text.
+
+**F-SEC-12.** A **bookkeeping** section records work on the notes rather
+than the story: a change log or session notes. A section is bookkeeping if
+its name is exactly `Change log` (F-LINK-4 normalization, so case doesn't
+matter), or if its comment has `canon=false`. Its subsections are
+bookkeeping too. Bookkeeping sections are kept, indexed, and searchable, but
+canon-as-of views, pinned canon, and the MCP server's canon context leave
+them out (§9.4), whatever their status. Pinning one is a [warning].
 
 | Under `## Shoulder injury` | Result |
 |---|---|
@@ -815,6 +840,7 @@ code span is just text.
 | `<!-- wolfden: status=undecided pin=true -->` | valid ([warning] F-PIN-3) |
 | `<!-- wolfden: status=maybe -->` | [error] F-STAT-1 |
 | `<!-- wolfden: pin=yes -->` | [error] F-PIN-1 |
+| `<!-- wolfden: canon=false -->` | valid, bookkeeping (F-SEC-12) |
 | `<!-- wolfden: pov=mara -->` | [warning] F-SEC-7 |
 | a blank line, then `<!-- wolfden: from=ember:19 -->` | [warning] F-SEC-10 |
 | `## Shoulder injury <!-- wolfden: from=ember:19 -->` | [warning] F-SEC-10 |
@@ -835,12 +861,12 @@ and entries can be pinned.
 | `canon` | Settled | yes |
 | `retconned` | Was canon, has been replaced | no |
 
-**F-STAT-1.** A `status` MUST be one of the six values above. [error]
+**F-STAT-1.** A `status` MUST be one of the six values above. [error],
+except in an outline table cell, where it's a [warning] (F-OUT-9).
 
 **F-STAT-2.** A fact without a `status` takes the status of what holds it:
 a subsection its parent section's, a section or field entry its entity's.
-An outline row without one is `canon`, unless a heading default gives one
-(F-OUT-9).
+An outline row without one is `canon`.
 
 **F-STAT-3.** A fact can't be more canon than what holds it. Write
 `own(f)` for a fact's written status, or what F-STAT-2 gives it, and
@@ -880,7 +906,8 @@ the entities of `S` and of the scopes that enclose it (design.md §2). It
 includes an entity if its `status` is `draft` or `canon` and `p` isn't
 before its `from` (F-ENT-6). For each included entity it shows the lead,
 each field's value at `p` from its live entries (F-TMP-4), and the in-canon
-sections in effect at `p` (F-SEC-8, F-SEC-9). Facts whose positions don't
+sections in effect at `p` (F-SEC-8, F-SEC-9), except bookkeeping sections
+(F-SEC-12). Facts whose positions don't
 resolve are left out (F-POS-4). `p` MAY be omitted, which means the end of
 the story: all canon so far.
 
@@ -913,9 +940,8 @@ lchar      = <any character except "[", "]", CR, LF>
 link shows its text as written.
 
 **F-LINK-1.** In a body (entity, container, or outline), links are
-recognized anywhere except in code spans, code blocks, and HTML comments,
-other than outline row fields (F-OUT-9). A `[[` preceded by a backslash
-isn't a link. In frontmatter, links are
+recognized anywhere except in code spans, code blocks, and HTML comments.
+A `[[` preceded by a backslash isn't a link. In frontmatter, links are
 recognized in every string under `fields`, including list items and
 temporal `value`s, and nowhere else (not in `name` or `aliases`).
 
@@ -981,8 +1007,8 @@ field names is a [warning].
 - In a section: the section's effective `from` (F-SEC-9).
 - Elsewhere in an entity (the lead, or a plain field): the entity's `from`
   (F-ENT-6).
-- In an outline row: its chapter (from `chapter`, F-OUT-9), or else the
-  start of its book.
+- In an outline row: its `chapter` cell (F-OUT-9), or else the start of
+  its book.
 - In a container body: none.
 
 A link whose target enters canon after the link's position is a [warning],
@@ -991,56 +1017,46 @@ position, or whose position is the start of the story, aren't checked.
 
 ## 11. Outlines
 
+An outline is a set of GFM tables, one row per beat. Rows stay short:
+details live in an entity that the row links to.
+
 ```markdown
 # Ember outline
 
-## Chapter 1
-<!-- wolfden: chapter=1 pov="[[mara-voss]]" -->
+## Act one
 
-- 37: Mara wakes aboard the *Tessaly* to a distress call.
-- 38: The away team lands at [[kessan-reach]], and the beat runs long
-  enough to wrap onto a second line.
-  <!-- wolfden: chapter=2 progress=drafted -->
-  A paragraph after the fields line is part of row 38.
-  - So is a nested list.
+| row | chapter | pov | beat | notes |
+|---|---|---|---|---|
+| 37 | 1 | [[mara-voss]] | Mara wakes aboard the *Tessaly*. | |
+| 38 | 2 | [[mara-voss]] | The team lands at [[kessan-reach]]. | [[landing]] |
+| 39a | 2 | | The ambush. | |
+| 39b | 2b | [[mara-voss\|Voss]] | Mara is hit. | |
 
-## Chapter 2
-<!-- wolfden: chapter=2 -->
+## Act two
 
-- 39a: The ambush.
-  <!-- wolfden: tags="action, ambush" -->
-- 39b: Mara is hit.
-  <!-- wolfden: chapter=2b status=candidate -->
-- 40:
-
-Loose notes:
-
-- Check the ship's deck plan before drafting 39b.
+| row | beat | status | progress |
+|---|---|---|---|
+| 40 | Voss takes command. | candidate | outlined |
 ```
 
 ```abnf
 row-id     = row-number *lower         ; 37, 69a, 69ab
 row-number = %x31-39 *DIGIT            ; no leading zeros
-row-start  = list-marker 1*WSP row-id ":" ( 1*WSP text / *WSP EOL )
-list-marker = "-" / "*" / "+"
 ```
 
 **F-OUT-1.** `outline.md` is optional and is only read in a book folder.
 Frontmatter is optional, needs no `id`, and its keys are kept. An outline
 isn't an entity.
 
-**F-OUT-2.** A **row** is a top-level bullet list item whose first line
-matches `row-start`: the id and colon, then whitespace and text, or the end
-of the line. `- 37:text`, with no space, isn't a row. The row's text is the
-rest of the item, including wrapped lines, continuation paragraphs, and
-nested blocks, except its fields line (F-OUT-9). Headings and prose
-between rows are free-form grouping and are ignored.
+**F-OUT-2.** An **outline table** is a GFM table in `outline.md` whose
+header has both a `row` and a `beat` column (F-OUT-11). Each body line of
+the table is a **row**. Other tables, headings, lists, and prose in the file
+are free-form notes and are ignored, with no diagnostic.
 
-**F-OUT-3.** In a top-level list that holds at least one row, an item that
-isn't a row is a [warning]. A list with no rows is a free-form note and
-gets no diagnostic. An ordered list item (`37. ...`) is never a row, since
-markdown renumbers ordered lists when it renders them, and in a list of
-rows it gets this warning.
+**F-OUT-3.** An outline **section** is the part of the file under one
+heading, up to the next heading of any level (or the part before the first
+heading). Each section SHOULD hold at most one outline table. A second one
+in the same section is a [warning], and its rows are still read.
 
 **F-OUT-4.** Rows are ordered by number, then by letter suffix as an ASCII
 string, with no suffix first: `69 < 69a < 69aa < 69b < 70`. Rows that
@@ -1060,39 +1076,47 @@ Gaps between books are allowed.
 `69b`, or `69` stays and `69a` follows it). Writers MUST NOT renumber
 existing rows, and SHOULD NOT reuse the id of a deleted row.
 
-**F-OUT-8.** Links in rows resolve from the book's scope (§10). A reference
-such as "row 69a" in prose is plain text in v0. Rows don't have positions
-(F-POS-6). Entities point at rows with a `row` field (F-FLD-7).
+**F-OUT-8.** Links in cells resolve from the book's scope (§10). A
+reference such as "row 69a" in prose is plain text in v0. Rows don't have
+positions (F-POS-6). An entity with a `row` field naming a row (F-FLD-7) is
+associated with it, so views can show the entity alongside the row.
 
-**F-OUT-9.** A row's **fields** are an optional wolfden comment in the
-`pos-line` grammar (§9.2), on the line directly after the row's first
-paragraph (so after any wrapped lines), indented as part of the item. Each
-`key=value` pair is a field, kept in the order written:
+**F-OUT-9.** Columns, in any order:
 
+- `row`, REQUIRED: the row id. A row whose `row` cell is empty or isn't a
+  `row-id` is a [warning], and the row is ignored.
+- `beat`, REQUIRED: short text saying what happens. It MAY be empty for a
+  placeholder.
 - `chapter`: a chapter key of this book, mapping the row to that chapter.
   A chapter that doesn't exist is a [warning].
-- `status`: the row's status (F-STAT-1). It defaults to `canon`.
-- `from`, `until`, and `pin` don't apply to rows. They're a [warning], and
-  are kept.
-- Any other key is a custom field, such as `pov`, `progress`, or `tags`,
-  with no diagnostic. Its value is a string. Links in it are recognized
-  (F-LINK-1). Wolfden doesn't split values, so a list such as
-  `tags="action, ambush"` stays one string in v0.
+- `pov`: the point-of-view character, usually a link.
+- `status`: the row's status (F-STAT-1). It defaults to `canon`. A value
+  outside the vocabulary is a [warning], and the row is read as `canon`.
+- `notes`: optional, conventionally a link to an entity that holds the
+  row's details.
+- Any other column is a **custom field** (`progress`, `tags`), with no
+  diagnostic. Its values are strings, and Wolfden doesn't split them, so
+  `action, ambush` stays one string in v0.
 
-A repeated key is an [error]. A `<!-- wolfden:` comment anywhere else in
-an outline is a [warning] and does nothing (F-SEC-10), except for heading
-defaults (F-OUT-11).
+An empty cell means the field is unset for that row.
 
 **F-OUT-10.** Rows with a `chapter` SHOULD follow chapter order: a row
 mapped to an earlier chapter than a row above it is a [warning].
 
-**F-OUT-11.** A wolfden comment on the line directly under a heading in an
-outline sets **default fields** for the rows below that heading, up to the
-next heading of the same or a higher level. It takes the same keys as a
-row's fields. A row's own fields override the defaults key by key, and a
-default from a deeper heading overrides one from a shallower heading. In
-the example above, row 37 gets `chapter=1` and its `pov` from the heading,
-row 38 overrides `chapter`, and row 39a has chapter `2`.
+**F-OUT-11.** Header cells are matched case-insensitively after this
+normalization: trim, lowercase, turn each run of spaces or hyphens into
+`_`, and drop any other character that isn't `a-z`, `0-9`, or `_`. So
+`POV`, `Pov`, and ` pov ` are all `pov`, and `Draft Status` is
+`draft_status`. A header that normalizes to something that isn't a valid
+field name (F-FLD-1), such as an empty string, is a [warning], and the
+column is ignored. Two columns that normalize to the same key are a
+[warning], and the later one is ignored. The header text is kept as
+written.
+
+**F-OUT-12.** A GFM table cell is one line. Long notes, bullets, and other
+detail belong in a separate entity, linked from the beat text or from the
+`notes` column. Links work in any cell. A `|` inside a cell, including the
+one in `[[target|label]]`, MUST be escaped as `\|`, as GFM requires.
 
 ## 12. Preservation
 
@@ -1229,10 +1253,12 @@ fully recovers.
 `universes/starfall/series/long-dark/books/ember/outline.md`:
 
 ```markdown
-- 1: A distress call from the edge of the Reach.
-- 2: [[Mara Voss]] leads the away team.
-- 3: The ambush.
-- 4: Voss takes command.
+| row | chapter | beat |
+|---|---|---|
+| 1 | 1 | A distress call from the edge of [[the Reach]]. |
+| 2 | 2 | [[Mara Voss]] leads the away team. |
+| 3 | 3 | The ambush. |
+| 4 | 4 | Voss takes command. |
 ```
 
 As of `ember:2`, Mara Voss is a lieutenant with an Overview and no Shoulder
