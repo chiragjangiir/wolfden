@@ -36,11 +36,11 @@ there's code that depends on it. Decisions already made are recorded in
 | **Author Identity** | Who a work is by: a real name, a pen name, or a collaboration. Metadata in v0, and the anchor for ownership in multi-user mode later. |
 | **Universe** | A shared setting for one or more related works. |
 | **Series** | An *ordered* sequence of books within a universe. |
-| **Book** | A single work, either in a series or standalone in a universe. It has an ordered list of chapters (and optionally scenes). |
+| **Book** | A single work, either in a series or standalone in a universe. It has an ordered list of chapters. Scenes within chapters come later. |
 | **Entity** | A single note about one thing: a character, a planet, a faction, a plot thread. Every entity has a **type**. |
 | **Type** | A schema for entities: frontmatter fields, standard sections, and a template. |
 | **Pack** | A bundle of types for a genre or purpose (core, space opera, epic fantasy, ...). |
-| **Story position** | A point in the story: book plus chapter (plus optional scene). Written as `ember:14`. |
+| **Story position** | A point in the story: a book key plus a chapter key, written `ember:14`. v0 positions are chapter-level. `ember:14.2` (scene 2 of chapter 14) is reserved for later. |
 
 ### Scope and inheritance
 
@@ -115,7 +115,8 @@ Executive officer of the *Tessaly*...
 ## Appearance
 Silver-streaked hair, a burn scar along her left forearm.
 
-## Shoulder injury {from="ember:19"}
+## Shoulder injury
+<!-- wolfden: from=ember:19 -->
 Takes a flechette round at Kessan Reach; the arm never fully recovers.
 
 ## Custom: Things she never says aloud
@@ -126,9 +127,11 @@ Key points:
 
 - **Fields can change over time.** A plain value means it's always true. A list
   of `{value, from, until?}` entries means it's true at story positions.
-- **Sections can carry positions too.** `{from="..."}` (and an optional
-  `until=`) on a heading marks the whole section as entering canon at that
-  point. This is a structured version of "Book 3, chapter 23 additions"
+- **Sections can carry positions too.** A `<!-- wolfden: from=... -->`
+  comment on the line directly under a heading (with an optional `until=`)
+  marks the whole section as entering canon at that point. GitHub,
+  Obsidian, and VS Code hide HTML comments, so headings render cleanly and
+  heading links keep working. Other HTML comments are left alone. This is a structured version of "Book 3, chapter 23 additions"
   sections in a hand-kept character file.
 - **Links** are wiki-style: `[[mara-voss]]`, `[[Mara Voss]]`, or an alias.
   They resolve by slug, name, or alias to an `id`, and the index stores the id.
@@ -177,7 +180,8 @@ adding fields and sections.
 
 `book.md` frontmatter holds the ordered chapter list. Each chapter has a
 stable key, a number and an optional title. Story positions refer to chapter
-keys, so renumbering chapters doesn't break positions.
+keys, so renumbering chapters doesn't break positions. Book and chapter keys
+can't contain `:` or `.`, which the position syntax uses as separators.
 
 ### Outline rows
 
@@ -321,9 +325,15 @@ demos, and test fixtures.
 
 ## 12. Open questions
 
-1. **Positions on sections:** is `{from="..."}` on headings the right syntax,
-   or would HTML comments render more cleanly in other markdown tools?
-2. **Positions finer than a chapter:** are scenes needed in v0?
+1. ~~**Positions on sections:** is `{from="..."}` on headings the right
+   syntax, or would HTML comments render more cleanly in other markdown
+   tools?~~ **Decided (#3):** an HTML comment on the line under the heading,
+   `<!-- wolfden: from=ember:19 until=ember:30 -->`. Attribute braces show up
+   as literal text in GitHub, Obsidian, and VS Code and break heading links.
+2. ~~**Positions finer than a chapter:** are scenes needed in v0?~~
+   **Decided (#4):** no. v0 positions are chapter-level. The syntax
+   `ember:14.2` is reserved for scenes, and v0 rejects it with a clear
+   "scenes not supported yet" error instead of misreading it.
 3. **Entities that span universes** (the same author's recurring narrator,
    say): are they needed, or are copies across universes fine?
 4. **Auto-checkpoint defaults:** an idle-time commit, or manual only by
