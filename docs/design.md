@@ -113,7 +113,7 @@ my-den/
 ```
 
 Folder names are slugs for humans. **Identity comes from the `id` in
-frontmatter, not from the path**, so files can be renamed or moved between
+frontmatter, not from the path** (once a file has one; tools add it), so files can be renamed or moved between
 scopes without breaking links. The app rewrites slug links and positions
 when it renames something. After a rename by hand, links by id, name, or
 alias still work (format.md F-RT-5).
@@ -156,7 +156,8 @@ Key points:
 - **Fields can change over time.** A plain value means it's always true. A list
   of `{value, from, until?}` entries means it's true at story positions.
 - **Sections can carry positions too.** A `<!-- wolfden: from=... -->`
-  comment on the line under a heading (with an optional `until=`)
+  comment on the line under a heading (one blank line allowed; with an
+  optional `until=`)
   marks the whole section as entering canon at that point. GitHub,
   Obsidian, and VS Code hide HTML comments, so headings render cleanly and
   heading links keep working. Other HTML comments are left alone. This is a
@@ -164,7 +165,8 @@ Key points:
   hand-kept character file.
 - **Links** are wiki-style: `[[mara-voss]]`, `[[Mara Voss]]`, or an alias.
   They resolve by slug, name, or alias to an `id` within the same universe
-  (§2), and the index stores the id. Ambiguous links are flagged.
+  (§2), and the index stores the id (or the path, for a file that has
+  no id yet). Ambiguous links are flagged.
 - **Status** keeps undecided material out of canon views without moving it
   elsewhere. `idea` entities are what a hand-kept "idea bank" holds.
 - **Entities enter canon at a position.** An optional top-level `from`

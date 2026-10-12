@@ -221,7 +221,7 @@ an [error] (F-ID-1).
 are indexed and listed, so they can be found and fixed, but every copy is
 left out of views and link resolution, and links that would reach one of
 them are broken (F-LINK-8). (This is how a file copied by hand gets
-caught.)
+caught.) Files without an `id` never clash as duplicates.
 
 **F-ID-4.** An `id` never changes. Writers MUST NOT change an existing
 `id`. Moving or renaming a file keeps its `id`, and a copy needs a new one.
@@ -231,8 +231,10 @@ listed in the [ULID] spec, uppercasing the result if needed. The CLI will
 add a `wolfden new-id` command (#17).
 
 **F-ID-6.** Reading and indexing MUST NOT write to files, so they never add
-a missing `id`. A writer that creates a file gives it an `id`. The app and
-MCP tools add a missing `id` when they next write that file, and
+a missing `id`. A writer that creates a file MUST give it an `id`. When the
+app or an MCP tool edits a file that has no `id`, it SHOULD add one in the
+same write, as the first frontmatter key. That is the one exception to
+F-RT-2 and F-RT-4. A write that changes nothing (F-RT-3) never adds one.
 `wolfden check --fix` (#17) adds missing ids in bulk.
 
 Valid: `01JA7Q8M4XK3V9R2D5W8HN6TQB`. Invalid: `01ja7q8m4xk3v9r2d5w8hn6tqb`
@@ -334,7 +336,8 @@ from several packs combine are defined in the core pack spec (#6).
 
 **F-DEN-6.** `bookkeeping_sections` is an optional list of non-empty
 heading patterns that mark a section as bookkeeping, in addition to the
-built-in ones (F-SEC-12). Any other shape is an [error].
+built-in ones (F-SEC-12). Any other shape is an [error]. A pattern made
+only of `*` and spaces, which matches every section, is a [warning].
 
 ## 6. Containers: universe, series, book
 
@@ -475,8 +478,8 @@ x-color: teal
 ---
 ```
 
-**F-ENT-1.** `id` is expected (F-ID-1, F-ID-2). A missing `id` is a
-[warning], and a malformed one is an [error].
+**F-ENT-1.** An entity SHOULD have an `id` (F-ID-1, F-ID-2). A missing
+`id` is a [warning], and a malformed one is an [error].
 
 **F-ENT-2.** `type` is REQUIRED and names a type enabled in the den: from
 `core`, an enabled pack, or `packs/` (#6). A missing `type` is an [error].
@@ -497,9 +500,8 @@ canon views, marked as draft. Its values are the status vocabulary shared
 by entities, sections, field entries, and outline rows (F-STAT-1, §9.3).
 Any other value is an [error]. A missing `status` has no diagnostic.
 Templates and writers that create an entity (#6) SHOULD write its `status`
-explicitly. A `candidate`
-entity, such as one of several possible minor characters, is left out of
-canon views like any other out-of-canon fact.
+explicitly. A `candidate` entity, such as one of several possible minor
+characters, is left out of canon views like any other out-of-canon fact.
 
 A name that is still a placeholder, waiting on a name check, is marked with
 an optional `placeholder: true` field that the core pack spec (#6) defines.
@@ -663,8 +665,8 @@ with a `.` after the `:` gets this error.
 **F-POS-4.** A position resolves to a book of the universe the file belongs
 to (any series or standalone) and a chapter in that book's `chapters`,
 except a bare book position, which resolves to the start of the book
-(F-POS-7). A book or chapter that doesn't exist is a [warning], not an error, so writers
-can plan ahead. The fact that uses it (a temporal entry, a section, or an
+(F-POS-7). A book or chapter that doesn't exist is a [warning], not an
+error, so writers can plan ahead. The fact that uses it (a temporal entry, a section, or an
 entity's `from`) stays indexed but is left out of canon views. It isn't
 live (F-TMP-4), and range checks (F-TMP-3) skip it.
 
@@ -788,19 +790,24 @@ pos-line   = *WSP "<!--" *WSP "wolfden:" *WSP attr *(1*WSP attr) *WSP "-->" *WSP
 attr       = attr-name "=" attr-value
 attr-name  = lower *(lower / DIGIT / "-" / "_")
 attr-value = 1*vchar / DQUOTE *qchar DQUOTE
-vchar      = <any character except DQUOTE, whitespace, CR, LF>
+vchar      = <any character except DQUOTE and Unicode whitespace>
 qchar      = <any character except DQUOTE, CR, LF>
 ```
 
-The comment ends at its first `-->`, so an unquoted value stops there:
-`from=ember:19-->` is `from=ember:19`. A value MUST NOT contain `-->`.
-Unquoted values can be any non-space characters, so `pov=Zoë` works.
-Values with spaces need quotes: `pov="Mara Voss"`.
+"Unicode whitespace" is as CommonMark defines it, so it includes tabs and
+no-break spaces. The comment ends at its first `-->`, and neither `vchar`
+nor `qchar` can include those three characters, so an unquoted value stops
+there: `from=ember:19-->` is `from=ember:19`. A line with anything but
+whitespace after its first `-->`, such as `from=ember:19--> -->`, doesn't
+match `pos-line` (F-SEC-10). Unquoted values can be any characters except
+whitespace and `"`, so `pov=Zoë` works. Values with spaces need quotes:
+`pov="Mara Voss"`.
 
 **F-SEC-6.** A **section comment** is a line matching `pos-line`, placed on
 the line after a heading of level 2 to 6, or after a stray level-1
 heading that F-SEC-2 treats as level 2 (after the underline, for a setext
-heading). One blank line between them is allowed. It applies to that
+heading). One blank line between them is allowed, where a blank line is
+empty or holds only spaces and tabs, as in CommonMark. It applies to that
 heading's section.
 
 **F-SEC-7.** Attributes are space-separated `key=value` pairs, in any
@@ -809,8 +816,10 @@ order, and a value MAY be double-quoted. A section's comment takes:
 - `from` and `until`: positions (§8).
 - `status`: the section's status (F-STAT-1).
 - `pin`: `true` or `false` (F-PIN-1).
-- `canon`: `false` marks the section as bookkeeping (F-SEC-12). `true` is
-  the default. Any other value is an [error].
+- `canon`: `false` marks the section as bookkeeping (F-SEC-12). `true`
+  keeps a section out of bookkeeping even if its name matches a
+  bookkeeping pattern. Without it, F-SEC-12 decides. Any other value is an
+  [error].
 
 A repeated attribute is an [error]. Any other attribute is a [warning], and
 is kept as written.
@@ -840,11 +849,15 @@ valid place is a line of its own under a section heading of an
 entity or container file (F-SEC-6). In a valid place, a line that doesn't
 match `pos-line`, such as one that doesn't close on the same line or has
 no attributes, is a [warning], and the comment is ignored: the section
-loads without it, and the rest of the file is unaffected. Values are still
-checked strictly. In a comment that does match, a bad value (`status=maybe`,
-`from=ember:14.2`, `pin=yes`) or a repeated attribute is an [error]
-(F-SEC-7), since guessing what it meant would be worse. A wolfden comment
-anywhere else, whether well-formed or not, is a [warning] and does nothing. That includes one at the end of a heading line
+loads without it. A comment that doesn't close on its own line starts a
+CommonMark HTML block that runs to the next `-->` in the file, and headings
+inside it aren't headings (F-SEC-1), so the warning SHOULD name the line
+where that block ends. Values are still checked strictly. In a comment that
+does match, a bad value (`status=maybe`, `from=ember:14.2`, `pin=yes`) or a
+repeated attribute is an [error] (F-SEC-7), since guessing what it meant
+would be worse. A wolfden comment anywhere else, whether well-formed or
+not, is a [warning] and does nothing. That includes one at the end of a
+heading line
 (`## Shoulder injury <!-- wolfden: from=ember:19 -->`), where the warning
 says to move it to the next line, and any in `outline.md`.
 
@@ -854,14 +867,22 @@ code span is just text.
 
 **F-SEC-12.** A **bookkeeping** section records work on the notes rather
 than the story: a change log or session notes. A section is bookkeeping if
-its name matches a **bookkeeping pattern**, or if its comment has
-`canon=false`. The built-in patterns are `Change log*`, `Changelog*`,
-`Revision history*`, and `*session note*`, and `den.yaml` can add more
-(F-DEN-6). In a pattern, `*` matches any text, including none, and
-everything else matches literally. Both sides get F-LINK-4 normalization
-first, so case doesn't matter. `## v12 session notes (merged)` and
-`## Changelog 2026` are bookkeeping; `## Session` is not. Its subsections are
-bookkeeping too. Bookkeeping sections are kept, indexed, and searchable, but
+its comment has `canon=false`, or if its name matches a **bookkeeping
+pattern** and its comment doesn't have `canon=true` (F-SEC-7). The
+subsections of a bookkeeping section are bookkeeping too, whatever their
+own comments say.
+
+The built-in patterns are `Change log`, `Change log *`, `Changelog`,
+`Changelog *`, `Revision history`, `Revision history *`, `*session note`,
+`*session note *`, `*session notes`, and `*session notes *`, and `den.yaml`
+can add more (F-DEN-6). In a pattern, `*` matches any text, including none,
+and everything else matches literally. A pattern is matched against the
+section's name with inline markup removed (`## **Change log**` matches),
+and both sides get F-LINK-4 normalization first, so case doesn't matter.
+`## v12 session notes (merged)` and `## Changelog 2026` are bookkeeping.
+`## Session` and `## Change logistics` are not.
+
+Bookkeeping sections are kept, indexed, and searchable, but
 canon-as-of views, pinned canon, and the MCP server's canon context leave
 them out (§9.4), whatever their status. Pinning one is a [warning]. Links
 in a bookkeeping section skip F-LINK-12 and F-LINK-13, since a change log
@@ -877,7 +898,7 @@ ambiguous links are still reported.
 | `<!-- wolfden: from=ember:14.2 -->` | [error] F-POS-2 |
 | `<!-- wolfden: from=ember:19` (no `-->`) | [warning] F-SEC-10, ignored |
 | `<!-- wolfden: from=ember:19-->` | valid |
-| `<!-- wolfden: pov=Zoë -->` | valid ([warning] F-SEC-7, unknown attribute) |
+| `<!-- wolfden: pov=Zoë -->` | [warning] F-SEC-7 (unknown attribute, not malformed) |
 | `<!-- wolfden: -->` | [warning] F-SEC-10, no attributes, ignored |
 | `<!-- wolfden: status=undecided pin=true -->` | valid ([warning] F-PIN-3) |
 | `<!-- wolfden: status=maybe -->` | [error] F-STAT-1 |
@@ -1031,7 +1052,8 @@ warning says containers aren't link targets yet.
 at any level, whose name matches (F-LINK-4). No match is a [warning], and
 the link still resolves to the entity.
 
-**F-LINK-10.** The index stores each resolved link's `id` (design.md §3).
+**F-LINK-10.** The index stores each resolved link's target `id`
+(design.md §3), or the target's path while it has no `id` (F-ID-2).
 Indexing MUST NOT rewrite link text. Renames and moves made in the app
 rewrite slug links (F-RT-5).
 
@@ -1178,13 +1200,15 @@ custom sections, HTML comments, whitespace, line endings (F-ENC-3), the
 final newline (F-ENC-4), and any byte order mark (F-ENC-2).
 
 **F-RT-2.** An edit to one field, entry, or section changes only the bytes
-of that field, entry, or section.
+of that field, entry, or section, except for adding a missing `id`
+(F-ID-6).
 
 **F-RT-3.** Reading a file and writing it back unchanged MUST produce the
 same bytes (#18 tests this).
 
 **F-RT-4.** A writer that adds a frontmatter key puts it after the existing
-keys, unless the type's template gives an order (#6).
+keys, unless the type's template gives an order (#6). A missing `id` goes
+first (F-ID-6).
 
 **F-RT-5.** When the app or an MCP tool renames or moves something, it MUST
 rewrite, in the same change, every reference that depends on the old name:
@@ -1196,7 +1220,8 @@ rewrite, in the same change, every reference that depends on the old name:
   matched the old text. The writer MAY instead offer to keep the old text
   as an alias, so those links keep resolving.
 - Moving an entity to another scope: any link that would no longer resolve
-  to it (F-LINK-7) is rewritten to its id or another unique form.
+  to it (F-LINK-7) is rewritten to its id or another unique form. An
+  entity without an `id` gets one in the same change (F-ID-6).
 
 A rename made outside the app, by hand or in another tool, is a refactor
 Wolfden can't see. Positions that name the old key become F-POS-4
@@ -1273,6 +1298,7 @@ id: 01JADJ8FSSZ5AWSH8VHTPRE95B
 type: location
 name: Kessan Reach
 aliases: [the Reach]
+status: canon
 ---
 
 ## Overview
@@ -1287,6 +1313,7 @@ id: 01JA7Q8M4XK3V9R2D5W8HN6TQB
 type: character
 name: Mara Voss
 aliases: [Voss]
+status: canon
 from: "ember:1"
 fields:
   rank:
