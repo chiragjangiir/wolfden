@@ -156,7 +156,7 @@ Key points:
 - **Fields can change over time.** A plain value means it's always true. A list
   of `{value, from, until?}` entries means it's true at story positions.
 - **Sections can carry positions too.** A `<!-- wolfden: from=... -->`
-  comment on the line directly under a heading (with an optional `until=`)
+  comment on the line under a heading (with an optional `until=`)
   marks the whole section as entering canon at that point. GitHub,
   Obsidian, and VS Code hide HTML comments, so headings render cleanly and
   heading links keep working. Other HTML comments are left alone. This is a

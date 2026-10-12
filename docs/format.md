@@ -778,22 +778,23 @@ can repeat freely, and out-of-canon sections don't count either.
 ### 9.2 Section comments
 
 ```abnf
-pos-line   = *WSP "<!--" *WSP "wolfden:" 1*(1*WSP attr) 1*WSP "-->" *WSP
+pos-line   = *WSP "<!--" *WSP "wolfden:" *WSP attr *(1*WSP attr) *WSP "-->" *WSP
 attr       = attr-name "=" attr-value
 attr-name  = lower *(lower / DIGIT / "-" / "_")
 attr-value = 1*vchar / DQUOTE *qchar DQUOTE
-vchar      = %x21 / %x23-7E            ; visible ASCII except " and space
+vchar      = <any character except DQUOTE, whitespace, CR, LF>
 qchar      = <any character except DQUOTE, CR, LF>
 ```
 
-A quoted value MUST NOT contain `-->`, since that ends the HTML comment.
-Unquoted values are ASCII only, so `pov=Zoë` is malformed (F-SEC-10), and
-the diagnostic SHOULD suggest quoting it: `pov="Zoë"`.
+The comment ends at its first `-->`, so an unquoted value stops there:
+`from=ember:19-->` is `from=ember:19`. A value MUST NOT contain `-->`.
+Unquoted values can be any non-space characters, so `pov=Zoë` works.
+Values with spaces need quotes: `pov="Mara Voss"`.
 
 **F-SEC-6.** A **section comment** is a line matching `pos-line`, placed on
-the line directly after a heading of level 2 to 6, or after a stray level-1
+the line after a heading of level 2 to 6, or after a stray level-1
 heading that F-SEC-2 treats as level 2 (after the underline, for a setext
-heading). There is no blank line between them. It applies to that
+heading). One blank line between them is allowed. It applies to that
 heading's section.
 
 **F-SEC-7.** Attributes are space-separated `key=value` pairs, in any
@@ -829,11 +830,15 @@ reaches outside its parent's range is a [warning].
 
 **F-SEC-10.** Outside code blocks and code spans, `<!--` followed by
 optional whitespace and `wolfden:` starts a **wolfden comment**. Its only
-valid place is a line of its own directly under a section heading of an
+valid place is a line of its own under a section heading of an
 entity or container file (F-SEC-6). In a valid place, a line that doesn't
-match `pos-line`, including one that doesn't close on the same line, is an
-[error]. A wolfden comment anywhere else, whether well-formed or not, is a
-[warning] and does nothing. That includes one at the end of a heading line
+match `pos-line`, such as one that doesn't close on the same line or has
+no attributes, is a [warning], and the comment is ignored: the section
+loads without it, and the rest of the file is unaffected. Values are still
+checked strictly. In a comment that does match, a bad value (`status=maybe`,
+`from=ember:14.2`, `pin=yes`) or a repeated attribute is an [error]
+(F-SEC-7), since guessing what it meant would be worse. A wolfden comment
+anywhere else, whether well-formed or not, is a [warning] and does nothing. That includes one at the end of a heading line
 (`## Shoulder injury <!-- wolfden: from=ember:19 -->`), where the warning
 says to move it to the next line, and any in `outline.md`.
 
@@ -859,15 +864,17 @@ ambiguous links are still reported.
 | `<!--wolfden: until=ash:1 -->` | valid |
 | `<!-- wolfden: from=ember:19 from=ember:20 -->` | [error] F-SEC-7 |
 | `<!-- wolfden: from=ember:14.2 -->` | [error] F-POS-2 |
-| `<!-- wolfden: from=ember:19` (no `-->`) | [error] F-SEC-10 |
-| `<!-- wolfden: from=ember:19-->` | [error] F-SEC-10, needs a space |
-| `<!-- wolfden: -->` | [error] F-SEC-10, no attributes |
+| `<!-- wolfden: from=ember:19` (no `-->`) | [warning] F-SEC-10, ignored |
+| `<!-- wolfden: from=ember:19-->` | valid |
+| `<!-- wolfden: pov=Zoë -->` | valid ([warning] F-SEC-7, unknown attribute) |
+| `<!-- wolfden: -->` | [warning] F-SEC-10, no attributes, ignored |
 | `<!-- wolfden: status=undecided pin=true -->` | valid ([warning] F-PIN-3) |
 | `<!-- wolfden: status=maybe -->` | [error] F-STAT-1 |
 | `<!-- wolfden: pin=yes -->` | [error] F-PIN-1 |
 | `<!-- wolfden: canon=false -->` | valid, bookkeeping (F-SEC-12) |
 | `<!-- wolfden: pov=mara -->` | [warning] F-SEC-7 |
-| a blank line, then `<!-- wolfden: from=ember:19 -->` | [warning] F-SEC-10 |
+| a blank line, then `<!-- wolfden: from=ember:19 -->` | valid (F-SEC-6) |
+| two blank lines, then `<!-- wolfden: from=ember:19 -->` | [warning] F-SEC-10 |
 | `## Shoulder injury <!-- wolfden: from=ember:19 -->` | [warning] F-SEC-10 |
 | `<!-- todo: check the date -->` | kept, ignored |
 
