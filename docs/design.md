@@ -78,6 +78,9 @@ is a file move, since ids don't depend on paths.
 
 ## 3. On-disk format
 
+The normative rules for §3 and §5 are in [`format.md`](format.md). This
+section explains the shape. Where the two differ, `format.md` wins.
+
 ### Den layout
 
 ```text
@@ -117,7 +120,7 @@ scopes without breaking links.
 
 ```markdown
 ---
-id: 01JA7Q8M4XK3V9               # ULID, assigned on creation, never changes
+id: 01JA7Q8M4XK3V9R2D5W8HN6TQB   # ULID, assigned on creation, never changes
 type: character
 name: Mara Voss
 aliases: [Voss, "the Commander"]
@@ -199,6 +202,9 @@ Dens can define their own types in `packs/`, or extend a pack's type by
 adding fields and sections.
 
 ## 5. Structure and time
+
+The normative rules for books, chapters, positions, and outlines are in
+[`format.md`](format.md) §6, §8, and §11.
 
 ### Books and chapters
 
