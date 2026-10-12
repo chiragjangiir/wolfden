@@ -8,7 +8,8 @@ timelines, plot threads, outlines, and every invented thing a world needs
 becomes true, so you can always ask *"what's canon as of the end of Book 2?"*
 
 > **Status: early design.** Nothing to install yet. Watch the repo to follow
-> along as the design takes shape.
+> along as the design takes shape. Ideas and feedback are welcome: see
+> [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Why
 

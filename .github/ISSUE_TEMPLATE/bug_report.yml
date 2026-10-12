@@ -1,0 +1,39 @@
+name: Bug report
+description: Something is wrong, broken, or doesn't match the docs.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Wolfden is in early design, so a "bug" may be
+        an error or inconsistency in the docs. That's worth reporting too.
+
+        Please don't paste real manuscripts or personal notes. Use a small
+        invented example instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What went wrong, and where (a doc, a file, a command)?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: If it applies, the steps or a minimal example.
+      placeholder: |
+        1.
+        2.
+        3.
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: If it applies, your OS, Wolfden version or commit, and browser.
