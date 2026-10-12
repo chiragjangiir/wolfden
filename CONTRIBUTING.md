@@ -44,8 +44,15 @@ first dataset), and code under [MIT](LICENSE).
 
 ## Commits
 
-- Write a short, imperative subject line ("Add issue templates"), and explain
-  the why in the body when it isn't obvious.
+- Use [Conventional Commits](https://www.conventionalcommits.org/):
+  `type(scope): summary`, with a short, imperative, lowercase summary.
+  Common types are `feat`, `fix`, `docs`, `test`, `refactor`, `ci`, and
+  `chore`. The scope is optional, for example `docs(format): add the
+  position grammar` or `fix(index): keep CRLF line endings`. Mark a breaking
+  change with `!` (`feat(format)!: ...`) or a `BREAKING CHANGE:` footer.
+- Explain the why in the body when it isn't obvious.
+- PR titles follow the same style, since the title goes into the merge
+  commit. Older commits predate this convention and stay as they are.
 - A [DCO](https://developercertificate.org) `Signed-off-by:` line
   (`git commit -s`) is welcome but not required.
   By opening a PR, you agree that your contribution is licensed under the
