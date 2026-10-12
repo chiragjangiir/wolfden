@@ -409,7 +409,8 @@ freezing (#31) isn't part of the format.
 
 **F-BOOK-2.** `chapters` is an optional list. The list order is the chapter
 order. A missing or empty list means the book has no chapters yet, and
-positions in it don't resolve (F-POS-4).
+positions in it don't resolve (F-POS-4), except a bare book position
+(F-POS-7).
 
 **F-BOOK-3.** Each item is a mapping with:
 
@@ -637,8 +638,9 @@ with a `.` after the `:` gets this error.
 ("invalid story position").
 
 **F-POS-4.** A position resolves to a book of the universe the file belongs
-to (any series or standalone) and a chapter in that book's `chapters`. A
-book or chapter that doesn't exist is a [warning], not an error, so writers
+to (any series or standalone) and a chapter in that book's `chapters`,
+except a bare book position, which resolves to the start of the book
+(F-POS-7). A book or chapter that doesn't exist is a [warning], not an error, so writers
 can plan ahead. The fact that uses it (a temporal entry, a section, or an
 entity's `from`) stays indexed but is left out of canon views. It isn't
 live (F-TMP-4), and range checks (F-TMP-3) skip it.
