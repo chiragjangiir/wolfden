@@ -97,8 +97,9 @@ are the RFC 5234 core rules.
 **F-ENC-1.** `den.yaml` and every `.md` file Wolfden reads MUST be UTF-8.
 Invalid UTF-8 is an [error].
 
-**F-ENC-2.** Readers MUST accept a leading byte order mark and keep it when
-rewriting. Writers MUST NOT add one to a new file.
+**F-ENC-2.** Files SHOULD NOT start with a byte order mark, but one is not
+an error and has no diagnostic. Readers MUST accept a leading BOM and keep
+it when rewriting. Writers MUST NOT add one to a new file.
 
 **F-ENC-3.** LF is the canonical line ending, and new files use it. Readers
 MUST accept CRLF. A writer that rewrites a file MUST keep its line endings.
