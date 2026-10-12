@@ -113,8 +113,8 @@ my-den/
 ```
 
 Folder names are slugs for humans. **Identity comes from the `id` in
-frontmatter, not from the path** (once a file has one; tools add it), so files can be renamed or moved between
-scopes without breaking links. The app rewrites slug links and positions
+frontmatter, not from the path** (once a file has one; tools add it), so
+files can be renamed or moved between scopes without breaking links. The app rewrites slug links and positions
 when it renames something. After a rename by hand, links by id, name, or
 alias still work (format.md F-RT-5).
 

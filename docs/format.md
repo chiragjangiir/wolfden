@@ -233,7 +233,8 @@ add a `wolfden new-id` command (#17).
 **F-ID-6.** Reading and indexing MUST NOT write to files, so they never add
 a missing `id`. A writer that creates a file MUST give it an `id`. When the
 app or an MCP tool edits a file that has no `id`, it SHOULD add one in the
-same write, as the first frontmatter key. That is the one exception to
+same write, as the first frontmatter key, after any YAML comment lines
+that open the frontmatter. That is the one exception to
 F-RT-2 and F-RT-4. A write that changes nothing (F-RT-3) never adds one.
 `wolfden check --fix` (#17) adds missing ids in bulk.
 
@@ -666,8 +667,9 @@ with a `.` after the `:` gets this error.
 to (any series or standalone) and a chapter in that book's `chapters`,
 except a bare book position, which resolves to the start of the book
 (F-POS-7). A book or chapter that doesn't exist is a [warning], not an
-error, so writers can plan ahead. The fact that uses it (a temporal entry, a section, or an
-entity's `from`) stays indexed but is left out of canon views. It isn't
+error, so writers can plan ahead. The fact that uses it (a temporal entry,
+a section, or an entity's `from`) stays indexed but is left out of canon
+views. It isn't
 live (F-TMP-4), and range checks (F-TMP-3) skip it.
 
 **F-POS-5.** Positions don't cross universes (design.md §2). A book key
@@ -790,14 +792,16 @@ pos-line   = *WSP "<!--" *WSP "wolfden:" *WSP attr *(1*WSP attr) *WSP "-->" *WSP
 attr       = attr-name "=" attr-value
 attr-name  = lower *(lower / DIGIT / "-" / "_")
 attr-value = 1*vchar / DQUOTE *qchar DQUOTE
-vchar      = <any character except DQUOTE and Unicode whitespace>
-qchar      = <any character except DQUOTE, CR, LF>
+vchar      = <any character except DQUOTE and Unicode whitespace,
+              and never the sequence "-->">
+qchar      = <any character except DQUOTE, CR, LF,
+              and never the sequence "-->">
 ```
 
 "Unicode whitespace" is as CommonMark defines it, so it includes tabs and
-no-break spaces. The comment ends at its first `-->`, and neither `vchar`
-nor `qchar` can include those three characters, so an unquoted value stops
-there: `from=ember:19-->` is `from=ember:19`. A line with anything but
+no-break spaces. The comment ends at its first `-->`, and no value can
+contain the sequence `-->` (single `-` and `>` characters are fine, as in
+`from=a-quiet-moon:2b`), so an unquoted value stops there: `from=ember:19-->` is `from=ember:19`. A line with anything but
 whitespace after its first `-->`, such as `from=ember:19--> -->`, doesn't
 match `pos-line` (F-SEC-10). Unquoted values can be any characters except
 whitespace and `"`, so `pov=Zoë` works. Values with spaces need quotes:
@@ -818,7 +822,8 @@ order, and a value MAY be double-quoted. A section's comment takes:
 - `pin`: `true` or `false` (F-PIN-1).
 - `canon`: `false` marks the section as bookkeeping (F-SEC-12). `true`
   keeps a section out of bookkeeping even if its name matches a
-  bookkeeping pattern. Without it, F-SEC-12 decides. Any other value is an
+  bookkeeping pattern, unless its parent section is bookkeeping, in which
+  case it's a [warning] and does nothing. Without it, F-SEC-12 decides. Any other value is an
   [error].
 
 A repeated attribute is an [error]. Any other attribute is a [warning], and
@@ -850,16 +855,16 @@ entity or container file (F-SEC-6). In a valid place, a line that doesn't
 match `pos-line`, such as one that doesn't close on the same line or has
 no attributes, is a [warning], and the comment is ignored: the section
 loads without it. A comment that doesn't close on its own line starts a
-CommonMark HTML block that runs to the next `-->` in the file, and headings
+CommonMark HTML block that runs to the next `-->` in the file, or to the
+end of the file, and headings
 inside it aren't headings (F-SEC-1), so the warning SHOULD name the line
 where that block ends. Values are still checked strictly. In a comment that
 does match, a bad value (`status=maybe`, `from=ember:14.2`, `pin=yes`) or a
 repeated attribute is an [error] (F-SEC-7), since guessing what it meant
 would be worse. A wolfden comment anywhere else, whether well-formed or
 not, is a [warning] and does nothing. That includes one at the end of a
-heading line
-(`## Shoulder injury <!-- wolfden: from=ember:19 -->`), where the warning
-says to move it to the next line, and any in `outline.md`.
+heading line (`## Shoulder injury <!-- wolfden: from=ember:19 -->`), where
+the warning says to move it to the next line, and any in `outline.md`.
 
 **F-SEC-11.** All other HTML comments are kept and ignored, wherever they
 are, including directly under a heading. A comment inside a code block or
@@ -872,15 +877,17 @@ pattern** and its comment doesn't have `canon=true` (F-SEC-7). The
 subsections of a bookkeeping section are bookkeeping too, whatever their
 own comments say.
 
-The built-in patterns are `Change log`, `Change log *`, `Changelog`,
-`Changelog *`, `Revision history`, `Revision history *`, `*session note`,
-`*session note *`, `*session notes`, and `*session notes *`, and `den.yaml`
-can add more (F-DEN-6). In a pattern, `*` matches any text, including none,
+The built-in patterns are `Change log`, `Changelog`, `Revision history`,
+`Session note`, and `Session notes`, each alone or followed by ` *`, and
+`* session note` and `* session notes`, each also followed by ` *` or not.
+`den.yaml` can add more (F-DEN-6). In a pattern, `*` matches any text, including none,
 and everything else matches literally. A pattern is matched against the
-section's name with inline markup removed (`## **Change log**` matches),
+section's name as plain text, that is, the CommonMark text content of the
+heading with emphasis, code, and link markup removed (`## **Change log**`
+matches),
 and both sides get F-LINK-4 normalization first, so case doesn't matter.
 `## v12 session notes (merged)` and `## Changelog 2026` are bookkeeping.
-`## Session` and `## Change logistics` are not.
+`## Session`, `## Change logistics`, and `## Possession notes` are not.
 
 Bookkeeping sections are kept, indexed, and searchable, but
 canon-as-of views, pinned canon, and the MCP server's canon context leave
@@ -1221,7 +1228,7 @@ rewrite, in the same change, every reference that depends on the old name:
   as an alias, so those links keep resolving.
 - Moving an entity to another scope: any link that would no longer resolve
   to it (F-LINK-7) is rewritten to its id or another unique form. An
-  entity without an `id` gets one in the same change (F-ID-6).
+  entity without an `id` MUST get one in the same change (F-ID-6).
 
 A rename made outside the app, by hand or in another tool, is a refactor
 Wolfden can't see. Positions that name the old key become F-POS-4
