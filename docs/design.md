@@ -40,7 +40,7 @@ there's code that depends on it. Decisions already made are recorded in
 | **Entity** | A single note about one thing: a character, a planet, a faction, a plot thread. Every entity has a **type**. |
 | **Type** | A schema for entities: frontmatter fields, standard sections, and a template. |
 | **Pack** | A bundle of types for a genre or purpose (core, space opera, epic fantasy, ...). |
-| **Story position** | A point in the story: a book key plus a chapter key, written `ember:14`. v0 positions are chapter-level. `ember:14.2` (scene 2 of chapter 14) is reserved for later. **Decided (#2):** a bare `ember` is shorthand for the book's first chapter. |
+| **Story position** | A point in the story: a book key plus a chapter key, written `ember:14`. v0 positions are chapter-level. `ember:14.2` (scene 2 of chapter 14) is reserved for later. **Decided (#2):** a bare `ember` means the start of that book. |
 
 ### Scope and inheritance
 
@@ -126,7 +126,7 @@ id: 01JA7Q8M4XK3V9R2D5W8HN6TQB   # ULID, assigned on creation, never changes
 type: character
 name: Mara Voss
 aliases: [Voss, "the Commander"]
-status: canon                    # idea | draft | canon | retconned
+status: canon                    # see format.md §9.3 for all six
 fields:
   species: "[[velari]]"
   rank:
@@ -409,8 +409,8 @@ demos, and test fixtures.
    now includes `undecided` and `candidate`, capped by the entity's status.
    `pin` marks hard canon, served first as **pinned canon**. Positions stay
    `book:chapter`, and `ember:r75` is reserved for outline-row positions,
-   which v0 rejects. A bare `ember` means the book's
-   first chapter. A `Change log` section, or one marked `canon=false`, is
+   which v0 rejects. A bare `ember` means the start of
+   the book. A `Change log` section, or one marked `canon=false`, is
    bookkeeping and stays out of canon views. There's no separate "locked"
    state in v0: writers use `status: canon` plus `pin`. If agents need write
    protection, it belongs to the MCP write tools (M2), not the format.
