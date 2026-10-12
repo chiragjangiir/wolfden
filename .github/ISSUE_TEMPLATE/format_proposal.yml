@@ -7,8 +7,10 @@ body:
       value: |
         The on-disk format is what people's notes depend on, so changes are
         discussed here before any PR. If the proposal changes a decision
-        already recorded in `docs/design.md`, the maintainer will add the
-        `decision` label.
+        already recorded in `docs/design.md`, or opens a new design question,
+        the maintainer will add the `decision` label. This form applies
+        `area: format`; the maintainer may change the area if the proposal is
+        about something else (packs, the index, MCP, and so on).
   - type: textarea
     id: summary
     attributes:

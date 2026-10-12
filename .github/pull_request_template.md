@@ -8,4 +8,5 @@ Closes #
 
 - [ ] No real manuscripts, notes, or personal details. Sample data is public-domain or invented.
 - [ ] If this changes the on-disk format or a recorded decision, `docs/design.md` is updated.
-- [ ] AI-assisted: an AI tool wrote a meaningful part of this PR, and I've reviewed it. (Leave unchecked if not.)
+
+AI-assisted: yes / no <!-- If yes, say which parts, and confirm you've reviewed all of it. -->
