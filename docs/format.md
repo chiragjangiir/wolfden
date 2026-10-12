@@ -308,6 +308,7 @@ authors:
   wren-calder:
     name: Wren Calder
 packs: [space-opera]
+bookkeeping_sections: ["Scratch", "* working notes"]
 ```
 
 **F-DEN-1.** `format` is REQUIRED and is an integer. This spec is format
@@ -329,6 +330,10 @@ built in nor in `packs/<key>/` is an [error]. Pack contents and how types
 from several packs combine are defined in the core pack spec (#6).
 
 **F-DEN-5.** Other keys are kept and ignored, with no diagnostic.
+
+**F-DEN-6.** `bookkeeping_sections` is an optional list of non-empty
+heading patterns that mark a section as bookkeeping, in addition to the
+built-in ones (F-SEC-12). Any other shape is an [error].
 
 ## 6. Containers: universe, series, book
 
@@ -848,8 +853,13 @@ code span is just text.
 
 **F-SEC-12.** A **bookkeeping** section records work on the notes rather
 than the story: a change log or session notes. A section is bookkeeping if
-its name is exactly `Change log` (F-LINK-4 normalization, so case doesn't
-matter), or if its comment has `canon=false`. Its subsections are
+its name matches a **bookkeeping pattern**, or if its comment has
+`canon=false`. The built-in patterns are `Change log*`, `Changelog*`,
+`Revision history*`, and `*session note*`, and `den.yaml` can add more
+(F-DEN-6). In a pattern, `*` matches any text, including none, and
+everything else matches literally. Both sides get F-LINK-4 normalization
+first, so case doesn't matter. `## v12 session notes (merged)` and
+`## Changelog 2026` are bookkeeping; `## Session` is not. Its subsections are
 bookkeeping too. Bookkeeping sections are kept, indexed, and searchable, but
 canon-as-of views, pinned canon, and the MCP server's canon context leave
 them out (§9.4), whatever their status. Pinning one is a [warning]. Links

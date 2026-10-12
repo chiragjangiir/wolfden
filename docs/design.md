@@ -411,7 +411,8 @@ demos, and test fixtures.
    `pin` marks hard canon, served first as **pinned canon**. Positions stay
    `book:chapter`, and `ember:r75` is reserved for outline-row positions,
    which v0 rejects. A bare `ember` means the start of
-   the book. A `Change log` section, or one marked `canon=false`, is
+   the book. A section headed like a change log or session notes
+   (built-in patterns plus any in `den.yaml`), or one marked `canon=false`, is
    bookkeeping and stays out of canon views. There's no separate "locked"
    state in v0: writers use `status: canon` plus `pin`. If agents need write
    protection, it belongs to the MCP write tools (M2), not the format.
