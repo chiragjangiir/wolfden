@@ -129,9 +129,10 @@ explicit tags (`!x`, `!!str`) MUST NOT be used. [error]
 values (F-FLD-7), and the values of `string`, `text`, `date`, `enum`, and
 `position` fields (types.md §5.2) are read as the scalar's text as
 written, not after type resolution. So `14`, `"14"`, and `'14'` are the
-same chapter key, `014` stays `014`, and `name: 1984` is the name "1984". A YAML null (`~`,
-`null`, or nothing) is still null, not the text "null": `name: ~` is a
-missing name (F-ENT-3), and a null `aliases` item is an error (F-ENT-4).
+same chapter key, `014` stays `014`, and `name: 1984` is the name "1984".
+A YAML null (`~`, `null`, or nothing) is still null, not the text
+"null": `name: ~` is a missing name (F-ENT-3), and a null `aliases` item
+is an error (F-ENT-4).
 
 **F-FM-1.** Frontmatter starts on the file's first line (after any byte order
 mark) with a line that is exactly `---`, and ends at the next line that is
@@ -336,7 +337,8 @@ an Author Identity. Each identity is a mapping with a REQUIRED non-empty
 **F-DEN-4.** `packs` is an optional list of pack keys to enable. The `core`
 pack is always enabled, and listing it is allowed. An entry that names
 neither a built-in pack nor a den-local pack (a folder `packs/<key>/` that
-holds a `pack.yaml`) is an [error]. A repeated entry is an [error]. Pack
+holds a `pack.yaml`) is an [error]. If the folder has a `pack.yml`
+instead, the message says to rename it. A repeated entry is an [error]. Pack
 contents and how packs combine, including a den-local pack named like a
 built-in one, are defined in [`types.md`](types.md) §2 and §4.
 
@@ -611,7 +613,9 @@ item is an entry), or else a plain value. A list in which some items are
 entries and others aren't is an [error]. A single entry means the same as a
 one-item temporal list. The shape decides, not the type, so a parser can
 tell these apart without loading packs. As a result, a plain value that is
-a mapping can't use a key named `value`.
+a mapping can't use a key named `value`. This section covers an entity's
+`fields`. Chapter fields and `chapter_defaults` have no entries, and their
+problems are warnings (types.md F-CHAP-3).
 
 **F-TMP-2.** An entry has:
 
@@ -1110,9 +1114,10 @@ the one the field names is a [warning].
 - In an outline row: its `chapter` cell (F-OUT-9), or else the start of
   its book. A `chapter` cell that doesn't resolve also falls back to the
   start of the book, with its F-OUT-9 warning.
-- In a chapter item's `fields` in `book.md`: that chapter (types.md
+- In a chapter item's `fields` in `book.md`: that chapter. In
+  `chapter_defaults`: each chapter that inherits the value (types.md
   F-CHAP-4).
-- In a container body or `chapter_defaults`: none.
+- In a container body: none.
 
 A link whose target enters canon after the link's position is a [warning],
 since it's usually a spoiler or a mistake (design.md §7). Links with no

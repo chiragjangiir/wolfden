@@ -55,9 +55,9 @@ sections:
   - name: Backstory
     description: Their life before the story starts.
   - name: Want
-    description: What they want most, their core want.
+    description: What they want most.
   - name: Wound
-    description: The old hurt that drives them, their core wound.
+    description: The old hurt that still drives them.
   - name: Voice
     description: How they talk and think.
   - name: Relationships

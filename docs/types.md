@@ -78,7 +78,10 @@ saying which definition is used.
 **F-PACK-3.** A **pack** is a folder that holds a `pack.yaml`. The folder
 name is the **pack key** (F-KEY-1). Other files and folders in a pack are
 ignored, with no diagnostic, and names starting with `.` are ignored as
-everywhere (F-LAY-2).
+everywhere (F-LAY-2). The one exception is a `.yml` file where this
+document expects a `.yaml` one (`pack.yml`, `chapter.yml`, or a `.yml`
+file in `types/` or `extensions/`): it is a [warning] ("did you mean
+ship.yaml?"), and it is not read.
 
 **F-PACK-4.** **Built-in** packs ship with Wolfden. In v0 the only
 built-in pack is `core` (§9). Its source is the `packs/core/` folder of the
@@ -88,9 +91,12 @@ the same way.
 
 **F-PACK-5.** A **den-local** pack is a folder directly in the den's
 `packs/` folder (format.md §5.1) that holds a `pack.yaml`. A folder there
-without a `pack.yaml` isn't a pack, and is a [warning]. If `den.yaml`
-lists its key and no built-in pack has that key, that entry names no pack,
-which is the F-DEN-4 error. Files directly in `packs/` are ignored.
+without a `pack.yaml` isn't a pack, and is a [warning], which names any
+`pack.yml` it finds. If `den.yaml` lists its key and no built-in pack has
+that key, that entry names no pack, which is the F-DEN-4 error. A folder
+whose name isn't a valid key (`packs/My Stuff/`) is a [warning] and is
+ignored, rather than the F-KEY-1 error, so a stray folder never stops a
+den from loading. Files directly in `packs/` are ignored.
 
 ### 2.2 `pack.yaml`
 
@@ -146,10 +152,17 @@ existing den means (design.md §4).
 **F-PACK-10.** A den-local pack whose key is the key of a built-in pack
 **shadows** it. A `den.yaml` entry with that key names the den-local pack,
 the built-in pack is ignored, and the den-local `pack.yaml` gets a
-[warning] ("packs/core shadows the built-in pack 'core'"). Since `core`
-is always enabled, a den-local `packs/core/` replaces the built-in core
-pack whether or not `den.yaml` lists `core`. A den that shadows a built-in
-pack no longer gets that pack's changes when Wolfden is upgraded.
+[warning] ("packs/core shadows the built-in pack 'core', so Wolfden's
+updates to core won't reach this den; rename the folder to make it an
+ordinary pack"). Since `core` is always enabled, a den-local
+`packs/core/` replaces the built-in core pack whether or not `den.yaml`
+lists `core`. A den that shadows a built-in pack no longer gets that
+pack's changes when Wolfden is upgraded.
+
+A den-local pack that is excluded by an error in its `pack.yaml`
+(F-PACK-2) still shadows the built-in pack: the den then has no pack with
+that key until the error is fixed, and the built-in pack doesn't come
+back. A typo never switches a den to definitions it chose not to use.
 
 **F-PACK-11.** Two enabled packs **clash** when both define the same type
 key (F-TYPE-4), the same `plural` (F-TYPE-5), the same field or section
@@ -195,9 +208,14 @@ MUST be a valid key (F-KEY-1). [error] The key is what entities write in
 `type:` (F-ENT-2).
 
 **F-TYPE-2.** The type keys `universe`, `series`, `book`, `chapter`,
-`outline`, `den`, `author`, and `pack` are reserved, for containers and
-for later use (design.md §2, #45). A type file with one of them is an
-[error].
+`scene`, `outline`, `den`, `author`, and `pack` are reserved, for
+containers and for later use (design.md §2, #45, and the scene form of
+positions, F-POS-2). A type file with one of them is an [error].
+
+The reserved names in this rule, F-FT-1, and F-CHAP-1 are fixed for this
+format version. Reserving another name would make an existing den-local
+definition stop working, which an additive change (F-DEN-1) must never do,
+so a new reservation needs a new format version.
 
 **F-TYPE-3.** The top level is a mapping with:
 
@@ -227,7 +245,8 @@ no pack can remove a type another pack defines.
 
 **F-TYPE-5.** Two enabled types MUST NOT have the same `plural`. If they
 do, F-PACK-11 decides which type is used, and the other type is ignored,
-with the clash [warning], as in F-TYPE-4.
+with the clash [warning], as in F-TYPE-4. Two types in the same pack are
+settled by type key, in ASCII order: the earlier key wins.
 
 ## 4. Extensions and combining packs
 
@@ -308,9 +327,9 @@ fields:
 
 **F-FT-1.** `fields` is a mapping from field name to **field definition**.
 A field name MUST match F-FLD-1. The names `row` and `placeholder` are
-reserved for the universal fields (§5.5), and no pack may define them.
-Breaking either rule is a [warning], and that definition is ignored
-(F-FT-2).
+reserved for the universal fields (§5.5), and no pack may define them
+(this list is fixed for format 1, F-TYPE-2). Breaking either rule is a
+[warning], and that definition is ignored (F-FT-2).
 
 **F-FT-2.** A field definition is either the name of a field type (a
 string, shorthand for a mapping with only `type`) or a mapping with:
@@ -331,9 +350,9 @@ is ignored, so the field is undefined (F-FLD-2) until it is fixed. The rest
 of the file still loads. A definition is broken if its field type is
 missing or unknown, if `list`, `temporal`, or `required` isn't a YAML
 boolean, if a key has the wrong shape, or if F-FT-1 or F-FT-8 says so.
-`values` on a type other than `enum`, or `to` on a type other than `ref`,
-is a [warning], and only that key is ignored. Any other key is a
-[warning], and is kept.
+`values` on a type other than `enum`, `to` on a type other than `ref`,
+or a `description` that isn't a string is a [warning], and only that key
+is ignored. Any other key is a [warning], and is kept.
 
 **F-FT-3.** The order of a type's fields is the order of its `fields`
 mapping, followed by any fields its extensions add (F-TYPE-8). That order
@@ -377,10 +396,14 @@ a [warning].
 `false`). Anything else, including `yes` and `"true"`, is a [warning].
 
 **F-FT-8. `enum`.** The definition MUST have `values`: a non-empty list of
-keys (F-KEY-1) with no repeats. Without one, the definition is broken: a
-[warning], and the definition is ignored (F-FT-2). A value is a scalar whose text, as written (F-YAML-5), matches
-one of `values` after Unicode default case folding (as in F-LINK-4), so
-`Past` and `PAST` are both `past`. Anything else is a [warning]. A writer
+keys (F-KEY-1) with no repeats. An item that is a key once lowercased
+(`Ally`) is a [warning], and is read lowercased. Without a usable
+`values`, the definition is broken: a [warning], and the definition is
+ignored (F-FT-2). A value is a scalar whose text, as written (F-YAML-5),
+matches one of `values` after Unicode default case folding (as in
+F-LINK-4), so `Past` and `PAST` are both `past`. Anything else is a
+[warning], which SHOULD suggest a close defined key, such as
+`third-limited` for `third_limited`. A writer
 that writes an enum value, including one it rewrites in a field it is
 editing, writes the defined key (`past`). It MUST NOT change a value in a
 field it isn't editing (F-RT-2).
@@ -436,7 +459,9 @@ time       = (SP / "T") 1*2DIGIT ":" 2DIGIT [":" 2DIGIT]
 - A **mapping** has `text`, a string, and `sort`, an integer or a list of
   integers. Either can be left out, but not both. Use it when the text is
   fuzzy or partial ("late spring", "before the war") and the date still
-  needs a place on a timeline. The key `calendar` is reserved for custom
+  needs a place on a timeline. `text` is read as written (`text: 2291` is
+  the text "2291") and never gives a sort key: only `sort` does. The key
+  `calendar` is reserved for custom
   calendars (#37): until they arrive, it is a [warning] ("custom calendars
   aren't supported yet"), and it is kept and otherwise ignored. Any other
   key is a [warning], and is kept.
@@ -475,8 +500,9 @@ fields:
     - { value: ["[[tessaly-crew]]", "[[reach-compact]]"], from: "ash:12" }
 ```
 
-F-TMP-1 tells the two shapes apart: a list whose items are all entries is
-a temporal list, and any other list is a plain list value.
+F-TMP-1 tells the shapes apart: a list whose items are all entries is a
+temporal list, a list with no entries is a plain list value, and a list
+that mixes the two is the F-TMP-1 error.
 
 ### 5.4 Temporal, required, and defaults
 
@@ -608,7 +634,11 @@ is then read as if it had no `template`.
 its own pack if that file exists, and otherwise the **generated
 template**: frontmatter with `status: draft` and nothing else, and a body
 of `# {{name}}` followed by a level-2 heading for each standard section in
-section order, each followed by a blank line.
+section order, each followed by a blank line. Extensions have no such
+fallback. A `.md` file in `templates/` that no type or extension of its
+pack uses, by name or through this fallback, is a [warning] ("template
+character.md isn't used; add `template: character.md` to
+extensions/character.yaml").
 
 **F-TPL-3.** A template is checked when its pack loads, like an entity
 file but with these differences:
@@ -662,15 +692,19 @@ scope `S`:
 
 1. Picks the path `entities/<plural>/<slug>.md` in `S`'s container folder,
    where `<plural>` is `T`'s folder name (F-TYPE-3). The slug SHOULD be
-   made from `N`: decompose it (NFKD), drop combining marks, lowercase it,
-   replace each run of characters outside `a-z` and `0-9` with one `-`,
-   trim `-` from both ends, and cut it to 64 characters at a word
-   boundary. The slug MUST be a valid key (F-KEY-1), and `<slug>.md` MUST
-   NOT match the name of a file already in that folder, compared
-   case-insensitively, since many file systems are case-insensitive. If
-   the result is empty or taken, the writer asks for a slug, or adds `-2`,
-   `-3`, and so on, first cutting the slug back (at a word boundary, where
-   there is one) so the whole stays within 64 characters.
+   made from `N`: lowercase it, replace the letters that don't decompose
+   (`æ` with `ae`, `œ` with `oe`, `ø` with `o`, `ß` with `ss`, `þ` with
+   `th`, `ð` and `đ` with `d`, `ł` with `l`), decompose it (NFKD), drop
+   combining marks, replace each run of characters outside `a-z` and
+   `0-9` with one `-`, trim `-` from both ends, and cut it to 64
+   characters (at a word boundary, where there is one). So "Ærin Søvik"
+   becomes `aerin-sovik`. If the result is empty, the writer asks for a
+   slug or uses the type key (`character`). The slug MUST be a valid key
+   (F-KEY-1), and `<slug>.md` MUST NOT match the name of a file already in
+   that folder, compared case-insensitively, since many file systems are
+   case-insensitive. If it's taken, the writer asks for a slug, or adds
+   `-2`, `-3`, and so on, first cutting the slug back (at a word boundary,
+   where there is one) so the whole stays within 64 characters.
 2. Writes the frontmatter in template order (F-TPL-7): `id` (a new ULID,
    F-ID-6), `type: T`, `name: N`, then `aliases`, `status`, `from`, and
    `fields` where there are any, then the template's other keys in the
@@ -686,6 +720,8 @@ scope `S`:
 The result MUST have no error (format.md §1.3). A writer MUST refuse to
 create an entity that would, and MUST NOT create one inside a final book
 (F-BOOK-1).
+
+The new thread "The missing manifest", shortened:
 
 ```markdown
 ---
@@ -755,10 +791,12 @@ the present tense and chapter 2 has two POV characters.
 **F-CHAP-1.** A pack's `chapter.yaml` is a mapping with one key, `fields`,
 a mapping of field definitions as in §5 (F-FT-1, F-FT-2). A chapter field
 has no `temporal`, `required`, or `default`: each of those keys is a
-[warning], and is ignored. The names `key`, `number`, `title`, `id`,
-`name`, `status`, `from`, `until`, `pin`, `fields`, `row`, and
-`placeholder` are reserved, for the chapter item's own keys and for later
-use. Defining one is a [warning], and that definition is ignored. Any
+[warning], and is ignored whatever its value, before F-FT-2 checks the
+rest of the definition. The names `key`, `number`, `title`, `id`, `name`,
+`status`, `from`, `until`, `pin`, `fields`, `row`, `placeholder`, and
+`scene` are reserved, for the chapter item's own keys and for later use.
+This list is fixed for format 1 (F-TYPE-2). Defining one is a [warning],
+and that definition is ignored. Any
 other key at the top level is a [warning], and is kept.
 
 **F-CHAP-2.** The **chapter fields** are the fields from the `chapter.yaml`
@@ -771,19 +809,25 @@ mapping from field name to a plain value. The values are checked as in
 §5.2 and §5.3, against the chapter field of that name. A null value is
 the same as leaving the field out (F-FLD-4). Every problem with a
 chapter's `fields`, including a value that doesn't match, a name that
-isn't a chapter field, a `fields` that isn't a mapping, and an entry
-(F-TMP-1) of any kind, is a [warning], never an error, since an error in
-`book.md` would exclude the whole book (F-GEN-2). A chapter field is a
-fact about one chapter, so it has no temporal form. Other keys on the item
-are kept but not indexed (F-BOOK-3).
+isn't a chapter field, and a `fields` that isn't a mapping, is a
+[warning], never an error, since an error in a container file would
+exclude the whole container (F-GEN-2). A chapter field is a fact about one
+chapter, so it has no temporal form. Entries (format.md §7.3) don't exist
+here: the errors of §7.3 (F-TMP-1, F-TMP-2) and the `status` and `pin`
+errors inside an entry (F-STAT-1, F-PIN-1) don't apply. A value that is
+an entry, or a list that holds one, is a [warning], and that value is
+ignored, as if the field were left out. Other keys on the item are kept
+but not indexed (F-BOOK-3).
 
 **F-CHAP-4.** Links in chapter fields are recognized (F-LINK-1) and
 resolve from the book's scope, like the rest of `book.md` (F-CTR-3). A
 link in a chapter item's `fields` has that chapter (`book:chapter`) as its
 position for F-LINK-13, so a `pov` link to a character who enters canon
 after that chapter gets the F-LINK-13 warning. A link in
-`chapter_defaults` resolves from the scope of the container that holds it,
-and has no position.
+`chapter_defaults` resolves from the scope of the container that holds
+it. It is checked against F-LINK-13 for each chapter whose effective value
+(F-CHAP-5) it is, with that chapter as its position. The warning goes on
+the file that holds the default and names the chapter.
 
 **F-CHAP-5.** `universe.md`, `series.md`, and `book.md` MAY have
 `chapter_defaults` (F-CTR-5): a mapping from chapter field name to a plain
@@ -921,9 +965,11 @@ coincidences in a payoff") are author notes, planned in #45.
 `planted` position, in story order, is a [warning]. Positions that don't
 resolve are skipped.
 
-**F-CORE-3.** An event whose `ends` has a sort key that sorts before the
-sort key of its `when` is a [warning]. Dates without sort keys are
-skipped.
+**F-CORE-3.** An event whose `ends` is earlier than its `when` is a
+[warning]. The two sort keys are compared only over the numbers both
+have, so `when: "2291-05-14 06:40"` with `ends: "2291-05-14"`, or `when:
+"2291-05"` with `ends: "2291"`, gets no warning. Dates without sort keys
+are skipped.
 
 **Idea.** A raw idea that isn't yet a thing of any one type: a premise, a
 scene, a twist, a line of dialogue. That's the difference from `status:

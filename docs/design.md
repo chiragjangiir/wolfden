@@ -238,8 +238,8 @@ section, or a chapter field), the den-local one is used and the built-in
 one is ignored, with a warning that names the clash. A den-local pack
 named like a built-in pack shadows it. So a Wolfden upgrade can add
 things but never changes what an existing den means. Versioning policy is
-#56. (Between two den-local packs, the one listed earlier in `den.yaml`
-wins, types.md F-PACK-11.)
+#56. Clashes between two den-local packs are settled by pack order (see
+types.md F-PACK-11).
 
 **Decided (#6): your writing is yours.** Wolfden's licenses place no
 conditions on the notes, manuscripts, or other content writers create with
