@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Wolfden.Api/Wolfden.Api.csproj" />
+    <Project Path="src/Wolfden.Cli/Wolfden.Cli.csproj" />
+    <Project Path="src/Wolfden.Core/Wolfden.Core.csproj" />
+    <Project Path="src/Wolfden.Git/Wolfden.Git.csproj" />
+    <Project Path="src/Wolfden.Index/Wolfden.Index.csproj" />
+    <Project Path="src/Wolfden.Mcp/Wolfden.Mcp.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Wolfden.Cli.Tests/Wolfden.Cli.Tests.csproj" />
+    <Project Path="tests/Wolfden.Core.Tests/Wolfden.Core.Tests.csproj" />
+    <Project Path="tests/Wolfden.Index.Tests/Wolfden.Index.Tests.csproj" />
+  </Folder>
+</Solution>

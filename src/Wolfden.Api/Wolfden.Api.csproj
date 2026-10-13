@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Wolfden.Core\Wolfden.Core.csproj" />
+    <ProjectReference Include="..\Wolfden.Index\Wolfden.Index.csproj" />
+    <ProjectReference Include="..\Wolfden.Git\Wolfden.Git.csproj" />
+  </ItemGroup>
+
+</Project>

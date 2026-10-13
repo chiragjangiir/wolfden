@@ -1,8 +1,8 @@
 # Contributing to Wolfden
 
-Thanks for your interest. Wolfden is in early design and there's no code yet,
-so the most useful contributions right now are ideas, questions, and feedback
-on [`docs/design.md`](docs/design.md).
+Thanks for your interest. Wolfden is in early design and the code is only a
+scaffold so far, so the most useful contributions right now are ideas,
+questions, and feedback on [`docs/design.md`](docs/design.md).
 
 ## Issues
 
@@ -11,6 +11,23 @@ on [`docs/design.md`](docs/design.md).
   Each form applies its label for you. A blank issue is fine too, and the
   maintainer will label it.
 - Search existing issues first. The backlog is organized by milestone.
+
+## Building
+
+You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0),
+version 10.0.400 or a later 10.0 feature band (`global.json` pins it). From
+the repo root:
+
+```sh
+dotnet build
+dotnet test
+```
+
+The solution is `Wolfden.slnx`. Projects live in `src/`, tests in `tests/`.
+Warnings fail the build, and package versions are kept in
+`Directory.Packages.props`. CI runs the same build and tests on Linux and
+Windows for every pull request. To turn off .NET SDK telemetry locally (CI
+already does), set the environment variable `DOTNET_CLI_TELEMETRY_OPTOUT=1`.
 
 ## Branches and pull requests
 

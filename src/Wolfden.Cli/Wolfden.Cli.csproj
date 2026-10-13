@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>wolfden</AssemblyName>
+    <RootNamespace>Wolfden.Cli</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Wolfden.Cli.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Wolfden.Core\Wolfden.Core.csproj" />
+    <ProjectReference Include="..\Wolfden.Index\Wolfden.Index.csproj" />
+    <ProjectReference Include="..\Wolfden.Git\Wolfden.Git.csproj" />
+    <ProjectReference Include="..\Wolfden.Api\Wolfden.Api.csproj" />
+    <ProjectReference Include="..\Wolfden.Mcp\Wolfden.Mcp.csproj" />
+  </ItemGroup>
+
+</Project>

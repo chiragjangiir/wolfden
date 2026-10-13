@@ -1,0 +1,21 @@
+<Project>
+
+  <!-- Shared settings for every project. Projects don't repeat these. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionSuffix>dev</VersionSuffix>
+    <Authors>Wolfden contributors</Authors>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- In CI, normalize embedded source paths so outputs don't depend on the build machine. -->
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+</Project>
