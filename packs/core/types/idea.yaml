@@ -1,0 +1,12 @@
+name: Idea
+plural: ideas
+description: >-
+  A raw idea that isn't yet a thing of any one type: a premise, a scene, a
+  twist, a line of dialogue. A possible thing of a known type, such as a
+  character who might exist, is that type with `status: idea` instead.
+fields:
+  about:
+    type: ref
+    list: true
+    description: What the idea is for or touches, if anything yet.
+template: idea.md

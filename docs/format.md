@@ -9,7 +9,7 @@ comments, status and pins, wiki-links, and outlines. It's meant to
 be precise enough to hand-write a valid den and to test a parser
 against. The reasons behind the
 format are in [`design.md`](design.md) and aren't repeated here. Type and
-pack files are defined in the core pack spec (#6).
+pack files are defined in [`types.md`](types.md).
 
 ## Contents
 
@@ -125,10 +125,11 @@ using the core schema. A parse failure is an [error].
 **F-YAML-4.** Anchors (`&a`), aliases (`*a`), merge keys (`<<`), and
 explicit tags (`!x`, `!!str`) MUST NOT be used. [error]
 
-**F-YAML-5.** Keys, positions, `name`, `aliases`, chapter `title`, and
-`row` values (F-FLD-7) are read as the scalar's text as written, not after
-type resolution. So `14`, `"14"`, and `'14'` are the same chapter key,
-`014` stays `014`, and `name: 1984` is the name "1984". A YAML null (`~`,
+**F-YAML-5.** Keys, positions, `name`, `aliases`, chapter `title`, `row`
+values (F-FLD-7), and the values of `string`, `text`, `date`, `enum`, and
+`position` fields (types.md §5.2) are read as the scalar's text as
+written, not after type resolution. So `14`, `"14"`, and `'14'` are the
+same chapter key, `014` stays `014`, and `name: 1984` is the name "1984". A YAML null (`~`,
 `null`, or nothing) is still null, not the text "null": `name: ~` is a
 missing name (F-ENT-3), and a null `aliases` item is an error (F-ENT-4).
 
@@ -231,13 +232,16 @@ listed in the [ULID] spec, uppercasing the result if needed. The CLI will
 add a `wolfden new-id` command (#17).
 
 **F-ID-6.** Reading and indexing MUST NOT write to files, so they never add
-a missing `id`. A writer that creates a file MUST give it an `id`. When the
-app or an MCP tool edits a file that has no `id`, it SHOULD add one in
-the same write (and MUST when moving it, F-RT-5), as the first frontmatter
-key, after any YAML comment lines that open the frontmatter. That is the
+a missing `id`. A writer that creates a container or entity file MUST give
+it an `id`. When the app or an MCP tool edits a container or entity file
+that has no `id`, it SHOULD add one in the same write (and MUST when
+moving it, F-RT-5), as the first frontmatter key, after any YAML comment
+lines that open the frontmatter. That is the
 one exception to F-RT-2 and F-RT-4. A write that changes nothing (F-RT-3)
 never adds one.
-`wolfden check --fix` (#17) adds missing ids in bulk.
+`wolfden check --fix` (#17) adds missing ids to container and entity files
+in bulk. No writer adds an id to any other file, such as `outline.md`
+(F-OUT-1) or a pack's template (types.md F-TPL-3).
 
 Valid: `01JA7Q8M4XK3V9R2D5W8HN6TQB`. Invalid: `01ja7q8m4xk3v9r2d5w8hn6tqb`
 (lowercase), `01JA7Q8M4XK3V9` (too short), `01JA7Q8M4XK3V9R2D5W8HN6TQI`
@@ -250,7 +254,7 @@ Valid: `01JA7Q8M4XK3V9R2D5W8HN6TQB`. Invalid: `01ja7q8m4xk3v9r2d5w8hn6tqb`
 ```text
 <den root>/
   den.yaml                        required (§5.2)
-  packs/<pack>/...                den-local packs, optional (#6)
+  packs/<pack>/...                den-local packs, optional (types.md)
   universes/<universe>/
     universe.md                   required (§6.2)
     entities/<type-folder>/.../<slug>.md
@@ -292,9 +296,9 @@ an entity file. An `entities/` folder counts only directly inside a
 container folder. The entity's scope is that container.
 
 **F-LAY-6.** The first folder under `entities/` SHOULD be the plural name of
-the entity's type, as the type defines it (#6): characters go in
-`entities/characters/`. The file's `type` decides its type, not the folder.
-A file in another type's folder, or directly in `entities/`, is a
+the entity's type, as the type defines it (types.md F-TYPE-3): characters
+go in `entities/characters/`. The file's `type` decides its type, not the
+folder. A file in another type's folder, or directly in `entities/`, is a
 [warning]. Folders below the type folder are free for the writer to use
 (`entities/characters/crew/mara-voss.md`) and mean nothing to Wolfden.
 
@@ -330,9 +334,11 @@ an Author Identity. Each identity is a mapping with a REQUIRED non-empty
 `name`. Any other shape is an [error]. Other keys in an identity are kept.
 
 **F-DEN-4.** `packs` is an optional list of pack keys to enable. The `core`
-pack is always enabled, and listing it is allowed. A pack that is neither
-built in nor in `packs/<key>/` is an [error]. Pack contents and how types
-from several packs combine are defined in the core pack spec (#6).
+pack is always enabled, and listing it is allowed. An entry that names
+neither a built-in pack nor a den-local pack (a folder `packs/<key>/` that
+holds a `pack.yaml`) is an [error]. A repeated entry is an [error]. Pack
+contents and how packs combine, including a den-local pack named like a
+built-in one, are defined in [`types.md`](types.md) §2 and §4.
 
 **F-DEN-5.** Other keys are kept and ignored, with no diagnostic.
 
@@ -358,6 +364,12 @@ from the container's own scope (§10), and its sections follow §9.
 
 **F-CTR-4.** Other frontmatter keys are kept and ignored, with no
 diagnostic (F-ENT-9 applies here too).
+
+**F-CTR-5.** `chapter_defaults` is an optional mapping of chapter field
+values for the chapters of the books in the container, inherited down the
+scope chain, with the nearest container winning field by field and a
+chapter's own `fields` (F-BOOK-3) overriding them. Its rules are in
+[`types.md`](types.md) F-CHAP-5, and every problem with it is a [warning].
 
 ### 6.2 `universe.md`
 
@@ -444,12 +456,13 @@ positions in it don't resolve (F-POS-4), except a bare book position
 - `title`, optional: a string.
 
 A `number` that isn't a non-negative integer (`"3"`, `3.5`, `-1`) is a
-[warning], and the chapter is treated as having no number. Other keys are
-kept but not indexed in v0. Chapter-level fields such as POV or an
-in-world date are for the core pack spec (#6) to define. An item MAY
-instead be a plain scalar, short for `{ key: <scalar> }`, so
-`chapters: [prologue, 1, 2, 3]` is valid. An item of any other shape, or one
-with no `key`, is an [error].
+[warning], and the chapter is treated as having no number. Chapter-level
+fields such as POV or an in-world date go in an optional `fields` mapping
+on the item, defined by packs ([`types.md`](types.md) §8), and can be set
+for many chapters at once with `chapter_defaults` (F-CTR-5). Other keys
+are kept but not indexed in v0. An item MAY instead be a plain scalar,
+short for `{ key: <scalar> }`, so `chapters: [prologue, 1, 2, 3]` is
+valid. An item of any other shape, or one with no `key`, is an [error].
 
 **F-BOOK-4.** A repeated chapter key is an [error].
 
@@ -484,7 +497,8 @@ x-color: teal
 `id` is a [warning], and a malformed one is an [error].
 
 **F-ENT-2.** `type` is REQUIRED and names a type enabled in the den: from
-`core`, an enabled pack, or `packs/` (#6). A missing `type` is an [error].
+`core` or a pack enabled in `den.yaml`, built in or den-local (types.md
+F-PACK-9). A missing `type` is an [error].
 An unknown type is a [warning] ("unknown type 'charcter'"), and the entity
 is indexed **untyped**: its fields are kept and indexed as written, it
 takes part in links and views like any other entity, and the checks that
@@ -501,16 +515,21 @@ counts as settled until the writer says so: an unmarked note still shows in
 canon views, marked as draft. Its values are the status vocabulary shared
 by entities, sections, field entries, and outline rows (F-STAT-1, §9.3).
 Any other value is an [error]. A missing `status` has no diagnostic.
-Templates and writers that create an entity (#6) SHOULD write its `status`
-explicitly. A `candidate` entity, such as one of several possible minor
-characters, is left out of canon views like any other out-of-canon fact.
+Templates SHOULD write a `status`, and a writer that creates an entity
+MUST write its `status` explicitly (types.md F-TPL-6). A `candidate`
+entity, such as one of several possible minor characters, is left out of
+canon views like any other out-of-canon fact.
 
 A name that is still a placeholder, waiting on a name check, is marked with
-an optional `placeholder: true` field that the core pack spec (#6) defines.
+an optional `placeholder: true` field, defined on every type (types.md
+F-FT-17).
 
 Note: `status` says whether something is canon, not where it stands in the
-story. A plot thread that is still open is canon. Its open, planted, or
-resolved state is a field of the `thread` type (#6), not its `status`.
+story. A plot thread that hasn't paid off yet is still canon. Whether it
+is planted or paid off comes from the `thread` type's `planted` and
+`paid_off` fields (types.md §9.1). A resolution that isn't decided yet is
+marked with `status` on just the part that's open, usually the thread's
+`## Payoff` section.
 
 **F-ENT-6.** `from` is an optional position (§8) where the entity enters
 canon, that is, where the reader first meets it. Without `from`, a
@@ -539,8 +558,9 @@ define top-level keys with that prefix.
 (usually a typo). Its value is kept and indexed as written.
 
 **F-FLD-3.** How a value must look for its field type (`string`, `ref`,
-`enum`, ...) is defined with the field types in #6. A value that doesn't
-match its field type is a [warning], and so is a missing required field.
+`enum`, ...) is defined with the field types in [`types.md`](types.md)
+§5.2. A value that doesn't match its field type is a [warning], and so is
+a missing required field.
 
 **F-FLD-4.** A null value (`born:` with nothing after it) means the field is
 unset, the same as leaving it out.
@@ -653,8 +673,9 @@ row-form   = book-key ":" "r" row-id             ; reserved for rows
 ```
 
 **F-POS-1.** A position is a string matching `position`, with no
-whitespace. Positions appear in `from` and `until` values in frontmatter and
-in section comments (§9.2). In YAML they SHOULD be quoted.
+whitespace. Positions appear in `from` and `until` values in frontmatter,
+in section comments (§9.2), and as the values of `position` fields
+(types.md F-FT-10). In YAML they SHOULD be quoted.
 
 **F-POS-2.** A position in the scene form (`ember:14.2`) is an [error] with
 the message "scenes are not supported yet; v0 positions are chapter-level".
@@ -729,7 +750,8 @@ only one a position can name is the start of a book, with a bare book
 position (F-POS-7).
 
 **F-ORD-4.** Story order is reading order, not in-world chronology. When
-something happens in-world is a field of `event` entities (#6).
+something happens in-world is the `when` field of `event` entities
+(types.md §9.1).
 
 With `order: [long-dark, a-quiet-moon]` and `books: [ember, ash]`, every
 `ember` position is before every `ash` position, which is before every
@@ -778,13 +800,15 @@ doesn't define is a custom section, and it's kept like any other (§12).
 
 **F-SEC-4.** Two sections MAY have the same name, for example one
 `## Appearance` per era, each with its own position. For a section the
-entity's type defines (#6), where a new section usually replaces the old
-one, two level-2 sections with that name that are both in canon and in
-effect at some position are a [warning]. Custom sections never get this
-warning, so cumulative ones such as `## Additions` or `## Session notes`
-can repeat freely, and out-of-canon sections don't count either.
+entity's type defines (a standard section, types.md §6), where a new
+section usually replaces the old one, two level-2 sections with that name
+that are both in canon and in effect at some position are a [warning].
+Custom sections never get this warning, so cumulative ones such as
+`## Additions` or `## Session notes` can repeat freely, and out-of-canon
+sections don't count either.
 
-**F-SEC-5.** A required section (#6) that's missing is a [warning].
+**F-SEC-5.** A required section (types.md F-TYPE-11) that's missing is a
+[warning].
 
 ### 9.2 Section comments
 
@@ -1015,8 +1039,10 @@ link shows its text as written.
 **F-LINK-1.** In a body (entity, container, or outline), links are
 recognized anywhere except in code spans, code blocks, and HTML comments.
 A `[[` preceded by a backslash isn't a link. In frontmatter, links are
-recognized in every string under `fields`, including list items and
-temporal `value`s, and nowhere else (not in `name` or `aliases`).
+recognized in every string under an entity's `fields` (including list
+items and temporal `value`s), under a chapter item's `fields` in
+`book.md`, and under a container's `chapter_defaults` (types.md §8), and
+nowhere else (not in `name`, `aliases`, or `x-` keys).
 
 **F-LINK-2.** `![[...]]` (an Obsidian embed) isn't a link in v0. It's left
 as text, with no diagnostic.
@@ -1066,9 +1092,9 @@ the link still resolves to the entity.
 Indexing MUST NOT rewrite link text. Renames and moves made in the app
 rewrite slug links (F-RT-5).
 
-**F-LINK-11.** A `ref` field (#6) holds a single link per value, with
-nothing else in the string. A resolved entity whose type isn't the one the
-field names is a [warning].
+**F-LINK-11.** A `ref` field (types.md F-FT-9) holds a single link per
+value, with nothing else in the string. A resolved entity whose type isn't
+the one the field names is a [warning].
 
 ### 10.3 Link checks
 
@@ -1084,7 +1110,9 @@ field names is a [warning].
 - In an outline row: its `chapter` cell (F-OUT-9), or else the start of
   its book. A `chapter` cell that doesn't resolve also falls back to the
   start of the book, with its F-OUT-9 warning.
-- In a container body: none.
+- In a chapter item's `fields` in `book.md`: that chapter (types.md
+  F-CHAP-4).
+- In a container body or `chapter_defaults`: none.
 
 A link whose target enters canon after the link's position is a [warning],
 since it's usually a spoiler or a mistake (design.md §7). Links with no
@@ -1216,8 +1244,8 @@ of that field, entry, or section, except for adding a missing `id`
 same bytes (#18 tests this).
 
 **F-RT-4.** A writer that adds a frontmatter key puts it after the existing
-keys, unless the type's template gives an order (#6). A missing `id` goes
-first (F-ID-6).
+keys, unless the type's template gives an order (types.md F-TPL-7). A
+missing `id` goes first (F-ID-6).
 
 **F-RT-5.** When the app or an MCP tool renames or moves something, it MUST
 rewrite, in the same change, every reference that depends on the old name:
@@ -1241,9 +1269,9 @@ can be renamed by hand "without breaking links" (design.md §3).
 ## 13. Appendix: a minimal den
 
 A complete den with one universe, one series, one book, and two entities.
-It uses only the core pack and loads with no errors. Until the core pack
-spec (#6) defines the character type's fields, `rank` gets an F-FLD-2
-warning.
+It uses only the core pack and loads with no errors. The core character
+type doesn't define `rank` (types.md §9.1), so `rank` gets an F-FLD-2
+warning. types.md §10 shows a den-local pack that adds it.
 
 ```text
 starfall-den/

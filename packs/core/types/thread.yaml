@@ -1,0 +1,32 @@
+name: Thread
+plural: threads
+description: >-
+  A plot thread: a setup, a mystery, or a promise to the reader that the
+  story has to pay off. Where it stands on the page comes from `planted`
+  and `paid_off`. Whether its resolution is decided is `status`, usually
+  on just the Payoff section.
+fields:
+  planted:
+    type: position
+    list: true
+    description: Where the story sets it up.
+  paid_off:
+    type: position
+    description: Where the story pays it off.
+  characters:
+    type: ref
+    to: character
+    list: true
+    description: The characters it turns on.
+sections:
+  - name: Overview
+    description: What the thread is, in a paragraph.
+  - name: Setup
+    description: How and where it's planted.
+  - name: Payoff
+    description: >-
+      How it resolves. While that's undecided, the section is marked
+      undecided and each option is a candidate subsection.
+  - name: Open questions
+    description: What else isn't decided about it yet.
+template: thread.md

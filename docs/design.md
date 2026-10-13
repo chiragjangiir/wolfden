@@ -189,36 +189,63 @@ Key points:
 
 ## 4. Types and packs
 
-A type is a YAML file:
+The normative rules for packs, types, field types, and templates are in
+[`types.md`](types.md), and the core pack's files are in
+[`packs/core/`](../packs/core/).
+
+A pack is a folder with a `pack.yaml` manifest, a YAML file per type in
+`types/`, and markdown templates in `templates/`. A type is a YAML file
+named by its key:
 
 ```yaml
-# packs/core/types/character.yaml
-name: character
-plural: characters
+# packs/core/types/character.yaml, shortened
+name: Character
+plural: characters                    # its folder under entities/
 fields:
-  species:  { type: ref, to: species }
-  rank:     { type: string, temporal: true }
-  born:     { type: string }            # in-world dates are free text in v0
-  pov:      { type: bool }
-sections:
-  required: [Overview]
-  suggested: [Appearance, Voice, Relationships, Arc]
+  role:     { type: text, temporal: true }
+  born:     date                      # in-world date: free text plus a sort key
+  species:  text                      # plain text, or a link to a species entity
+  factions: { type: ref, to: faction, list: true, temporal: true }
+sections:                             # standard sections, in section order
+  - Overview
+  - Appearance
+  - Want
 template: character.md
 ```
 
-Field types: `string`, `text`, `number`, `bool`, `enum`, `ref` (to a type),
-`list` of any of those, and `temporal: true` for values that change over time.
+Field types: `string`, `text`, `number`, `bool`, `date`, `enum`, `ref` (a
+link, optionally to given types), and `position`, each optionally a `list`.
+`temporal: true` marks values that change over time, and `required` and
+`default` are available. Every type also has the `row` and `placeholder`
+fields.
 
 **Planned packs:**
 
 - **core** (always on): character, location, faction, item, event, thread
-  (a plot thread with open/resolved state), idea, note (free-form).
+  (a plot thread with planted and paid-off positions), idea, note
+  (free-form).
 - **space-opera**: star-system, planet, settlement, species, polity,
   ship-class, ship, technology.
 - **epic-fantasy**: realm, magic-system, creature, deity, artifact, order.
 
-Dens can define their own types in `packs/`, or extend a pack's type by
-adding fields and sections.
+Dens can define their own types in `packs/`, or extend any enabled type
+by adding fields, sections, or a template (`extensions/`). Extensions
+add; they don't change what another pack defines.
+
+**Decided (#6): the den wins.** When a den-local definition clashes with
+a built-in one (a pack key, a type, a `plural`, an extension's field or
+section, or a chapter field), the den-local one is used and the built-in
+one is ignored, with a warning that names the clash. A den-local pack
+named like a built-in pack shadows it. So a Wolfden upgrade can add
+things but never changes what an existing den means. Versioning policy is
+#56. (Between two den-local packs, the one listed earlier in `den.yaml`
+wins, types.md F-PACK-11.)
+
+**Decided (#6): your writing is yours.** Wolfden's licenses place no
+conditions on the notes, manuscripts, or other content writers create with
+it. The built-in packs in `packs/` are licensed MIT-0 (no attribution
+required), so headings and prompts copied from a template carry no
+conditions either.
 
 ## 5. Structure and time
 
@@ -228,7 +255,11 @@ The normative rules for books, chapters, positions, and outlines are in
 ### Books and chapters
 
 `book.md` frontmatter holds the ordered chapter list. Each chapter has a
-stable key, a number and an optional title. Story positions refer to chapter
+stable key, a number, an optional title, and optional fields from packs:
+core defines POV, narration (first person, third limited, and so on),
+tense, and an in-world date. A universe, series, or book can set
+`chapter_defaults` once (say, third person past tense for a whole series),
+and a chapter's own fields override them. Story positions refer to chapter
 keys, so renumbering chapters doesn't break positions. Book and chapter keys
 can't contain `:` or `.`, which the position syntax uses as separators.
 
@@ -251,7 +282,9 @@ row positions later, the same way `ember:14.2` is reserved for scenes.
 Timeline entries are `event` entities with two independent axes:
 
 - **In-world time:** when it happens in the story world. Free text plus a
-  sortable key in v0. Custom calendars (fantasy months, stardates) come later.
+  sortable key in v0 (the `when` field, a `date`, types.md). A date such
+  as `2291-05-14 06:40`, with an optional time of day, sorts by itself.
+  Custom calendars (fantasy months, stardates) come later (#37).
 - **Story position:** where the reader learns of it. Flashbacks and reveals
   make these differ, and the difference is often the interesting part.
 
