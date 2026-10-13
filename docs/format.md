@@ -934,8 +934,10 @@ A missing `until` depends on the section:
   like a temporal entry (F-TMP-4). If it's live, it ends at the earliest
   `from` after its own among the other live level-2 sections with the same
   name (matched as in F-SEC-3), or at the end of the story if there is
-  none. A section is **live** if it's in canon (F-STAT-3), its positions
-  resolve (F-POS-4), and its explicit range isn't empty. Its `from` here
+  none. A section is **live** if it's in canon (F-STAT-3), isn't
+  bookkeeping (F-SEC-12), its positions resolve (F-POS-4), and its
+  explicit range isn't empty. So a bookkeeping section never ends an
+  earlier one, since canon views leave it out. Its `from` here
   is the one this rule gives it, explicit or not. A standard section that
   isn't live runs to the end of the story, so views that show
   out-of-canon facts, such as an idea bank, still have a range for it.
