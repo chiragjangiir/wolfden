@@ -315,4 +315,36 @@ public class LinkCheckTests
 
         Assert.Equal("[[dropped|lead]]: this canon text links to 'Dropped', whose status is retconned.", warning.Diagnostic.Message);
     }
+
+    [Fact]
+    public void LinksInIgnoredChapterFieldValuesResolveButArentChecked()
+    {
+        // types.md F-CHAP-3: an entry-shaped chapter-field value is ignored, as
+        // if the field were left out, in a chapter item and in chapter_defaults alike.
+        var source = Den()
+            .Entity(LongDark, "late", Character("Late", "status: retconned", "from: \"ash:2\""))
+            .With($"{Ember}/book.md", """
+                ---
+                name: Ember
+                chapter_defaults: { tense: { value: "[[late|ignored default]]" } }
+                chapters:
+                  - { key: "1", fields: { pov: { value: "[[late|ignored entry]]" } } }
+                  - { key: "2", fields: { pov: ["[[late|listed entry]]", { value: x }] } }
+                  - { key: "3", fields: { pov: "[[nobody|still resolved]]" } }
+                ---
+                """);
+        var index = LinkIndex.Load(source);
+        LinkOccurrence At(string label) => index.Links.Single(l => l.Occurrence.Link.Label == label).Occurrence;
+
+        foreach (var label in new[] { "ignored default", "ignored entry", "listed entry" })
+        {
+            Assert.True(At(label).IsIgnoredValue);
+            Assert.Empty(At(label).Positions);
+            Assert.False(At(label).IsInCanonFact);
+            Assert.Equal("Late", index.Links.Single(l => l.Occurrence.Link.Label == label).Target!.Name);
+        }
+
+        // Only the broken link is reported: no F-LINK-12 or F-LINK-13 for the ignored ones.
+        Assert.Equal("F-LINK-8", Assert.Single(index.Diagnostics).Diagnostic.RuleId);
+    }
 }

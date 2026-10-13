@@ -191,7 +191,8 @@ public class LinkResolutionTests
     [InlineData("[[ember]]", "It matches book 'ember' ('ember'), but containers aren't link targets yet.")]
     [InlineData("[[long-dark]]", "It matches series 'long-dark'")]
     [InlineData("[[Copied]]", "id is used by more than one file (F-ID-3)")]
-    [InlineData("[[Has Errors]]", "'Has Errors' matches no entity in universe 'starfall'.")]
+    [InlineData("[[Has Errors]]", "It would match universes/starfall/entities/characters/has-errors.md, but that file has errors, so it isn't indexed (F-GEN-2).")]
+    [InlineData("[[has-errors]]", "but that file has errors")]
     public void BrokenLinksSayWhy(string link, string message)
     {
         const string id = "01JA7Q8M4XK3V9R2D5W8HN6TQD";
@@ -269,5 +270,76 @@ public class LinkResolutionTests
         var index = LinkIndex.Load(source);
 
         Assert.Equal(FactStatus.Idea, index.Link($"{Starfall}/entities/characters/note.md", "[[maybe]]").Target!.Status);
+    }
+
+    [Fact]
+    public void AnIdBeatsANameEqualToIt()
+    {
+        var source = Den()
+            .Entity(Starfall, "mara-voss", Character("Mara Voss", $"id: {MaraId}"))
+            .Entity(Starfall, "decoy", Character(MaraId))
+            .Entity(Starfall, "note", Character("Note"), $"[[{MaraId}]]\n");
+
+        var link = LinkIndex.Load(source).Link($"{Starfall}/entities/characters/note.md", $"[[{MaraId}]]");
+
+        Assert.Equal("mara-voss", link.Target!.Slug);
+        Assert.Equal(LinkMatchKind.Id, link.Resolution.MatchedBy);
+    }
+
+    [Fact]
+    public void ADuplicateIdWinnerBreaksTheLinkInsteadOfFallingThroughATier()
+    {
+        // F-ID-3: [[alpha]] would reach Alpha by name, so it's broken, not
+        // resolved to Gamma by alias.
+        const string id = "01JA7Q8M4XK3V9R2D5W8HN6TQB";
+        var source = Den()
+            .Entity(Starfall, "a", Character("Alpha", $"id: {id}"))
+            .Entity(Starfall, "b", Character("Beta", $"id: {id}"))
+            .Entity(Starfall, "c", Character("Gamma", "aliases: [alpha]"))
+            .Entity(Starfall, "note", Character("Note"), "[[alpha]]\n");
+        var index = LinkIndex.Load(source);
+
+        var link = index.Link($"{Starfall}/entities/characters/note.md", "[[alpha]]");
+        Assert.Equal(LinkOutcome.Broken, link.Outcome);
+        Assert.Null(link.Target);
+        var warning = Assert.Single(index.Diagnostics).Diagnostic;
+        Assert.Equal("F-LINK-8", warning.RuleId);
+        Assert.Contains("would match 'Alpha' (universes/starfall/entities/characters/a.md), but that entity's id is used by more than one file (F-ID-3)",
+            warning.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ADuplicateIdWinnerBreaksTheLinkInsteadOfFallingThroughAScope()
+    {
+        // The book's own Lantern has a duplicated id, so [[Lantern]] from the
+        // book is broken, not resolved to the universe's Lantern.
+        const string id = "01JA7Q8M4XK3V9R2D5W8HN6TQB";
+        var source = Den()
+            .Entity(Ash, "lantern", Character("Lantern", $"id: {id}"))
+            .Entity(Moon, "copy", Character("Copy", $"id: {id}"))
+            .Entity(Starfall, "lantern", Character("Lantern"))
+            .Entity(Ash, "note", Character("Note"), "[[Lantern]]\n");
+        var index = LinkIndex.Load(source);
+
+        Assert.Equal(LinkOutcome.Broken, index.Link($"{Ash}/entities/characters/note.md", "[[Lantern]]").Outcome);
+        Assert.Contains("(F-ID-3)", Assert.Single(index.Diagnostics).Diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AmbiguousMessagesListAtMostFiveMatches()
+    {
+        var source = Den();
+        for (var i = 0; i < 8; i++)
+        {
+            source.Entity(Starfall, $"same-{i}", Character("Same"));
+        }
+
+        source.Entity(Starfall, "note", Character("Note"), "[[Same]]\n");
+        var index = LinkIndex.Load(source);
+
+        Assert.Equal(8, index.Link($"{Starfall}/entities/characters/note.md", "[[Same]]").Resolution.Matches.Count);
+        var message = Assert.Single(index.Diagnostics).Diagnostic.Message;
+        Assert.Contains("same-4.md); and 3 more), and 8 of them", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("same-5.md", message, StringComparison.Ordinal);
     }
 }

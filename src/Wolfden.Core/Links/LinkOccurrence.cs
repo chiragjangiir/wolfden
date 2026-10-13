@@ -106,7 +106,15 @@ public sealed class LinkOccurrence
     /// an in-canon status, or a chapter field, which is a fact about its
     /// chapter with no status of its own.
     /// </summary>
-    public bool IsInCanonFact => Site is LinkSite.ChapterField or LinkSite.ChapterDefault || Status?.IsInCanon() == true;
+    public bool IsInCanonFact => IsIgnoredValue ? false
+        : Site is LinkSite.ChapterField or LinkSite.ChapterDefault || Status?.IsInCanon() == true;
+
+    /// <summary>
+    /// True for a link in a chapter-field value that types.md F-CHAP-3
+    /// ignores, such as an entry. The link still resolves, but it has no
+    /// position and isn't a fact, so F-LINK-12 and F-LINK-13 skip it.
+    /// </summary>
+    public bool IsIgnoredValue { get; internal init; }
 
     /// <inheritdoc />
     public override string ToString() => $"{Path}:{Link.Line}:{Link.Column}: {Link.Text}";

@@ -35,6 +35,15 @@ public static partial class LinkSyntax
     {
         ArgumentNullException.ThrowIfNull(text);
         var result = new List<WikiLink>();
+        var lineStarts = new List<int> { 0 };
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] == '\n')
+            {
+                lineStarts.Add(i + 1);
+            }
+        }
+
         foreach (var raw in Scan(text, 0, text.Length, null))
         {
             if (raw.IsEmpty)
@@ -42,9 +51,9 @@ public static partial class LinkSyntax
                 continue;
             }
 
-            var lineStart = raw.Offset == 0 ? 0 : text.LastIndexOf('\n', raw.Offset - 1) + 1;
-            var line = 1 + text.AsSpan(0, lineStart).Count('\n');
-            result.Add(raw.ToLink(text, line, raw.Offset - lineStart + 1));
+            var index = lineStarts.BinarySearch(raw.Offset);
+            var line = index >= 0 ? index : ~index - 1;
+            result.Add(raw.ToLink(text, line + 1, raw.Offset - lineStarts[line] + 1));
         }
 
         return result;
@@ -65,7 +74,7 @@ public static partial class LinkSyntax
     /// excluded range (code and HTML comments in a body). Links with an empty
     /// target are returned too, so the caller can report them (F-LINK-3).
     /// </summary>
-    internal static IEnumerable<RawLink> Scan(string text, int start, int end, IReadOnlyList<(int Start, int End)>? excluded)
+    internal static IEnumerable<RawLink> Scan(string text, int start, int end, RangeSet? excluded)
     {
         var regex = LinkPattern();
         var pos = start;
@@ -78,7 +87,7 @@ public static partial class LinkSyntax
             }
 
             var index = m.Index;
-            if (IsEscaped(text, index, start) || IsEmbed(text, index, start) || Overlaps(excluded, index, index + m.Length))
+            if (IsEscaped(text, index, start) || IsEmbed(text, index, start) || excluded?.Overlaps(index, index + m.Length) == true)
             {
                 // Something else may start inside this match, such as the
                 // second '[' of '\[[[a]]'.
@@ -119,24 +128,6 @@ public static partial class LinkSyntax
     private static bool IsEmbed(string text, int index, int floor) =>
         index - 1 >= floor && text[index - 1] == '!' && !IsEscaped(text, index - 1, floor);
 
-    private static bool Overlaps(IReadOnlyList<(int Start, int End)>? ranges, int start, int end)
-    {
-        if (ranges is null)
-        {
-            return false;
-        }
-
-        foreach (var (s, e) in ranges)
-        {
-            if (s < end && start < e)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     /// <summary>
     /// <c>link = "[[" target [ "#" heading ] [ "|" label ] "]]"</c>. The
     /// target may be empty here, for the F-LINK-3 warning. A <c>\|</c> also
@@ -147,4 +138,57 @@ public static partial class LinkSyntax
         """\[\[(?<t>(?:[^\[\]|#\r\n\\]|\\(?!\|))*)(?:\#(?<h>(?:[^\[\]|#\r\n\\]|\\(?!\|))+))?(?:\\?\|(?<l>[^\[\]\r\n]+))?\]\]""",
         RegexOptions.CultureInvariant)]
     private static partial Regex LinkPattern();
+}
+
+/// <summary>
+/// A set of half-open text ranges, such as the code and comments of a body,
+/// that answers "does this span overlap any of them?" in logarithmic time.
+/// </summary>
+internal sealed class RangeSet
+{
+    private readonly int[] _starts;
+    private readonly int[] _maxEnds;
+
+    public RangeSet(IEnumerable<(int Start, int End)> ranges)
+    {
+        var sorted = ranges.OrderBy(r => r.Start).ToArray();
+        _starts = new int[sorted.Length];
+        _maxEnds = new int[sorted.Length];
+        var max = int.MinValue;
+        for (var i = 0; i < sorted.Length; i++)
+        {
+            _starts[i] = sorted[i].Start;
+            max = Math.Max(max, sorted[i].End);
+            _maxEnds[i] = max;
+        }
+    }
+
+    /// <summary>True if <c>[start, end)</c> overlaps any range.</summary>
+    public bool Overlaps(int start, int end)
+    {
+        // The ranges that start before end are a prefix of the sorted list;
+        // one of them overlaps if the furthest any of them reaches is past start.
+        var count = UpperBound(end - 1);
+        return count > 0 && _maxEnds[count - 1] > start;
+    }
+
+    /// <summary>The number of ranges whose start is at most <paramref name="value"/>.</summary>
+    private int UpperBound(int value)
+    {
+        int lo = 0, hi = _starts.Length;
+        while (lo < hi)
+        {
+            var mid = (lo + hi) >>> 1;
+            if (_starts[mid] <= value)
+            {
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid;
+            }
+        }
+
+        return lo;
+    }
 }

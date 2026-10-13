@@ -150,7 +150,7 @@ internal static class BodyLinkScanner
         }
     }
 
-    private static void ScanTable(SourceText source, int first, int last, List<(int Start, int End)> excluded, List<FoundLink> result)
+    private static void ScanTable(SourceText source, int first, int last, RangeSet excluded, List<FoundLink> result)
     {
         var text = source.Text;
         var headerCells = SplitCells(text, source.Lines[first].Start, source.Lines[first].End);
@@ -238,7 +238,7 @@ internal static class BodyLinkScanner
         });
     }
 
-    private static void Collect(SourceText source, int start, int end, List<(int Start, int End)> excluded, OutlineRowCells? row, List<FoundLink> result)
+    private static void Collect(SourceText source, int start, int end, RangeSet excluded, OutlineRowCells? row, List<FoundLink> result)
     {
         foreach (var raw in LinkSyntax.Scan(source.Text, start, end, excluded))
         {
@@ -248,7 +248,7 @@ internal static class BodyLinkScanner
     }
 
     /// <summary>The ranges, in file offsets, where links aren't recognized: code and HTML comments.</summary>
-    private static List<(int Start, int End)> Exclusions(MarkdigDocument document, int bodyStart, string text)
+    private static RangeSet Exclusions(MarkdigDocument document, int bodyStart, string text)
     {
         var ranges = new List<(int Start, int End)>();
         foreach (var node in document.Descendants())
@@ -279,7 +279,7 @@ internal static class BodyLinkScanner
             }
         }
 
-        return ranges;
+        return new RangeSet(ranges);
 
         (int, int) Range(MarkdownObject o) =>
             (bodyStart + o.Span.Start, Math.Min(text.Length, bodyStart + Math.Max(o.Span.Start, o.Span.End) + 1));

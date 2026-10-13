@@ -102,10 +102,14 @@ internal sealed class LinkScanner(Bookkeeping bookkeeping, List<LinkOccurrence> 
                     continue;
                 }
 
-                var positions = HasValue(field.Value) ? InheritingChapters(container, name) : [];
+                var set = HasValue(field.Value);
+                var positions = set ? InheritingChapters(container, name) : [];
                 foreach (var link in ScalarLinks(path, file, field.Value))
                 {
-                    Add(new LinkOccurrence(path, link, LinkSite.ChapterDefault, container) { Field = name, Positions = positions });
+                    Add(new LinkOccurrence(path, link, LinkSite.ChapterDefault, container)
+                    {
+                        Field = name, Positions = positions, IsIgnoredValue = !set,
+                    });
                 }
             }
         }
@@ -123,11 +127,13 @@ internal sealed class LinkScanner(Bookkeeping bookkeeping, List<LinkOccurrence> 
                 var position = Single(new LinkPosition(chapter.Point, chapter.ToString()));
                 foreach (var field in chapterFields.Entries)
                 {
+                    // F-CHAP-3: an ignored value (an entry) is as if the field were left out.
+                    var set = HasValue(field.Value);
                     foreach (var link in ScalarLinks(path, file, field.Value))
                     {
                         Add(new LinkOccurrence(path, link, LinkSite.ChapterField, book)
                         {
-                            Field = field.KeyText, Chapter = chapter, Positions = position,
+                            Field = field.KeyText, Chapter = chapter, Positions = set ? position : [], IsIgnoredValue = !set,
                         });
                     }
                 }

@@ -36,6 +36,7 @@ public sealed partial class EntityCatalog
     private readonly List<CatalogEntity> _entities = [];
     private readonly List<DenDiagnostic> _diagnostics = [];
     private readonly Dictionary<string, CatalogEntity> _byPath = new(StringComparer.Ordinal);
+    private readonly List<ExcludedEntity> _excluded = [];
 
     private EntityCatalog(DenStructure structure)
     {
@@ -73,6 +74,9 @@ public sealed partial class EntityCatalog
     /// <summary>The entity whose file is at <paramref name="path"/>, or null.</summary>
     public CatalogEntity? FindByPath(string path) => _byPath.GetValueOrDefault(path);
 
+    /// <summary>Entity files left out for errors, with the texts a link could have matched them by.</summary>
+    internal IReadOnlyList<ExcludedEntity> ExcludedEntities => _excluded;
+
     private void LoadEntities(IDenSource source)
     {
         var containers = Structure.Universes
@@ -83,7 +87,7 @@ public sealed partial class EntityCatalog
             foreach (var path in EntityFiles(source, $"{container.Path}/entities").Order(StringComparer.Ordinal))
             {
                 var diagnostics = new List<Diagnostic>();
-                var entity = Read(path, source.ReadFile(path), container, diagnostics);
+                var entity = Read(path, source.ReadFile(path), container, diagnostics, _excluded);
                 foreach (var d in diagnostics)
                 {
                     _diagnostics.Add(new DenDiagnostic(path, d));
@@ -153,7 +157,7 @@ public sealed partial class EntityCatalog
         }
     }
 
-    private static CatalogEntity? Read(string path, byte[] bytes, Container scope, List<Diagnostic> diagnostics)
+    private static CatalogEntity? Read(string path, byte[] bytes, Container scope, List<Diagnostic> diagnostics, List<ExcludedEntity> excluded)
     {
         var file = MarkdownFile.Parse(bytes, requireFrontmatter: true);
         diagnostics.AddRange(file.Diagnostics);
@@ -248,6 +252,18 @@ public sealed partial class EntityCatalog
 
         if (file.HasErrors || errors.Count > 0)
         {
+            // Kept only so a broken link can say the file it would reach has errors.
+            var keys = new List<string>();
+            if (fm["id"] is YamlScalar { IsNull: false } rawId)
+            {
+                keys.Add(rawId.Text);
+            }
+
+            keys.AddRange(new[] { slug, fm["name"] is YamlScalar { IsNull: false } rawName ? rawName.Text : null }
+                .Concat((fm["aliases"] as YamlSequence)?.Items.OfType<YamlScalar>().Where(a => !a.IsNull).Select(a => a.Text) ?? [])
+                .Where(k => !string.IsNullOrWhiteSpace(k))
+                .Select(k => Links.LinkText.Normalize(k!)));
+            excluded.Add(new ExcludedEntity(path, scope.Universe, keys));
             return null;
         }
 
@@ -350,3 +366,9 @@ public sealed partial class EntityCatalog
     [GeneratedRegex("^[a-z][a-z0-9_]{0,63}\\z", RegexOptions.CultureInvariant)]
     private static partial Regex FieldName();
 }
+
+/// <summary>An entity file left out for errors (F-GEN-2), kept for broken-link hints.</summary>
+/// <param name="Path">The file's path.</param>
+/// <param name="Universe">The universe it's in.</param>
+/// <param name="MatchKeys">Its id as written, and its slug, name, and aliases normalized (F-LINK-4).</param>
+internal sealed record ExcludedEntity(string Path, Universe Universe, IReadOnlyList<string> MatchKeys);

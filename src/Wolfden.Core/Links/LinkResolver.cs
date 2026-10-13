@@ -50,7 +50,7 @@ public sealed class TargetResolution
     /// <summary>The entity the link resolves to, or null.</summary>
     public CatalogEntity? Entity { get; }
 
-    /// <summary>The tier that matched, or null for a broken link.</summary>
+    /// <summary>The tier that matched, or null if nothing matched. A link whose winner has a duplicate id (F-ID-3) is broken but has a tier.</summary>
     public LinkMatchKind? MatchedBy { get; }
 
     /// <summary>Every match in the winning tier, by path. For an ambiguous link, the candidates.</summary>
@@ -68,8 +68,12 @@ public sealed class TargetResolution
 public sealed class LinkResolver
 {
     private readonly EntityCatalog _catalog;
+    /// <summary>How many matches an F-LINK-7 message lists before "and N more".</summary>
+    private const int ListedMatches = 5;
+
     private readonly Dictionary<Universe, Candidates> _targets = [];
-    private readonly Dictionary<Universe, Candidates> _duplicates = [];
+    private readonly Dictionary<Universe, Dictionary<string, string>> _excluded = [];
+    private readonly Dictionary<(Container Scope, string Target), TargetResolution> _cache = [];
 
     /// <summary>A resolver over the entities of <paramref name="catalog"/>.</summary>
     public LinkResolver(EntityCatalog catalog)
@@ -78,10 +82,20 @@ public sealed class LinkResolver
         _catalog = catalog;
         foreach (var universe in catalog.Structure.Universes)
         {
-            var entities = catalog.InUniverse(universe).ToList();
-            // F-ID-3: entities with a duplicate id are left out of resolution.
-            _targets[universe] = new Candidates(entities.Where(e => !e.HasDuplicateId));
-            _duplicates[universe] = new Candidates(entities.Where(e => e.HasDuplicateId));
+            // Entities with a duplicate id are candidates too: a link whose
+            // winner has one is broken (F-ID-3), rather than falling through
+            // to some other entity.
+            _targets[universe] = new Candidates(catalog.InUniverse(universe));
+            var excluded = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var entity in catalog.ExcludedEntities.Where(e => e.Universe == universe))
+            {
+                foreach (var key in entity.MatchKeys)
+                {
+                    excluded.TryAdd(key, entity.Path);
+                }
+            }
+
+            _excluded[universe] = excluded;
         }
     }
 
@@ -94,6 +108,17 @@ public sealed class LinkResolver
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(target);
         target = target.Trim();
+        if (!_cache.TryGetValue((scope, target), out var resolution))
+        {
+            resolution = Compute(scope, target);
+            _cache[(scope, target)] = resolution;
+        }
+
+        return resolution;
+    }
+
+    private TargetResolution Compute(Container scope, string target)
+    {
         var universe = scope.Universe;
         var (kind, matches) = _targets.TryGetValue(universe, out var candidates) ? candidates.Match(target) : (null, []);
         if (kind is not { } matchedBy)
@@ -103,31 +128,63 @@ public sealed class LinkResolver
 
         if (matches.Count == 1)
         {
-            return new TargetResolution(LinkOutcome.Resolved, matches[0], matchedBy, matches, null);
+            return Winner(matches[0], matchedBy, matches, target);
         }
 
         // F-LINK-7: the match in the nearest scope of the scope chain wins.
+        // The chain has at most three scopes, so this is one pass over the matches.
         var chain = scope.ScopeChain;
-        var nearest = matches
-            .Select(m => (Entity: m, Distance: IndexOf(chain, m.Scope)))
-            .Where(m => m.Distance >= 0)
-            .GroupBy(m => m.Distance)
-            .OrderBy(g => g.Key)
-            .FirstOrDefault()?
-            .Select(m => m.Entity)
-            .ToList();
+        var nearest = new List<CatalogEntity>();
+        var best = int.MaxValue;
+        foreach (var match in matches)
+        {
+            var distance = IndexOf(chain, match.Scope);
+            if (distance < 0 || distance > best)
+            {
+                continue;
+            }
+
+            if (distance < best)
+            {
+                best = distance;
+                nearest.Clear();
+            }
+
+            nearest.Add(match);
+        }
 
         if (nearest is [var winner])
         {
-            return new TargetResolution(LinkOutcome.Resolved, winner, matchedBy, matches, null);
+            return Winner(winner, matchedBy, matches, target);
         }
 
-        var listed = string.Join("; ", matches.Select(m => $"'{m.Name}' ({m.Path})"));
-        var why = nearest is null
+        var listed = string.Join("; ", matches.Take(ListedMatches).Select(m => $"'{m.Name}' ({m.Path})"));
+        if (matches.Count > ListedMatches)
+        {
+            listed += $"; and {matches.Count - ListedMatches} more";
+        }
+
+        var why = nearest.Count == 0
             ? "and none of them is in this file's scope chain"
             : $"and {nearest.Count} of them are in the nearest scope, {Describe(nearest[0].Scope)}";
         return new TargetResolution(LinkOutcome.Ambiguous, null, matchedBy, matches,
             $"'{target}' is ambiguous: it matches {matches.Count} entities by {matchedBy.ToString().ToLowerInvariant()} ({listed}), {why}. Link by slug or id to pick one.");
+    }
+
+    /// <summary>
+    /// The link reaches <paramref name="winner"/>, unless its id is
+    /// duplicated: then the link is broken (F-ID-3), not resolved to
+    /// whatever would match next.
+    /// </summary>
+    private static TargetResolution Winner(CatalogEntity winner, LinkMatchKind matchedBy, IReadOnlyList<CatalogEntity> matches, string target)
+    {
+        if (!winner.HasDuplicateId)
+        {
+            return new TargetResolution(LinkOutcome.Resolved, winner, matchedBy, matches, null);
+        }
+
+        return new TargetResolution(LinkOutcome.Broken, null, matchedBy, matches,
+            $"'{target}' would match '{winner.Name}' ({winner.Path}), but that entity's id is used by more than one file (F-ID-3), so links don't reach it until the id is unique.");
     }
 
     private static int IndexOf(IReadOnlyList<Container> chain, Container scope)
@@ -149,9 +206,11 @@ public sealed class LinkResolver
     private string BrokenMessage(Universe universe, string target)
     {
         var message = $"'{target}' matches no entity in universe '{universe.Key}'.";
-        if (_duplicates.TryGetValue(universe, out var duplicates) && duplicates.Match(target) is (not null, var dup))
+        var normalized = LinkText.Normalize(target);
+        if (_excluded.TryGetValue(universe, out var excluded)
+            && (excluded.TryGetValue(normalized, out var errorPath) || excluded.TryGetValue(target, out errorPath)))
         {
-            return $"{message} It would match '{dup[0].Name}' ({dup[0].Path}), but that entity's id is used by more than one file (F-ID-3), so links don't reach it until the id is unique.";
+            return $"{message} It would match {errorPath}, but that file has errors, so it isn't indexed (F-GEN-2).";
         }
 
         foreach (var other in _catalog.Structure.Universes.Where(u => u != universe))
@@ -162,7 +221,6 @@ public sealed class LinkResolver
             }
         }
 
-        var normalized = LinkText.Normalize(target);
         var container = universe.Series.Cast<Container>().Concat(universe.Books)
             .FirstOrDefault(c => LinkText.Normalize(c.Key) == normalized || LinkText.Normalize(c.Name) == normalized);
         if (container is not null)

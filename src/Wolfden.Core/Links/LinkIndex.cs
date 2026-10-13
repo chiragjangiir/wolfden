@@ -49,6 +49,7 @@ public sealed class ResolvedLink
 public sealed class LinkIndex
 {
     private readonly List<ResolvedLink> _links = [];
+    private readonly Dictionary<CatalogEntity, List<ResolvedLink>> _backlinks = [];
     private readonly List<DenDiagnostic> _diagnostics = [];
 
     private LinkIndex(EntityCatalog catalog)
@@ -90,7 +91,7 @@ public sealed class LinkIndex
     }
 
     /// <summary>The links that resolve to <paramref name="entity"/>: its backlinks.</summary>
-    public IEnumerable<ResolvedLink> LinksTo(CatalogEntity entity) => _links.Where(l => l.Target == entity);
+    public IReadOnlyList<ResolvedLink> LinksTo(CatalogEntity entity) => _backlinks.TryGetValue(entity, out var links) ? links : [];
 
     private void Run(IDenSource source)
     {
@@ -131,7 +132,17 @@ public sealed class LinkIndex
 
         foreach (var occurrence in occurrences.OrderBy(o => o.Path, StringComparer.Ordinal).ThenBy(o => o.Link.Line).ThenBy(o => o.Link.Column))
         {
-            _links.Add(Check(occurrence, structure.SpoilerChecks));
+            var link = Check(occurrence, structure.SpoilerChecks);
+            _links.Add(link);
+            if (link.Target is { } target)
+            {
+                if (!_backlinks.TryGetValue(target, out var list))
+                {
+                    _backlinks[target] = list = [];
+                }
+
+                list.Add(link);
+            }
         }
 
         var sorted = _diagnostics.OrderBy(d => d.Path, StringComparer.Ordinal).ThenBy(d => d.Diagnostic.Line ?? 0).ToList();
