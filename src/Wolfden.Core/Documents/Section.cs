@@ -9,7 +9,8 @@ public sealed record SectionAttribute(string Name, string Value, bool IsQuoted);
 /// <summary>
 /// A section comment such as <c>&lt;!-- wolfden: from=ember:19 --&gt;</c>
 /// (format.md §9.2), parsed into its attributes. Values are kept as raw
-/// text: positions are parsed elsewhere (#11).
+/// text. A bad from or until is reported when the file is parsed, and
+/// <see cref="Positions.PositionScanner"/> reads them as positions.
 /// </summary>
 public sealed class SectionComment
 {

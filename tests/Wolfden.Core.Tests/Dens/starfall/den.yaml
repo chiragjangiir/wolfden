@@ -1,0 +1,6 @@
+# An invented den for the position tests (#11): a series of two books, a
+# standalone book, a series with no books yet, and a second universe.
+format: 1
+name: Starfall Notes
+authors:
+  wren-calder: { name: Wren Calder }
