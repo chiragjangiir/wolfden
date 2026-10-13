@@ -37,6 +37,20 @@ public readonly record struct StoryPoint : IComparable<StoryPoint>
     /// <summary>True for the end of the story, after every position (F-ORD-3).</summary>
     public bool IsEndOfStory => Slot == EndSlot;
 
+    /// <summary>
+    /// The point as one number that sorts in story order, for storing and
+    /// range queries (an index compares <c>from &lt;= p &lt; until</c> as
+    /// integers). The start of the story is <see cref="long.MinValue"/> and
+    /// the end is <see cref="long.MaxValue"/>. Ordinals of different
+    /// universes mean nothing to each other, and they change when the
+    /// universe's books or chapters are reordered, so they're only valid for
+    /// the structure they were computed from.
+    /// </summary>
+    public long Ordinal =>
+        IsStartOfStory ? long.MinValue
+        : IsEndOfStory ? long.MaxValue
+        : ((long)Slot << 32) | (uint)Chapter;
+
     /// <summary>The place of the book (or empty series) in story order.</summary>
     internal int Slot { get; }
 
