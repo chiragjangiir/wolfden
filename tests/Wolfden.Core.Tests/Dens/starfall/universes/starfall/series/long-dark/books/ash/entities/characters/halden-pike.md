@@ -2,12 +2,14 @@
 id: 01JA7Q8M4XK3V9R2D5W8HN6TQC
 type: character
 name: Halden Pike
+aliases: [Pike]
 status: canon
 from: "ash"
 ---
 
 ## Overview
-The *Tessaly*'s quartermaster, with debts on three stations.
+The *Tessaly*'s quartermaster, with debts on three stations. He keeps the
+[[Lantern]] in the hold.
 
 ## Debts
 <!-- wolfden: from=ash:2 until=ash:epilogue -->
