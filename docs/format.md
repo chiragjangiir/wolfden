@@ -163,7 +163,8 @@ word       = 1*(lower / DIGIT)
 lowercase ASCII letters and digits, with single hyphens between words.
 No uppercase, spaces, underscores, `:`, or `.`. A key that breaks this rule
 is an [error] where it names a container, chapter, author, pack, or type.
-For entity slugs, see F-KEY-4.
+A den-local pack folder with an invalid name is a [warning] instead, and
+is ignored (types.md F-PACK-5). For entity slugs, see F-KEY-4.
 
 **F-KEY-2.** Universe, series, and book keys MUST start with a letter.
 [error] Chapter keys and entity slugs MAY start with a digit, so `14` is a

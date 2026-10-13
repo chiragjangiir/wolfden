@@ -173,7 +173,8 @@ pack's changes when Wolfden is upgraded.
 A den-local pack that is excluded by an error in its `pack.yaml`
 (F-PACK-2) still shadows the built-in pack: the den then has no pack with
 that key until the error is fixed, and the built-in pack doesn't come
-back. A typo never switches a den to definitions it chose not to use.
+back. An error in `pack.yaml` never switches a den to definitions it
+chose not to use.
 
 **F-PACK-11.** Two enabled packs **clash** when both define the same type
 key (F-TYPE-4), the same `plural` (F-TYPE-5), the same field or section
@@ -408,9 +409,11 @@ a [warning].
 
 **F-FT-8. `enum`.** The definition MUST have `values`: a non-empty list of
 keys (F-KEY-1) with no repeats. An item that is a key once lowercased
-(`Ally`) is a [warning], and is read lowercased. Without a usable
-`values`, the definition is broken: a [warning], and the definition is
-ignored (F-FT-2). A value is a scalar whose text, as written (F-YAML-5),
+(`Ally`) is a [warning], and is read lowercased. An item that still isn't
+a key (`third limited`), or that repeats an earlier item once lowercased,
+is a [warning], and that item is dropped. If `values` is missing or no
+items are left, the definition is broken: a [warning], and the definition
+is ignored (F-FT-2). A value is a scalar whose text, as written (F-YAML-5),
 matches one of `values` after Unicode default case folding (as in
 F-LINK-4), so `Past` and `PAST` are both `past`. Anything else is a
 [warning], which SHOULD suggest a close defined key, such as
@@ -708,14 +711,16 @@ scope `S`:
    `th`, `ð` and `đ` with `d`, `ł` with `l`), decompose it (NFKD), drop
    combining marks, replace each run of characters outside `a-z` and
    `0-9` with one `-`, trim `-` from both ends, and cut it to 64
-   characters (at a word boundary, where there is one). So "Ærin Søvik"
+   characters (at a word boundary, where there is one), trimming a
+   trailing `-`. So "Ærin Søvik"
    becomes `aerin-sovik`. If the result is empty, the writer asks for a
    slug or uses the type key (`character`). The slug MUST be a valid key
    (F-KEY-1), and `<slug>.md` MUST NOT match the name of a file already in
    that folder, compared case-insensitively, since many file systems are
    case-insensitive. If it's taken, the writer asks for a slug, or adds
    `-2`, `-3`, and so on, first cutting the slug back (at a word boundary,
-   where there is one) so the whole stays within 64 characters.
+   where there is one, and trimming a trailing `-`) so the whole stays
+   within 64 characters.
 2. Writes the frontmatter in template order (F-TPL-7): `id` (a new ULID,
    F-ID-6), `type: T`, `name: N`, then `aliases`, `status`, `from`, and
    `fields` where there are any, then the template's other keys in the
@@ -819,7 +824,12 @@ definition is used.
 mapping from field name to a plain value. The values are checked as in
 §5.2 and §5.3, against the chapter field of that name. A null value is
 the same as leaving the field out (F-FLD-4), but an empty list is not:
-it means "none here" (F-CHAP-5). Every problem with a chapter's
+it means "none here" (F-CHAP-5). Unlike an entity field's value, a
+chapter-field value that doesn't match its definition is ignored, with
+the [warning]: it counts as not set, so the chapter inherits (F-CHAP-5).
+So `tense: futur` or `tense: []` doesn't block a `tense` default. In a
+list, only the item that doesn't match is ignored, and a list left with
+no items counts as not set. Every problem with a chapter's
 `fields`, including a value that doesn't match, a name that isn't a
 chapter field, and a `fields` that isn't a mapping, is a [warning], never
 an error, since an error in a container file would exclude the whole
