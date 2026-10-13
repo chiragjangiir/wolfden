@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Markdig;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
+using Wolfden.Core.Positions;
 using Wolfden.Core.Text;
 using MarkdigDocument = Markdig.Syntax.MarkdownDocument;
 
@@ -215,6 +216,11 @@ internal static partial class BodyParser
 
             switch (attr.Name)
             {
+                case "from" or "until" when !PositionScanner.IsEmptyBound(attr.Value)
+                                            && !StoryPosition.TryParse(attr.Value, out _, out var positionError):
+                    // A bad value in a well-formed comment is an error (F-SEC-10).
+                    diagnostics.Add(positionError.ToDiagnostic(DiagnosticSeverity.Error, line));
+                    break;
                 case "status" when !Statuses.Contains(attr.Value):
                     diagnostics.Add(new Diagnostic("F-STAT-1", DiagnosticSeverity.Error, line,
                         $"'{attr.Value}' isn't a status. Use idea, undecided, candidate, draft, canon, or retconned."));

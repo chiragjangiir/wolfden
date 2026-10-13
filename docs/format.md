@@ -336,7 +336,7 @@ spoiler_checks: true
 ```
 
 **F-DEN-1.** `format` is REQUIRED and is an integer. This spec is format
-`1`. A missing or non-integer `format` is an [error]. A `format` higher
+`1`. A missing or non-integer `format`, or one below `1`, is an [error]. A `format` higher
 than the reader supports is an [error] that says so ("den format 2 is newer
 than this version of Wolfden"). Additive changes, such as a new optional
 key, don't change the format number.
@@ -410,7 +410,9 @@ The Kessan Reach and the long war over it.
 
 **F-UNI-1.** `order` is a list of the universe's series keys and standalone
 book keys, in **story order**: the order in which a reader is meant to meet
-the works. Positions are ordered by it (§8.2).
+the works. Positions are ordered by it (§8.2). An `order` that isn't a list,
+such as a single key (`order: long-dark`), is an [error]. A null `order` is
+the same as leaving it out.
 
 **F-UNI-2.** An `order` entry that names no series or standalone book of
 this universe, or a key that clashes (F-KEY-5), is a [warning] and is
@@ -431,7 +433,9 @@ books: [ember, ash]
 ---
 ```
 
-**F-SER-1.** `books` lists the series' book keys in story order.
+**F-SER-1.** `books` lists the series' book keys in story order. A `books`
+that isn't a list, such as a single key, is an [error]. A null `books` is
+the same as leaving it out.
 
 **F-SER-2.** An entry that names no book folder in this series is a
 [warning] and is ignored. A repeated entry is an [error].
@@ -469,7 +473,8 @@ freezing (#31) isn't part of the format.
 **F-BOOK-2.** `chapters` is an optional list. The list order is the chapter
 order. A missing or empty list means the book has no chapters yet, and
 positions in it don't resolve (F-POS-4), except a bare book position
-(F-POS-7).
+(F-POS-7). A null `chapters` is the same as a missing one. A `chapters`
+that isn't a list, such as a single key or a mapping, is an [error].
 
 **F-BOOK-3.** Each item is a mapping with:
 
@@ -561,7 +566,9 @@ book-scope entity enters at the start of its book, a series-scope entity at
 the start of its series, and a universe-scope entity at the start of the
 story (F-ORD-3). A canon-as-of view at position `p` leaves
 out an entity whose `from` is after `p`. A book-scope entity whose `from`
-is outside its own book is a [warning]. There is no entity-level `until`:
+is outside its own book is a [warning]. A `from` with no value, or with
+`~` or another YAML null (F-YAML-5), counts as missing, with no
+diagnostic. There is no entity-level `until`:
 use `status` for material that leaves canon.
 
 **F-ENT-7.** `fields` is an optional mapping from field name to value
@@ -654,6 +661,9 @@ problems are warnings (types.md F-CHAP-3).
   takes its entity's status.
 - `pin`, optional: `true` pins the entry (F-PIN-1).
 
+A `from` or `until` with no value, or with `~` or another YAML null
+(F-YAML-5), counts as missing, with no diagnostic.
+
 Other keys in an entry are a [warning], and are kept.
 
 **F-TMP-3.** An entry holds at positions `p` with `from <= p < until`.
@@ -742,9 +752,8 @@ error too. F-KEY-2 keeps chapter keys out of this form. To tie a fact to a
 row in v0, use a `row` field (F-FLD-7).
 
 **F-POS-7.** A **bare book position** (`ember`) names the **start of the
-book** (F-ORD-3), the point just before its first chapter. For `from` and
-`until` it orders the same as the book's first chapter, it resolves even
-in a book with no chapters yet, and it's the same point F-ENT-6 gives a
+book** (F-ORD-3), which orders the same as its first chapter. It resolves
+even in a book with no chapters yet, and it's the same point F-ENT-6 gives a
 book-scope entity with no `from`. It's for facts that "became true in Book
 2" and for imports where only the book is known. Writers SHOULD use
 chapter-level positions wherever they know the chapter, but
@@ -780,7 +789,8 @@ story** comes before every position. The **start of a series** is the start
 of its first book in story order. A series with no books yet starts at
 its place in story order: after every chapter of the works before it.
 The **start of a book** comes after every chapter of earlier books and
-before the book's first chapter. The **end of the story** comes after
+orders the same as the book's first chapter, or, in a book with no
+chapters yet, before every chapter of later books. The **end of the story** comes after
 every position. A missing `from` or `until` means one of these points. The
 only one a position can name is the start of a book, with a bare book
 position (F-POS-7).
@@ -893,7 +903,8 @@ heading's section.
 **F-SEC-7.** Attributes are space-separated `key=value` pairs, in any
 order, and a value MAY be double-quoted. A section's comment takes:
 
-- `from` and `until`: positions (§8).
+- `from` and `until`: positions (§8). An empty value (`from=""`) or `~`
+  counts as missing, with no diagnostic.
 - `status`: the section's status (F-STAT-1).
 - `pin`: `true` or `false` (F-PIN-1).
 - `canon`: `false` marks the section as bookkeeping (F-SEC-12). `true` keeps
