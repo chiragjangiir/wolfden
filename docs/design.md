@@ -333,6 +333,11 @@ from the files:
   full-text search.
 - **Rebuilt** fully on demand and incrementally through a file watcher, so
   edits made outside the app show up within moments.
+- **Self-healing.** A full rebuild writes a new file and swaps it in, so a
+  crash never leaves a half-built index. An index that's missing,
+  unreadable (say, after a sync conflict), or from another schema version
+  is rebuilt, not repaired. Wolfden puts a `.gitignore` inside `.wolfden/`
+  so git skips the folder without changes to the den's own `.gitignore`.
 
 **Canon as of** is the main query. Given a position, it returns each
 entity's field values and sections in effect at that point, leaving out
