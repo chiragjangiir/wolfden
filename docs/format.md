@@ -566,7 +566,9 @@ book-scope entity enters at the start of its book, a series-scope entity at
 the start of its series, and a universe-scope entity at the start of the
 story (F-ORD-3). A canon-as-of view at position `p` leaves
 out an entity whose `from` is after `p`. A book-scope entity whose `from`
-is outside its own book is a [warning]. There is no entity-level `until`:
+is outside its own book is a [warning]. A `from` with no value, or with
+`~` or another YAML null (F-YAML-5), counts as missing, with no
+diagnostic. There is no entity-level `until`:
 use `status` for material that leaves canon.
 
 **F-ENT-7.** `fields` is an optional mapping from field name to value
