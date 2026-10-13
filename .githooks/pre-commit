@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Blocks a commit when the staged tree contains a personal user path or a term
+# from the private denylist. See CONTRIBUTING.md, "Privacy hooks".
+#
+# Uses `git grep` (not grep, which crashes on some Windows builds) and blocks
+# the commit if a scan or the configured list fails, so an error never lets a
+# leak through.
+
+. "$(git rev-parse --show-toplevel)/.githooks/privacy-lib.sh"
+
+tmp=$(mktemp -d) || exit 1
+trap 'rm -rf "$tmp"' EXIT
+
+fail=0
+privacy_scan() { # $1 = message prefix; remaining args = git grep options
+  prefix=$1; shift
+  git grep --cached -n -I "$@" > "$tmp/hits"
+  case $? in
+    0) cut -d: -f1,2 "$tmp/hits" | sed "s|^|privacy: $prefix at |" >&2; fail=1 ;;
+    1) ;;
+    *) echo "privacy: scan failed; blocking the commit to be safe." >&2; fail=1 ;;
+  esac
+}
+
+privacy_scan "personal user path" -E -e "$PRIVACY_PATH_RE"
+
+privacy_load_denylist "$tmp/deny"
+case $? in
+  0) if [ -s "$tmp/deny" ]; then
+       privacy_scan "denylisted term (not shown)" -i -F -f "$tmp/deny"
+     else
+       echo "privacy: the denylist has no terms; only the path check ran." >&2
+     fi ;;
+  1) echo "privacy: no denylist configured; only the path check ran." >&2 ;;
+  *) fail=1 ;;
+esac
+
+if [ "$fail" = 1 ]; then
+  echo "privacy: commit blocked. Fix the problems above, then commit again." >&2
+  exit 1
+fi
+exit 0
