@@ -26,12 +26,12 @@ of [[john-seward]] and [[quincey-morris]].
 
 ## Arc
 <!-- wolfden: from=dracula:10 -->
-He gives Lucy the first transfusion, and believes for a time that it made
-them married in the sight of God.
+He gives Lucy the first transfusion.
 
 ### Lord Godalming
 <!-- wolfden: from=dracula:13 -->
-His father dies within days of Lucy, and he inherits the title. The
+His father dies within days of Lucy, and he inherits the title. He says
+the transfusion made Lucy his wife in the sight of God. The
 narrators call him Lord Godalming, or Godalming, from here on.
 
 ### The stake

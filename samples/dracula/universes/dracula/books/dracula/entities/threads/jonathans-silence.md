@@ -28,4 +28,8 @@ him again for four chapters.
 <!-- wolfden: from=dracula:8 -->
 In chapter 8 Sister Agatha writes from a hospital in Buda-Pesth: he has
 been there for nearly six weeks with a violent brain fever. Mina goes to
-him at once, and marries him there in chapter 9.
+him at once.
+
+### The wedding
+<!-- wolfden: from=dracula:9 -->
+She marries him there. See [[mina-and-jonathan-marry]].

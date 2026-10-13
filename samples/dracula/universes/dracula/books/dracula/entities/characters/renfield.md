@@ -7,7 +7,8 @@ status: canon
 from: "dracula:5"
 fields:
   role:
-    - { value: "Seward's zoöphagous patient.", from: "dracula:5" }
+    - { value: "Seward's most interesting patient.", from: "dracula:5" }
+    - { value: "Seward's zoöphagous patient.", from: "dracula:6" }
     - { value: The Count's servant., from: "dracula:8" }
     - { value: The servant who turns on his master., from: "dracula:21" }
   died: { text: "3 October", sort: [0, 10, 3] }
@@ -25,8 +26,11 @@ an educated gentleman when he chooses.
 
 ## Want
 Lives. He eats flies, feeds the flies to spiders, the spiders to
-sparrows, and asks for a kitten. Seward names him "zoöphagous": a
-life-eating maniac.
+sparrows, and asks for a kitten.
+
+### Zoöphagous
+<!-- wolfden: from=dracula:6 -->
+Seward names him "zoöphagous": a life-eating maniac.
 
 ## Relationships
 - [[john-seward]]: his doctor and jailer.

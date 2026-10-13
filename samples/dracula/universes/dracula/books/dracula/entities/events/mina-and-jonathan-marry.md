@@ -18,4 +18,4 @@ hospital, before the chaplain of the English mission church. Jonathan
 gives her his journal and asks never to know what is in it.
 
 ## Consequences
-Her journal is headed Mina Harker's from chapter 14 on.
+Her journal is headed Mina Harker's from chapter 13 (22 September) on.

@@ -25,8 +25,12 @@ admired. She tells Mina about her suitors in chapter 5.
 
 ## Appearance
 <!-- wolfden: until=dracula:15 -->
-Fair, sweet-faced, and slight. From August on she grows pale and thin,
-with two small red marks on her throat that never heal.
+Fair, sweet-faced, and slight.
+
+### Decline
+<!-- wolfden: from=dracula:8 -->
+From August on she grows pale and thin, with two small red marks on her
+throat that never heal.
 
 ## Appearance
 <!-- wolfden: from=dracula:15 until=dracula:16 -->

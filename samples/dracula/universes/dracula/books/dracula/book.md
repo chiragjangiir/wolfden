@@ -1,6 +1,7 @@
 ---
 id: 01M4TF5EZPTXW69ZGT6VVDH0YJ
 name: Dracula
+status: draft
 # Every document in the novel is a first-person account, written up
 # after the fact. pov lists the main characters whose documents make up
 # each chapter. Minor writers (solicitors, a nun, a newspaper

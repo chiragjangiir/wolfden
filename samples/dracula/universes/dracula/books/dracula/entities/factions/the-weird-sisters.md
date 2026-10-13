@@ -28,6 +28,6 @@ instead.
 
 ### Their end
 <!-- wolfden: from=dracula:27 -->
-On 5 November they try to lure Mina out of Van Helsing's holy circle.
-That day he finds them asleep in their tombs and destroys them one by
+On the night of 4 November they try to lure Mina out of Van Helsing's
+holy circle. Next day he finds them asleep in their tombs and destroys them one by
 one.

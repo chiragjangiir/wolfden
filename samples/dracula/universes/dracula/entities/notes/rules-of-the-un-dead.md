@@ -39,5 +39,8 @@ writing any scene with the Count in it.
 ## Destroying one
 <!-- wolfden: pin=true -->
 A stake through the heart, then the head cut off and the mouth filled
-with garlic. Lucy is destroyed this way. The Count is not: see
-[[the-counts-end]].
+with garlic. Lucy is destroyed this way.
+
+### The Count
+<!-- wolfden: from=dracula:27 -->
+The Count is not destroyed this way: see [[the-counts-end]].

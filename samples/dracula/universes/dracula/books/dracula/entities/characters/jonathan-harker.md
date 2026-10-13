@@ -11,7 +11,7 @@ fields:
   pronouns: he/him
   occupation:
     - { value: [solicitor], from: "dracula:1" }
-    - { value: [solicitor, partner in the Exeter firm], from: "dracula:13" }
+    - { value: [solicitor, junior partner in Hawkins & Harker], from: "dracula:12" }
   skills: [shorthand, some German]
   heritage: English, of Exeter
   factions:
@@ -50,8 +50,11 @@ so.
 <!-- wolfden: from=dracula:8 -->
 His weeks as the Count's prisoner end in a brain fever in a hospital in
 Buda-Pesth. Afterwards he can't tell whether what he wrote at the castle
-was real or madness, and he gives the journal to Mina sealed, asking
-never to know.
+was real or madness.
+
+### The sealed journal
+<!-- wolfden: from=dracula:9 -->
+He gives the journal to Mina sealed, asking never to know what is in it.
 
 ## Relationships
 - [[mina-harker]]: his fiancée, later his wife.

@@ -7,12 +7,13 @@ status: canon
 from: "dracula:note"
 fields:
   role: The Harkers' son, named for all the band.
-  born: { text: "6 November, seven years after the hunt", sort: [7, 11, 6] }
+  born: { text: "6 November; the year isn't stated" }
 ---
 
 # Quincey Harker
 
 ## Overview
-The son of [[jonathan-harker]] and [[mina-harker]], born on the day
-[[quincey-morris]] died. "His bundle of names links all our little band
+The son of [[jonathan-harker]] and [[mina-harker]], whose birthday is
+the day on which [[quincey-morris]] died. By the Note, seven years after
+the hunt, he is old enough to sit on Van Helsing's knee. "His bundle of names links all our little band
 of men together; but we call him Quincey." See [[quinceys-spirit]].

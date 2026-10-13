@@ -16,8 +16,8 @@ often runs out of step with story order.
 | 5 | 3 | [[jonathan-harker]] | 12 May | The Count questions Harker on English law and tells him to stay a month. Harker knows he is a prisoner. | |
 | 6 | 3 | [[jonathan-harker]] | 15–16 May | The Count crawls face down the castle wall. [[the-weird-sisters]] in the forbidden wing. | |
 | 7 | 4 | [[jonathan-harker]] | 19 May – 24 June | Harker is made to write home and date the letters weeks ahead. The Szgany fill the great boxes with earth. | [[earth-boxes]] |
-| 8 | 4 | [[jonathan-harker]] | 25 June | Harker finds the Count in his box, gorged with blood. | |
-| 9 | 4 | [[jonathan-harker]] | 30 June | Harker climbs down the castle wall. | [[harker-escapes-the-castle]] |
+| 8 | 4 | [[jonathan-harker]] | 25 June | Harker finds the Count asleep in a box of earth, eyes open and lips red. | |
+| 9 | 4 | [[jonathan-harker]] | 30 June | The Count, grown younger, lies gorged with blood "like a filthy leech." Harker climbs down the castle wall. | [[harker-escapes-the-castle]] |
 
 ## Letters and Whitby
 
