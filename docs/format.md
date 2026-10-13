@@ -410,7 +410,9 @@ The Kessan Reach and the long war over it.
 
 **F-UNI-1.** `order` is a list of the universe's series keys and standalone
 book keys, in **story order**: the order in which a reader is meant to meet
-the works. Positions are ordered by it (§8.2).
+the works. Positions are ordered by it (§8.2). An `order` that isn't a list,
+such as a single key (`order: long-dark`), is an [error]. A null `order` is
+the same as leaving it out.
 
 **F-UNI-2.** An `order` entry that names no series or standalone book of
 this universe, or a key that clashes (F-KEY-5), is a [warning] and is
@@ -431,7 +433,9 @@ books: [ember, ash]
 ---
 ```
 
-**F-SER-1.** `books` lists the series' book keys in story order.
+**F-SER-1.** `books` lists the series' book keys in story order. A `books`
+that isn't a list, such as a single key, is an [error]. A null `books` is
+the same as leaving it out.
 
 **F-SER-2.** An entry that names no book folder in this series is a
 [warning] and is ignored. A repeated entry is an [error].
@@ -469,7 +473,8 @@ freezing (#31) isn't part of the format.
 **F-BOOK-2.** `chapters` is an optional list. The list order is the chapter
 order. A missing or empty list means the book has no chapters yet, and
 positions in it don't resolve (F-POS-4), except a bare book position
-(F-POS-7).
+(F-POS-7). A null `chapters` is the same as a missing one. A `chapters`
+that isn't a list, such as a single key or a mapping, is an [error].
 
 **F-BOOK-3.** Each item is a mapping with:
 
@@ -780,7 +785,8 @@ story** comes before every position. The **start of a series** is the start
 of its first book in story order. A series with no books yet starts at
 its place in story order: after every chapter of the works before it.
 The **start of a book** comes after every chapter of earlier books and
-before the book's first chapter. The **end of the story** comes after
+orders the same as the book's first chapter, or, in a book with no
+chapters yet, before every chapter of later books. The **end of the story** comes after
 every position. A missing `from` or `until` means one of these points. The
 only one a position can name is the start of a book, with a bare book
 position (F-POS-7).
