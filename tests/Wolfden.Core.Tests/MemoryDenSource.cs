@@ -58,6 +58,16 @@ internal sealed class MemoryDenSource : IDenSource
             .ToList();
     }
 
+    public IEnumerable<string> GetFiles(string path)
+    {
+        var prefix = path.Length == 0 ? "" : path + "/";
+        return _files.Keys
+            .Where(f => f.StartsWith(prefix, StringComparison.Ordinal) && !f[prefix.Length..].Contains('/'))
+            .Select(f => f[prefix.Length..])
+            .Order(StringComparer.Ordinal)
+            .ToList();
+    }
+
     /// <summary>A minimal valid den.yaml.</summary>
     public static MemoryDenSource Den() => new MemoryDenSource().With("den.yaml", "format: 1\n");
 

@@ -31,7 +31,7 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
             return;
         }
 
-        if (ReadFormat(file) is not int format)
+        if (ReadFormat(file) is not int format || !ReadSettings(file))
         {
             return;
         }
@@ -74,6 +74,53 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         }
 
         return format;
+    }
+
+    /// <summary>
+    /// F-DEN-6 and F-DEN-7: <c>bookkeeping_sections</c> and
+    /// <c>spoiler_checks</c>. Returns false if <c>bookkeeping_sections</c>
+    /// has the wrong shape, an error that keeps the den from loading.
+    /// </summary>
+    private bool ReadSettings(YamlFile file)
+    {
+        switch (file.GetValue("spoiler_checks"))
+        {
+            // A null is the same as leaving it out, as for order and books.
+            case null or YamlScalar { IsNull: true }:
+                break;
+            case YamlScalar scalar when scalar.AsBoolean() is bool on:
+                den.SpoilerChecks = on;
+                break;
+            case var node:
+                den.Add(DenFile, new Diagnostic("F-DEN-7", DiagnosticSeverity.Warning, node.Line,
+                    $"spoiler_checks must be true or false, not '{Describe(node)}', so the spoiler checks stay off."));
+                break;
+        }
+
+        var patterns = file.GetValue("bookkeeping_sections");
+        if (patterns is null or YamlScalar { IsNull: true })
+        {
+            return true;
+        }
+
+        var valid = patterns is YamlSequence list
+            && list.Items.All(i => i is YamlScalar { IsNull: false } s && s.Text.Trim().Length > 0);
+        if (!valid)
+        {
+            den.Add(DenFile, new Diagnostic("F-DEN-6", DiagnosticSeverity.Error, patterns.Line,
+                "bookkeeping_sections must be a list of non-empty heading patterns, such as '[\"Scratch\", \"* working notes\"]'."));
+            return false;
+        }
+
+        var items = ((YamlSequence)patterns).Items.Cast<YamlScalar>().ToList();
+        foreach (var item in items.Where(i => i.Text.All(c => c is '*' || char.IsWhiteSpace(c))))
+        {
+            den.Add(DenFile, new Diagnostic("F-DEN-6", DiagnosticSeverity.Warning, item.Line,
+                $"The bookkeeping pattern '{item.Text}' matches every section, so every section is bookkeeping."));
+        }
+
+        den.BookkeepingSections = items.Select(i => i.Text).ToList();
+        return true;
     }
 
     private static bool IsDecimalInteger(string text)
@@ -446,7 +493,7 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         {
             case null or YamlScalar { IsNull: true }:
                 break;
-            case YamlScalar id when Ulid().IsMatch(id.Text):
+            case YamlScalar id when Keys.IsId(id.Text):
                 read.Id = id.Text;
                 break;
             case var id:
@@ -502,9 +549,6 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
             return false;
         }
     }
-
-    [GeneratedRegex(@"^[0-7][0-9A-HJKMNP-TV-Z]{25}\z", RegexOptions.CultureInvariant)]
-    private static partial Regex Ulid();
 
     private sealed record ChapterInfo(string Key, long? Number, string? Title, int Line);
 

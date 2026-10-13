@@ -91,6 +91,9 @@ public sealed partial class MarkdownFile : DenFile
     /// <summary>The body: everything after the frontmatter's closing line (F-FM-2).</summary>
     public string Body => IsReadable ? Text[_bodyStart..] : "";
 
+    /// <summary>Offset of the body's first character in <see cref="DenFile.Text"/>.</summary>
+    internal int BodyStart => _bodyStart;
+
     /// <summary>The lead: the body before the first level-2 heading (F-SEC-2).</summary>
     public string Lead => IsReadable ? Text[_bodyStart.._leadEnd] : "";
 

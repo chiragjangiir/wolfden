@@ -74,6 +74,37 @@ public abstract class Container
     /// series, or book (F-ORD-3).</summary>
     public abstract StoryPoint Start { get; }
 
+    /// <summary>
+    /// The scope chain (format.md §1.4): this container and the ones that
+    /// enclose it, nearest first. For a book in a series, that's the book,
+    /// the series, and the universe.
+    /// </summary>
+    public IReadOnlyList<Container> ScopeChain
+    {
+        get
+        {
+            var chain = new List<Container> { this };
+            if (this is Book { Series: { } series })
+            {
+                chain.Add(series);
+            }
+
+            if (Kind != ContainerKind.Universe)
+            {
+                chain.Add(Universe);
+            }
+
+            return chain;
+        }
+    }
+
+    /// <summary>
+    /// Describes <see cref="Start"/> for messages, such as "the start of book 'ember'".
+    /// </summary>
+    public string StartDescription => Kind == ContainerKind.Universe
+        ? "the start of the story"
+        : $"the start of {Kind.ToString().ToLowerInvariant()} '{Key}'";
+
     /// <inheritdoc />
     public override string ToString() => $"{Kind} '{Key}' ({Path})";
 

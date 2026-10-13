@@ -34,6 +34,15 @@ public static partial class Keys
     /// <summary>True if <paramref name="text"/> starts with <c>r</c> and a digit, the reserved row form (F-POS-6).</summary>
     internal static bool IsRowForm(string text) => text.Length >= 2 && text[0] == 'r' && char.IsAsciiDigit(text[1]);
 
+    /// <summary>
+    /// True if <paramref name="text"/> is an id (F-ID-1): a ULID in canonical
+    /// form, 26 uppercase Crockford base32 characters, the first 0 to 7.
+    /// </summary>
+    public static bool IsId(string text) => UlidPattern().IsMatch(text);
+
+    [GeneratedRegex(@"^[0-7][0-9A-HJKMNP-TV-Z]{25}\z", RegexOptions.CultureInvariant)]
+    private static partial Regex UlidPattern();
+
     // \z, not $: $ would also match before a final newline.
     [GeneratedRegex(@"^[a-z0-9]+(?:-[a-z0-9]+)*\z", RegexOptions.CultureInvariant)]
     private static partial Regex KeyPattern();

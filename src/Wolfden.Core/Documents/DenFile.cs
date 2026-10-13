@@ -73,6 +73,9 @@ public abstract class DenFile
 
     private protected SourceText? Source { get; }
 
+    /// <summary>The decoded text with its line table, for readers in this assembly.</summary>
+    internal SourceText? SourceForReading => Source;
+
     /// <summary>
     /// The file's bytes: its text encoded as UTF-8, after its byte order mark
     /// if it has one. For an unedited file they equal the bytes it was parsed
