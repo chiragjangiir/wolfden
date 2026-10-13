@@ -819,9 +819,9 @@ definition is used.
 mapping from field name to a plain value. The values are checked as in
 §5.2 and §5.3, against the chapter field of that name. A null value is
 the same as leaving the field out (F-FLD-4), but an empty list is not:
-it means "none here" (F-CHAP-5). Every problem with a chapter's `fields`, including a value that doesn't match, a name that
-isn't a chapter field, and a `fields` that isn't a mapping, is a
-[warning], never an error, since an error in a container file would
+it means "none here" (F-CHAP-5). Every problem with a chapter's
+`fields`, including a value that doesn't match, a name that isn't a
+chapter field, and a `fields` that isn't a mapping, is a [warning], never an error, since an error in a container file would
 exclude the whole container (F-GEN-2). A chapter field is a fact about one
 chapter, so it has no temporal form. Entries (format.md §7.3) don't exist
 here: the errors of §7.3 (F-TMP-1, F-TMP-2) and the `status` and `pin`

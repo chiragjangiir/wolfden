@@ -242,8 +242,8 @@ existing built-in field's type, renaming a section, or adding or changing
 a default is a breaking change, while template prompts and headings may
 change in any release, since they only affect new entities. A writer who
 relies on a custom field should define it in a den-local pack (types.md
-§2.4). Versioning policy is #56. Clashes between two den-local packs are settled by pack order (see
-types.md F-PACK-11).
+§2.4). Versioning policy is #56. Clashes between two den-local packs are
+settled by pack order (see types.md F-PACK-11).
 
 **Decided (#6): your writing is yours.** Wolfden's licenses place no
 conditions on the notes, manuscripts, or other content writers create with
