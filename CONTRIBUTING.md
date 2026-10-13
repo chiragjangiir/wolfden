@@ -26,7 +26,8 @@ dotnet test
 The solution is `Wolfden.slnx`. Projects live in `src/`, tests in `tests/`.
 Warnings fail the build, and package versions are kept in
 `Directory.Packages.props`. CI runs the same build and tests on Linux and
-Windows for every pull request.
+Windows for every pull request. To turn off .NET SDK telemetry locally (CI
+already does), set the environment variable `DOTNET_CLI_TELEMETRY_OPTOUT=1`.
 
 ## Branches and pull requests
 
