@@ -85,7 +85,13 @@ public sealed class DenStructure
     public Container? FindScope(string path)
     {
         ArgumentNullException.ThrowIfNull(path);
-        var segments = path.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        // Paths are den-relative and already normal: no leading '/', and no '.' or '..'.
+        var segments = path.Replace('\\', '/').Split('/');
+        if (segments.Any(s => s is "" or "." or ".."))
+        {
+            return null;
+        }
+
         if (segments.Length < 2 || segments[0] != "universes" || FindUniverse(segments[1]) is not { } universe)
         {
             return null;

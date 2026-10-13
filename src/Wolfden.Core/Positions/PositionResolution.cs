@@ -15,7 +15,12 @@ namespace Wolfden.Core.Positions;
 public sealed record ResolvedPosition(StoryPosition Position, Book Book, Chapter? Chapter, StoryPoint Point)
     : IComparable<ResolvedPosition>
 {
-    /// <summary>Compares two positions of the same universe in story order (F-ORD-2).</summary>
+    /// <summary>
+    /// Compares two positions of the same universe in story order (F-ORD-2).
+    /// A bare book position compares equal to the book's first chapter
+    /// (F-POS-7), though the two records aren't <see cref="object.Equals(object)"/>:
+    /// they're written differently.
+    /// </summary>
     /// <exception cref="ArgumentException">The positions are in different universes.</exception>
     public int CompareTo(ResolvedPosition? other) => other is null ? 1 : Point.CompareTo(other.Point);
 

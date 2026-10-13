@@ -216,7 +216,8 @@ internal static partial class BodyParser
 
             switch (attr.Name)
             {
-                case "from" or "until" when !StoryPosition.TryParse(attr.Value, out _, out var positionError):
+                case "from" or "until" when !PositionScanner.IsEmptyBound(attr.Value)
+                                            && !StoryPosition.TryParse(attr.Value, out _, out var positionError):
                     // A bad value in a well-formed comment is an error (F-SEC-10).
                     diagnostics.Add(positionError.ToDiagnostic(DiagnosticSeverity.Error, line));
                     break;

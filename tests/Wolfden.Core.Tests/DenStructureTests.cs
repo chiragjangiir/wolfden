@@ -63,6 +63,10 @@ public class DenStructureTests
     [InlineData("universes/starfall/series/nowhere/series.md", null)]
     [InlineData("universes/starfall/books/ember/book.md", null)]
     [InlineData("notes/x.md", null)]
+    [InlineData("universes/starfall/../starfall/universe.md", null)]
+    [InlineData("/universes/starfall/universe.md", null)]
+    [InlineData("universes//starfall/universe.md", null)]
+    [InlineData("./universes/starfall/universe.md", null)]
     [InlineData("den.yaml", null)]
     public void FindScopeReturnsTheNearestContainer(string path, string? expected)
     {
@@ -339,7 +343,7 @@ public class DenStructureTests
         Assert.Equal(["t"], Keys(u.Works));
         Assert.Equal(["z"], Keys(u.Books));
         Assert.Null(den.FindScope("universes/u/series/s/entities/x.md"));
-        Assert.Contains("has no book 'a'", Resolve(u, "a:1").Problem);
+        Assert.Contains("in a series that has errors", Resolve(u, "a:1").Problem);
     }
 
     [Fact]
@@ -430,7 +434,11 @@ public class DenStructureTests
     }
 
     [Theory]
-    [InlineData(null, "F-LAY-1")]
+    [InlineData(null, "F-DEN-1")]
+    [InlineData("format: 0\n", "F-DEN-1")]
+    [InlineData("format: -1\n", "F-DEN-1")]
+    [InlineData("format: 0x1\n", "F-DEN-1")]
+    [InlineData("format: 99999999999999999\n", "F-DEN-1")]
     [InlineData("name: x\n", "F-DEN-1")]
     [InlineData("format: \"1\"\n", "F-DEN-1")]
     [InlineData("format: one\n", "F-DEN-1")]
@@ -478,5 +486,93 @@ public class DenStructureTests
         Assert.Throws<ArgumentException>(() => den.Resolve("notes/x.md", StoryPosition.Parse("ember:1")));
         Assert.True(den.Resolve("universes/starfall/entities/x.md", StoryPosition.Parse("ember:1")).IsResolved);
         Assert.False(den.Resolve("universes/drift/entities/x.md", StoryPosition.Parse("ember:1")).IsResolved);
+    }
+
+    [Theory]
+    [InlineData("format: 0\n", "formats start at 1")]
+    [InlineData("format: -1\n", "formats start at 1")]
+    [InlineData("format: -99999999999999999\n", "formats start at 1")]
+    [InlineData("format: 99999999999999999\n", "is newer than this version of Wolfden")]
+    [InlineData("format: +1\n", null)]
+    public void FormatsOutsideTheSupportedRangeSaySo(string denYaml, string? message)
+    {
+        var den = Load(new MemoryDenSource().With("den.yaml", denYaml));
+
+        Assert.Equal(message is null, den.IsLoaded);
+        if (message is not null)
+        {
+            Assert.Contains(message, den.Diagnostics.Single().Diagnostic.Message);
+        }
+    }
+
+    [Fact]
+    public void BooksUnderASeriesWithErrorsStillCountForKeyClashes()
+    {
+        var den = Load(MemoryDenSource.Den()
+            .Universe("u", "order: [s, t]")
+            .Series("u", "s", "books: [b1]")
+            .Book("u", "s", "b1", "chapters: [1]")
+            .Series("u", "t", "books: b1")
+            .Book("u", "t", "b1", "chapters: [1]")
+            .Book("u", "t", "b2", "chapters: [1]"));
+
+        var rules = Rules(den);
+        Assert.Contains(("universes/u/series/t/series.md", "F-SER-1", DiagnosticSeverity.Error), rules);
+        Assert.Contains(("universes/u/series/s/books/b1/book.md", "F-KEY-5", DiagnosticSeverity.Warning), rules);
+        Assert.Contains(("universes/u/series/t/books/b1/book.md", "F-KEY-5", DiagnosticSeverity.Warning), rules);
+        var u = den.FindUniverse("u")!;
+        Assert.Contains("F-KEY-5", Resolve(u, "b1:1").Problem);
+        Assert.Contains("in a series that has errors", Resolve(u, "b2:1").Problem);
+        // The unread books get no diagnostics of their own (F-GEN-2).
+        Assert.DoesNotContain(rules, r => r.Path.StartsWith("universes/u/series/t/books/b2", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AListedFolderWithoutItsContainerFileIsReportedOnce()
+    {
+        var den = Load(MemoryDenSource.Den()
+            .Universe("u", "order: [s, gone]")
+            .Series("u", "s", "books: [b1, b2]")
+            .Book("u", "s", "b1", "chapters: [1]")
+            .With("universes/u/series/s/books/b2/outline.md", "notes\n")
+            .With("universes/u/books/gone/outline.md", "notes\n"));
+
+        Assert.Equal(
+        [
+            ("universes/u/books/gone", "F-LAY-4", DiagnosticSeverity.Error),
+            ("universes/u/series/s/books/b2", "F-LAY-4", DiagnosticSeverity.Error),
+        ], Rules(den));
+    }
+
+    [Fact]
+    public void NamesMatchInExactCaseOnEveryFileSystem()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "wolfden-case-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "universes", "u", "books", "ember"));
+            File.WriteAllText(Path.Combine(root, "den.yaml"), "format: 1\n");
+            File.WriteAllText(Path.Combine(root, "universes", "u", "Universe.md"), "---\nname: u\n---\n");
+            File.WriteAllText(Path.Combine(root, "universes", "u", "books", "ember", "book.md"), "---\nname: Ember\n---\n");
+
+            var source = new FileSystemDenSource(root);
+            var den = DenStructure.Load(source);
+
+            // Universe.md isn't universe.md, and Books/ isn't books/, on Windows too.
+            Assert.Equal([("universes/u", "F-LAY-4", DiagnosticSeverity.Error)], Rules(den));
+            Assert.Empty(den.Universes);
+            Assert.False(source.FileExists("DEN.yaml"));
+            Assert.False(source.FileExists("universes/U/Universe.md"));
+            Assert.True(source.FileExists("universes/u/books/ember/book.md"));
+            Assert.False(source.FileExists("universes/u/Books/ember/book.md"));
+            Assert.Empty(source.GetDirectories("Universes"));
+            Assert.Empty(source.GetDirectories("universes/u/Books"));
+            Assert.Equal(["ember"], source.GetDirectories("universes/u/books"));
+            Assert.False(source.FileExists("universes/u/books"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 }

@@ -121,7 +121,9 @@ public class PositionSyntaxTests
     [InlineData("from=Ember:14", "F-POS-3")]
     [InlineData("from=ember:14:2", "F-POS-3")]
     [InlineData("from=\"ember: 14\"", "F-POS-3")]
-    [InlineData("from=\"\"", "F-POS-3")]
+    [InlineData("from=\"\"", null)]
+    [InlineData("from=~ until=ash:1", null)]
+    [InlineData("until=\"~\"", null)]
     public void SectionCommentPositionsAreCheckedWhenTheFileIsParsed(string attributes, string? rule)
     {
         var file = Md($"---\nname: x\n---\n## Shoulder injury\n<!-- wolfden: {attributes} -->\nText.\n");
@@ -275,5 +277,65 @@ public class PositionSyntaxTests
 
         Assert.Equal([(PositionSite.EntryFrom, "ash:1"), (PositionSite.FieldValue, "ash:20")],
             scan.References.Select(r => (r.Site, r.Text)));
+    }
+
+    [Theory]
+    // F-YAML-5: positions are read as the scalar's text as written, so a YAML
+    // boolean or number is just text. "true" is a valid bare book position,
+    // which resolves only if a book has that key (F-POS-4); "14" isn't a
+    // position, since a book key starts with a letter.
+    [InlineData("true", "true", null)]
+    [InlineData("false", "false", null)]
+    [InlineData("yes", "yes", null)]
+    [InlineData("'true'", "true", null)]
+    [InlineData("14", "14", "F-POS-3")]
+    [InlineData("\"14\"", "14", "F-POS-3")]
+    [InlineData("1.5", "1.5", "F-POS-3")]
+    [InlineData("\"~\"", "~", "F-POS-3")]
+    [InlineData("\"null\"", "null", null)]
+    public void NonStringScalarsAreReadAsWritten(string yaml, string text, string? rule)
+    {
+        var file = Md($"---\nname: x\nfrom: {yaml}\nfields:\n  rank: {{ value: a, until: {yaml} }}\n---\n");
+
+        var scan = PositionScanner.Scan(file);
+
+        Assert.Equal([text, text], scan.References.Select(r => r.Text));
+        Assert.Equal(rule is null ? [] : [rule, rule], scan.Diagnostics.Select(d => d.RuleId));
+        if (rule is null)
+        {
+            Assert.All(scan.References, r => Assert.Equal(StoryPosition.Create(text), r.Position));
+        }
+    }
+
+    [Theory]
+    // Decision 3 (PR #79): a null bound counts as missing, with no diagnostic (F-TMP-2).
+    [InlineData("")]
+    [InlineData("~")]
+    [InlineData("null")]
+    [InlineData("Null")]
+    [InlineData("NULL")]
+    public void NullBoundsCountAsMissing(string yaml)
+    {
+        var file = Md($"---\nname: x\nfrom: {yaml}\nfields:\n  rank:\n    - {{ value: a, from: {yaml}, until: {yaml} }}\n---\n");
+
+        var scan = PositionScanner.Scan(file);
+
+        Assert.Empty(file.Diagnostics);
+        Assert.Empty(scan.Diagnostics);
+        Assert.Empty(scan.References);
+    }
+
+    [Fact]
+    public void ContainerFilesHoldPositionsOnlyInSectionComments()
+    {
+        // F-CTR-4: from and fields aren't container keys, so they're kept and ignored.
+        var file = Md("---\nname: Ember\nfrom: \"whatever\"\nfields:\n  rank: { value: a, from: \"ember:14.2\" }\n---\n## Notes\n<!-- wolfden: from=ember:2 -->\n");
+
+        var scan = PositionScanner.ScanContainer(file);
+
+        Assert.Empty(scan.Diagnostics);
+        var reference = Assert.Single(scan.References);
+        Assert.Equal((PositionSite.SectionFrom, "ember:2"), (reference.Site, reference.Text));
+        Assert.Equal(3, PositionScanner.Scan(file).References.Count);
     }
 }

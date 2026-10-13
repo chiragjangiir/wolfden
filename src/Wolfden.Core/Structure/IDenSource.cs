@@ -29,19 +29,48 @@ public sealed class FileSystemDenSource : IDenSource
     /// <summary>The den root's full path.</summary>
     public string Root { get; }
 
-    /// <inheritdoc />
-    public bool FileExists(string path) => File.Exists(Full(path));
+    /// <summary>
+    /// True if a file exists at <paramref name="path"/>, with every name on
+    /// the path in exactly that case. Names are matched as on Linux even on a
+    /// case-insensitive file system (Windows, macOS): <c>Universe.md</c> isn't
+    /// <c>universe.md</c>, so a den loads the same everywhere.
+    /// </summary>
+    public bool FileExists(string path) => ExactPathExists(path, file: true);
 
     /// <inheritdoc />
     public byte[] ReadFile(string path) => File.ReadAllBytes(Full(path));
 
-    /// <inheritdoc />
-    public IEnumerable<string> GetDirectories(string path)
-    {
-        var full = Full(path);
-        return Directory.Exists(full)
-            ? Directory.EnumerateDirectories(full).Select(d => Path.GetFileName(d)!).Order(StringComparer.Ordinal).ToList()
+    /// <summary>
+    /// The folders directly in <paramref name="path"/>, by their names on
+    /// disk. The path itself must match in exact case, as for <see cref="FileExists"/>.
+    /// </summary>
+    public IEnumerable<string> GetDirectories(string path) =>
+        ExactPathExists(path, file: false)
+            ? Directory.EnumerateDirectories(Full(path)).Select(d => Path.GetFileName(d)!).Order(StringComparer.Ordinal).ToList()
             : [];
+
+    private bool ExactPathExists(string path, bool file)
+    {
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var current = Root;
+        for (var i = 0; i < segments.Length; i++)
+        {
+            var last = i == segments.Length - 1;
+            if (!Directory.Exists(current))
+            {
+                return false;
+            }
+
+            var entries = last && file ? Directory.EnumerateFiles(current) : Directory.EnumerateDirectories(current);
+            if (!entries.Any(e => string.Equals(Path.GetFileName(e), segments[i], StringComparison.Ordinal)))
+            {
+                return false;
+            }
+
+            current = Path.Combine(current, segments[i]);
+        }
+
+        return file ? segments.Length > 0 : Directory.Exists(current);
     }
 
     private string Full(string path) =>

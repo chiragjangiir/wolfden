@@ -14,8 +14,9 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
     {
         if (!source.FileExists(DenFile))
         {
-            den.Add(DenFile, new Diagnostic("F-LAY-1", DiagnosticSeverity.Error, null,
-                "This folder has no den.yaml, so it isn't a den."));
+            // §5.1: den.yaml is required, and without it there's no format (F-DEN-1).
+            den.Add(DenFile, new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, null,
+                "This folder has no den.yaml, so it isn't a den. Add one with 'format: 1'."));
             return;
         }
 
@@ -45,26 +46,40 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         }
     }
 
-    /// <summary>F-DEN-1: <c>format</c> is a required integer, no higher than this reader supports.</summary>
+    /// <summary>F-DEN-1: <c>format</c> is a required integer, from 1 up to the highest this reader supports.</summary>
     private int? ReadFormat(YamlFile file)
     {
         var node = file.GetValue("format");
-        if (node is not YamlScalar { IsNull: false, Style: YamlScalarStyle.Plain } scalar
-            || !int.TryParse(scalar.Text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var format))
+        if (node is not YamlScalar { IsNull: false, Style: YamlScalarStyle.Plain } scalar || !IsDecimalInteger(scalar.Text))
         {
             den.Add(DenFile, new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node?.Line ?? 1,
                 node is null ? "den.yaml has no format. Add 'format: 1'." : "format must be an integer, such as 'format: 1'."));
             return null;
         }
 
-        if (format > DenStructure.SupportedFormat)
+        var text = scalar.Text.TrimStart('+');
+        var tooBig = !int.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var format);
+        if (tooBig ? !text.StartsWith('-') : format > DenStructure.SupportedFormat)
         {
             den.Add(DenFile, new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node.Line,
-                $"den format {format} is newer than this version of Wolfden, which reads format {DenStructure.SupportedFormat}."));
+                $"den format {text} is newer than this version of Wolfden, which reads format {DenStructure.SupportedFormat}."));
+            return null;
+        }
+
+        if (tooBig || format < 1)
+        {
+            den.Add(DenFile, new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node.Line,
+                $"den format {text} doesn't exist: formats start at 1."));
             return null;
         }
 
         return format;
+    }
+
+    private static bool IsDecimalInteger(string text)
+    {
+        var digits = text.Length > 0 && text[0] is '+' or '-' ? text[1..] : text;
+        return digits.Length > 0 && digits.All(char.IsAsciiDigit);
     }
 
     private Universe? LoadUniverse(string key)
@@ -105,7 +120,8 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         }
 
         var works = series.Concat(standalone).OrderBy(w => w.Key, StringComparer.Ordinal).ThenBy(w => w.Kind).ToList();
-        var ordered = Arrange(read, order, works, clashes, "order", "F-UNI-2", "F-UNI-3", "series or standalone book");
+        var folders = Folders($"{path}/series").Concat(Folders($"{path}/books")).ToHashSet(StringComparer.Ordinal);
+        var ordered = Arrange(read, order, works, clashes, folders, "order", "F-UNI-2", "F-UNI-3", "series or standalone book");
 
         // Story order (F-ORD-1): walk the works, putting each series' books in place.
         var slot = 0;
@@ -154,13 +170,20 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         var listed = ReadKeyList(read, "books", "F-SER-1", "F-SER-2", "book");
         if (read.HasErrors)
         {
-            return new WorkInfo(ContainerKind.Series, key, path, read.FilePath, null, []);
+            // The series and everything under it are left out (F-GEN-2), so its
+            // books aren't read and get no diagnostics of their own. Their keys
+            // still count, for F-KEY-5 and for the "has errors" F-POS-4 message.
+            var unread = Folders($"{path}/books")
+                .Where(k => Keys.IsContainerKey(k) && source.FileExists($"{path}/books/{k}/book.md"))
+                .Select(k => new WorkInfo(ContainerKind.Book, k, $"{path}/books/{k}", $"{path}/books/{k}/book.md", null, []))
+                .ToList();
+            return new WorkInfo(ContainerKind.Series, key, path, read.FilePath, null, unread);
         }
 
         var series = new Series(universe, key, path, read.File, read.Name, read.Id);
         var books = Folders($"{path}/books").Select(k => LoadBook(universe, series, k)).OfType<WorkInfo>()
             .OrderBy(b => b.Key, StringComparer.Ordinal).ToList();
-        var ordered = Arrange(read, listed, books, [], "books", "F-SER-2", "F-SER-3", "book");
+        var ordered = Arrange(read, listed, books, [], Folders($"{path}/books").ToHashSet(StringComparer.Ordinal), "books", "F-SER-2", "F-SER-3", "book");
         series.Books = ordered.Select(b => b.Loaded).OfType<Book>().ToList();
         return new WorkInfo(ContainerKind.Series, key, path, read.FilePath, series, books);
     }
@@ -328,12 +351,14 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
 
     /// <summary>
     /// Puts works in the order a list gives (F-UNI-1, F-SER-1). Entries that
-    /// name nothing, or a clashing key, are warnings and are ignored. Works
+    /// name nothing, or a clashing key, are warnings and are ignored. An entry
+    /// naming a folder that isn't a container (F-LAY-4, F-KEY-1) is ignored
+    /// without a second warning, since the folder already has one. Works
     /// the list leaves out are warnings when there's more than one work, and
     /// come after the listed ones by key in ASCII order (F-UNI-3, F-SER-3).
     /// </summary>
     private List<WorkInfo> Arrange(ContainerRead read, List<YamlNode> entries, List<WorkInfo> works,
-        HashSet<string> clashes, string field, string entryRule, string missingRule, string what)
+        HashSet<string> clashes, HashSet<string> folders, string field, string entryRule, string missingRule, string what)
     {
         var listed = new List<WorkInfo>();
         foreach (var entry in entries)
@@ -352,11 +377,11 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
             }
 
             var work = works.FirstOrDefault(w => w.Key == scalar.Text);
-            if (work is null)
+            if (work is null && !folders.Contains(scalar.Text))
             {
                 read.Warning(entryRule, entry.Line, $"{field} names '{scalar.Text}', but there's no {what} '{scalar.Text}' here. The entry is ignored.");
             }
-            else if (!listed.Contains(work))
+            else if (work is not null && !listed.Contains(work))
             {
                 listed.Add(work);
             }
@@ -485,7 +510,7 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
 
     /// <summary>A series or book folder that has a container file, loaded or not.</summary>
     /// <param name="Loaded">The container, or null if it has errors (F-GEN-2).</param>
-    /// <param name="Books">For a series that loaded, its book folders.</param>
+    /// <param name="Books">For a series, its book folders (unread, if the series has errors).</param>
     private sealed record WorkInfo(ContainerKind Kind, string Key, string Path, string FilePath, Container? Loaded, List<WorkInfo> Books);
 
     /// <summary>A container file being read, and whether it has errors so far.</summary>

@@ -13,6 +13,8 @@ namespace Wolfden.Core.Positions;
 /// because a bare book position "orders the same as the book's first
 /// chapter" for <c>from</c> and <c>until</c> (F-POS-7). A book with no
 /// chapters yet still has a start, after every chapter of earlier books.
+/// <c>default(StoryPoint)</c> belongs to no universe: it equals only itself,
+/// and comparing it with a real point throws.
 /// </remarks>
 public readonly record struct StoryPoint : IComparable<StoryPoint>
 {

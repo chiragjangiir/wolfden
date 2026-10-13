@@ -44,26 +44,44 @@ public sealed record PositionReference(string Text, StoryPosition? Position, Pos
 public sealed record PositionScan(IReadOnlyList<PositionReference> References, IReadOnlyList<Diagnostic> Diagnostics);
 
 /// <summary>
-/// Finds the story positions in an entity or container file: the entity's
+/// Finds the story positions in an entity file (<see cref="Scan(MarkdownFile, IReadOnlySet{string}?)"/>)
+/// or a container file (<see cref="ScanContainer"/>): the entity's
 /// <c>from</c>, the <c>from</c> and <c>until</c> of field entries, the
 /// <c>from</c> and <c>until</c> of section comments, and, given the names of
 /// the fields the entity's type defines as <c>position</c>, their values.
 /// </summary>
 public static class PositionScanner
 {
-    /// <summary>Scans a parsed file for positions.</summary>
-    /// <param name="file">An entity or container file.</param>
+    /// <summary>Scans an entity file for positions.</summary>
+    /// <param name="file">An entity file.</param>
     /// <param name="positionFields">
     /// The fields whose type is <c>position</c> (types.md F-FT-10), such as a
     /// thread's <c>planted</c> and <c>paid_off</c>. Their values are scanned
     /// too, and a bad one is a warning rather than an error.
     /// </param>
-    public static PositionScan Scan(MarkdownFile file, IReadOnlySet<string>? positionFields = null)
+    public static PositionScan Scan(MarkdownFile file, IReadOnlySet<string>? positionFields = null) =>
+        Scan(file, positionFields, isContainer: false);
+
+    /// <summary>
+    /// Scans a container file (<c>universe.md</c>, <c>series.md</c>,
+    /// <c>book.md</c>) for positions. Only its section comments hold
+    /// positions: a container has no <c>from</c> or <c>fields</c>, so those
+    /// keys are kept and ignored (format.md F-CTR-4).
+    /// </summary>
+    public static PositionScan ScanContainer(MarkdownFile file) => Scan(file, null, isContainer: true);
+
+    /// <summary>
+    /// True for a section comment value that counts as a missing
+    /// <c>from</c> or <c>until</c>: empty (<c>from=""</c>) or <c>~</c> (format.md F-SEC-7).
+    /// </summary>
+    public static bool IsEmptyBound(string value) => value is "" or "~";
+
+    private static PositionScan Scan(MarkdownFile file, IReadOnlySet<string>? positionFields, bool isContainer)
     {
         ArgumentNullException.ThrowIfNull(file);
         var references = new List<PositionReference>();
         var diagnostics = new List<Diagnostic>();
-        var frontmatter = file.Frontmatter;
+        var frontmatter = isContainer ? null : file.Frontmatter;
         if (frontmatter is not null)
         {
             if (frontmatter["from"] is { } from)
@@ -102,7 +120,7 @@ public static class PositionScanner
                     _ => (PositionSite?)null,
                 };
 
-                if (site is { } s)
+                if (site is { } s && !IsEmptyBound(attr.Value))
                 {
                     StoryPosition.TryParse(attr.Value, out var position, out _);
                     references.Add(new PositionReference(attr.Value, position, s, comment.Line, Section: section));
@@ -154,7 +172,10 @@ public static class PositionScanner
 
     /// <summary>
     /// A <c>from</c> or <c>until</c> in frontmatter. A bad one is an error
-    /// (F-POS-2, F-POS-3, F-POS-6). A null one is the same as leaving it out.
+    /// (F-POS-2, F-POS-3, F-POS-6). A null one is the same as leaving it out
+    /// (F-TMP-2). Any other scalar is read as its text as written (F-YAML-5),
+    /// so <c>from: true</c> names a book <c>true</c>, and <c>from: 14</c> is an
+    /// F-POS-3 error since a book key starts with a letter.
     /// </summary>
     private static void ReadBound(YamlNode node, PositionSite site, string? field, List<PositionReference> references, List<Diagnostic> diagnostics)
     {

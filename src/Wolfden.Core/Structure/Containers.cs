@@ -145,7 +145,7 @@ public sealed class Universe : Container
             if (_excludedBookKeys.Contains(key))
             {
                 return PositionResolution.Failure(position,
-                    $"Book '{key}' has errors, so positions in it don't resolve until they're fixed.");
+                    $"Book '{key}' has errors, or is in a series that has errors, so positions in it don't resolve until they're fixed.");
             }
 
             var elsewhere = Den.Universes.FirstOrDefault(u => u != this && u.FindBook(key) is not null);
