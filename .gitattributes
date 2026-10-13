@@ -3,3 +3,8 @@
 *.sln text eol=crlf
 *.png binary
 *.jpg binary
+
+# Parser fixtures keep their exact bytes (CRLF, BOM, lone CR, invalid
+# UTF-8, no final newline). Never normalize them: the round-trip tests
+# depend on it, and GitAttributesGuardTests fails if this rule goes.
+tests/Wolfden.Core.Tests/Fixtures/** -text

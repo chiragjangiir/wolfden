@@ -1,0 +1,10 @@
+﻿# A den file with comments and CRLF line endings.
+format: 1
+name: "Starfall Notes"   # display name
+authors:
+  wren-calder:
+    name: Wren Calder
+packs: [space-opera]
+bookkeeping_sections: ["Scratch", "* working notes"]
+spoiler_checks: true
+x-unknown: { kept: yes }
