@@ -15,7 +15,7 @@ fields:
 # {{name}}
 
 ## Overview
-<!-- Who they are, in a paragraph. -->
+<!-- Who they are, in a paragraph, as the reader first meets them. Put later reveals, in prose as well as links, in a ### subsection with its own from=. -->
 
 ## Appearance
 <!-- What a stranger notices first. -->
@@ -33,10 +33,10 @@ fields:
 <!-- How do they talk? Rhythm, favorite words, what they never say. -->
 
 ## Relationships
-<!-- Who matters to them, and how? Link each one. -->
+<!-- Who matters to them, and how? Link each one. Put people the reader meets later in a ### subsection with its own from=. -->
 
 ## Arc
-<!-- Where does their arc end? -->
+<!-- Where does their arc end? Give each turn a ### subsection with its own from=, so views from earlier chapters don't give it away. -->
 
 ## Open questions
 <!-- wolfden: status=undecided -->

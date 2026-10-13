@@ -20,4 +20,4 @@ fields:
 <!-- Members with a page are listed from their factions field. Note the rest here: members without a page yet, and who holds which role. -->
 
 ## History
-<!-- Where did it come from, and how has it changed? -->
+<!-- Where did it come from, and how has it changed? Give each later era a subsection with its own from=. -->

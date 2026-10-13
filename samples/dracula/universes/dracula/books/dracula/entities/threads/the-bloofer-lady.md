@@ -23,8 +23,11 @@ asked them to walk with her.
 ## Setup
 - Chapter 13: the cutting from *The Westminster Gazette*, which reads it
   as a children's game.
-- Chapter 14: Van Helsing reads the cutting, and tells Seward that Lucy
-  made the wounds.
+
+### Chapter 14
+<!-- wolfden: from=dracula:14 -->
+- Van Helsing reads the cutting, and tells Seward that Lucy made the
+  wounds.
 
 ## Payoff
 <!-- wolfden: from=dracula:15 -->

@@ -310,6 +310,12 @@ a container folder, other than its container file and a book's
 `outline.md`, is a [warning], since it's probably a note that belongs in
 `entities/`. Non-`.md` files under `entities/` are ignored.
 
+**F-LAY-8.** Other files and folders at the den root, such as a
+`README.md`, a `LICENSE`, or a `drafts/` folder, are ignored, with no
+diagnostic. F-LAY-7 doesn't apply there, since the den root isn't a
+container. A `den.yaml` inside one of them (`archive/old-den/den.yaml`)
+still gets the F-LAY-1 warning.
+
 ### 5.2 `den.yaml`
 
 ```yaml
@@ -320,6 +326,7 @@ authors:
     name: Wren Calder
 packs: [space-opera]
 bookkeeping_sections: ["Scratch", "* working notes"]
+spoiler_checks: true
 ```
 
 **F-DEN-1.** `format` is REQUIRED and is an integer. This spec is format
@@ -349,6 +356,14 @@ built-in one, are defined in [`types.md`](types.md) §2 and §4.
 heading patterns that mark a section as bookkeeping, in addition to the
 built-in ones (F-SEC-12). Any other shape is an [error]. A pattern made
 only of `*` and spaces, which matches every section, is a [warning].
+
+**F-DEN-7.** `spoiler_checks` is an optional boolean that turns on the
+spoiler checks. In format 1 that's one check, F-LINK-13. It defaults to
+`false`.
+The positions on facts record where the reader learns each one, so a
+writer can pace the reveals. The check helps writers who track that, by
+flagging a link to something the reader hasn't met yet. A value that isn't
+a YAML boolean is a [warning], and the checks stay off.
 
 ## 6. Containers: universe, series, book
 
@@ -594,6 +609,7 @@ ambiguous, is a [warning]. `row` is not a position: v0 positions stay
 ```yaml
 fields:
   born: { value: "2291", pin: true }
+  species: { value: "[[velari]]", from: "ash:4" }
   rank:
     - { value: Lieutenant, from: "ember:1" }
     - { value: Commander, from: "ember:22", pin: true }
@@ -603,16 +619,18 @@ fields:
     - { value: "[[kessan-reach]]", from: "ash:12" }
 ```
 
-`born` is a plain fact, pinned. As of `ember:21`, `rank` is Lieutenant.
-From `ember:22` on, it's Commander, a pinned fact. Captain is a banked
-option, so canon views leave it out and Commander doesn't end at `ash:30`.
-`posting` is unset from `ash:9` up to `ash:12`.
+`born` is a plain fact, pinned. `species` never changes, but the reader
+only learns it at `ash:4`, so it's **known from** there (F-TMP-8):
+canon-as-of views leave it out before `ash:4`. As of `ember:21`, `rank` is
+Lieutenant. From `ember:22` on, it's Commander, a pinned fact. Captain is
+a banked option, so canon views leave it out and Commander doesn't end at
+`ash:30`. `posting` is unset from `ash:9` up to `ash:12`.
 
 **F-TMP-1.** An **entry** is a mapping with a `value` key. A field's value
 is a single entry, a **temporal list** (a non-empty list in which every
 item is an entry), or else a plain value. A list in which some items are
 entries and others aren't is an [error]. A single entry means the same as a
-one-item temporal list. The shape decides, not the type, so a parser can
+one-item temporal list (F-TMP-8 aside). The shape decides, not the type, so a parser can
 tell these apart without loading packs. As a result, a plain value that is
 a mapping can't use a key named `value`. This section covers an entity's
 `fields`. Chapter fields and `chapter_defaults` have no entries, and their
@@ -660,10 +678,17 @@ leaves a gap in which the field is unset. Gaps are allowed.
 except for the tie in F-TMP-5. Writers SHOULD list entries in story order
 and MUST NOT reorder them.
 
-**F-TMP-8.** A temporal list, or an entry with `from` or `until`, on a
-field the type defines as not temporal is a [warning]. It's still read as
-temporal. A single entry with only `value`, `status`, or `pin` is fine on
-any field.
+**F-TMP-8.** A temporal list, or an entry with `until`, on a field the
+type defines as not temporal is a [warning]. It's still read as temporal.
+A single entry without `until` is fine on any field, with no diagnostic,
+whatever else it has (`value`, `from`, `status`, `pin`). On a field that
+isn't temporal, its `from` means the fact is **known from** that
+position: it's where the reader learns the fact, not where the value
+changes. It's read like any entry (F-TMP-3, F-TMP-4), so canon-as-of views
+leave the value out before its `from` and show it from there on. That's
+how a fact such as a death or a hidden identity stays out of views from
+before the reveal. The `row` field is the exception: a `row` entry with
+`from` is still a [warning] (F-FLD-7).
 
 ## 8. Story positions and order
 
@@ -805,12 +830,18 @@ doesn't define is a custom section, and it's kept like any other (§12).
 
 **F-SEC-4.** Two sections MAY have the same name, for example one
 `## Appearance` per era, each with its own position. For a section the
-entity's type defines (a standard section, types.md §6), where a new
-section usually replaces the old one, two level-2 sections with that name
-that are both in canon and in effect at some position are a [warning].
-Custom sections never get this warning, so cumulative ones such as
-`## Additions` or `## Session notes` can repeat freely, and out-of-canon
-sections don't count either.
+entity's type defines (a standard section, types.md §6), a new section
+replaces the old one: a live level-2 section hands over to the next one
+with the same name (F-SEC-8). Two live level-2 standard sections with the
+same name **overlap** if they have the same `from` (as F-SEC-8 gives it,
+explicit or not), or if an
+explicit `until` reaches past the next one's `from`, as for entries
+(F-TMP-5). Overlap is a [warning]. Unlike F-TMP-5, there's no
+tie-break: where sections overlap, views show each of them that is in
+effect, so no prose is hidden. Custom sections never hand over and
+never get this warning, so cumulative ones such as `## Additions` or
+`## Session notes` can repeat freely, and out-of-canon sections don't
+count either.
 
 **F-SEC-5.** A required section (types.md F-TYPE-11) that's missing is a
 [warning].
@@ -867,17 +898,53 @@ is kept as written.
 
 **F-SEC-8.** A section with `from` or `until` is in effect at positions
 `p` with `from <= p < until`, the same as F-TMP-3. A missing `from` means
-from the entity's own `from` (F-ENT-6). A missing `until` means to the end
-of the story: unlike temporal entries, sections never end on their own when
-a later section starts. An `until` that isn't after its `from` is a
-[warning] (F-GEN-4), and the section is never in effect. A section with
-neither is in effect wherever its entity is.
+from the entity's own `from` (F-ENT-6), except for a thread's `## Payoff`
+(types.md F-CORE-4). An `until` that isn't after its `from` is a
+[warning] (F-GEN-4), and the section is never in effect.
+
+A missing `until` depends on the section:
+
+- A **standard section** (types.md F-TYPE-10) at level 2 **hands over**
+  like a temporal entry (F-TMP-4). If it's live, it ends at the earliest
+  `from` after its own among the other live level-2 sections with the same
+  name (matched as in F-SEC-3), or at the end of the story if there is
+  none. A section is **live** if it's in canon (F-STAT-3), its positions
+  resolve (F-POS-4), and its explicit range isn't empty. Its `from` here
+  is the one this rule gives it, explicit or not. A standard section that
+  isn't live runs to the end of the story, so views that show
+  out-of-canon facts, such as an idea bank, still have a range for it.
+- Any other section, including a custom section and a subsection, runs to
+  the end of the story, or for a subsection to the end of its parent
+  (F-SEC-9). It never ends on its own when a later section starts.
+
+An explicit `until` always wins. A section's **effective `until`** is its
+`until`, or else the end that this rule gives it. A level-2 section with
+neither `from` nor `until` that doesn't hand over is in effect wherever
+its entity is.
+
+```markdown
+## Appearance
+Silver-streaked hair.
+
+## Appearance
+<!-- wolfden: from=ember:19 -->
+Silver-streaked hair, and her left arm in a brace.
+
+## Appearance
+<!-- wolfden: from=ash:20 -->
+The brace is gone, but she still favors the arm.
+```
+
+The first `## Appearance` is in effect up to `ember:19`, the second from
+`ember:19` up to `ash:20`, and the third from `ash:20` on.
 
 **F-SEC-9.** A subsection is in effect only where both it and every section
 that holds it are in effect. So a subsection's **effective `from`** is the
 later of its own `from` and its parent's effective `from`, and the same
-goes for `until` with the earlier of the two. A subsection whose range
-reaches outside its parent's range is a [warning].
+goes for `until` with the earlier of the two, where a level-2 parent's
+`until` is its effective `until` (F-SEC-8), so a subsection ends when its
+parent hands over. A subsection whose own `from` or `until` lies outside
+its parent's range is a [warning].
 
 **F-SEC-10.** Outside code blocks and code spans, `<!--` followed by
 optional whitespace and `wolfden:` starts a **wolfden comment**. Its only
@@ -1024,6 +1091,38 @@ order), then by type key, then by normalized `name` (F-LINK-4), then by
 file path. Within an entity, fields come in frontmatter order and sections
 in file order.
 
+### 9.5 Keeping reveals in place
+
+This section has no rules. It describes how to write notes whose
+canon-as-of views don't give away later reveals, for writers who track
+where the reader learns each fact.
+
+Summary prose runs ahead of the story easily. An `## Overview`, `## Arc`,
+or `## Relationships` that sums up a character tends to name people met
+later and events still to come, and a view from an early chapter would
+show all of it. To keep it in place, write the unpositioned part as of
+the entity's `from`, and put each later reveal in a subsection with its
+own `from=` (F-SEC-9):
+
+```markdown
+## Overview
+Executive officer of the *Tessaly*.
+
+### In command
+<!-- wolfden: from=ember:22 -->
+Takes command of the *Tessaly* after the ambush at [[kessan-reach]].
+```
+
+A fact in a field works the same way. A single entry with a `from` keeps a
+fact that never changes, such as a death, out of views from before the
+reader learns it (F-TMP-8).
+
+With `spoiler_checks: true` (F-DEN-7), F-LINK-13 flags a link that runs
+ahead of its position. It sees links only. A later fact written as plain
+text, or a link to something that entered canon earlier but says
+something new about it, gets no warning, so read summary prose for
+reveals as well as links.
+
 ## 10. Links
 
 ### 10.1 Syntax
@@ -1108,7 +1207,7 @@ the one the field names is a [warning].
 
 **F-LINK-13.** A link's **position** depends on where it is:
 
-- In a temporal entry: the entry's `from`.
+- In an entry (F-TMP-1), on any field: the entry's `from`.
 - In a section: the section's effective `from` (F-SEC-9).
 - Elsewhere in an entity (the lead, or a plain field): the entity's `from`
   (F-ENT-6).
@@ -1123,6 +1222,11 @@ the one the field names is a [warning].
 A link whose target enters canon after the link's position is a [warning],
 since it's usually a spoiler or a mistake (design.md §7). Links with no
 position, or whose position is the start of the story, aren't checked.
+
+This check is a spoiler check: it runs only in a den whose `den.yaml` has
+`spoiler_checks: true` (F-DEN-7). It sees links only, not prose. A section
+that mentions a later fact in plain text gets no warning, so prose needs
+the same care (§9.5).
 
 ## 11. Outlines
 

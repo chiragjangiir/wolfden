@@ -11,9 +11,10 @@ fields:
   pronouns: he/him
   skills: [command of wolves and rats, English learned from books]
   heritage: A Székely noble of Transylvania.
-  born: { text: "centuries before the story" }
-  died: { text: "6 November, at sunset", sort: [0, 11, 6] }
-  species: { value: "vampire (Un-Dead)", pin: true }
+  born: { value: { text: "centuries before the story" }, from: "dracula:18" }
+  died: { value: { text: "6 November, at sunset", sort: [0, 11, 6] }, from: "dracula:27" }
+  # Hinted from chapter 15 on; chapter 18 is Van Helsing's full account.
+  species: { value: "vampire (Un-Dead)", from: "dracula:18", pin: true }
 ---
 
 # Count Dracula
@@ -24,7 +25,6 @@ A Transylvanian nobleman who buys an English estate through
 "Welcome to my house! Enter freely and of your own will!"
 
 ## Appearance
-<!-- wolfden: until=dracula:13 -->
 A tall old man, clean-shaven but for a long white moustache, with a
 strong aquiline face, pointed ears, sharp white teeth, hair growing on
 his palms, and rank breath. After feeding he looks younger.

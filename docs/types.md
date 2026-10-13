@@ -156,9 +156,13 @@ affect entities created afterward.
 
 An addition can still give meaning to something a den left undefined: a
 new core field checks the values a den already wrote under that name, and
-a new core type picks up entities that named it. A writer who relies on a
-custom field should define it in a den-local pack (§10), so that its
-definition is the den's own and wins over any later built-in one.
+a new core type picks up entities that named it. A new standard section
+makes repeated custom sections with that name start handing over
+(format.md F-SEC-8), so the earlier ones drop out of later views. A
+den-local extension that adds a section name does the same. A writer who
+relies on a custom field should define it in a den-local pack (§10), so
+that its definition is the den's own and wins over any later built-in
+one.
 
 **F-PACK-10.** A den-local pack whose key is the key of a built-in pack
 **shadows** it. A `den.yaml` entry with that key names the den-local pack,
@@ -521,10 +525,11 @@ that mixes the two is the F-TMP-1 error.
 ### 5.4 Temporal, required, and defaults
 
 **F-FT-13.** `temporal: true` marks a field whose value can change over the
-story, so it may have a temporal list or an entry with `from` or `until`
-(format.md §7.3). On a field without it, those are the F-TMP-8 warning. A
-single entry with only `value`, `status`, or `pin` is fine on any field
-(F-TMP-8), so any fact can be pinned or given its own status.
+story, so it may have a temporal list or an entry with `until` (format.md
+§7.3). On a field without it, those are the F-TMP-8 warning. A single
+entry without `until` is fine on any field (F-TMP-8), so any fact can be
+pinned, given its own status, or given a `from` where the reader learns
+it.
 
 **F-FT-14.** `required: true` means the field SHOULD have a value. A
 required field is **missing** if the entity's `fields` has no value for it
@@ -598,9 +603,10 @@ is an item whose name matches an earlier item's (F-SEC-3). Any other key
 in a mapping is a [warning], and is kept.
 
 **F-TYPE-10.** A type's standard sections are the sections "the type
-defines" in F-SEC-3 and F-SEC-4. They match an entity's level-2 sections
-by name, as in F-SEC-3. Every other section is a custom section and is kept
-like any other (format.md §12).
+defines" in F-SEC-3, F-SEC-4, and F-SEC-8. They match an entity's level-2
+sections by name, as in F-SEC-3, and a later one with the same name takes
+over from an earlier one (F-SEC-8). Every other section is a custom
+section and is kept like any other (format.md §12).
 
 **F-TYPE-11.** A **required** section is present if the entity has a
 level-2 section with that name, whatever its status, position, or content.
@@ -844,8 +850,9 @@ but not indexed (F-BOOK-3).
 **F-CHAP-4.** Links in chapter fields are recognized (F-LINK-1) and
 resolve from the book's scope, like the rest of `book.md` (F-CTR-3). A
 link in a chapter item's `fields` has that chapter (`book:chapter`) as its
-position for F-LINK-13, so a `pov` link to a character who enters canon
-after that chapter gets the F-LINK-13 warning. A link in
+position for F-LINK-13, so where spoiler checks are on (F-DEN-7), a `pov`
+link to a character who enters canon after that chapter gets the F-LINK-13
+warning. A link in
 `chapter_defaults` resolves from the scope of the container that holds
 it. It is checked against F-LINK-13 for each chapter whose effective value
 (F-CHAP-5) it is, with that chapter as its position. The warning goes on
@@ -950,12 +957,16 @@ and where their arc ends. The template has every field except `died` and
 Group membership is the character's `factions` field (see Faction below).
 A minor character who is only a possibility is a character with `status:
 candidate` (F-ENT-5). In-world rank or office is genre-specific and left
-to other packs or a den's extension (§10).
+to other packs or a den's extension (§10). `died` and `species` aren't
+temporal, but a death or a nature the story reveals partway through can be
+written as a single entry with a `from`, where the reader learns it
+(F-TMP-8), so earlier views don't give it away.
 
 **Location, faction, item.** Places, groups, and objects. `part_of` nests
 places and groups. A later era of a place's history goes in a subsection
 of `## History` with its own `from=` (F-SEC-9), not a second `## History`,
-which would get the F-SEC-4 warning once both are in effect.
+which would take over from the first at its `from` (F-SEC-8) and hide the
+earlier history from later views.
 
 **Faction.** Membership is written once, on each member: the character's
 `factions` field. The faction's page lists its members from those links.
@@ -979,6 +990,11 @@ and each is written in one place.
   **paid off** if `paid_off` isn't after `p`, else **planted** if one of
   its `planted` positions isn't after `p`, else **not yet planted**.
   Positions that don't resolve are skipped. Views SHOULD show this state.
+  Here and in F-CORE-2 and F-CORE-4, `planted` and `paid_off` are each
+  read from a plain value, or from a single entry that is in canon
+  (F-STAT-3), using its `value`. Anything else, such as a `candidate`
+  entry for a payoff chapter still being decided, or a temporal list,
+  counts as unset.
 - **Whether its resolution is decided** is ordinary `status` (§9.3 of
   format.md), on the thread or on just the part that's open. Usually the
   thread is in canon and only its `## Payoff` section is `undecided`, with
@@ -1006,6 +1022,29 @@ threads ("no coincidences in a payoff") are author notes, planned in #45.
 **F-CORE-2.** A thread whose `paid_off` comes before its earliest
 `planted` position, in story order, is a [warning]. Positions that don't
 resolve are skipped.
+
+**F-CORE-4.** A thread's `## Payoff` section takes the thread's `paid_off`
+as its `from` when its section comment has no `from` (format.md F-SEC-8),
+so the payoff stays out of views from before it happens, and the links in
+it have that position (F-LINK-13). An explicit `from=` wins, and the
+section's subsections inherit the position as usual (F-SEC-9).
+
+A `paid_off` that is a well-formed position but doesn't resolve yet, such
+as a chapter of a book that has no chapters listed, is still the Payoff's
+`from`. The section is then left out of canon views like any fact whose
+position doesn't resolve (F-POS-4), so a planned payoff never shows early.
+It gets no second F-POS-4 warning, since `paid_off` already has one
+(F-FT-10).
+
+The rule is narrow. It covers only a level-2 section named `Payoff`
+(matched as in F-SEC-3), only in an entity whose type is the built-in core
+pack's `thread` (extended or not), and only while `paid_off` is set (as
+read above) and is a well-formed position. Otherwise F-SEC-8's usual rule
+applies. A den-local type that replaces `thread` (F-TYPE-4, F-PACK-10)
+doesn't get this default, and writes `from=` instead. That includes a den
+that shadows core with a copy of it, whose copied `thread.yaml` still
+describes the default in its Payoff description, so such a den should
+edit that description.
 
 **F-CORE-3.** An event whose `ends` is earlier than its `when` is a
 [warning]. The two sort keys are compared only over the numbers both

@@ -2,19 +2,19 @@
 id: 01M4TF5F08GDVZVWZ4JYQDBHZG
 type: character
 name: Lucy Westenra
-aliases: [Lucy, the bloofer lady]
+aliases: [Lucy]
 status: canon
 from: "dracula:5"
 fields:
   role:
     - { value: "Mina's friend, courted by three men at once.", from: "dracula:5" }
     - { value: The Count's first victim in England., from: "dracula:8" }
-    - { value: "Un-Dead: the \"bloofer lady\" of Hampstead.", from: "dracula:13" }
+    - { value: "Un-Dead: the \"bloofer lady\" of Hampstead.", from: "dracula:14" }
     - { value: At peace., from: "dracula:16" }
   gender: woman
   pronouns: she/her
   heritage: The only child of a wealthy widow of Hampstead.
-  died: { text: "20 September", sort: [0, 9, 20] }
+  died: { value: { text: "20 September", sort: [0, 9, 20] }, from: "dracula:12" }
 ---
 
 # Lucy Westenra
@@ -24,7 +24,6 @@ fields:
 admired. She tells Mina about her suitors in chapter 5.
 
 ## Appearance
-<!-- wolfden: until=dracula:15 -->
 Fair, sweet-faced, and slight.
 
 ### Decline
@@ -33,7 +32,7 @@ From August on she grows pale and thin, with two small red marks on her
 throat that never heal.
 
 ## Appearance
-<!-- wolfden: from=dracula:15 until=dracula:16 -->
+<!-- wolfden: from=dracula:15 -->
 Days after her funeral she lies in her coffin more beautiful than in
 life, with red lips and sharp teeth.
 
@@ -66,7 +65,7 @@ She dies at [[hillingham]] on 20 September. Over her body Van Helsing
 says: "It is only the beginning!"
 
 ### The Un-Dead
-<!-- wolfden: from=dracula:13 until=dracula:17 -->
+<!-- wolfden: from=dracula:14 until=dracula:17 -->
 Children on Hampstead Heath are lured away by a "bloofer lady" and found
 with small wounds in their throats. See [[the-bloofer-lady]].
 

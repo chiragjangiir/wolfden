@@ -51,6 +51,12 @@ sections that come into effect at different chapters.
 - **Status.** Facts from the novel are `canon`. The writer's own open
   questions and interpretations are `undecided`, with the options banked
   as `candidate` subsections.
+- **Spoiler-safe.** Facts are placed where the reader learns them, so a
+  view as of a chapter shouldn't give away what comes later. Deaths and
+  the Count's nature are known from the chapter that reveals them
+  ([`format.md`](../../docs/format.md) §9.5), summary prose that runs
+  ahead is split into subsections with their own `from=`, and `den.yaml`
+  sets `spoiler_checks: true`.
 
 ## License
 

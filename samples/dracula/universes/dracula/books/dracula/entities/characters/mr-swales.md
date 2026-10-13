@@ -6,7 +6,9 @@ status: canon
 from: "dracula:6"
 fields:
   role: An old Whitby sailor Mina and Lucy talk with on the churchyard seat.
-  died: { text: "found dead on the morning of 10 August", sort: [0, 8, 10] }
+  died:
+    value: { text: "found dead on the morning of 10 August", sort: [0, 8, 10] }
+    from: "dracula:7"
 ---
 
 # Mr. Swales
