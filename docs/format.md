@@ -79,8 +79,8 @@ its container file, F-LAY-4, is a problem with the folder itself.)
 ### 1.4 Notation and terms
 
 Grammars use ABNF ([RFC 5234]), except that quoted strings are
-case-sensitive. `lower` is `%x61-7A` (a to z). `DIGIT`, `WSP`, and `DQUOTE`
-are the RFC 5234 core rules.
+case-sensitive. `lower` is `%x61-7A` (a to z). `DIGIT`, `SP`, `WSP`, and
+`DQUOTE` are the RFC 5234 core rules.
 
 [RFC 5234]: https://www.rfc-editor.org/rfc/rfc5234
 
@@ -118,7 +118,11 @@ re-normalize text they aren't changing.
 **F-YAML-1.** `den.yaml` and frontmatter are a single YAML 1.2 document
 using the core schema. A parse failure is an [error].
 
-**F-YAML-2.** The top level MUST be a mapping. [error]
+**F-YAML-2.** The top level MUST be a mapping. [error] Frontmatter or a
+YAML file that holds no YAML document, only blank lines and comments, or
+only a `---` marker, is an empty mapping, with no diagnostic. Missing keys
+are then reported by the rules that require them (F-ENT-2, F-ENT-3,
+F-CTR-1, F-DEN-1).
 
 **F-YAML-3.** A mapping MUST NOT repeat a key. [error]
 
@@ -813,8 +817,13 @@ after it up to the next heading of the same or a higher level (fewer `#`
 signs). Level-2 sections are the entity's sections, and deeper ones are
 subsections of the section that holds them. Both ATX (`##`) and setext
 headings count. Text inside code blocks and HTML blocks is never a heading.
+Only headings at the top level of the body start sections: a heading inside
+a block quote or a list item (`> ## Aside`, `- ## Item`) is part of the
+section's text.
 
-**F-SEC-2.** Content before the first level-2 heading is the **lead**. A
+**F-SEC-2.** Content before the first level-2 heading is the **lead**,
+including any headings of level 3 to 6 in it: they don't start sections,
+and a wolfden comment under one is misplaced (F-SEC-10). A
 level-1 heading in the lead is the display title. It's optional and doesn't
 have to match `name`. A level-1 heading after the first level-2 heading is
 a [warning], and is treated as a level-2 heading, so the content under it
@@ -849,7 +858,7 @@ count either.
 ### 9.2 Section comments
 
 ```abnf
-pos-line   = *WSP "<!--" *WSP "wolfden:" *WSP attr *(1*WSP attr) *WSP "-->" *WSP
+pos-line   = 0*3SP "<!--" *WSP "wolfden:" *WSP attr *(1*WSP attr) *WSP "-->" *WSP
 attr       = attr-name "=" attr-value
 attr-name  = lower *(lower / DIGIT / "-" / "_")
 attr-value = 1*vchar / DQUOTE *qchar DQUOTE
@@ -860,7 +869,9 @@ qchar      = <any character except DQUOTE, CR, LF,
 ```
 
 "Unicode whitespace" is as CommonMark defines it, so it includes tabs and
-no-break spaces. The comment ends at its first `-->`, and no value can
+no-break spaces. A section comment is indented by at most three spaces, as
+in CommonMark: a line indented by four or more spaces, or by a tab, is an
+indented code block, so it's text, not a comment, and has no diagnostic. The comment ends at its first `-->`, and no value can
 contain the sequence `-->` (single `-` and `>` characters are fine, as in
 `from=a-quiet-moon:2b`), so an unquoted value stops there:
 `from=ember:19-->` is `from=ember:19`. A line with anything but whitespace
@@ -1012,6 +1023,8 @@ ambiguous links are still reported.
 | `<!-- wolfden: pov=mara -->` | [warning] F-SEC-7 |
 | a blank line, then `<!-- wolfden: from=ember:19 -->` | valid (F-SEC-6) |
 | two blank lines, then `<!-- wolfden: from=ember:19 -->` | [warning] F-SEC-10 |
+| `   <!-- wolfden: from=ember:19 -->` (three spaces) | valid |
+| a blank line, then `    <!-- wolfden: from=ember:19 -->` (four spaces) | code, not a comment |
 | `## Shoulder injury <!-- wolfden: from=ember:19 -->` | [warning] F-SEC-10 |
 | `<!-- todo: check the date -->` | kept, ignored |
 
