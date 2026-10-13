@@ -7,7 +7,10 @@ from: "dracula:13"
 fields:
   planted: ["dracula:13", "dracula:14"]
   paid_off: "dracula:16"
-  characters: ["[[lucy-westenra]]", "[[abraham-van-helsing]]", "[[arthur-holmwood]]"]
+  characters:
+    - "[[lucy-westenra]]"
+    - "[[abraham-van-helsing]]"
+    - "[[arthur-holmwood]]"
 ---
 
 # The bloofer lady
@@ -25,9 +28,10 @@ asked them to walk with her.
 
 ## Payoff
 <!-- wolfden: from=dracula:15 -->
-The payoff starts in chapter 15, a chapter before `paid_off`, when
-Van Helsing first shows Seward the empty coffin. Chapters 15 and 16: Van Helsing shows Seward, then Arthur and Morris,
-that the bloofer lady is Lucy Un-Dead.
+The payoff starts in chapter 15, a chapter before the thread is paid
+off, when Van Helsing first shows Seward the empty coffin. Over chapters
+15 and 16 he shows Seward, then Arthur and Morris, that the bloofer lady
+is Lucy Un-Dead.
 
 ### The stake
 <!-- wolfden: from=dracula:16 -->

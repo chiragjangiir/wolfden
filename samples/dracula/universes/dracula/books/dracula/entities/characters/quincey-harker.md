@@ -15,5 +15,6 @@ fields:
 ## Overview
 The son of [[jonathan-harker]] and [[mina-harker]], whose birthday is
 the day on which [[quincey-morris]] died. By the Note, seven years after
-the hunt, he is old enough to sit on Van Helsing's knee. "His bundle of names links all our little band
-of men together; but we call him Quincey." See [[quinceys-spirit]].
+the hunt, he is old enough to sit on Van Helsing's knee. "His bundle of
+names links all our little band of men together; but we call him
+Quincey." See [[quinceys-spirit]].

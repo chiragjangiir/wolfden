@@ -22,12 +22,12 @@ Count's, and one is fair, with golden hair and eyes like pale sapphires.
 
 ## History
 <!-- wolfden: from=dracula:3 -->
-On the night of 15 May they come for Harker in the forbidden wing, and the Count
-drives them off: "This man belongs to me!" He gives them a child in a bag
-instead.
+On the night of 15 May they come for Harker in the forbidden wing, and
+the Count drives them off: "This man belongs to me!" He gives them a
+child in a bag instead.
 
 ### Their end
 <!-- wolfden: from=dracula:27 -->
 On the night of 4 November they try to lure Mina out of Van Helsing's
-holy circle. Next day he finds them asleep in their tombs and destroys them one by
-one.
+holy circle. Next day he finds them asleep in their tombs and destroys
+them one by one.

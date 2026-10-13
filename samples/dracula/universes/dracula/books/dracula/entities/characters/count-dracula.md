@@ -47,9 +47,12 @@ Scholomance.
 
 ## Want
 <!-- wolfden: from=dracula:2 -->
-To leave his empty country for London. In chapter 4 Harker sees what he
-wants there: a city where "amongst its teeming millions" he can feed and
-make new creatures.
+To leave his empty country for London.
+
+### What he wants there
+<!-- wolfden: from=dracula:4 -->
+Harker sees it in chapter 4: a city where, "amongst its teeming
+millions," he can feed and make new creatures.
 
 ## Relationships
 - [[jonathan-harker]]: his solicitor, guest, and prisoner.
