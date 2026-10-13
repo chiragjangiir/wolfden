@@ -49,8 +49,8 @@ Book 1, chapter 3. Wolfden is built around that.
 ## License
 
 Code: [MIT](LICENSE). The built-in packs in `packs/` (types and
-templates): [MIT-0](packs/LICENSE). Sample datasets: CC-BY-4.0 (license
-file to come with the data).
+templates): [MIT-0](packs/LICENSE). Sample datasets in `samples/`:
+[CC-BY-4.0](samples/LICENSE).
 
 **Your writing is yours.** Wolfden's licenses cover Wolfden itself. They
 place no conditions on the notes, manuscripts, or anything else you create

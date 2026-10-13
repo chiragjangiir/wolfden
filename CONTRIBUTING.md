@@ -60,8 +60,8 @@ always tell who wrote what.
 
 Never commit real manuscripts, notes, or personal details, yours or anyone
 else's. Sample data is either from a public-domain work or fully invented.
-Sample datasets are licensed under CC-BY-4.0 (license file to come with the
-first dataset), and code under [MIT](LICENSE).
+Sample datasets are licensed under [CC-BY-4.0](samples/LICENSE), and code
+under [MIT](LICENSE).
 
 ## Commits
 

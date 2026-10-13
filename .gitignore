@@ -24,6 +24,7 @@ dist/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+.obsidian/
 Thumbs.db
 .DS_Store
 
