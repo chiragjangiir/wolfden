@@ -170,8 +170,9 @@ internal static class YamlEditor
         var end = current.ContentEnd;
         if (current is YamlMapping { IsFlow: false } or YamlSequence { IsFlow: false })
         {
-            // A block collection ends with its last line, including any
-            // comment on it; comment lines after it stay.
+            // A block collection is replaced whole, with any comments inside
+            // it and one on its last line: they belong to the value being
+            // replaced. Comment lines after it, at a lower indent, stay.
             end = source.Lines[LineIndexOfEnd(source, current)].End;
         }
 

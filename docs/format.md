@@ -147,7 +147,9 @@ an [error], and so is frontmatter that never closes.
 **F-FM-2.** The **body** is everything after the closing `---` line. Where
 this spec talks about headings, code, HTML comments, and list items, it
 means them as [CommonMark 0.31.2] defines them. Wolfden doesn't restrict
-any other markdown.
+any other markdown. A body the reader can't parse as CommonMark, for
+example one that nests block quotes or lists deeper than it supports, is
+an [error].
 
 [CommonMark 0.31.2]: https://spec.commonmark.org/0.31.2/
 
@@ -869,9 +871,10 @@ qchar      = <any character except DQUOTE, CR, LF,
 ```
 
 "Unicode whitespace" is as CommonMark defines it, so it includes tabs and
-no-break spaces. A section comment is indented by at most three spaces, as
-in CommonMark: a line indented by four or more spaces, or by a tab, is an
-indented code block, so it's text, not a comment, and has no diagnostic. The comment ends at its first `-->`, and no value can
+no-break spaces. A section comment is indented by at most three spaces,
+as in CommonMark: a line indented by four or more spaces, or by a tab, is
+an indented code block, so it's text, not a comment, and has no
+diagnostic. The comment ends at its first `-->`, and no value can
 contain the sequence `-->` (single `-` and `>` characters are fine, as in
 `from=a-quiet-moon:2b`), so an unquoted value stops there:
 `from=ember:19-->` is `from=ember:19`. A line with anything but whitespace

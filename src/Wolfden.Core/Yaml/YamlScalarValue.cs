@@ -77,6 +77,16 @@ public sealed partial class YamlScalarValue
         return DoubleQuote(_text);
     }
 
+    /// <summary>
+    /// True if <paramref name="node"/> holds this value as Wolfden wrote it:
+    /// like <see cref="Matches"/>, but a string written plain must also be a
+    /// string to other YAML readers (<see cref="PlainScalarResolver"/>), so
+    /// a quoting gap can't turn it into a number, bool, or null.
+    /// </summary>
+    internal bool MatchesAsWritten(YamlNode? node) =>
+        Matches(node) && (_kind != Kind.String || node is not YamlScalar { Style: YamlScalarStyle.Plain } plain
+            || PlainScalarResolver.IsStringInBothSchemas(plain.Text));
+
     /// <summary>True if <paramref name="node"/> already holds this value, read as format.md F-YAML-5 reads it.</summary>
     public bool Matches(YamlNode? node)
     {
@@ -125,7 +135,7 @@ public sealed partial class YamlScalarValue
             return false;
         }
 
-        return !ReservedWord().IsMatch(text);
+        return !ReservedWord().IsMatch(text) && PlainScalarResolver.IsStringInBothSchemas(text);
     }
 
     /// <summary>A key a writer may add: a plain word such as <c>x-color</c> or <c>see_also</c>.</summary>
@@ -183,12 +193,14 @@ public sealed partial class YamlScalarValue
 
     /// <summary>
     /// Anything a YAML 1.1 or 1.2 reader might take for a number, date, or
-    /// time: a digit first, then only digits, separators, signs, spaces, and
-    /// the letters of exponents, radix prefixes, and timestamps. Cautious on
-    /// purpose; <c>2291</c>, <c>014</c>, <c>1:20</c>, and <c>2026-10-13</c>
-    /// are quoted, while a ULID or <c>7th-fleet</c> isn't.
+    /// time: a digit first, then only digits, hex digits, separators, signs,
+    /// spaces, and the letters of radix prefixes and timestamps. Cautious on
+    /// purpose; <c>2291</c>, <c>014</c>, <c>0x1F</c>, <c>0x_FF</c>,
+    /// <c>1:20</c>, and <c>2026-10-13</c> are quoted, while a ULID or
+    /// <c>7th-fleet</c> isn't. <see cref="PlainScalarResolver"/> backs this
+    /// up when an edit is verified.
     /// </summary>
-    [GeneratedRegex("^[0-9][0-9_:.,+ eExXoObBtTzZ-]*$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("^[0-9][0-9a-fA-F_:.,+ xXoObBtTzZ-]*$", RegexOptions.CultureInvariant)]
     private static partial Regex NumberLike();
 
     [GeneratedRegex("^(?:null|true|false|yes|no|on|off|y|n)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]

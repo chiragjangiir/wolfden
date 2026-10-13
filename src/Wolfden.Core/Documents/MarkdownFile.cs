@@ -130,7 +130,9 @@ public sealed partial class MarkdownFile : DenFile
     /// <summary>
     /// Sets the scalar at <paramref name="path"/>: a top-level key, then keys
     /// of nested block mappings. Missing keys are added after their siblings;
-    /// frontmatter is added if the file has none.
+    /// frontmatter is added if the file has none. Replacing a scalar keeps
+    /// the spacing before it and a comment after it. Replacing a block list
+    /// or mapping replaces it whole, including any comments inside it.
     /// </summary>
     /// <exception cref="InvalidOperationException">The file can't be edited, or a key on the path isn't a mapping.</exception>
     /// <exception cref="NotSupportedException">The edit would have to change a flow mapping.</exception>

@@ -20,7 +20,7 @@ internal static class YamlTreeCheck
     {
         if (index == path.Count)
         {
-            return value.Matches(after);
+            return value.MatchesAsWritten(after);
         }
 
         // Missing or empty before (no key, `key:`, `key: ~`, `key: {}`):
