@@ -57,9 +57,9 @@ public class DraculaPositionTests
     {
         var count = EntityFiles().Sum(row => ScanEntity(row.Data).Scan.References.Count);
 
-        // Every from, until, planted, and paid_off in the sample (grep finds 183
-        // from/until lines, and the threads' planted lists add 6 more).
-        Assert.True(count >= 180, $"Only {count} positions found.");
+        // Every from, until, planted, and paid_off in the sample: 176 froms and
+        // untils, and 13 thread positions. Update this when the sample changes.
+        Assert.Equal(189, count);
     }
 
     [Theory]
