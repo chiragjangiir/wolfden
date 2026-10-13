@@ -63,6 +63,28 @@ public class TypeEffectsTests
     }
 
     [Fact]
+    public void BookkeepingSectionsDontEndAnEarlierOne()
+    {
+        // format.md F-SEC-8: a bookkeeping section isn't live, since canon views leave it out.
+        var facts = Facts("## Appearance\nFirst.\n\n## Appearance\n<!-- wolfden: from=ember:2 canon=false -->\nScratch.\n");
+        var end = facts.Entity.Universe.EndOfStory;
+
+        Assert.Equal([end, end], facts.Sections.Select(s => s.EffectiveUntil!.Value));
+        Assert.Equal([true, false], facts.Sections.Select(s => s.IsLive));
+    }
+
+    [Fact]
+    public void ASubsectionNeverInEffectIsntLive()
+    {
+        var facts = Facts("## Appearance\nOne.\n\n### Later\n<!-- wolfden: from=ash:1 -->\nAfter the handover.\n\n## Appearance\n<!-- wolfden: from=ember:2 -->\nTwo.\n");
+
+        var sub = facts.Sections[1];
+        Assert.Equal((P(facts, "ash:1"), P(facts, "ember:2")), (sub.EffectiveFrom!.Point, sub.EffectiveUntil!.Value));
+        Assert.False(sub.IsLive);
+        Assert.True(facts.Sections[0].IsLive);
+    }
+
+    [Fact]
     public void CustomSectionsDontHandOver()
     {
         var facts = Facts("## Session log\nOne.\n\n## Session log\n<!-- wolfden: from=ember:2 -->\nTwo.\n");
@@ -351,6 +373,44 @@ public class TypeEffectsTests
             den.Diagnostics.Select(d => (d.Path, d.Diagnostic.Line)));
         Assert.All(den.Diagnostics, d => Assert.Equal("F-CHAP-3", d.Diagnostic.RuleId));
         Assert.Contains("Did you mean 'third-limited'?", den.Diagnostics[^1].Diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ADateWithACalendarStaysValid()
+    {
+        // types.md F-FT-11: calendar and unknown keys are advisory warnings, so
+        // the chapter keeps its own when rather than inheriting the default.
+        var source = Den()
+            .With($"{Ember}/book.md", """
+                ---
+                name: Ember
+                chapter_defaults: { when: "2290" }
+                chapters:
+                  - { key: "1", fields: { when: { text: late spring, sort: [2291, 5], calendar: reach, era: second } } }
+                ---
+                """);
+
+        var den = DenStructure.Load(source);
+        var when = den.FindUniverse("starfall")!.FindBook("ember")!.FindChapter("1")!.Fields["when"];
+
+        Assert.Null(when.DefaultFrom);
+        Assert.Equal(new[] { 2291L, 5 }, Types.FieldValues.ReadDate(when.Value)!.SortKey);
+        Assert.Equal(2, den.Diagnostics.Count);
+        Assert.All(den.Diagnostics, d => Assert.Equal(("F-CHAP-3", 5), (d.Diagnostic.RuleId, d.Diagnostic.Line!.Value)));
+        Assert.Contains("Custom calendars aren't supported yet", den.Diagnostics[0].Diagnostic.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(den.Diagnostics, d => d.Diagnostic.Message.Contains("ignored, so the chapter inherits", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AnUnquotedPovGetsTheQuotingHint()
+    {
+        var source = Den()
+            .Entity(Starfall, "pike", Character("Pike"))
+            .With($"{Ember}/book.md", "---\nname: Ember\nchapters:\n  - { key: \"1\", fields: { pov: [[pike]] } }\n---\n");
+
+        var warning = Assert.Single(DenStructure.Load(source).Diagnostics);
+
+        Assert.Contains("write \"[[pike]]\" (F-FLD-6)", warning.Diagnostic.Message, StringComparison.Ordinal);
     }
 
     [Fact]

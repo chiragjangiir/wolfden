@@ -91,6 +91,9 @@ public sealed class DenTypes
     {
         private readonly List<DenDiagnostic> _diagnostics = [];
 
+        /// <summary>Built-in types that a den-local type replaced by taking their plural (F-TYPE-5), with that type's file.</summary>
+        private readonly Dictionary<string, (string Key, string Path)> _replacedByDen = new(StringComparer.Ordinal);
+
         public DenTypes Build()
         {
             var packs = EnabledPacks();
@@ -206,6 +209,10 @@ public sealed class DenTypes
                     $"; type '{ignored.File.Key}' is ignored");
                 byPlural[candidate.File.Plural] = used;
                 chosen.Remove(ignored.File.Key);
+                if (ignored.Pack.Pack.IsBuiltIn && !used.Pack.Pack.IsBuiltIn)
+                {
+                    _replacedByDen[ignored.File.Key] = (used.File.Key, used.File.Path);
+                }
             }
 
             var result = new Dictionary<string, TypeDefinition>(StringComparer.Ordinal);
@@ -351,6 +358,9 @@ public sealed class DenTypes
         /// <summary>F-FT-9: a <c>to</c> naming a type that isn't enabled is a warning, and the type check skips that name.</summary>
         private void CheckRefTargets(IEnumerable<FieldDefinition> fields, Dictionary<string, TypeDefinition> types)
         {
+            // A built-in field whose target a den-local type replaced is reported
+            // once, on the den's own file, rather than on files the writer can't edit.
+            var redirected = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
             foreach (var field in fields.Where(f => f.To is not null))
             {
                 var known = new List<string>();
@@ -360,6 +370,15 @@ public sealed class DenTypes
                     {
                         known.Add(key);
                     }
+                    else if (field.Pack.IsBuiltIn && _replacedByDen.ContainsKey(key))
+                    {
+                        if (!redirected.TryGetValue(key, out var names))
+                        {
+                            redirected[key] = names = [];
+                        }
+
+                        names.Add(field.Name);
+                    }
                     else
                     {
                         Warn(field.Path, "F-FT-9", field.Line, $"'{field.Name}' links to type '{key}', which isn't an enabled type, so the type check skips it.");
@@ -368,6 +387,13 @@ public sealed class DenTypes
 
                 // With every name skipped, nothing is left to check against.
                 field.CheckedTo = known;
+            }
+
+            foreach (var (key, names) in redirected)
+            {
+                var (by, path) = _replacedByDen[key];
+                Warn(path, "F-FT-9", null,
+                    $"Type '{by}' replaces the built-in type '{key}', so the built-in fields that link to '{key}' ({string.Join(", ", names.Distinct(StringComparer.Ordinal))}) skip that type check.");
             }
         }
 

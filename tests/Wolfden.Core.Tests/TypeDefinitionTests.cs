@@ -129,6 +129,46 @@ public class TypeDefinitionTests
     }
 
     [Fact]
+    public void NullFlagsAreUnset()
+    {
+        // types.md F-FT-2: a null list, temporal, or required is the same as leaving it out.
+        var den = Load(("types/ship.yaml", "name: Ship\nplural: ships\nfields:\n  crew: { type: text, list: , temporal: ~, required: null }\n"));
+        var crew = den.Types.Find("ship")!.FindField("crew")!;
+
+        Assert.Empty(den.Diagnostics);
+        Assert.Equal((false, false, false), (crew.IsList, crew.IsTemporal, crew.IsRequired));
+    }
+
+    [Fact]
+    public void ADateDefaultWithACalendarIsKept()
+    {
+        var den = Load(("types/ship.yaml", "name: Ship\nplural: ships\nfields:\n  launched: { type: date, default: { text: long ago, calendar: reach } }\n"));
+
+        Assert.NotNull(den.Types.Find("ship")!.FindField("launched")!.Default);
+        Assert.Empty(den.Diagnostics);
+    }
+
+    [Fact]
+    public void ReplacingACoreTypeReportsItsRefsOnceOnTheDensFile()
+    {
+        // A den-local type takes core character's plural (F-TYPE-5), so core's refs
+        // to character skip their check. That's one warning on the den's own file,
+        // none on built-in files the writer can't edit.
+        var den = Load(("types/person.yaml", "name: Person\nplural: characters\n"));
+
+        Assert.Null(den.Types.Find("character"));
+        Assert.Equal(
+            [
+                ("types/person.yaml", "F-FT-9", DiagnosticSeverity.Warning, (int?)null),
+                ("types/person.yaml", "F-TYPE-5", DiagnosticSeverity.Warning, null),
+            ],
+            Rules(den).OrderBy(r => r.Rule, StringComparer.Ordinal));
+        var message = den.Diagnostics.Single(d => d.Diagnostic.RuleId == "F-FT-9").Diagnostic.Message;
+        Assert.All(["leader", "owner", "participants", "characters", "pov"], name => Assert.Contains(name, message, StringComparison.Ordinal));
+        Assert.DoesNotContain(den.Diagnostics, d => d.Path.StartsWith("builtin:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BadSectionItemsAreDropped()
     {
         const string ship = """

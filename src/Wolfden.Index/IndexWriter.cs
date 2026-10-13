@@ -11,6 +11,7 @@ using Wolfden.Core.Entities;
 using Wolfden.Core.Links;
 using Wolfden.Core.Outlines;
 using Wolfden.Core.Structure;
+using Wolfden.Core.Types;
 using Wolfden.Core.Yaml;
 
 namespace Wolfden.Index;
@@ -78,6 +79,7 @@ internal sealed class IndexWriter
             new MetaRecord { Key = IndexSchema.SchemaVersionKey, Value = IndexSchema.Version.ToString(CultureInfo.InvariantCulture) },
             new MetaRecord { Key = IndexSchema.DenFormatKey, Value = IndexBuilder.DenFormatStamp(_source.FileExists("den.yaml") ? _source.ReadFile("den.yaml") : null) },
             new MetaRecord { Key = IndexSchema.SupportedFormatKey, Value = DenStructure.SupportedFormat.ToString(CultureInfo.InvariantCulture) },
+            new MetaRecord { Key = IndexSchema.BuiltInPacksKey, Value = BuiltInPacks.Instance.Hash },
         ]);
         _rows.Add(new DenRecord
         {

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text;
 using Wolfden.Core.Documents;
 using Wolfden.Core.Structure;
@@ -19,10 +20,12 @@ public sealed class BuiltInPacks : IDenSource
     private static readonly Lazy<BuiltInPacks> Shared = new(Load);
 
     private readonly Dictionary<string, byte[]> _files;
+    private readonly Lazy<string> _hash;
 
     private BuiltInPacks(Dictionary<string, byte[]> files)
     {
         _files = files;
+        _hash = new Lazy<string>(ComputeHash);
         Keys = files.Keys.Select(p => p[..p.IndexOf('/', StringComparison.Ordinal)])
             .Distinct(StringComparer.Ordinal)
             .Where(k => _files.ContainsKey($"{k}/pack.yaml"))
@@ -38,6 +41,13 @@ public sealed class BuiltInPacks : IDenSource
 
     /// <summary>Parsed pack files. They never change while the process runs, so each is parsed once.</summary>
     internal ConcurrentDictionary<string, DenFile> Parsed { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// A SHA-256, in lowercase hex, of every built-in pack file's path and
+    /// bytes. It changes whenever a release changes the built-in packs, so
+    /// derived data such as the index can tell it was built from other ones.
+    /// </summary>
+    public string Hash => _hash.Value;
 
     /// <summary>Every embedded file, relative to <c>packs/</c>, in ASCII order.</summary>
     public IEnumerable<string> Files => _files.Keys.Order(StringComparer.Ordinal);
@@ -75,6 +85,22 @@ public sealed class BuiltInPacks : IDenSource
     /// <summary>Built-in packs made of the given files, for tests of packs that don't ship yet.</summary>
     internal static BuiltInPacks FromFiles(IReadOnlyDictionary<string, string> files) =>
         new(files.ToDictionary(f => f.Key, f => Encoding.UTF8.GetBytes(f.Value), StringComparer.Ordinal));
+
+    private string ComputeHash()
+    {
+        using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var path in Files)
+        {
+            // Length-prefixed, so no two file sets hash alike by running together.
+            var name = Encoding.UTF8.GetBytes(path);
+            sha.AppendData(BitConverter.GetBytes(name.Length));
+            sha.AppendData(name);
+            sha.AppendData(BitConverter.GetBytes(_files[path].Length));
+            sha.AppendData(_files[path]);
+        }
+
+        return Convert.ToHexStringLower(sha.GetHashAndReset());
+    }
 
     private static BuiltInPacks Load()
     {

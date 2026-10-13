@@ -108,7 +108,9 @@ internal sealed class ChapterFieldReader(DenStructure den, Universe universe)
             var check = FieldValues.Check(definition, value);
             foreach (var problem in check.Problems)
             {
-                Warn(path, "F-CHAP-3", problem.Line, $"{problem.Message} In {where}, it's ignored, so the chapter inherits instead.");
+                Warn(path, "F-CHAP-3", problem.Line, problem.IsAdvisory
+                    ? $"{problem.Message} (In {where}.)"
+                    : $"{problem.Message} In {where}, it's ignored, so the chapter inherits instead.");
             }
 
             // F-CHAP-3, F-CHAP-5: a value that doesn't match counts as not set;

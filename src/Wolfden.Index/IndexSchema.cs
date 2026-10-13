@@ -17,6 +17,14 @@ public static class IndexSchema
     /// <summary>The <c>meta</c> key for <see cref="Version"/>.</summary>
     public const string SchemaVersionKey = "schema_version";
 
+    /// <summary>
+    /// The <c>meta</c> key for the hash of the built-in packs the index was
+    /// built with (<c>BuiltInPacks.Hash</c>). Which sections hand over, which
+    /// refs are checked, and which enum values match depend on them, so an
+    /// index built with other built-in packs is rebuilt.
+    /// </summary>
+    public const string BuiltInPacksKey = "builtin_packs";
+
     /// <summary>The <c>meta</c> key for the den's <c>format</c> as written in <c>den.yaml</c> (empty if it has none).</summary>
     public const string DenFormatKey = "den_format";
 

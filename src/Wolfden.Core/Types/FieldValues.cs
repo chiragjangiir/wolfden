@@ -11,7 +11,11 @@ namespace Wolfden.Core.Types;
 /// <param name="Line">The 1-based line of the value or item.</param>
 /// <param name="Message">A message for the writer.</param>
 /// <param name="Node">The value or list item that doesn't match.</param>
-public sealed record ValueProblem(string RuleId, int Line, string Message, YamlNode Node);
+/// <param name="IsAdvisory">
+/// True for a warning that doesn't make the value a mismatch, such as a
+/// date's <c>calendar</c> key (types.md F-FT-11): the value is still read.
+/// </param>
+public sealed record ValueProblem(string RuleId, int Line, string Message, YamlNode Node, bool IsAdvisory = false);
 
 /// <summary>The result of checking a plain value against a field definition (types.md §5.2, §5.3).</summary>
 public sealed class ValueCheck
@@ -24,11 +28,11 @@ public sealed class ValueCheck
         IsEmptyList = isEmptyList;
     }
 
-    /// <summary>The problems, in file order. None if the value matches.</summary>
+    /// <summary>The problems, in file order, including advisory ones, which don't stop the value matching.</summary>
     public IReadOnlyList<ValueProblem> Problems { get; }
 
     /// <summary>True if the whole value matches its field type.</summary>
-    public bool Matches => Problems.Count == 0;
+    public bool Matches => Problems.All(p => p.IsAdvisory);
 
     /// <summary>
     /// The items that match: for a list field, each matching list item (a
@@ -93,7 +97,7 @@ public static partial class FieldValues
             else if (item is YamlSequence)
             {
                 problems.Add(new ValueProblem("F-FT-12", item.Line,
-                    $"{field.Name} has a list inside its list, and there are no lists of lists.{QuoteHint(field, item)}", item));
+                    $"{field.Name} has a list inside its list, and there are no lists of lists.{ItemQuoteHint(field, item)}", item));
             }
             else if (CheckItem(field, item, problems))
             {
@@ -151,7 +155,7 @@ public static partial class FieldValues
 
     private static bool CheckItem(FieldDefinition field, YamlNode node, List<ValueProblem> problems)
     {
-        var before = problems.Count;
+        var before = problems.Count(p => !p.IsAdvisory);
         var name = field.Name;
         void Problem(string rule, string message) => problems.Add(new ValueProblem(rule, node.Line, message, node));
 
@@ -221,12 +225,15 @@ public static partial class FieldValues
                 break;
         }
 
-        return problems.Count == before;
+        return problems.Count(p => !p.IsAdvisory) == before;
     }
 
     private static InWorldDate? ReadDate(string name, YamlNode node, List<ValueProblem> problems)
     {
         void Problem(YamlNode at, string message) => problems.Add(new ValueProblem("F-FT-11", at.Line, message, at));
+
+        // F-FT-11: calendar and unknown keys are advisory; the date is still read.
+        void Advise(YamlNode at, string message) => problems.Add(new ValueProblem("F-FT-11", at.Line, message, at, IsAdvisory: true));
 
         if (node is YamlScalar { IsNull: false } scalar)
         {
@@ -268,10 +275,10 @@ public static partial class FieldValues
 
                     break;
                 case "calendar":
-                    Problem(entry.Key, "Custom calendars aren't supported yet, so calendar is kept and otherwise ignored.");
+                    Advise(entry.Key, "Custom calendars aren't supported yet (#37), so calendar is kept and otherwise ignored.");
                     break;
                 default:
-                    Problem(entry.Key, $"A date has text and sort, not '{entry.KeyText}'. The key is kept and ignored.");
+                    Advise(entry.Key, $"A date has text and sort, not '{entry.KeyText}'. The key is kept and ignored.");
                     break;
             }
         }
@@ -393,6 +400,15 @@ public static partial class FieldValues
     /// <summary>F-FLD-6: an unquoted <c>[[x]]</c> is a list inside a list.</summary>
     private static string QuoteHint(FieldDefinition field, YamlNode node) =>
         field.Kind == FieldKind.Ref && node is YamlSequence { Items: [YamlSequence { Items: [YamlScalar inner] }] }
+            ? $" Without quotes, YAML reads [[{inner.Text}]] as a list inside a list: write \"[[{inner.Text}]]\" (F-FLD-6)."
+            : "";
+
+    /// <summary>
+    /// F-FLD-6 for an item of a list ref field: in <c>pov: [[pike]]</c>, or
+    /// <c>pov: ["[[voss]]", [[pike]]]</c>, the item is a list holding one string.
+    /// </summary>
+    private static string ItemQuoteHint(FieldDefinition field, YamlNode item) =>
+        field.Kind == FieldKind.Ref && item is YamlSequence { Items: [YamlScalar inner] }
             ? $" Without quotes, YAML reads [[{inner.Text}]] as a list inside a list: write \"[[{inner.Text}]]\" (F-FLD-6)."
             : "";
 

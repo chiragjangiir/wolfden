@@ -3,6 +3,6 @@ fields:
     type: string
     temporal: true
     description: Military rank.
-  posting: { type: ref, to: ship, temporal: true }
+  posting: { type: ref, to: [ship, location], temporal: true }
 sections:
   - Service record

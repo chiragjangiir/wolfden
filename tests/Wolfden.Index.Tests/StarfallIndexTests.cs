@@ -191,7 +191,6 @@ public sealed class StarfallIndexTests : IClassFixture<StarfallIndexTests.Built>
 
         Assert.Equal(expected, Index.Context.Diagnostics.ToList().Select(d => (d.Path, d.RuleId, d.Line)).Order());
         Assert.Contains(Index.Context.Diagnostics, d => d.RuleId == "F-LINK-13" && d.Severity == "warning");
-        Assert.Contains(Index.Context.Diagnostics, d => d.RuleId == "F-LINK-11" && d.Path.EndsWith("mara-voss.md", StringComparison.Ordinal));
     }
 
     [Fact]

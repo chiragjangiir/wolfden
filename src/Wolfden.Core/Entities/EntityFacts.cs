@@ -166,11 +166,13 @@ public sealed class SectionFact
     public bool IsStandard { get; internal set; }
 
     /// <summary>
-    /// True if the section is live (F-SEC-8): in canon (F-STAT-3), its
-    /// positions resolve (F-POS-4), and its explicit range isn't empty.
+    /// True if the section is live (F-SEC-8): in canon (F-STAT-3), not
+    /// bookkeeping (F-SEC-12), its positions resolve (F-POS-4), and its
+    /// range isn't empty. For a subsection, the range is its effective one
+    /// (F-SEC-9), so a subsection that is never in effect isn't live.
     /// </summary>
-    public bool IsLive => Status.IsInCanon() && EffectiveFrom is { } from && EffectiveUntil is { } until
-        && (UntilText is null || from.Point < until);
+    public bool IsLive => Status.IsInCanon() && !IsBookkeeping && EffectiveFrom is { } from && EffectiveUntil is { } until
+        && from.Point < until;
 }
 
 /// <summary>
