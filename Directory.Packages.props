@@ -7,6 +7,11 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
 
+  <ItemGroup Label="Core">
+    <PackageVersion Include="Markdig" Version="1.4.0" />                       <!-- BSD-2-Clause -->
+    <PackageVersion Include="YamlDotNet" Version="18.1.0" />                   <!-- MIT -->
+  </ItemGroup>
+
   <ItemGroup Label="Testing">
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />      <!-- MIT -->
     <PackageVersion Include="xunit.v3" Version="3.2.2" />                      <!-- Apache-2.0 -->
