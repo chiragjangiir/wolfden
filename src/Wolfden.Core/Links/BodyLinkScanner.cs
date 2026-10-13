@@ -35,7 +35,7 @@ internal sealed record OutlineRowCells(string RowId, string? Status, string? Cha
 /// </summary>
 internal static class BodyLinkScanner
 {
-    private static readonly MarkdownPipeline Plain = new MarkdownPipelineBuilder().UsePreciseSourceLocation().Build();
+    internal static readonly MarkdownPipeline Plain = new MarkdownPipelineBuilder().UsePreciseSourceLocation().Build();
 
     internal static readonly MarkdownPipeline WithTables =
         new MarkdownPipelineBuilder().UsePreciseSourceLocation().UsePipeTables().Build();
@@ -286,7 +286,7 @@ internal static class BodyLinkScanner
     }
 
     /// <summary>The HTML comments in an HTML block: from each <c>&lt;!--</c> to the next <c>--&gt;</c>, or the end of the block.</summary>
-    private static void AddComments(string text, int start, int end, List<(int Start, int End)> ranges)
+    internal static void AddComments(string text, int start, int end, List<(int Start, int End)> ranges)
     {
         var i = start;
         while (i < end)
