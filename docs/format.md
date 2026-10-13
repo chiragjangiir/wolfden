@@ -336,7 +336,7 @@ spoiler_checks: true
 ```
 
 **F-DEN-1.** `format` is REQUIRED and is an integer. This spec is format
-`1`. A missing or non-integer `format` is an [error]. A `format` higher
+`1`. A missing or non-integer `format`, or one below `1`, is an [error]. A `format` higher
 than the reader supports is an [error] that says so ("den format 2 is newer
 than this version of Wolfden"). Additive changes, such as a new optional
 key, don't change the format number.
@@ -659,6 +659,9 @@ problems are warnings (types.md F-CHAP-3).
   takes its entity's status.
 - `pin`, optional: `true` pins the entry (F-PIN-1).
 
+A `from` or `until` with no value, or with `~` or another YAML null
+(F-YAML-5), counts as missing, with no diagnostic.
+
 Other keys in an entry are a [warning], and are kept.
 
 **F-TMP-3.** An entry holds at positions `p` with `from <= p < until`.
@@ -899,7 +902,8 @@ heading's section.
 **F-SEC-7.** Attributes are space-separated `key=value` pairs, in any
 order, and a value MAY be double-quoted. A section's comment takes:
 
-- `from` and `until`: positions (§8).
+- `from` and `until`: positions (§8). An empty value (`from=""`) or `~`
+  counts as missing, with no diagnostic.
 - `status`: the section's status (F-STAT-1).
 - `pin`: `true` or `false` (F-PIN-1).
 - `canon`: `false` marks the section as bookkeeping (F-SEC-12). `true` keeps
