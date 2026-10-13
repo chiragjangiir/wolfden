@@ -236,9 +236,13 @@ add; they don't change what another pack defines.
 a built-in one (a pack key, a type, a `plural`, an extension's field or
 section, or a chapter field), the den-local one is used and the built-in
 one is ignored, with a warning that names the clash. A den-local pack
-named like a built-in pack shadows it. So a Wolfden upgrade can add
-things but never changes what an existing den means. Versioning policy is
-#56. Clashes between two den-local packs are settled by pack order (see
+named like a built-in pack shadows it. So an upgrade never overrides a
+den's own definitions. Built-in packs change only by adding: changing an
+existing built-in field's type, renaming a section, or adding or changing
+a default is a breaking change, while template prompts and headings may
+change in any release, since they only affect new entities. A writer who
+relies on a custom field should define it in a den-local pack (types.md
+§2.4). Versioning policy is #56. Clashes between two den-local packs are settled by pack order (see
 types.md F-PACK-11).
 
 **Decided (#6): your writing is yours.** Wolfden's licenses place no

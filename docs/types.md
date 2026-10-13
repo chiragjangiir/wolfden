@@ -145,9 +145,20 @@ the enabled packs (§4).
 
 ### 2.4 When packs clash
 
-A den's own definitions win over Wolfden's built-in ones. So a Wolfden
-upgrade can add types, fields, and sections, but it never changes what an
-existing den means (design.md §4).
+A den's own definitions win over Wolfden's built-in ones, so an upgrade
+never overrides a den's own definitions (design.md §4).
+
+Built-in packs change only by adding: new types, fields, sections, and
+chapter fields. Changing an existing built-in field's type, renaming a
+section, or adding or changing a `default` is a breaking change (#56).
+Template prompts and headings may change in any release, since they only
+affect entities created afterward.
+
+An addition can still give meaning to something a den left undefined: a
+new core field checks the values a den already wrote under that name, and
+a new core type picks up entities that named it. A writer who relies on a
+custom field should define it in a den-local pack (§10), so that its
+definition is the den's own and wins over any later built-in one.
 
 **F-PACK-10.** A den-local pack whose key is the key of a built-in pack
 **shadows** it. A `den.yaml` entry with that key names the den-local pack,
@@ -807,8 +818,8 @@ definition is used.
 **F-CHAP-3.** In `book.md`, a chapter item's `fields`, if present, is a
 mapping from field name to a plain value. The values are checked as in
 §5.2 and §5.3, against the chapter field of that name. A null value is
-the same as leaving the field out (F-FLD-4). Every problem with a
-chapter's `fields`, including a value that doesn't match, a name that
+the same as leaving the field out (F-FLD-4), but an empty list is not:
+it means "none here" (F-CHAP-5). Every problem with a chapter's `fields`, including a value that doesn't match, a name that
 isn't a chapter field, and a `fields` that isn't a mapping, is a
 [warning], never an error, since an error in a container file would
 exclude the whole container (F-GEN-2). A chapter field is a fact about one
@@ -839,6 +850,26 @@ chapter's **effective value** for a chapter field is:
    in its book's scope chain (book, then series, then universe) that has a
    non-null value for that field;
 3. otherwise, none.
+
+For a list-valued chapter field, an explicit empty list is a value, not
+an unset field (unlike F-FT-12): it means "none here" and stops
+inheritance for that field. A null, or leaving the field out, still
+inherits. Scalar fields have no "none" value, so a chapter that differs
+writes the value it wants. This is for a book told by one narrator that
+has, say, an omniscient prologue or a chapter that is a found document:
+
+```yaml
+# book.md
+chapter_defaults: { pov: "[[mara-voss]]", narration: first }
+chapters:
+  - { key: prologue, fields: { pov: [], narration: third-omniscient } }
+  - { key: "1", number: 1 }
+  - { key: "9", number: 9, title: The Salvaged Log, fields: { pov: [] } }
+```
+
+The prologue and chapter 9 have no POV character, and every other chapter
+is Mara Voss's. The same holds in `chapter_defaults`: an empty list there
+stops inheritance from containers further up.
 
 Each field is looked up on its own, so a series can set `tense` and one of
 its books `narration`. Views and the index use effective values.
