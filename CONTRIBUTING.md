@@ -56,7 +56,8 @@ first dataset), and code under [MIT](LICENSE).
 - A [DCO](https://developercertificate.org) `Signed-off-by:` line
   (`git commit -s`) is welcome but not required.
   By opening a PR, you agree that your contribution is licensed under the
-  project's licenses (MIT for code, CC-BY-4.0 for sample data).
+  project's licenses (MIT for code, MIT-0 for the built-in packs in
+  `packs/`, CC-BY-4.0 for sample data).
 - Use LF line endings and UTF-8. `.editorconfig` handles this in most editors.
 
 ## Proposing format or design changes
