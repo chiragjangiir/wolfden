@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Blocks a commit whose message contains a personal user path or a term from
+# the private denylist. See CONTRIBUTING.md, "Privacy hooks".
+
+. "$(git rev-parse --show-toplevel)/.githooks/privacy-lib.sh"
+
+tmp=$(mktemp -d) || exit 1
+trap 'rm -rf "$tmp"' EXIT
+
+# git grep --no-index only reads files under the current directory, so scan
+# a copy of the message from the temp directory.
+cp "$1" "$tmp/msg" || exit 1
+have_list=0
+privacy_load_denylist "$tmp/deny" && [ -s "$tmp/deny" ] && have_list=1
+cd "$tmp" || exit 1
+
+fail=0
+msg_scan() { # $1 = message prefix; remaining args = git grep options
+  prefix=$1; shift
+  git grep --no-index -n "$@" -- msg > hits
+  case $? in
+    0) cut -d: -f2 hits | sed "s|^|privacy: $prefix in the commit message, line |" >&2; fail=1 ;;
+    1) ;;
+    *) echo "privacy: scan failed; blocking the commit to be safe." >&2; fail=1 ;;
+  esac
+}
+
+msg_scan "personal user path" -E -e "$PRIVACY_PATH_RE"
+if [ "$have_list" = 1 ]; then
+  msg_scan "denylisted term (not shown)" -i -F -f deny
+fi
+
+[ "$fail" = 0 ] || echo "privacy: commit blocked. Edit the message, then commit again." >&2
+exit $fail

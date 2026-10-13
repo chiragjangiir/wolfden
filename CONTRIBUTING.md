@@ -24,6 +24,24 @@ on [`docs/design.md`](docs/design.md).
 - A CI privacy check scans every PR for personal file paths. In docs, write
   `~` or `%USERPROFILE%` instead of a real home directory.
 
+### Privacy hooks (optional)
+
+The repo ships git hooks that run the same checks locally, before a commit
+exists: `pre-commit` scans staged files and `commit-msg` scans the message.
+They also accept a private denylist, a plain text file kept **outside** the
+repo, with one term per line (case-insensitive; blank lines and lines
+starting with `#` are ignored). Matches are reported by file and line only,
+never by term. To turn them on in your clone:
+
+```sh
+git config core.hooksPath .githooks
+git config privacy.denylist "<path to your private list>"   # optional
+```
+
+`scripts/denylist-check.sh` checks a denylist without printing it: it flags
+short terms, duplicates, and terms that already match a tracked file, by list
+line number only.
+
 ## AI-assisted contributions
 
 AI-assisted contributions are welcome under the same rules: on a branch,
