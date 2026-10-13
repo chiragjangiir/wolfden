@@ -368,8 +368,9 @@ spoiler checks. In format 1 that's one check, F-LINK-13. It defaults to
 `false`.
 The positions on facts record where the reader learns each one, so a
 writer can pace the reveals. The check helps writers who track that, by
-flagging a link to something the reader hasn't met yet. A value that isn't
-a YAML boolean is a [warning], and the checks stay off.
+flagging a link to something the reader hasn't met yet. A null value is
+the same as leaving the key out. Any other value that isn't a YAML boolean
+is a [warning], and the checks stay off.
 
 ## 6. Containers: universe, series, book
 
@@ -1165,7 +1166,9 @@ lchar      = <any character except "[", "]", CR, LF>
 
 `[[mara-voss]]` links to an entity. `[[mara-voss|Voss]]` shows "Voss".
 `[[mara-voss#Shoulder injury]]` links to a section. Without a label, the
-link shows its text as written.
+link shows its text as written. `\|` separates the label too, so a link
+escaped for a table cell (`[[mara-voss\|Voss]]`, F-OUT-12) reads the same
+anywhere.
 
 **F-LINK-1.** In a body (entity, container, or outline), links are
 recognized anywhere except in code spans, code blocks, and HTML comments.
@@ -1229,8 +1232,13 @@ the one the field names is a [warning].
 
 ### 10.3 Link checks
 
-**F-LINK-12.** A link in an in-canon fact (F-STAT-3) to an `idea` or
-`retconned` entity is a [warning].
+**F-LINK-12.** A link in canon text to an `idea` or `retconned` entity is
+a [warning]. Canon text is an in-canon fact (F-STAT-3): a section, a field
+entry, or an outline row. It is also the lead and the plain field values
+of an in-canon entity, judged by the entity's status, and a chapter
+item's `fields` and a container's `chapter_defaults`, which count as in
+canon. Container bodies and the free-form notes of an outline aren't
+checked.
 
 **F-LINK-13.** A link's **position** depends on where it is:
 
@@ -1293,7 +1301,9 @@ header has both a `row` and a `beat` column (F-OUT-11). Each body line of
 the table is a **row**. Other tables, headings, lists, and prose in the file
 are free-form notes and are ignored, with no diagnostic, except that a
 table whose header has exactly one of `row` and `beat` is a [warning] ("did
-you mean an outline table?").
+you mean an outline table?"). Only tables at the top level of the file
+count, as for headings (F-SEC-1): a table inside a block quote or a list
+item is a free-form note.
 
 **F-OUT-3.** An outline **section** is the part of the file under one
 heading, up to the next heading of any level (or the part before the first
