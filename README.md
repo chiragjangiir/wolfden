@@ -18,6 +18,22 @@ them consistent. General-purpose note apps and wikis don't know what a series
 is, what order the books go in, or that a character's eye color was set in
 Book 1, chapter 3. Wolfden is built around that.
 
+## Who it's for
+
+Novelists and other writers of long fiction who keep serious notes: series
+bibles, timelines, plot threads, worldbuilding. You shouldn't have to be
+technical to use it.
+
+- **Where it's headed:** no git or command line needed. Wolfden will offer
+  history, checkpoints, and "freeze this book" as ordinary buttons, with git
+  doing the work underneath. Backing up to a private remote, such as GitHub,
+  will be optional, with guided setup.
+- **Where it is today:** early. There's no app yet, just the file format.
+  For now, it suits writers who are comfortable editing markdown files in a
+  text editor such as [Obsidian](https://obsidian.md) or VS Code. Git is
+  optional. To see what a den looks like, browse the
+  [Dracula sample](samples/dracula/).
+
 ## Planned features
 
 - **Story hierarchy:** Author Identity → Universe → Series (ordered) → Book.
