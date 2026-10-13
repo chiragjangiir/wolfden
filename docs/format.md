@@ -402,7 +402,7 @@ key in ASCII order.
 
 ### 6.3 `series.md`
 
-```yaml
+```markdown
 ---
 id: 01JA3E28JT97KB6CQ643DZVMXX
 name: The Long Dark
@@ -421,7 +421,7 @@ ones come after the listed ones, by key in ASCII order.
 
 ### 6.4 `book.md`
 
-```yaml
+```markdown
 ---
 id: 01JAQKFBF5KZNWJ47TAN9ZT24M
 name: Ember
