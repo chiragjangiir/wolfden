@@ -9,9 +9,12 @@ namespace Wolfden.Index;
 // Story positions are stored as ordinals (StoryPoint.Ordinal): one integer
 // per point that sorts in story order within a universe, with the start and
 // end of the story as long.MinValue and long.MaxValue. A fact holds at point
-// p when from_ordinal <= p < until_ordinal. A null ordinal means the
-// position doesn't resolve (format.md F-POS-4), and the fact is left out of
-// canon views. Ordinals are only comparable within one universe_id.
+// p when from_ordinal <= p < until_ordinal, except at the end of the story
+// itself (an omitted position, F-VIEW-1), where that comparison matches
+// nothing: use IndexQueries.InEffectAt, which handles it. A null ordinal
+// means the position doesn't resolve (format.md F-POS-4), and the fact is
+// left out of canon views. Ordinals are only comparable within one
+// universe_id.
 //
 // Statuses, kinds, and outcomes are stored as the lowercase words format.md
 // uses ("canon", "temporal", "broken"), so the database reads well in SQL.
@@ -267,7 +270,11 @@ public sealed class FieldValueRecord
     /// <summary>Where it starts, or null if a position doesn't resolve.</summary>
     public long? FromOrdinal { get; set; }
 
-    /// <summary>Where it ends (exclusive), after the F-TMP-4 handover, or null if a position doesn't resolve.</summary>
+    /// <summary>
+    /// Where it ends (exclusive), after the F-TMP-4 handover, or null if a
+    /// position doesn't resolve. <see cref="IndexQueries.EndOfStory"/> if it
+    /// has no end; query with <see cref="IndexQueries.InEffectAt(IQueryable{FieldValueRecord}, long)"/>.
+    /// </summary>
     public long? UntilOrdinal { get; set; }
 }
 
@@ -333,8 +340,10 @@ public sealed class SectionRecord
 
     /// <summary>
     /// The effective <c>until</c> (exclusive), or null if a position doesn't
-    /// resolve. Standard-section handover (F-SEC-8) isn't applied yet, since
-    /// it needs the den's types: see <see cref="Wolfden.Core.Entities.SectionFact.EffectiveUntil"/>.
+    /// resolve. <see cref="IndexQueries.EndOfStory"/> if it has no end; query
+    /// with <see cref="IndexQueries.InEffectAt(IQueryable{SectionRecord}, long)"/>.
+    /// Standard-section handover (F-SEC-8) isn't applied yet, since it needs
+    /// the den's types (#84): see <see cref="Wolfden.Core.Entities.SectionFact.EffectiveUntil"/>.
     /// </summary>
     public long? UntilOrdinal { get; set; }
 }
@@ -480,7 +489,11 @@ public sealed class OutlineRowRecord
     public string CellsJson { get; set; } = "{}";
 }
 
-/// <summary>A diagnostic from loading the den (format.md §1.3).</summary>
+/// <summary>
+/// A diagnostic from loading the den (format.md §1.3). It's keyed by
+/// <see cref="Path"/>, not by a file row, since some diagnostics are about
+/// folders or files that were never read (F-LAY-4, F-DEN-1).
+/// </summary>
 public sealed class DiagnosticRecord
 {
     /// <summary>Row id, in path and line order.</summary>

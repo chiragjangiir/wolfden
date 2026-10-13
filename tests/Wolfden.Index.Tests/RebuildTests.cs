@@ -158,6 +158,90 @@ public sealed class RebuildTests
     }
 
     [Fact]
+    public void AnotherSqliteFileIsntTakenForAnIndex()
+    {
+        using var den = TempDen.Starfall();
+        Directory.CreateDirectory(Path.GetDirectoryName(den.IndexPath)!);
+        using (var connection = new SqliteConnection(IndexBuilder.ConnectionString(den.IndexPath, SqliteOpenMode.ReadWriteCreate)))
+        {
+            // A lookalike with a matching meta table, but no application_id.
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = $"""
+                CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+                INSERT INTO meta VALUES ('{IndexSchema.SchemaVersionKey}', '{IndexSchema.Version}'), ('{IndexSchema.DenFormatKey}', '1'),
+                    ('{IndexSchema.SupportedFormatKey}', '1');
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        Assert.Equal(IndexStatus.Corrupt, IndexBuilder.Check(den.Root));
+        using var index = DenIndex.Open(den.Root);
+        Assert.NotEmpty(index.Search("reach"));
+    }
+
+    [Fact]
+    public void ANullMetaValueIsCorrupt()
+    {
+        using var den = TempDen.Starfall();
+        Directory.CreateDirectory(Path.GetDirectoryName(den.IndexPath)!);
+        using (var connection = new SqliteConnection(IndexBuilder.ConnectionString(den.IndexPath, SqliteOpenMode.ReadWriteCreate)))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = $"""
+                PRAGMA application_id = {IndexSchema.ApplicationId};
+                CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+                INSERT INTO meta VALUES ('{IndexSchema.SchemaVersionKey}', NULL);
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        Assert.Equal(IndexStatus.Corrupt, IndexBuilder.Check(den.Root));
+    }
+
+    [Fact]
+    public void AStateFolderThatIsAFileIsReportedClearly()
+    {
+        using var den = TempDen.Starfall();
+        den.Write(IndexBuilder.StateFolder, "not a folder");
+
+        Assert.Equal(IndexStatus.Missing, IndexBuilder.Check(den.Root));
+        var ex = Assert.Throws<IOException>(() => IndexBuilder.Rebuild(den.Root));
+        Assert.Contains("is a file", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnIndexThatIsAFolderIsReportedClearly()
+    {
+        using var den = TempDen.Starfall();
+        Directory.CreateDirectory(den.IndexPath);
+
+        Assert.Equal(IndexStatus.Corrupt, IndexBuilder.Check(den.Root));
+        var ex = Assert.Throws<IOException>(() => IndexBuilder.Rebuild(den.Root));
+        Assert.Contains("is a folder", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ABusyIndexGivesAClearErrorOnWindows()
+    {
+        // Elsewhere, a file can be replaced while it's open.
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows refuses to replace an open file.");
+        using var den = TempDen.Starfall();
+        IndexBuilder.Rebuild(den.Root);
+        var before = File.ReadAllBytes(den.IndexPath);
+
+        using (var reader = new SqliteConnection(IndexBuilder.ConnectionString(den.IndexPath, SqliteOpenMode.ReadOnly)))
+        {
+            reader.Open();
+            var ex = Assert.Throws<IOException>(() => IndexBuilder.Rebuild(den.Root));
+            Assert.Contains("is in use", ex.Message, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(before, File.ReadAllBytes(den.IndexPath));
+    }
+
+    [Fact]
     public void StaleTempFilesAreCleanedUp()
     {
         using var den = TempDen.Starfall();

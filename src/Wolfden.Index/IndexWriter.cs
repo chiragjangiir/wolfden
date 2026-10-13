@@ -1,8 +1,11 @@
 using System.Globalization;
+using System.Linq.Expressions;
+using System.Reflection;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Wolfden.Core.Documents;
 using Wolfden.Core.Entities;
 using Wolfden.Core.Links;
@@ -31,6 +34,7 @@ internal sealed class IndexWriter
     private readonly Dictionary<Chapter, int> _chapters = [];
     private readonly Dictionary<CatalogEntity, int> _entities = [];
     private readonly Dictionary<Section, int> _sections = [];
+    private readonly List<object> _rows = [];
     private readonly List<(string Title, string Body, string Kind, int EntityId, int? SectionId)> _search = [];
 
     private IndexWriter(string root)
@@ -65,14 +69,16 @@ internal sealed class IndexWriter
         {
             var id = _files.Count + 1;
             _files[path] = id;
-            db.Files.Add(new FileRecord { Id = id, Path = path, Kind = FileKind(path), Hash = hash, IsLoaded = loaded.Contains(path) });
+            _rows.Add(new FileRecord { Id = id, Path = path, Kind = FileKind(path), Hash = hash, IsLoaded = loaded.Contains(path) });
         }
 
-        db.Meta.AddRange(
+        _rows.AddRange(
+        [
             new MetaRecord { Key = IndexSchema.SchemaVersionKey, Value = IndexSchema.Version.ToString(CultureInfo.InvariantCulture) },
             new MetaRecord { Key = IndexSchema.DenFormatKey, Value = IndexBuilder.DenFormatStamp(_source.FileExists("den.yaml") ? _source.ReadFile("den.yaml") : null) },
-            new MetaRecord { Key = IndexSchema.SupportedFormatKey, Value = DenStructure.SupportedFormat.ToString(CultureInfo.InvariantCulture) });
-        db.Dens.Add(new DenRecord
+            new MetaRecord { Key = IndexSchema.SupportedFormatKey, Value = DenStructure.SupportedFormat.ToString(CultureInfo.InvariantCulture) },
+        ]);
+        _rows.Add(new DenRecord
         {
             Id = 1,
             Name = DenName(),
@@ -82,48 +88,47 @@ internal sealed class IndexWriter
             BookkeepingSectionsJson = JsonSerializer.Serialize(structure.BookkeepingSections, JsonOptions),
         });
 
-        WriteContainers(db, structure);
-        WriteEntities(db, catalog, new Bookkeeping(structure.BookkeepingSections));
-        WriteLinks(db, links);
-        WriteOutlines(db, outlines);
-        WriteDiagnostics(db, structure.Diagnostics.Concat(catalog.Diagnostics).Concat(links.Diagnostics));
+        WriteContainers(structure);
+        WriteEntities(catalog, new Bookkeeping(structure.BookkeepingSections));
+        WriteLinks(links);
+        WriteOutlines(outlines);
+        WriteDiagnostics(structure.Diagnostics.Concat(catalog.Diagnostics).Concat(links.Diagnostics));
 
-        db.SaveChanges();
-        WriteSearch(connection);
+        Insert(db, connection);
     }
 
-    private void WriteContainers(IndexDbContext db, DenStructure structure)
+    private void WriteContainers(DenStructure structure)
     {
         foreach (var universe in structure.Universes)
         {
-            var universeId = AddContainer(db, universe, universe, null, null);
+            var universeId = AddContainer(universe, universe, null, null);
             foreach (var work in universe.Works)
             {
                 if (work is Series series)
                 {
                     var firstBook = series.Books.Count > 0 ? IndexOf(universe, series.Books[0]) : (int?)null;
-                    var seriesId = AddContainer(db, series, universe, universeId, firstBook);
+                    var seriesId = AddContainer(series, universe, universeId, firstBook);
                     foreach (var book in series.Books)
                     {
-                        AddBook(db, book, universe, universeId, seriesId);
+                        AddBook(book, universe, universeId, seriesId);
                     }
                 }
                 else if (work is Book book)
                 {
-                    AddBook(db, book, universe, universeId, universeId);
+                    AddBook(book, universe, universeId, universeId);
                 }
             }
         }
     }
 
-    private void AddBook(IndexDbContext db, Book book, Universe universe, int universeId, int parentId)
+    private void AddBook(Book book, Universe universe, int universeId, int parentId)
     {
-        var bookId = AddContainer(db, book, universe, parentId, IndexOf(universe, book));
+        var bookId = AddContainer(book, universe, parentId, IndexOf(universe, book));
         foreach (var chapter in book.Chapters)
         {
             var id = _chapters.Count + 1;
             _chapters[chapter] = id;
-            db.Chapters.Add(new ChapterRecord
+            _rows.Add(new ChapterRecord
             {
                 Id = id,
                 BookId = bookId,
@@ -138,11 +143,11 @@ internal sealed class IndexWriter
         }
     }
 
-    private int AddContainer(IndexDbContext db, Container container, Universe universe, int? parentId, int? storyOrder)
+    private int AddContainer(Container container, Universe universe, int? parentId, int? storyOrder)
     {
         var id = _containers.Count + 1;
         _containers[container] = id;
-        db.Containers.Add(new ContainerRecord
+        _rows.Add(new ContainerRecord
         {
             Id = id,
             FileId = _files[container.FilePath],
@@ -160,7 +165,7 @@ internal sealed class IndexWriter
         return id;
     }
 
-    private void WriteEntities(IndexDbContext db, EntityCatalog catalog, Bookkeeping bookkeeping)
+    private void WriteEntities(EntityCatalog catalog, Bookkeeping bookkeeping)
     {
         var aliasId = 0;
         var valueId = 0;
@@ -170,7 +175,7 @@ internal sealed class IndexWriter
             _entities[entity] = id;
             var universeId = _containers[entity.Universe];
             var lead = entity.File.Lead;
-            db.Entities.Add(new EntityRecord
+            _rows.Add(new EntityRecord
             {
                 Id = id,
                 FileId = _files[entity.Path],
@@ -194,7 +199,7 @@ internal sealed class IndexWriter
 
             for (var i = 0; i < entity.Aliases.Count; i++)
             {
-                db.Aliases.Add(new AliasRecord
+                _rows.Add(new AliasRecord
                 {
                     Id = ++aliasId,
                     EntityId = id,
@@ -209,7 +214,7 @@ internal sealed class IndexWriter
             {
                 if (field.Kind == FieldValueKind.Plain)
                 {
-                    db.FieldValues.Add(new FieldValueRecord
+                    _rows.Add(new FieldValueRecord
                     {
                         Id = ++valueId,
                         EntityId = id,
@@ -229,7 +234,7 @@ internal sealed class IndexWriter
 
                 foreach (var entry in field.Entries)
                 {
-                    db.FieldValues.Add(new FieldValueRecord
+                    _rows.Add(new FieldValueRecord
                     {
                         Id = ++valueId,
                         EntityId = id,
@@ -256,7 +261,7 @@ internal sealed class IndexWriter
                 var section = fact.Section;
                 var sectionId = _sections.Count + 1;
                 _sections[section] = sectionId;
-                db.Sections.Add(new SectionRecord
+                _rows.Add(new SectionRecord
                 {
                     Id = sectionId,
                     EntityId = id,
@@ -284,14 +289,14 @@ internal sealed class IndexWriter
         }
     }
 
-    private void WriteLinks(IndexDbContext db, LinkIndex links)
+    private void WriteLinks(LinkIndex links)
     {
         var id = 0;
         foreach (var link in links.Links)
         {
             var occurrence = link.Occurrence;
             var resolution = link.Resolution;
-            db.Links.Add(new LinkRecord
+            _rows.Add(new LinkRecord
             {
                 Id = ++id,
                 FileId = _files[occurrence.Path],
@@ -339,14 +344,14 @@ internal sealed class IndexWriter
         return result;
     }
 
-    private void WriteOutlines(IndexDbContext db, List<(Book Book, string Path, IReadOnlyList<OutlineRow>? Rows)> outlines)
+    private void WriteOutlines(List<(Book Book, string Path, IReadOnlyList<OutlineRow>? Rows)> outlines)
     {
         var id = 0;
         foreach (var (book, path, rows) in outlines)
         {
             foreach (var row in rows ?? [])
             {
-                db.OutlineRows.Add(new OutlineRowRecord
+                _rows.Add(new OutlineRowRecord
                 {
                     Id = ++id,
                     FileId = _files[path],
@@ -370,12 +375,12 @@ internal sealed class IndexWriter
         }
     }
 
-    private static void WriteDiagnostics(IndexDbContext db, IEnumerable<DenDiagnostic> diagnostics)
+    private void WriteDiagnostics(IEnumerable<DenDiagnostic> diagnostics)
     {
         var id = 0;
         foreach (var d in diagnostics.OrderBy(d => d.Path, StringComparer.Ordinal).ThenBy(d => d.Diagnostic.Line ?? 0))
         {
-            db.Diagnostics.Add(new DiagnosticRecord
+            _rows.Add(new DiagnosticRecord
             {
                 Id = ++id,
                 Path = d.Path,
@@ -387,28 +392,94 @@ internal sealed class IndexWriter
         }
     }
 
-    private void WriteSearch(SqliteConnection connection)
+    /// <summary>
+    /// Inserts every row in the order added (which respects foreign keys),
+    /// then the search rows, in one transaction. Each table gets one
+    /// prepared INSERT built from the EF model, which is far faster than
+    /// EF's change tracker for a whole den.
+    /// </summary>
+    private void Insert(IndexDbContext db, SqliteConnection connection)
     {
         using var transaction = connection.BeginTransaction();
-        using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = IndexSchema.InsertSearchRow;
-        var title = command.Parameters.Add("$title", SqliteType.Text);
-        var body = command.Parameters.Add("$body", SqliteType.Text);
-        var kind = command.Parameters.Add("$kind", SqliteType.Text);
-        var entity = command.Parameters.Add("$entity", SqliteType.Integer);
-        var section = command.Parameters.Add("$section", SqliteType.Integer);
-        foreach (var row in _search)
+        var inserts = new Dictionary<Type, (SqliteCommand Command, (SqliteParameter Parameter, Func<object, object?> Get)[] Columns)>();
+        try
         {
-            title.Value = row.Title;
-            body.Value = row.Body;
-            kind.Value = row.Kind;
-            entity.Value = row.EntityId;
-            section.Value = (object?)row.SectionId ?? DBNull.Value;
-            command.ExecuteNonQuery();
+            foreach (var row in _rows)
+            {
+                if (!inserts.TryGetValue(row.GetType(), out var insert))
+                {
+                    insert = Prepare(db, connection, transaction, row.GetType());
+                    inserts[row.GetType()] = insert;
+                }
+
+                foreach (var (parameter, get) in insert.Columns)
+                {
+                    parameter.Value = get(row) ?? DBNull.Value;
+                }
+
+                insert.Command.ExecuteNonQuery();
+            }
+        }
+        finally
+        {
+            foreach (var (command, _) in inserts.Values)
+            {
+                command.Dispose();
+            }
+        }
+
+        using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = IndexSchema.InsertSearchRow;
+            var title = command.Parameters.Add("$title", SqliteType.Text);
+            var body = command.Parameters.Add("$body", SqliteType.Text);
+            var comments = command.Parameters.Add("$comments", SqliteType.Text);
+            var kind = command.Parameters.Add("$kind", SqliteType.Text);
+            var entity = command.Parameters.Add("$entity", SqliteType.Integer);
+            var section = command.Parameters.Add("$section", SqliteType.Integer);
+            command.Prepare();
+            foreach (var row in _search)
+            {
+                // HTML comments (F-SEC-11) are searchable, in a column of
+                // their own, so a hit can say it came from one.
+                var (text, notes) = MarkdownComments.Split(row.Body);
+                title.Value = row.Title;
+                body.Value = text.TrimStart('\r', '\n');
+                comments.Value = notes;
+                kind.Value = row.Kind;
+                entity.Value = row.EntityId;
+                section.Value = (object?)row.SectionId ?? DBNull.Value;
+                command.ExecuteNonQuery();
+            }
         }
 
         transaction.Commit();
+    }
+
+    private static (SqliteCommand Command, (SqliteParameter Parameter, Func<object, object?> Get)[] Columns) Prepare(
+        IndexDbContext db, SqliteConnection connection, SqliteTransaction transaction, Type type)
+    {
+        var entityType = db.Model.FindEntityType(type) ?? throw new InvalidOperationException($"{type.Name} isn't in the index model.");
+        var properties = entityType.GetProperties().ToList();
+        var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            $"INSERT INTO \"{entityType.GetTableName()}\" ({string.Join(", ", properties.Select(p => $"\"{p.GetColumnName()}\""))}) " +
+            $"VALUES ({string.Join(", ", properties.Select((_, i) => $"$p{i}"))})";
+        var columns = properties
+            .Select((p, i) => (command.Parameters.Add(new SqliteParameter($"$p{i}", DBNull.Value)), Getter(p.PropertyInfo!)))
+            .ToArray();
+        command.Prepare();
+        return (command, columns);
+    }
+
+    /// <summary>A compiled <c>row => (object?)((T)row).Property</c>, much faster than reflection for a whole den.</summary>
+    private static Func<object, object?> Getter(PropertyInfo property)
+    {
+        var row = Expression.Parameter(typeof(object), "row");
+        var value = Expression.Property(Expression.Convert(row, property.DeclaringType!), property);
+        return Expression.Lambda<Func<object, object?>>(Expression.Convert(value, typeof(object)), row).Compile();
     }
 
     private static IEnumerable<Container> AllContainers(DenStructure structure) =>

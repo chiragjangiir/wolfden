@@ -59,8 +59,12 @@ public static class IndexBuilder
     /// (F-ID-6); it writes only inside <c>.wolfden/</c>.
     /// </summary>
     /// <exception cref="DirectoryNotFoundException">The den root doesn't exist.</exception>
-    /// <exception cref="IOException">The old index stayed open in a query or another process, so it couldn't be replaced (Windows).</exception>
-    /// <exception cref="UnauthorizedAccessException">As for <see cref="IOException"/>: Windows reports some sharing violations this way.</exception>
+    /// <exception cref="IOException">
+    /// The old index stayed open in a query, in this process or another
+    /// Wolfden process, so it couldn't be replaced (Windows); or
+    /// <c>.wolfden</c> or <c>.wolfden/index.db</c> isn't what it should be,
+    /// such as a file where the folder belongs. The message says which.
+    /// </exception>
     public static void Rebuild(string denRoot) => Rebuild(denRoot, beforeSwap: null);
 
     /// <summary>
@@ -78,11 +82,23 @@ public static class IndexBuilder
         }
 
         var folder = Path.Combine(root, StateFolder);
+        if (File.Exists(folder))
+        {
+            throw new IOException(
+                $"'{folder}' is a file, but Wolfden keeps its index in a folder by that name. Move or rename the file, then try again.");
+        }
+
         Directory.CreateDirectory(folder);
         WriteGitignore(folder);
         RemoveStaleTempFiles(folder);
 
         var target = Path.Combine(folder, IndexFileName);
+        if (Directory.Exists(target))
+        {
+            throw new IOException(
+                $"'{target}' is a folder, but it should be Wolfden's index file. Move or delete the folder (the index is rebuilt from the den's files), then try again.");
+        }
+
         var temp = Path.Combine(folder, $"{IndexFileName}.{Guid.NewGuid():N}{TempSuffix}");
         try
         {
@@ -107,6 +123,12 @@ public static class IndexBuilder
     public static IndexStatus Check(string denRoot)
     {
         var path = IndexPath(denRoot);
+        if (Directory.Exists(path))
+        {
+            // Not an index; Rebuild reports it clearly.
+            return IndexStatus.Corrupt;
+        }
+
         if (!File.Exists(path))
         {
             return IndexStatus.Missing;
@@ -119,6 +141,13 @@ public static class IndexBuilder
             connection.Open();
             using (var check = connection.CreateCommand())
             {
+                // Another SQLite file in the index's place isn't an index.
+                check.CommandText = "PRAGMA application_id";
+                if (check.ExecuteScalar() is not long id || id != IndexSchema.ApplicationId)
+                {
+                    return IndexStatus.Corrupt;
+                }
+
                 check.CommandText = "PRAGMA quick_check";
                 if (check.ExecuteScalar() as string != "ok")
                 {
@@ -128,7 +157,7 @@ public static class IndexBuilder
 
             meta = ReadMeta(connection);
         }
-        catch (SqliteException)
+        catch (Exception ex) when (ex is SqliteException or InvalidOperationException or InvalidCastException)
         {
             return IndexStatus.Corrupt;
         }
@@ -187,11 +216,26 @@ public static class IndexBuilder
             connection.Open();
             Execute(connection, "PRAGMA journal_mode = MEMORY");
             Execute(connection, "PRAGMA synchronous = OFF");
+            Execute(connection, $"PRAGMA application_id = {IndexSchema.ApplicationId}");
             using (var db = new IndexDbContext(connection))
             {
                 db.Database.EnsureCreated();
                 Execute(connection, IndexSchema.CreateSearchTable);
+
+                // Building an index once, after the rows are in, is faster
+                // than updating it row by row, so the secondary indexes come
+                // off for the load and go back on afterwards, unchanged.
+                var indexes = IndexDefinitions(connection);
+                foreach (var (name, _) in indexes)
+                {
+                    Execute(connection, $"DROP INDEX \"{name}\"");
+                }
+
                 IndexWriter.Write(root, db, connection);
+                foreach (var (_, sql) in indexes)
+                {
+                    Execute(connection, sql);
+                }
             }
 
             Execute(connection, "PRAGMA optimize");
@@ -201,6 +245,21 @@ public static class IndexBuilder
         // file is on disk before it replaces the old index.
         using var stream = new FileStream(temp, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
         stream.Flush(flushToDisk: true);
+    }
+
+    /// <summary>The model's secondary indexes, by name, with the SQL that creates each one, in a fixed order.</summary>
+    private static List<(string Name, string Sql)> IndexDefinitions(SqliteConnection connection)
+    {
+        var result = new List<(string, string)>();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL ORDER BY name";
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            result.Add((reader.GetString(0), reader.GetString(1)));
+        }
+
+        return result;
     }
 
     /// <summary>Moves the new index over the old one, retrying briefly while another process has the old one open.</summary>
@@ -223,8 +282,15 @@ public static class IndexBuilder
                 File.Move(temp, target, overwrite: true);
                 return;
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < 5)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
+                if (attempt >= 5)
+                {
+                    throw new IOException(
+                        $"The index '{target}' is in use, by a query in this process or by another Wolfden process, so the rebuilt index couldn't replace it. Try again when it's idle.",
+                        ex);
+                }
+
                 Thread.Sleep(100 * attempt);
             }
         }
@@ -238,7 +304,10 @@ public static class IndexBuilder
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            meta[reader.GetString(0)] = reader.GetString(1);
+            if (!reader.IsDBNull(0) && !reader.IsDBNull(1))
+            {
+                meta[reader.GetString(0)] = reader.GetString(1);
+            }
         }
 
         return meta;

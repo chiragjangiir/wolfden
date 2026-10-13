@@ -96,6 +96,31 @@ public sealed class StarfallIndexTests : IClassFixture<StarfallIndexTests.Built>
     }
 
     [Fact]
+    public void InEffectAtHandlesTheEndOfTheStory()
+    {
+        // F-VIEW-1: an omitted position means the end of the story, "all
+        // canon so far". Open-ended facts store until = EndOfStory, so a
+        // plain p < until would find nothing there.
+        var mara = Index.FindEntity(Mara)!;
+        var values = Index.Context.FieldValues.Where(v => v.EntityId == mara.Id && v.IsLive);
+        var sections = Index.Context.Sections.Where(s => s.EntityId == mara.Id);
+
+        Assert.Equal(["\"Commander\"", "\"[[kessan-reach]]\"", "\"human\""],
+            values.InEffectAt(IndexQueries.EndOfStory).OrderBy(v => v.FieldOrder).Select(v => v.ValueJson).ToList());
+        Assert.Equal(["Overview", "In command", "Shoulder injury"],
+            sections.InEffectAt(IndexQueries.EndOfStory).OrderBy(s => s.Index).Select(s => s.Name).ToList());
+
+        Assert.Empty(values.InEffectAt(IndexQueries.StartOfStory));
+        Assert.Equal(["\"Lieutenant\"", "\"[[tessaly]]\"", "\"human\""],
+            values.InEffectAt(P("ember:1")).OrderBy(v => v.FieldOrder).Select(v => v.ValueJson).ToList());
+        Assert.Equal(["Overview", "In command", "Shoulder injury", "Recovery"],
+            sections.InEffectAt(P("ash:2")).OrderBy(s => s.Index).Select(s => s.Name).ToList());
+
+        Assert.Contains(Index.Context.Entities.EnteredBy(IndexQueries.EndOfStory), e => e.Id == mara.Id);
+        Assert.DoesNotContain(Index.Context.Entities.EnteredBy(P("ember:prologue")), e => e.Id == mara.Id);
+    }
+
+    [Fact]
     public void SectionsHaveEffectiveRanges()
     {
         var mara = Index.FindEntity(Mara)!;
