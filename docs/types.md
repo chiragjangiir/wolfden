@@ -156,9 +156,13 @@ affect entities created afterward.
 
 An addition can still give meaning to something a den left undefined: a
 new core field checks the values a den already wrote under that name, and
-a new core type picks up entities that named it. A writer who relies on a
-custom field should define it in a den-local pack (§10), so that its
-definition is the den's own and wins over any later built-in one.
+a new core type picks up entities that named it. A new standard section
+makes repeated custom sections with that name start handing over
+(format.md F-SEC-8), so the earlier ones drop out of later views. A
+den-local extension that adds a section name does the same. A writer who
+relies on a custom field should define it in a den-local pack (§10), so
+that its definition is the den's own and wins over any later built-in
+one.
 
 **F-PACK-10.** A den-local pack whose key is the key of a built-in pack
 **shadows** it. A `den.yaml` entry with that key names the den-local pack,
@@ -986,6 +990,11 @@ and each is written in one place.
   **paid off** if `paid_off` isn't after `p`, else **planted** if one of
   its `planted` positions isn't after `p`, else **not yet planted**.
   Positions that don't resolve are skipped. Views SHOULD show this state.
+  Here and in F-CORE-2 and F-CORE-4, `planted` and `paid_off` are each
+  read from a plain value, or from a single entry that is in canon
+  (F-STAT-3), using its `value`. Anything else, such as a `candidate`
+  entry for a payoff chapter still being decided, or a temporal list,
+  counts as unset.
 - **Whether its resolution is decided** is ordinary `status` (§9.3 of
   format.md), on the thread or on just the part that's open. Usually the
   thread is in canon and only its `## Payoff` section is `undecided`, with
@@ -1020,12 +1029,22 @@ so the payoff stays out of views from before it happens, and the links in
 it have that position (F-LINK-13). An explicit `from=` wins, and the
 section's subsections inherit the position as usual (F-SEC-9).
 
+A `paid_off` that is a well-formed position but doesn't resolve yet, such
+as a chapter of a book that has no chapters listed, is still the Payoff's
+`from`. The section is then left out of canon views like any fact whose
+position doesn't resolve (F-POS-4), so a planned payoff never shows early.
+It gets no second F-POS-4 warning, since `paid_off` already has one
+(F-FT-10).
+
 The rule is narrow. It covers only a level-2 section named `Payoff`
-(matched as in F-SEC-3), only in an entity whose type is the core pack's
-`thread` (extended or not), and only while `paid_off` is set and resolves
-(F-FT-10). Otherwise F-SEC-8's usual rule applies. A den-local type that
-replaces `thread` (F-TYPE-4, F-PACK-10) doesn't get this default, and
-writes `from=` instead.
+(matched as in F-SEC-3), only in an entity whose type is the built-in core
+pack's `thread` (extended or not), and only while `paid_off` is set (as
+read above) and is a well-formed position. Otherwise F-SEC-8's usual rule
+applies. A den-local type that replaces `thread` (F-TYPE-4, F-PACK-10)
+doesn't get this default, and writes `from=` instead. That includes a den
+that shadows core with a copy of it, whose copied `thread.yaml` still
+describes the default in its Payoff description, so such a den should
+edit that description.
 
 **F-CORE-3.** An event whose `ends` is earlier than its `when` is a
 [warning]. The two sort keys are compared only over the numbers both

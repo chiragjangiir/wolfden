@@ -313,7 +313,8 @@ a container folder, other than its container file and a book's
 **F-LAY-8.** Other files and folders at the den root, such as a
 `README.md`, a `LICENSE`, or a `drafts/` folder, are ignored, with no
 diagnostic. F-LAY-7 doesn't apply there, since the den root isn't a
-container.
+container. A `den.yaml` inside one of them (`archive/old-den/den.yaml`)
+still gets the F-LAY-1 warning.
 
 ### 5.2 `den.yaml`
 
@@ -362,9 +363,7 @@ spoiler checks. In format 1 that's one check, F-LINK-13. It defaults to
 The positions on facts record where the reader learns each one, so a
 writer can pace the reveals. The check helps writers who track that, by
 flagging a link to something the reader hasn't met yet. A value that isn't
-a YAML boolean is a [warning], and the checks stay off. The key is an
-additive change (F-DEN-1): a reader that doesn't know it ignores it
-(F-DEN-5).
+a YAML boolean is a [warning], and the checks stay off.
 
 ## 6. Containers: universe, series, book
 
@@ -631,7 +630,7 @@ a banked option, so canon views leave it out and Commander doesn't end at
 is a single entry, a **temporal list** (a non-empty list in which every
 item is an entry), or else a plain value. A list in which some items are
 entries and others aren't is an [error]. A single entry means the same as a
-one-item temporal list. The shape decides, not the type, so a parser can
+one-item temporal list (F-TMP-8 aside). The shape decides, not the type, so a parser can
 tell these apart without loading packs. As a result, a plain value that is
 a mapping can't use a key named `value`. This section covers an entity's
 `fields`. Chapter fields and `chapter_defaults` have no entries, and their
@@ -837,7 +836,9 @@ with the same name (F-SEC-8). Two live level-2 standard sections with the
 same name **overlap** if they have the same `from` (as F-SEC-8 gives it,
 explicit or not), or if an
 explicit `until` reaches past the next one's `from`, as for entries
-(F-TMP-5). Overlap is a [warning]. Custom sections never hand over and
+(F-TMP-5). Overlap is a [warning]. Unlike F-TMP-5, there's no
+tie-break: where sections overlap, views show each of them that is in
+effect, so no prose is hidden. Custom sections never hand over and
 never get this warning, so cumulative ones such as `## Additions` or
 `## Session notes` can repeat freely, and out-of-canon sections don't
 count either.
@@ -906,10 +907,12 @@ A missing `until` depends on the section:
 - A **standard section** (types.md F-TYPE-10) at level 2 **hands over**
   like a temporal entry (F-TMP-4). If it's live, it ends at the earliest
   `from` after its own among the other live level-2 sections with the same
-  name, or at the end of the story if there is none. A section is
-  **live** if it's in canon (F-STAT-3), its positions resolve (F-POS-4),
-  and its explicit range isn't empty. Its `from` here is the one this rule
-  gives it, explicit or not.
+  name (matched as in F-SEC-3), or at the end of the story if there is
+  none. A section is **live** if it's in canon (F-STAT-3), its positions
+  resolve (F-POS-4), and its explicit range isn't empty. Its `from` here
+  is the one this rule gives it, explicit or not. A standard section that
+  isn't live runs to the end of the story, so views that show
+  out-of-canon facts, such as an idea bank, still have a range for it.
 - Any other section, including a custom section and a subsection, runs to
   the end of the story, or for a subsection to the end of its parent
   (F-SEC-9). It never ends on its own when a later section starts.
@@ -1204,7 +1207,7 @@ the one the field names is a [warning].
 
 **F-LINK-13.** A link's **position** depends on where it is:
 
-- In a temporal entry: the entry's `from`.
+- In an entry (F-TMP-1), on any field: the entry's `from`.
 - In a section: the section's effective `from` (F-SEC-9).
 - Elsewhere in an entity (the lead, or a plain field): the entity's `from`
   (F-ENT-6).

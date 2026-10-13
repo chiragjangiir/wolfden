@@ -19,10 +19,15 @@ he owe him?
 ## Setup
 - Chapter 5: Seward takes up a new study, a patient "morbidly
   excitable," with "some fixed idea which I cannot make out."
-- Chapter 8: Renfield escapes to the chapel at [[carfax]] and is found
-  talking to its door: "I am here to do Your bidding, Master."
-- Chapters 9 to 20: he grows calm or wild as the Count comes and goes
-  next door.
+
+### Chapter 8
+<!-- wolfden: from=dracula:8 -->
+- Renfield escapes to the chapel at [[carfax]] and is found talking to
+  its door: "I am here to do Your bidding, Master."
+
+### Chapters 9 to 20
+<!-- wolfden: from=dracula:9 -->
+- He grows calm or wild as the Count comes and goes next door.
 
 ## Payoff
 In chapter 21, dying, Renfield tells how he invited the Count in, and

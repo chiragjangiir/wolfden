@@ -157,9 +157,9 @@ Key points:
 - **Fields can change over time.** A plain value means it's always true. A list
   of `{value, from, until?}` entries means it's true at story positions.
   **Decided (#66):** a single entry with a `from` is allowed on any field,
-  even one that isn't temporal. It means "known from here": a death or a
-  hidden identity stays out of canon views from before the reader learns
-  it.
+  even one that isn't temporal (except `row`). It means "known from here":
+  a death or a hidden identity stays out of canon views from before the
+  reader learns it.
 - **Sections can carry positions too.** A `<!-- wolfden: from=... -->`
   comment on the line under a heading (one blank line allowed; with an
   optional `until=`)

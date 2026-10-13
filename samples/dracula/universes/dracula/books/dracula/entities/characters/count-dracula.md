@@ -13,6 +13,7 @@ fields:
   heritage: A Székely noble of Transylvania.
   born: { value: { text: "centuries before the story" }, from: "dracula:18" }
   died: { value: { text: "6 November, at sunset", sort: [0, 11, 6] }, from: "dracula:27" }
+  # Hinted from chapter 15 on; chapter 18 is Van Helsing's full account.
   species: { value: "vampire (Un-Dead)", from: "dracula:18", pin: true }
 ---
 
