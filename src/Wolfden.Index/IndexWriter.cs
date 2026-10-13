@@ -92,6 +92,7 @@ internal sealed class IndexWriter
         });
 
         WriteContainers(structure);
+        WriteFieldDefaults(structure);
         WriteEntities(catalog, new Bookkeeping(structure.BookkeepingSections));
         WriteLinks(links);
         WriteOutlines(outlines);
@@ -168,6 +169,32 @@ internal sealed class IndexWriter
         return id;
     }
 
+    /// <summary>The defaults of every enabled type's fields (types.md F-FT-15), for canon views.</summary>
+    private void WriteFieldDefaults(DenStructure structure)
+    {
+        var id = 0;
+        foreach (var type in structure.Types.Types.OrderBy(t => t.Key, StringComparer.Ordinal))
+        {
+            for (var i = 0; i < type.Fields.Count; i++)
+            {
+                var field = type.Fields[i];
+                if (field.Default is { } value && value is not YamlScalar { IsNull: true })
+                {
+                    _rows.Add(new FieldDefaultRecord
+                    {
+                        Id = ++id,
+                        TypeKey = type.Key,
+                        Field = field.Name,
+                        FieldOrder = i,
+                        DefaultJson = Json(value),
+                        Path = field.Path,
+                        Line = field.Line,
+                    });
+                }
+            }
+        }
+    }
+
     private void WriteEntities(EntityCatalog catalog, Bookkeeping bookkeeping)
     {
         var aliasId = 0;
@@ -197,6 +224,7 @@ internal sealed class IndexWriter
                 HasDuplicateId = entity.HasDuplicateId,
                 Title = entity.File.Title,
                 Lead = lead,
+                LeadLine = entity.File.LeadLine,
             });
             _search.Add((string.Join("\n", entity.Aliases.Prepend(entity.Name)), lead, "entity", id, null));
 
@@ -225,6 +253,7 @@ internal sealed class IndexWriter
                         Field = field.Name,
                         FieldOrder = field.Order,
                         Kind = "plain",
+                        Line = field.Line,
                         ValueJson = Json(field.Value),
                         OwnStatus = entity.Status.ToKey(),
                         Status = entity.Status.ToKey(),
@@ -246,6 +275,7 @@ internal sealed class IndexWriter
                         FieldOrder = field.Order,
                         Kind = field.Kind == FieldValueKind.Entry ? "entry" : "temporal",
                         EntryIndex = entry.Index,
+                        Line = entry.Line,
                         ValueJson = Json(entry.Value),
                         FromText = entry.FromText,
                         UntilText = entry.UntilText,

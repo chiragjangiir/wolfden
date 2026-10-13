@@ -97,6 +97,9 @@ public sealed partial class MarkdownFile : DenFile
     /// <summary>The lead: the body before the first level-2 heading (F-SEC-2).</summary>
     public string Lead => IsReadable ? Text[_bodyStart.._leadEnd] : "";
 
+    /// <summary>The 1-based line where the body, and so the lead, starts.</summary>
+    public int LeadLine => Source is { } source ? source.LineIndexOf(_bodyStart) + 1 : 1;
+
     /// <summary>The first level-1 heading in the lead, the display title, if any.</summary>
     public string? Title { get; }
 

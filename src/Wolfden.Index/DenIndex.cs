@@ -76,6 +76,18 @@ public sealed class DenIndex : IDisposable
             .FirstOrDefault();
     }
 
+    /// <summary>
+    /// The canon-as-of view (format.md F-VIEW-1) of <paramref name="scope"/>
+    /// at <paramref name="position"/>: a <c>book:chapter</c> or bare book
+    /// position, or null for the end of the story (all canon so far).
+    /// </summary>
+    /// <exception cref="CanonViewException">The scope doesn't exist, or the position doesn't parse or resolve.</exception>
+    public CanonView CanonAsOf(CanonScope scope, string? position = null)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        return CanonQuery.Run(Context, scope, position);
+    }
+
     /// <summary>The links that resolve to the entity with this key: its backlinks, by path and place in the file.</summary>
     public IReadOnlyList<LinkRecord> Backlinks(string entityKey)
     {

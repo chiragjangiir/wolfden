@@ -10,9 +10,11 @@ public static class IndexSchema
     /// Version 2 (#84) loads types and packs: standard sections hand over
     /// (F-SEC-8), <c>ref</c> fields are type-checked (F-LINK-11), and
     /// chapter-field values that don't match their definitions are ignored
-    /// (F-CHAP-3).
+    /// (F-CHAP-3). Version 3 (#15) adds what canon views (format.md §9.4)
+    /// need: field defaults (types.md F-FT-15), and the line of each field
+    /// value and lead, so a view can point at its source.
     /// </summary>
-    public const int Version = 2;
+    public const int Version = 3;
 
     /// <summary>The <c>meta</c> key for <see cref="Version"/>.</summary>
     public const string SchemaVersionKey = "schema_version";
