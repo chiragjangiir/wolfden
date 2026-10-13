@@ -158,9 +158,9 @@ public sealed class DraculaIndexTests : IClassFixture<DraculaIndexTests.Built>
         Assert.Equal(3, sections.Count);
         Assert.Equal([chapter["5"], chapter["15"], chapter["16"]], sections.Select(s => s.FromOrdinal!.Value));
 
-        // Handover between standard sections needs the den's types, which
-        // aren't loaded yet, so each runs to the end of the story for now.
-        Assert.All(sections, s => Assert.Equal(long.MaxValue, s.UntilOrdinal));
+        // Appearance is a standard section of the core character, so each
+        // hands over to the next one (F-SEC-8), and the last runs on.
+        Assert.Equal([chapter["15"], chapter["16"], long.MaxValue], sections.Select(s => s.UntilOrdinal!.Value));
     }
 
     /// <summary>One index of a Dracula copy, shared by the tests in this class.</summary>

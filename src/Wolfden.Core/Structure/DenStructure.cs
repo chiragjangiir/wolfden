@@ -1,5 +1,6 @@
 using Wolfden.Core.Documents;
 using Wolfden.Core.Positions;
+using Wolfden.Core.Types;
 
 namespace Wolfden.Core.Structure;
 
@@ -13,19 +14,22 @@ public sealed record DenDiagnostic(string Path, Diagnostic Diagnostic)
 }
 
 /// <summary>
-/// A den's structure, read-only: <c>den.yaml</c>, its universes, series,
-/// and books, the story order of the books, and each book's chapters
-/// (format.md §5, §6, §8.2). It's what positions resolve against. It reads
-/// only <c>den.yaml</c> and container files, never entities, and never
-/// writes (F-ID-6).
+/// A den's structure, read-only: <c>den.yaml</c>, its packs and types, its
+/// universes, series, and books, the story order of the books, and each
+/// book's chapters with their chapter fields (format.md §5, §6, §8.2;
+/// types.md). It's what positions resolve against. It reads only
+/// <c>den.yaml</c>, pack files, and container files, never entities, and
+/// never writes (F-ID-6).
 /// </summary>
 /// <remarks>
 /// Containers with errors are left out with everything under them (F-GEN-2).
 /// <see cref="Diagnostics"/> holds the problems that decide the structure:
 /// container files' parse errors, names and ids, a book's status and
-/// chapters, <c>order</c> and <c>books</c>, and key clashes. Other checks of
-/// container files, such as authors and <c>chapter_defaults</c>, are left to
-/// <c>wolfden check</c> (#16).
+/// chapters, <c>order</c> and <c>books</c>, key clashes, <c>den.yaml</c>'s
+/// <c>packs</c> (F-DEN-4), pack files (<see cref="DenTypes.Diagnostics"/>),
+/// and chapter-field values, which are ignored when they don't match their
+/// definitions (types.md F-CHAP-3). Other checks of container files, such
+/// as authors, are left to <c>wolfden check</c> (#16).
 /// </remarks>
 public sealed class DenStructure
 {
@@ -57,6 +61,12 @@ public sealed class DenStructure
     /// (F-SEC-12) aren't included.
     /// </summary>
     public IReadOnlyList<string> BookkeepingSections { get; internal set; } = [];
+
+    /// <summary>
+    /// The den's enabled packs and types (types.md F-PACK-9). Until
+    /// <c>den.yaml</c> loads, the built-in packs alone.
+    /// </summary>
+    public DenTypes Types { get; internal set; } = DenTypes.BuiltIn;
 
     /// <summary>The universes that loaded, by key in ASCII order.</summary>
     public IReadOnlyList<Universe> Universes => _universes;

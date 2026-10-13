@@ -26,9 +26,10 @@ namespace Wolfden.Core.Entities;
 /// (F-ID-3), and a file name that isn't a valid slug (F-KEY-4).
 /// </para>
 /// <para>
-/// Checks that need the den's types, or that only warn, such as unknown
-/// types, field values, and positions that don't resolve, are left to
-/// <c>wolfden check</c> (#16).
+/// Each entity's type is looked up among the den's enabled types
+/// (<see cref="CatalogEntity.Definition"/>). Checks against types, and
+/// checks that only warn, such as unknown types, field values, and
+/// positions that don't resolve, are left to <c>wolfden check</c> (#16).
 /// </para>
 /// </remarks>
 public sealed partial class EntityCatalog
@@ -275,11 +276,14 @@ public sealed partial class EntityCatalog
             fromResolution = scope.Universe.Resolve(from);
         }
 
-        return new CatalogEntity(path, file, scope, id, slug, name!, aliases, type!, status, from, fromResolution);
+        return new CatalogEntity(path, file, scope, id, slug, name!, aliases, type!, status, from, fromResolution)
+        {
+            Definition = scope.Universe.Den.Types.Find(type!),
+        };
     }
 
     /// <summary>F-ENT-7, F-FLD-1, F-TMP-1, F-TMP-2, and the status and pin of entries (F-STAT-1, F-PIN-1).</summary>
-    private static void CheckFields(YamlNode? fields, Action<string, int, string> error)
+    internal static void CheckFields(YamlNode? fields, Action<string, int, string> error)
     {
         if (fields is null or YamlScalar { IsNull: true })
         {

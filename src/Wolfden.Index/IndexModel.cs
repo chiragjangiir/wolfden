@@ -60,7 +60,7 @@ public sealed class FileRecord
     /// <summary>The path relative to the den root, with <c>/</c>.</summary>
     public string Path { get; set; } = "";
 
-    /// <summary><c>den</c>, <c>container</c>, <c>entity</c>, <c>outline</c>, or <c>other</c>.</summary>
+    /// <summary><c>den</c>, <c>pack</c> (a den-local pack file, types.md §2), <c>container</c>, <c>entity</c>, <c>outline</c>, or <c>other</c>.</summary>
     public string Kind { get; set; } = "";
 
     /// <summary>The SHA-256 of the file's bytes, in lowercase hex.</summary>
@@ -342,8 +342,8 @@ public sealed class SectionRecord
     /// The effective <c>until</c> (exclusive), or null if a position doesn't
     /// resolve. <see cref="IndexQueries.EndOfStory"/> if it has no end; query
     /// with <see cref="IndexQueries.InEffectAt(IQueryable{SectionRecord}, long)"/>.
-    /// Standard-section handover (F-SEC-8) isn't applied yet, since it needs
-    /// the den's types (#84): see <see cref="Wolfden.Core.Entities.SectionFact.EffectiveUntil"/>.
+    /// A standard section of the entity's type hands over to the next live
+    /// one with the same name (F-SEC-8): see <see cref="Wolfden.Core.Entities.SectionFact.EffectiveUntil"/>.
     /// </summary>
     public long? UntilOrdinal { get; set; }
 }

@@ -5,7 +5,8 @@ namespace Wolfden.Core.Tests;
 /// <summary>
 /// Every link in the invented Starfall den (<c>Dens/starfall</c>), across a
 /// series of two books, a standalone book, and universe scope. The den has
-/// two deliberate problems: an ambiguous link and a spoiler.
+/// three deliberate problems: an ambiguous link, a spoiler, and a posting
+/// to a location where its den-local pack's ref field wants a ship.
 /// </summary>
 public class StarfallLinkTests
 {
@@ -25,6 +26,7 @@ public class StarfallLinkTests
             [
                 (Universe + "/entities/locations/kessan-reach.md", "F-LINK-7", (int?)15),
                 (Universe + "/series/long-dark/books/ember/outline.md", "F-LINK-13", 9),
+                (Universe + "/series/long-dark/entities/characters/mara-voss.md", "F-LINK-11", 15),
             ],
             index.Rules());
     }

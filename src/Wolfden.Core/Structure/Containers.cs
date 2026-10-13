@@ -1,5 +1,7 @@
 using Wolfden.Core.Documents;
 using Wolfden.Core.Positions;
+using Wolfden.Core.Types;
+using Wolfden.Core.Yaml;
 
 namespace Wolfden.Core.Structure;
 
@@ -73,6 +75,15 @@ public abstract class Container
     /// <summary>The container's place in story order: the start of the story,
     /// series, or book (F-ORD-3).</summary>
     public abstract StoryPoint Start { get; }
+
+    /// <summary>
+    /// The chapter field values this container's <c>chapter_defaults</c> sets
+    /// (types.md F-CHAP-5, format.md F-CTR-5), by field name. A value that's
+    /// null, or that F-CHAP-3 ignores, isn't here: it doesn't stop
+    /// inheritance from containers further up.
+    /// </summary>
+    public IReadOnlyDictionary<string, ChapterFieldValue> ChapterDefaults { get; internal set; } =
+        new Dictionary<string, ChapterFieldValue>(StringComparer.Ordinal);
 
     /// <summary>
     /// The scope chain (format.md §1.4): this container and the ones that
@@ -334,6 +345,27 @@ public sealed class Chapter
 
     /// <summary>The chapter's place in story order (F-ORD-2).</summary>
     public StoryPoint Point => new(Book.Universe.Key, Book.Slot, Index);
+
+    /// <summary>
+    /// The chapter field values set in the chapter item's own <c>fields</c>
+    /// (types.md F-CHAP-3), by field name. A value that's null, or that
+    /// F-CHAP-3 ignores, isn't here, so the chapter inherits instead.
+    /// </summary>
+    public IReadOnlyDictionary<string, ChapterFieldValue> OwnFields { get; internal set; } =
+        new Dictionary<string, ChapterFieldValue>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The chapter's <b>effective values</b> (types.md F-CHAP-5), by field
+    /// name: its own value, or else the nearest <c>chapter_defaults</c> in
+    /// its book's scope chain (book, then series, then universe) that sets
+    /// the field. A list field whose value is an empty list is set, to
+    /// "none here".
+    /// </summary>
+    public IReadOnlyDictionary<string, ChapterFieldValue> Fields { get; internal set; } =
+        new Dictionary<string, ChapterFieldValue>(StringComparer.Ordinal);
+
+    /// <summary>The chapter item's <c>fields</c> as parsed, or null.</summary>
+    internal YamlNode? FieldsNode { get; init; }
 
     /// <inheritdoc />
     public override string ToString() => $"{Book.Key}:{Key}";

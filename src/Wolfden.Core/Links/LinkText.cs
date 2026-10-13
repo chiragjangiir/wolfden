@@ -47,6 +47,24 @@ public static class LinkText
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Case folds <paramref name="text"/> as <see cref="Normalize"/> does,
+    /// after NFC, but without trimming or collapsing whitespace. Enum values
+    /// match their keys this way (types.md F-FT-8).
+    /// </summary>
+    public static string CaseFold(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        var nfc = text.Normalize(NormalizationForm.FormC);
+        var sb = new StringBuilder(nfc.Length);
+        foreach (var rune in nfc.EnumerateRunes())
+        {
+            AppendFolded(sb, rune);
+        }
+
+        return sb.ToString();
+    }
+
     /// <summary>True if the two texts match under <see cref="Normalize"/>.</summary>
     public static bool Matches(string a, string b) => string.Equals(Normalize(a), Normalize(b), StringComparison.Ordinal);
 

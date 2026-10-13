@@ -1,6 +1,7 @@
 using Wolfden.Core.Documents;
 using Wolfden.Core.Entities;
 using Wolfden.Core.Structure;
+using Wolfden.Core.Types;
 
 namespace Wolfden.Core.Links;
 
@@ -38,14 +39,11 @@ public sealed class ResolvedLink
 /// bodies and fields, container bodies, chapter fields and
 /// <c>chapter_defaults</c>, and outlines. It reports empty links
 /// (F-LINK-3), ambiguous (F-LINK-7) and broken (F-LINK-8) links, headings
-/// that don't match (F-LINK-9), links from canon to idea or retconned
+/// that don't match (F-LINK-9), links in <c>ref</c> fields to entities of
+/// another type (F-LINK-11), links from canon to idea or retconned
 /// entities (F-LINK-12), and, when the den turns on spoiler checks
 /// (F-DEN-7), links that run ahead of their position (F-LINK-13).
 /// </summary>
-/// <remarks>
-/// The type check on <c>ref</c> fields (F-LINK-11) needs the den's types,
-/// which aren't loaded yet, so it's left to <c>wolfden check</c> (#16).
-/// </remarks>
 public sealed class LinkIndex
 {
     private readonly List<ResolvedLink> _links = [];
@@ -167,6 +165,13 @@ public sealed class LinkIndex
             }
         }
 
+        // F-LINK-11: a ref field's link must reach an entity of a type its `to` names.
+        if (!occurrence.IsIgnoredValue && RefField(occurrence) is { } field && !field.Accepts(target.Type))
+        {
+            Warn(occurrence, "F-LINK-11",
+                $"{link.Text}: {field.Name} links to '{target.Name}', whose type is {target.Type}, but {field.Name} is a ref to {string.Join(" or ", field.CheckedTo)}.");
+        }
+
         if (!occurrence.IsBookkeeping)
         {
             if (occurrence.IsInCanonFact && target.Status is FactStatus.Idea or FactStatus.Retconned)
@@ -192,6 +197,23 @@ public sealed class LinkIndex
         }
 
         return new ResolvedLink(occurrence, resolution, section);
+    }
+
+    /// <summary>The <c>ref</c> field a link is in (types.md F-FT-9): an entity field of its type, or a chapter field. Null otherwise.</summary>
+    private FieldDefinition? RefField(LinkOccurrence occurrence)
+    {
+        if (occurrence.Field is not { } name)
+        {
+            return null;
+        }
+
+        var field = occurrence.Site switch
+        {
+            LinkSite.EntityField or LinkSite.EntityFieldEntry => occurrence.Entity?.Definition?.FindField(name),
+            LinkSite.ChapterField or LinkSite.ChapterDefault => Catalog.Structure.Types.FindChapterField(name),
+            _ => null,
+        };
+        return field is { Kind: FieldKind.Ref } ? field : null;
     }
 
     private void Warn(LinkOccurrence occurrence, string rule, string message) =>

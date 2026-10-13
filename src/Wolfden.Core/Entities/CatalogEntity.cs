@@ -2,6 +2,7 @@ using Wolfden.Core.Documents;
 using Wolfden.Core.Links;
 using Wolfden.Core.Positions;
 using Wolfden.Core.Structure;
+using Wolfden.Core.Types;
 
 namespace Wolfden.Core.Entities;
 
@@ -59,6 +60,13 @@ public sealed class CatalogEntity
 
     /// <summary>The type key as written (F-ENT-2).</summary>
     public string Type { get; }
+
+    /// <summary>
+    /// The combined definition of the entity's type (types.md F-TYPE-8), or
+    /// null if the type isn't enabled in the den: an unknown type, so the
+    /// entity is untyped (F-ENT-2).
+    /// </summary>
+    public TypeDefinition? Definition { get; internal init; }
 
     /// <summary>The entity's status, <c>draft</c> if it has none (F-ENT-5).</summary>
     public FactStatus Status { get; }

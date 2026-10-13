@@ -191,6 +191,18 @@ public sealed class StarfallIndexTests : IClassFixture<StarfallIndexTests.Built>
 
         Assert.Equal(expected, Index.Context.Diagnostics.ToList().Select(d => (d.Path, d.RuleId, d.Line)).Order());
         Assert.Contains(Index.Context.Diagnostics, d => d.RuleId == "F-LINK-13" && d.Severity == "warning");
+        Assert.Contains(Index.Context.Diagnostics, d => d.RuleId == "F-LINK-11" && d.Path.EndsWith("mara-voss.md", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void DenLocalPackFilesAreRecorded()
+    {
+        var packs = Index.Context.Files.Where(f => f.Kind == "pack").OrderBy(f => f.Path).ToList();
+
+        Assert.Equal(
+            ["packs/starfall/extensions/character.yaml", "packs/starfall/pack.yaml", "packs/starfall/templates/ship.md", "packs/starfall/types/ship.yaml"],
+            packs.Select(f => f.Path));
+        Assert.All(packs, f => Assert.True(f.IsLoaded));
     }
 
     [Fact]
