@@ -752,9 +752,8 @@ error too. F-KEY-2 keeps chapter keys out of this form. To tie a fact to a
 row in v0, use a `row` field (F-FLD-7).
 
 **F-POS-7.** A **bare book position** (`ember`) names the **start of the
-book** (F-ORD-3), the point just before its first chapter. For `from` and
-`until` it orders the same as the book's first chapter, it resolves even
-in a book with no chapters yet, and it's the same point F-ENT-6 gives a
+book** (F-ORD-3), which orders the same as its first chapter. It resolves
+even in a book with no chapters yet, and it's the same point F-ENT-6 gives a
 book-scope entity with no `from`. It's for facts that "became true in Book
 2" and for imports where only the book is known. Writers SHOULD use
 chapter-level positions wherever they know the chapter, but
