@@ -12,4 +12,4 @@ A contested belt of mining stations at the edge of settled space.
 
 ## Under the Compact
 <!-- wolfden: from=a-quiet-moon:1 -->
-The Compact holds the Reach after the war.
+The Compact holds the Reach after the war, and the [[Lantern]] carries its mail.

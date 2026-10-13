@@ -180,7 +180,7 @@ public class StoryOrderTests
         var den = DenStructure.Load(source);
         var positions = FixturePositions(source);
 
-        Assert.Equal(21, positions.Count);
+        Assert.Equal(25, positions.Count);
         foreach (var (path, reference) in positions)
         {
             var resolution = den.Resolve(path, reference.Position!);

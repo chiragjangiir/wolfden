@@ -45,6 +45,19 @@ public sealed class DenStructure
     /// <summary>The den's format number from <c>den.yaml</c>, or null if it didn't load.</summary>
     public int? Format { get; private set; }
 
+    /// <summary>
+    /// True if <c>den.yaml</c> turns on the spoiler checks with
+    /// <c>spoiler_checks: true</c> (F-DEN-7). In format 1 that's F-LINK-13.
+    /// </summary>
+    public bool SpoilerChecks { get; internal set; }
+
+    /// <summary>
+    /// The den's own bookkeeping patterns from <c>den.yaml</c>'s
+    /// <c>bookkeeping_sections</c> (F-DEN-6), as written. The built-in ones
+    /// (F-SEC-12) aren't included.
+    /// </summary>
+    public IReadOnlyList<string> BookkeepingSections { get; internal set; } = [];
+
     /// <summary>The universes that loaded, by key in ASCII order.</summary>
     public IReadOnlyList<Universe> Universes => _universes;
 

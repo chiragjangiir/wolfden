@@ -14,6 +14,9 @@ public interface IDenSource
 
     /// <summary>The names of the folders directly in <paramref name="path"/>, or none if it isn't a folder.</summary>
     IEnumerable<string> GetDirectories(string path);
+
+    /// <summary>The names of the files directly in <paramref name="path"/>, or none if it isn't a folder.</summary>
+    IEnumerable<string> GetFiles(string path);
 }
 
 /// <summary>A den on disk.</summary>
@@ -47,6 +50,15 @@ public sealed class FileSystemDenSource : IDenSource
     public IEnumerable<string> GetDirectories(string path) =>
         ExactPathExists(path, file: false)
             ? Directory.EnumerateDirectories(Full(path)).Select(d => Path.GetFileName(d)!).Order(StringComparer.Ordinal).ToList()
+            : [];
+
+    /// <summary>
+    /// The files directly in <paramref name="path"/>, by their names on
+    /// disk. The path itself must match in exact case, as for <see cref="FileExists"/>.
+    /// </summary>
+    public IEnumerable<string> GetFiles(string path) =>
+        ExactPathExists(path, file: false)
+            ? Directory.EnumerateFiles(Full(path)).Select(f => Path.GetFileName(f)!).Order(StringComparer.Ordinal).ToList()
             : [];
 
     private bool ExactPathExists(string path, bool file)

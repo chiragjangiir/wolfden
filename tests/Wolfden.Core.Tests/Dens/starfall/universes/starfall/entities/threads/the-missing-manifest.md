@@ -13,4 +13,4 @@ fields:
 The *Tessaly*'s cargo manifest goes missing before the ambush.
 
 ## Payoff
-Halden Pike sold it to the Compact to pay his debts.
+[[Halden Pike]] sold it to the Compact to pay his debts.
