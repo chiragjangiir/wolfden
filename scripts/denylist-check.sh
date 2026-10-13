@@ -26,7 +26,7 @@ tmp=$(mktemp -d) || exit 2
 trap 'rm -rf "$tmp"' EXIT
 
 # One "line-number<TAB>term" per term, with the same cleaning as the hooks.
-sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$list" \
+privacy_clean_lines < "$list" \
   | awk '!/^#/ && length($0) > 0 { print NR "\t" $0 }' > "$tmp/terms"
 
 # Duplicates, short terms and single words, by line number only.

@@ -28,8 +28,10 @@ jobs:
           # git grep exits 0 on a match, 1 on none, and >1 on an error.
           scan() { # $1 = label; remaining args = git grep options
             label=$1; shift
-            git grep -n -I "$@" > "$RUNNER_TEMP/hits"
-            case $? in
+            # Steps run under bash -e, so capture the status instead of exiting.
+            rc=0
+            git grep -n -I "$@" > "$RUNNER_TEMP/hits" || rc=$?
+            case $rc in
               0) echo "::error::$label at:"; cut -d: -f1,2 "$RUNNER_TEMP/hits"; fail=1 ;;
               1) ;;
               *) echo "::error::$label scan failed."; fail=1 ;;
@@ -42,7 +44,7 @@ jobs:
 
           if [ -n "$DENYLIST" ]; then
             printf '%s\n' "$DENYLIST" \
-              | sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' -e 's/^[[:space:]]*//' \
+              | sed -e "1s/^$(printf '\357\273\277')//" -e 's/^[[:space:]]*//' \
                     -e 's/[[:space:]]*$//' -e '/^#/d' -e '/^$/d' \
               > "$RUNNER_TEMP/deny"
             if [ -s "$RUNNER_TEMP/deny" ]; then

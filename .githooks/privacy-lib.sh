@@ -9,11 +9,16 @@
 # In docs, write %USERPROFILE% or ~ instead.
 PRIVACY_PATH_RE='[A-Za-z]:[\/]Users[\/]|/[cC]/Users/'
 
-# Reads a denylist on stdin and writes the terms: strips a UTF-8 BOM, CRs,
-# surrounding whitespace, comment lines and blank lines.
+# Reads a denylist on stdin and strips a UTF-8 BOM and the whitespace around
+# each line, which also removes a CR. Keeps every line, so line numbers hold.
+# Portable sed only: BSD sed has no \x escapes.
+privacy_clean_lines() {
+  sed -e "1s/^$(printf '\357\273\277')//" -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+# Reads a denylist on stdin and writes only the terms: no comments or blanks.
 privacy_clean_terms() {
-  sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' -e 's/^[[:space:]]*//' \
-      -e 's/[[:space:]]*$//' -e '/^#/d' -e '/^$/d'
+  privacy_clean_lines | sed -e '/^#/d' -e '/^$/d'
 }
 
 # Writes the denylist's terms to the file named by $1.
