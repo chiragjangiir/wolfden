@@ -3,3 +3,4 @@ name: Dracula
 authors:
   bram-stoker:
     name: Bram Stoker
+spoiler_checks: true

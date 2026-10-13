@@ -26,7 +26,6 @@ sale of a London house to [[count-dracula]]. He keeps his journal in
 shorthand, which opens the novel. Engaged to [[mina-harker|Mina]].
 
 ## Appearance
-<!-- wolfden: until=dracula:23 -->
 A frank, happy-looking young man with a strong face and dark brown hair.
 
 ## Appearance

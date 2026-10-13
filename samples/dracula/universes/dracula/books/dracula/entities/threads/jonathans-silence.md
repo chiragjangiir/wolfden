@@ -25,7 +25,6 @@ him again for four chapters.
   dated from the castle. "Another week gone, and no news from Jonathan."
 
 ## Payoff
-<!-- wolfden: from=dracula:8 -->
 In chapter 8 Sister Agatha writes from a hospital in Buda-Pesth: he has
 been there for nearly six weeks with a violent brain fever. Mina goes to
 him at once.

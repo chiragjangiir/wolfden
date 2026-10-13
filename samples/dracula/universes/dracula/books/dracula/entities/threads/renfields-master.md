@@ -25,7 +25,6 @@ he owe him?
   next door.
 
 ## Payoff
-<!-- wolfden: from=dracula:21 -->
 In chapter 21, dying, Renfield tells how he invited the Count in, and
 how he tried to stop him when he understood that the Count had come for
 Mina. See [[renfield-lets-the-count-in]].

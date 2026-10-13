@@ -11,7 +11,7 @@ fields:
     - { value: "Seward's zoöphagous patient.", from: "dracula:6" }
     - { value: The Count's servant., from: "dracula:8" }
     - { value: The servant who turns on his master., from: "dracula:21" }
-  died: { text: "3 October", sort: [0, 10, 3] }
+  died: { value: { text: "3 October", sort: [0, 10, 3] }, from: "dracula:21" }
 ---
 
 # R. M. Renfield

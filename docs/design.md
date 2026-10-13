@@ -51,8 +51,8 @@ and Universe. A character who appears across a whole series lives at Series
 
 Entities can **reference across scopes** in any direction. Book 3 can link to
 a character introduced in a standalone book in the same universe. A reference
-to a *later* book is allowed, but the continuity check (§7) flags it, since
-it's usually a spoiler or a mistake.
+to a *later* book is allowed. A den that turns on spoiler checks gets it
+flagged (§7), since it's usually a spoiler or a mistake.
 
 ### Entities don't span universes
 
@@ -88,6 +88,7 @@ my-den/
   den.yaml                      # den settings, author identities, enabled packs
   packs/                        # den-local custom types (optional)
   # notes/ and authors/ are reserved for Author and den notes (§2, #45)
+  # anything else at the root (a README, a LICENSE) is ignored
   universes/
     starfall/
       universe.md               # frontmatter + overview prose
@@ -155,6 +156,10 @@ Key points:
 
 - **Fields can change over time.** A plain value means it's always true. A list
   of `{value, from, until?}` entries means it's true at story positions.
+  **Decided (#66):** a single entry with a `from` is allowed on any field,
+  even one that isn't temporal. It means "known from here": a death or a
+  hidden identity stays out of canon views from before the reader learns
+  it.
 - **Sections can carry positions too.** A `<!-- wolfden: from=... -->`
   comment on the line under a heading (one blank line allowed; with an
   optional `until=`)
@@ -162,7 +167,12 @@ Key points:
   Obsidian, and VS Code hide HTML comments, so headings render cleanly and
   heading links keep working. Other HTML comments are left alone. This is a
   structured version of "Book 3, chapter 23 additions" sections in a
-  hand-kept character file.
+  hand-kept character file. **Decided (#71):** a later section with the
+  same standard heading (a new `## Appearance` for a new era) takes over
+  from the earlier one at its `from`, the way a new field entry does, so
+  the earlier one needs no `until`. Custom sections don't hand over, so
+  cumulative ones can repeat. **Decided (#68):** a thread's `## Payoff`
+  enters canon at the thread's `paid_off` unless it says otherwise.
 - **Links** are wiki-style: `[[mara-voss]]`, `[[Mara Voss]]`, or an alias.
   They resolve by slug, name, or alias to an `id` within the same universe
   (§2), and the index stores the id (or the path, for a file that has
@@ -336,9 +346,17 @@ reference and continuity checks all build on it.
 - Missing required fields or sections.
 - Positions that refer to books or chapters that don't exist.
 - Overlapping temporal values for the same field.
-- A reference from an earlier book to an entity that first appears in a later
-  one.
 - Duplicate IDs (for example, from copying files by hand).
+- **Spoiler checks**, off by default: a link to an entity the reader
+  hasn't met yet at the link's position, such as a reference from an
+  earlier book to an entity that first appears in a later one.
+
+**Decided (#68): spoiler checks are opt-in.** The positions on facts record
+where the reader learns each one, so a writer can pace the reveals. Not
+every writer tracks that, so the check that helps them is off unless
+`den.yaml` sets `spoiler_checks: true` (format.md F-DEN-7). It sees links,
+not prose, so summary prose that runs ahead of the story is the writer's
+to place (format.md §9.5).
 
 Later rules: a character appearing after their death, travel times that
 don't fit the timeline, and open threads at a frozen book's end.

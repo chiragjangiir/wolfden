@@ -14,4 +14,4 @@ fields:
 <!-- What does it look like, and what does it do? -->
 
 ## History
-<!-- Where did it come from, and whose hands has it passed through? -->
+<!-- Where did it come from, and whose hands has it passed through? Give each later owner a subsection with its own from=. -->

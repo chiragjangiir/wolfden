@@ -25,7 +25,6 @@ ends with his death, but not quite by those rules.
   side."
 
 ## Payoff
-<!-- wolfden: from=dracula:27 -->
 The sun is on the point of setting, and the Count's look is turning to
 triumph, when Jonathan's Kukri cuts his throat and Morris's bowie knife
 goes into his heart. The body crumbles to dust, the scar leaves Mina's

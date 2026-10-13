@@ -14,7 +14,7 @@ fields:
   gender: woman
   pronouns: she/her
   heritage: The only child of a wealthy widow of Hampstead.
-  died: { text: "20 September", sort: [0, 9, 20] }
+  died: { value: { text: "20 September", sort: [0, 9, 20] }, from: "dracula:12" }
 ---
 
 # Lucy Westenra
@@ -24,7 +24,6 @@ fields:
 admired. She tells Mina about her suitors in chapter 5.
 
 ## Appearance
-<!-- wolfden: until=dracula:15 -->
 Fair, sweet-faced, and slight.
 
 ### Decline
@@ -33,7 +32,7 @@ From August on she grows pale and thin, with two small red marks on her
 throat that never heal.
 
 ## Appearance
-<!-- wolfden: from=dracula:15 until=dracula:16 -->
+<!-- wolfden: from=dracula:15 -->
 Days after her funeral she lies in her coffin more beautiful than in
 life, with red lips and sharp teeth.
 

@@ -9,7 +9,7 @@ fields:
   role: Lucy's refused suitor, and the band's man of action.
   skills: [shooting, riding, hunting]
   heritage: American, from Texas.
-  died: { text: "6 November, at sunset", sort: [0, 11, 6] }
+  died: { value: { text: "6 November, at sunset", sort: [0, 11, 6] }, from: "dracula:27" }
   factions:
     - { value: ["[[the-little-band]]"], from: "dracula:18", until: "dracula:note" }
 ---

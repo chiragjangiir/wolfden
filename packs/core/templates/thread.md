@@ -16,7 +16,7 @@ fields:
 <!-- How and where is it planted? Add each place to planted. -->
 
 ## Payoff
-<!-- How does it resolve? If that isn't decided yet, mark this section status=undecided and bank each option as a ### subsection marked status=candidate. -->
+<!-- How does it resolve? This section shows from paid_off on, unless you give it a from=. If the resolution isn't decided yet, mark this section status=undecided and bank each option as a ### subsection marked status=candidate. -->
 
 ## Open questions
 <!-- wolfden: status=undecided -->

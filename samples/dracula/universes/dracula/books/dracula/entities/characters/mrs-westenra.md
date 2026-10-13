@@ -6,7 +6,7 @@ status: canon
 from: "dracula:5"
 fields:
   role: Lucy's mother.
-  died: { text: "night of 17 September", sort: [0, 9, 17] }
+  died: { value: { text: "night of 17 September", sort: [0, 9, 17] }, from: "dracula:11" }
 ---
 
 # Mrs. Westenra

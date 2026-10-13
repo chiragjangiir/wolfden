@@ -25,8 +25,10 @@ sections:
     description: How and where it's planted.
   - name: Payoff
     description: >-
-      How it resolves. While that's undecided, the section is marked
-      undecided and each option is a candidate subsection.
+      How it resolves. It enters canon at `paid_off` unless its section
+      comment gives a `from`. While the resolution is undecided, the
+      section is marked undecided and each option is a candidate
+      subsection.
   - name: Open questions
     description: What else isn't decided about it yet.
 template: thread.md
