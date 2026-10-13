@@ -593,13 +593,24 @@ internal sealed partial class PackReader
             {
                 Warn(file, "F-FT-15", defaultNode.Line, $"A {kind.ToKey()} field has no default, so the default of '{name}' is ignored.");
             }
-            else if (FieldValues.Check(field, defaultNode) is { Matches: false } check)
-            {
-                Warn(file, "F-FT-15", defaultNode.Line, $"The default of '{name}' is ignored: {check.Problems[0].Message}");
-            }
             else
             {
-                field.Default = defaultNode;
+                // Advisory problems (a date's calendar, F-FT-11) are their own
+                // warnings and don't make the default a mismatch.
+                var check = FieldValues.Check(field, defaultNode);
+                foreach (var advisory in check.Problems.Where(p => p.IsAdvisory))
+                {
+                    Warn(file, advisory.RuleId, advisory.Line, $"In the default of '{name}': {advisory.Message}");
+                }
+
+                if (check.Problems.FirstOrDefault(p => !p.IsAdvisory) is { } reason)
+                {
+                    Warn(file, "F-FT-15", defaultNode.Line, $"The default of '{name}' is ignored: {reason.Message}");
+                }
+                else
+                {
+                    field.Default = defaultNode;
+                }
             }
         }
 

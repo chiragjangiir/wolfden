@@ -547,7 +547,9 @@ field present.
 **F-FT-15.** `default` is a value that matches the field's type and
 `list` (§5.2, §5.3). A `ref` or `position` field has no default. A
 `default` that breaks either rule is a [warning], and the default is
-ignored. Where an entity has no value for the field at a position (it's
+ignored. An advisory warning, such as a date's `calendar` (F-FT-11), is
+still reported on the type file, but doesn't break the rule, so the
+default is kept. Where an entity has no value for the field at a position (it's
 missing, unset, or between entries), views and the index show the
 default, marked as a default. A default isn't a fact: it has no position,
 status, or pin of its own, and pinned canon (F-VIEW-2) leaves it out.

@@ -145,7 +145,23 @@ public class TypeDefinitionTests
         var den = Load(("types/ship.yaml", "name: Ship\nplural: ships\nfields:\n  launched: { type: date, default: { text: long ago, calendar: reach } }\n"));
 
         Assert.NotNull(den.Types.Find("ship")!.FindField("launched")!.Default);
-        Assert.Empty(den.Diagnostics);
+        var warning = Assert.Single(den.Diagnostics);
+        Assert.Equal(("F-FT-11", DiagnosticSeverity.Warning, (int?)4), (warning.Diagnostic.RuleId, warning.Diagnostic.Severity, warning.Diagnostic.Line));
+        Assert.Contains("Custom calendars aren't supported yet", warning.Diagnostic.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("{ type: date, default: { calendar: reach, sort: bad } }", "sort must be an integer")]
+    [InlineData("{ type: date, default: { calendar: reach } }", "needs text, sort, or both")]
+    [InlineData("{ type: date, list: true, default: [{ text: x, calendar: r }, { sort: nope }] }", "sort must be an integer")]
+    public void AnIgnoredDefaultNamesTheRealReason(string definition, string reason)
+    {
+        var den = Load(("types/ship.yaml", $"name: Ship\nplural: ships\nfields:\n  launched: {definition}\n"));
+
+        Assert.Null(den.Types.Find("ship")!.FindField("launched")!.Default);
+        var ignored = Assert.Single(den.Diagnostics, d => d.Diagnostic.RuleId == "F-FT-15");
+        Assert.Contains(reason, ignored.Diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains(den.Diagnostics, d => d.Diagnostic.RuleId == "F-FT-11" && d.Diagnostic.Message.Contains("calendar", StringComparison.Ordinal));
     }
 
     [Fact]

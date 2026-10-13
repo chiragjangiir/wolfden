@@ -404,8 +404,10 @@ public static partial class FieldValues
             : "";
 
     /// <summary>
-    /// F-FLD-6 for an item of a list ref field: in <c>pov: [[pike]]</c>, or
-    /// <c>pov: ["[[voss]]", [[pike]]]</c>, the item is a list holding one string.
+    /// F-FLD-6 for an item of a list ref field: in <c>pov: [[pike]]</c>, the
+    /// value's one item is a list holding one string. (In
+    /// <c>pov: ["[[voss]]", [[pike]]]</c> the item is a list inside a list,
+    /// which gets no hint.)
     /// </summary>
     private static string ItemQuoteHint(FieldDefinition field, YamlNode item) =>
         field.Kind == FieldKind.Ref && item is YamlSequence { Items: [YamlScalar inner] }
