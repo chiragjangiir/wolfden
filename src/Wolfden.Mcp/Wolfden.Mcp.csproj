@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Wolfden.Core\Wolfden.Core.csproj" />
+    <ProjectReference Include="..\Wolfden.Index\Wolfden.Index.csproj" />
+  </ItemGroup>
+
+</Project>

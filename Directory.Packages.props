@@ -1,0 +1,16 @@
+<Project>
+
+  <!-- Central Package Management: every package version lives here, and
+       project files list packages without versions. Check a package's
+       license before adding it (see CLAUDE.md). -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup Label="Testing">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />      <!-- MIT -->
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />                      <!-- Apache-2.0 -->
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />     <!-- Apache-2.0 -->
+  </ItemGroup>
+
+</Project>
