@@ -12,6 +12,7 @@ fiction. See `README.md` for the pitch. Design docs live in `docs/`.
 ## Decisions made (2026-10-10)
 
 - **License:** MIT for code. Sample datasets are licensed separately under CC-BY-4.0.
+- `packs/` is MIT-0, and Wolfden's licenses place no conditions on the notes, manuscripts, or other content writers create with it.
 - **v0 scope:** local-first and single-user. No accounts or multi-tenancy in
   v0. Multi-user, multi-tenant hosting (accounts, OAuth with GitHub and
   Google, roles) comes in a later phase. Don't build for it early, but don't
