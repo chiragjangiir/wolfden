@@ -821,8 +821,9 @@ mapping from field name to a plain value. The values are checked as in
 the same as leaving the field out (F-FLD-4), but an empty list is not:
 it means "none here" (F-CHAP-5). Every problem with a chapter's
 `fields`, including a value that doesn't match, a name that isn't a
-chapter field, and a `fields` that isn't a mapping, is a [warning], never an error, since an error in a container file would
-exclude the whole container (F-GEN-2). A chapter field is a fact about one
+chapter field, and a `fields` that isn't a mapping, is a [warning], never
+an error, since an error in a container file would exclude the whole
+container (F-GEN-2). A chapter field is a fact about one
 chapter, so it has no temporal form. Entries (format.md §7.3) don't exist
 here: the errors of §7.3 (F-TMP-1, F-TMP-2) and the `status` and `pin`
 errors inside an entry (F-STAT-1, F-PIN-1) don't apply. A value that is
@@ -989,8 +990,8 @@ The manifest was forged at Kessan Reach before the *Tessaly* docked.
 
 Once the payoff is chosen, the chosen option becomes the section's
 content, the section's comment goes, and the options not chosen can stay
-as `candidate` subsections or be deleted. Rules a writer keeps across all threads ("no
-coincidences in a payoff") are author notes, planned in #45.
+as `candidate` subsections or be deleted. Rules a writer keeps across all
+threads ("no coincidences in a payoff") are author notes, planned in #45.
 
 **F-CORE-2.** A thread whose `paid_off` comes before its earliest
 `planted` position, in story order, is a [warning]. Positions that don't
