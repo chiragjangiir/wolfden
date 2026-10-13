@@ -3,7 +3,8 @@
 # from the private denylist. See CONTRIBUTING.md, "Privacy hooks".
 #
 # Uses `git grep` (not grep, which crashes on some Windows builds) and blocks
-# the commit if a scan itself fails, so an error never lets a leak through.
+# the commit if a scan or the configured list fails, so an error never lets a
+# leak through.
 
 . "$(git rev-parse --show-toplevel)/.githooks/privacy-lib.sh"
 
@@ -22,16 +23,20 @@ privacy_scan() { # $1 = message prefix; remaining args = git grep options
 }
 
 privacy_scan "personal user path" -E -e "$PRIVACY_PATH_RE"
-have_list=1
-if privacy_load_denylist "$tmp/deny"; then
-  [ -s "$tmp/deny" ] && privacy_scan "denylisted term (not shown)" -i -F -f "$tmp/deny"
-else
-  have_list=0
-fi
+
+privacy_load_denylist "$tmp/deny"
+case $? in
+  0) if [ -s "$tmp/deny" ]; then
+       privacy_scan "denylisted term (not shown)" -i -F -f "$tmp/deny"
+     else
+       echo "privacy: the denylist has no terms; only the path check ran." >&2
+     fi ;;
+  1) echo "privacy: no denylist configured; only the path check ran." >&2 ;;
+  *) fail=1 ;;
+esac
 
 if [ "$fail" = 1 ]; then
-  echo "privacy: commit blocked. Fix the lines above, then commit again." >&2
+  echo "privacy: commit blocked. Fix the problems above, then commit again." >&2
   exit 1
 fi
-[ "$have_list" = 1 ] || echo "privacy: no denylist configured; only the path check ran." >&2
 exit 0

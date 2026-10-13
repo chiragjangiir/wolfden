@@ -25,22 +25,30 @@ jobs:
           DENYLIST: ${{ secrets.PRIVACY_DENYLIST }}
         run: |
           fail=0
+          # git grep exits 0 on a match, 1 on none, and >1 on an error.
+          scan() { # $1 = label; remaining args = git grep options
+            label=$1; shift
+            git grep -n -I "$@" > "$RUNNER_TEMP/hits"
+            case $? in
+              0) echo "::error::$label at:"; cut -d: -f1,2 "$RUNNER_TEMP/hits"; fail=1 ;;
+              1) ;;
+              *) echo "::error::$label scan failed."; fail=1 ;;
+            esac
+          }
 
-          # Personal user paths. In docs, write %USERPROFILE% or ~ instead.
-          if git grep -n -I -E '[A-Za-z]:[\/]Users[\/]|/[cC]/Users/' > "$RUNNER_TEMP/hits"; then
-            echo "::error::Personal user path found at:"
-            cut -d: -f1,2 "$RUNNER_TEMP/hits"
-            fail=1
-          fi
+          # Personal user paths. Keep in sync with .githooks/privacy-lib.sh.
+          # In docs, write %USERPROFILE% or ~ instead.
+          scan "Personal user path found" -E -e '[A-Za-z]:[\/]Users[\/]|/[cC]/Users/'
 
           if [ -n "$DENYLIST" ]; then
-            printf '%s\n' "$DENYLIST" | tr -d '\r' \
-              | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^#/d' -e '/^$/d' \
+            printf '%s\n' "$DENYLIST" \
+              | sed -e '1s/^\xEF\xBB\xBF//' -e 's/\r$//' -e 's/^[[:space:]]*//' \
+                    -e 's/[[:space:]]*$//' -e '/^#/d' -e '/^$/d' \
               > "$RUNNER_TEMP/deny"
-            if git grep -n -I -i -F -f "$RUNNER_TEMP/deny" > "$RUNNER_TEMP/hits"; then
-              echo "::error::Denylisted term found at (term not shown):"
-              cut -d: -f1,2 "$RUNNER_TEMP/hits"
-              fail=1
+            if [ -s "$RUNNER_TEMP/deny" ]; then
+              scan "Denylisted term found (term not shown)" -i -F -f "$RUNNER_TEMP/deny"
+            else
+              echo "::warning::PRIVACY_DENYLIST has no terms; only the path check ran."
             fi
           else
             # Secrets aren't passed to pull requests from forks.

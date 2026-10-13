@@ -40,7 +40,10 @@ git config privacy.denylist "<path to your private list>"   # optional
 
 `scripts/denylist-check.sh` checks a denylist without printing it: it flags
 short terms, duplicates, and terms that already match a tracked file, by list
-line number only.
+line number and match count. `-l` also shows where each match is.
+
+If the list is configured but can't be read, the hooks block the commit
+rather than skip the check.
 
 ## AI-assisted contributions
 

@@ -7,14 +7,21 @@
 tmp=$(mktemp -d) || exit 1
 trap 'rm -rf "$tmp"' EXIT
 
-# git grep --no-index only reads files under the current directory, so scan
-# a copy of the message from the temp directory.
-cp "$1" "$tmp/msg" || exit 1
-have_list=0
-privacy_load_denylist "$tmp/deny" && [ -s "$tmp/deny" ] && have_list=1
+fail=0
+privacy_load_denylist "$tmp/deny"
+case $? in
+  0) have_list=1 ;;
+  1) have_list=0 ;;
+  *) echo "privacy: commit blocked." >&2; exit 1 ;;
+esac
+[ -s "$tmp/deny" ] || have_list=0
+
+# Scan a copy, without the diff that `git commit -v` adds below the scissors
+# line. git grep --no-index only reads files under the current directory, so
+# scan it from the temp directory.
+sed '/^# -* >8 -*$/,$d' "$1" > "$tmp/msg" || exit 1
 cd "$tmp" || exit 1
 
-fail=0
 msg_scan() { # $1 = message prefix; remaining args = git grep options
   prefix=$1; shift
   git grep --no-index -n "$@" -- msg > hits
@@ -26,9 +33,7 @@ msg_scan() { # $1 = message prefix; remaining args = git grep options
 }
 
 msg_scan "personal user path" -E -e "$PRIVACY_PATH_RE"
-if [ "$have_list" = 1 ]; then
-  msg_scan "denylisted term (not shown)" -i -F -f deny
-fi
+[ "$have_list" = 1 ] && msg_scan "denylisted term (not shown)" -i -F -f deny
 
 [ "$fail" = 0 ] || echo "privacy: commit blocked. Edit the message, then commit again." >&2
 exit $fail
