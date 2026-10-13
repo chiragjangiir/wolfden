@@ -14,6 +14,11 @@ namespace Wolfden.Core.Yaml;
 /// </summary>
 internal sealed class YamlBlock
 {
+    /// <summary>Deeper nesting is reported as F-YAML-1, so a hostile file
+    /// can't exhaust the stack.</summary>
+    internal const int MaxDepth = 256;
+
+    private readonly HashSet<string> _anchors = new(StringComparer.Ordinal);
     private readonly SourceText _source;
     private readonly List<Diagnostic> _diagnostics = [];
 
@@ -71,13 +76,21 @@ internal sealed class YamlBlock
             }
 
             parser.MoveNext(); // past DocumentStart
-            Root = ReadNode(parser);
+            Root = ReadNode(parser, 0);
             parser.MoveNext(); // past DocumentEnd
             if (parser.Current is DocumentStart second)
             {
                 Error("F-YAML-1", Abs(second.Start), "Only one YAML document is allowed here.");
                 Root = null;
                 Failed = true;
+                return;
+            }
+
+            if (Root is YamlScalar { Style: YamlScalarStyle.Plain, Text: "" })
+            {
+                // An explicit but empty document (`---` alone) holds nothing,
+                // like empty frontmatter.
+                Root = null;
                 return;
             }
 
@@ -90,10 +103,15 @@ internal sealed class YamlBlock
         {
             Fail(_source.LineIndexOf(RegionStart) + (int)ex.Start.Line, ex.Message);
         }
-        catch (InvalidOperationException ex)
+        catch (TooDeepException ex)
         {
-            // YamlDotNet throws this for some malformed input, such as an
-            // unclosed flow sequence. It's still a parse failure, not a crash.
+            Fail(LineOf(ex.Offset), $"values are nested more than {MaxDepth} levels deep.");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // YamlDotNet throws InvalidOperationException and others for some
+            // malformed input, such as an unclosed flow sequence. It's still a
+            // parse failure, not a crash.
             Fail(null, ex.Message);
         }
     }
@@ -108,9 +126,14 @@ internal sealed class YamlBlock
 
     private int Abs(Mark mark) => RegionStart + (int)mark.Index;
 
-    private YamlNode ReadNode(IParser parser)
+    private YamlNode ReadNode(IParser parser, int depth)
     {
         var current = parser.Current ?? throw new InvalidOperationException("Unexpected end of YAML events.");
+        if (depth > MaxDepth)
+        {
+            throw new TooDeepException(Abs(current.Start));
+        }
+
         if (current is NodeEvent node)
         {
             CheckProperties(node);
@@ -121,6 +144,11 @@ internal sealed class YamlBlock
             case AnchorAlias alias:
             {
                 Error("F-YAML-4", Abs(alias.Start), $"Aliases (*{alias.Value}) aren't allowed.");
+                if (!_anchors.Contains(alias.Value.Value))
+                {
+                    Error("F-YAML-1", Abs(alias.Start), $"The alias *{alias.Value} names no anchor before it.");
+                }
+
                 var start = Abs(alias.Start);
                 var end = Abs(alias.End);
                 parser.MoveNext();
@@ -139,18 +167,40 @@ internal sealed class YamlBlock
                     ScalarStyle.Folded => YamlScalarStyle.Folded,
                     _ => YamlScalarStyle.Plain,
                 };
+                int? lastLine = null;
                 if (style is YamlScalarStyle.Literal or YamlScalarStyle.Folded)
                 {
-                    // A block scalar's end mark lands after its trailing
-                    // blank lines; its content ends at the last non-blank.
-                    while (end > start && char.IsWhiteSpace(_source.Text[end - 1]))
+                    if (IsKeepChomped(start))
                     {
-                        end--;
+                        // `|+` keeps its trailing blank lines: they're part of
+                        // the value, so the content runs to the end mark, less
+                        // the last line break.
+                        if (end > start && _source.Text[end - 1] == '\n')
+                        {
+                            end--;
+                        }
+
+                        if (end > start && _source.Text[end - 1] == '\r')
+                        {
+                            end--;
+                        }
+
+                        lastLine = end;
+                    }
+                    else
+                    {
+                        // Otherwise the end mark lands after trailing blank
+                        // lines that aren't part of the value; the content ends
+                        // at the last non-blank character.
+                        while (end > start && char.IsWhiteSpace(_source.Text[end - 1]))
+                        {
+                            end--;
+                        }
                     }
                 }
 
                 parser.MoveNext();
-                return new YamlScalar(scalar.Value, style, LineOf(start), start, end);
+                return new YamlScalar(scalar.Value, style, LineOf(start), start, end, lastLine);
             }
 
             case SequenceStart sequenceStart:
@@ -161,12 +211,13 @@ internal sealed class YamlBlock
                 parser.MoveNext();
                 while (parser.Current is not SequenceEnd)
                 {
-                    items.Add(ReadNode(parser));
+                    items.Add(ReadNode(parser, depth + 1));
                 }
 
                 var end = CollectionEnd(isFlow, (SequenceEnd)parser.Current, items.Count > 0 ? items[^1].ContentEnd : start);
+                int? lastLine = !isFlow && items.Count > 0 ? items[^1].LastLineOffset : null;
                 parser.MoveNext();
-                return new YamlSequence(items, isFlow, LineOf(start), start, end);
+                return new YamlSequence(items, isFlow, LineOf(start), start, end, lastLine);
             }
 
             case MappingStart mappingStart:
@@ -178,8 +229,8 @@ internal sealed class YamlBlock
                 parser.MoveNext();
                 while (parser.Current is not MappingEnd)
                 {
-                    var key = ReadNode(parser);
-                    var value = ReadNode(parser);
+                    var key = ReadNode(parser, depth + 1);
+                    var value = ReadNode(parser, depth + 1);
                     if (key is YamlScalar keyScalar)
                     {
                         if (keyScalar.Style == YamlScalarStyle.Plain && keyScalar.Text == "<<")
@@ -196,8 +247,9 @@ internal sealed class YamlBlock
                 }
 
                 var end = CollectionEnd(isFlow, (MappingEnd)parser.Current, entries.Count > 0 ? entries[^1].Value.ContentEnd : start);
+                int? lastLine = !isFlow && entries.Count > 0 ? entries[^1].Value.LastLineOffset : null;
                 parser.MoveNext();
-                return new YamlMapping(entries, isFlow, LineOf(start), start, end);
+                return new YamlMapping(entries, isFlow, LineOf(start), start, end, lastLine);
             }
 
             default:
@@ -219,10 +271,26 @@ internal sealed class YamlBlock
         return at < _source.Text.Length && _source.Text[at] is ']' or '}' ? at + 1 : Abs(endEvent.End);
     }
 
+    /// <summary>True if the block scalar header at <paramref name="start"/> has the keep indicator (<c>+</c>).</summary>
+    private bool IsKeepChomped(int start)
+    {
+        var text = _source.Text;
+        for (var i = start + 1; i < text.Length && (text[i] is '+' or '-' || char.IsAsciiDigit(text[i])); i++)
+        {
+            if (text[i] == '+')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void CheckProperties(NodeEvent node)
     {
         if (!node.Anchor.IsEmpty)
         {
+            _anchors.Add(node.Anchor.Value);
             Error("F-YAML-4", Abs(node.Start), $"Anchors (&{node.Anchor}) aren't allowed.");
         }
 
@@ -230,5 +298,10 @@ internal sealed class YamlBlock
         {
             Error("F-YAML-4", Abs(node.Start), $"Explicit tags ({node.Tag}) aren't allowed.");
         }
+    }
+
+    private sealed class TooDeepException(int offset) : Exception
+    {
+        public int Offset { get; } = offset;
     }
 }

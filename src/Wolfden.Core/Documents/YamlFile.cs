@@ -52,9 +52,9 @@ public sealed class YamlFile : DenFile
         }
 
         var result = new YamlFile(ApplyEdits(edits));
-        if (!value.Matches(result.GetValue(path)) || !result.CanEdit)
+        if (!result.CanEdit || !YamlTreeCheck.SameExcept(_block!.Root, result._block!.Root, path, value))
         {
-            throw new EditVerificationException($"Setting '{string.Join('.', path)}' didn't read back as written, so the edit was refused.");
+            throw new EditVerificationException($"Setting '{string.Join('.', path)}' didn't read back as written, or changed another value, so the edit was refused.");
         }
 
         return result;

@@ -5,4 +5,8 @@
     <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Wolfden.Core.Tests" />
+  </ItemGroup>
+
 </Project>

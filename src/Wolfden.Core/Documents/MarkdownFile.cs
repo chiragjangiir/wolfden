@@ -17,6 +17,7 @@ public sealed partial class MarkdownFile : DenFile
     private readonly int _bodyStart;
     private readonly int _leadEnd;
     private readonly IReadOnlyList<Section> _sections = [];
+    private readonly Diagnostic? _missingFrontmatter;
 
     private MarkdownFile(byte[] bytes, bool requireFrontmatter)
         : base(bytes)
@@ -57,8 +58,9 @@ public sealed partial class MarkdownFile : DenFile
         }
         else if (requireFrontmatter)
         {
-            diagnostics.Add(new Diagnostic("F-FM-1", DiagnosticSeverity.Error, 1,
-                "The file has no frontmatter: it must start with a line that is exactly '---'."));
+            _missingFrontmatter = new Diagnostic("F-FM-1", DiagnosticSeverity.Error, 1,
+                "The file has no frontmatter: it must start with a line that is exactly '---'.");
+            diagnostics.Add(_missingFrontmatter);
         }
 
         var body = BodyParser.Parse(this, Source, _bodyStart, diagnostics);
@@ -137,7 +139,9 @@ public sealed partial class MarkdownFile : DenFile
     {
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(value);
-        EnsureEditable();
+        // Adding frontmatter to a file that has none fixes F-FM-1, so that
+        // error doesn't block this edit.
+        EnsureEditable(_frontmatter is null ? _missingFrontmatter : null);
 
         List<TextEdit> edits;
         if (_frontmatter is null)
@@ -159,9 +163,9 @@ public sealed partial class MarkdownFile : DenFile
         }
 
         var result = Reparse(edits);
-        if (!value.Matches(result.GetFrontmatterValue(path)) || result.Body != Body || !result.CanEdit)
+        if (result.Body != Body || !result.CanEdit || !YamlTreeCheck.SameExcept(_frontmatter?.Root, result._frontmatter?.Root, path, value))
         {
-            throw new EditVerificationException($"Setting '{string.Join('.', path)}' didn't read back as written, so the edit was refused.");
+            throw new EditVerificationException($"Setting '{string.Join('.', path)}' didn't read back as written, or changed another value, so the edit was refused.");
         }
 
         return result;
@@ -171,8 +175,11 @@ public sealed partial class MarkdownFile : DenFile
     /// Replaces a section's own text (<see cref="Section.Body"/>): what
     /// follows its heading and section comment, up to the next heading. The
     /// heading, comment, subsections, and the blank lines around the old
-    /// text are kept. Line endings in <paramref name="body"/> are converted
-    /// to the file's own.
+    /// text are kept. Blank lines at the start and end of
+    /// <paramref name="body"/> are dropped, so <c>"a\n\n\n"</c> is written as
+    /// <c>a</c> and the old spacing around the text stays. Line breaks in
+    /// <paramref name="body"/> are CR, LF, or CRLF, and are converted to the
+    /// file's own; other characters, such as U+2028, are written as given.
     /// </summary>
     /// <exception cref="ArgumentException">The new text would add or change a heading or section comment.</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
@@ -254,6 +261,15 @@ public sealed partial class MarkdownFile : DenFile
             throw new ArgumentException("The new text would add or change a heading or section comment. Edit one section at a time.", nameof(body));
         }
 
+        for (var i = 0; i < Sections.Count; i++)
+        {
+            var expected = i == section.Index ? string.Join(nl, newLines) : TrimBlankLines(Sections[i].Body);
+            if (TrimBlankLines(result.Sections[i].Body) != expected)
+            {
+                throw new EditVerificationException($"The text of '{result.Sections[i].Name}' didn't read back as written, so the edit was refused.");
+            }
+        }
+
         return result;
     }
 
@@ -315,6 +331,11 @@ public sealed partial class MarkdownFile : DenFile
             throw new ArgumentException($"'{name}' and its text wouldn't read back as one new section.", nameof(name));
         }
 
+        if (TrimBlankLines(result.Slice(added.HeadingEnd, added.OwnEnd)) != string.Join(nl, SplitLines(body)))
+        {
+            throw new EditVerificationException($"The text of '{name}' didn't read back as written, so the edit was refused.");
+        }
+
         return result;
     }
 
@@ -341,14 +362,62 @@ public sealed partial class MarkdownFile : DenFile
         return true;
     }
 
+    /// <summary>
+    /// Splits on CRLF, LF, and CR only, the line breaks CommonMark and the
+    /// line table agree on, and drops blank lines at both ends.
+    /// </summary>
     private static string[] SplitLines(string text)
     {
-        var normalized = text.ReplaceLineEndings("\n").TrimEnd('\n');
-        return normalized.Length == 0 ? [] : normalized.Split('\n');
+        var lines = LineBreak().Split(text);
+        int first = 0, last = lines.Length - 1;
+        while (first <= last && IsBlank(lines[first]))
+        {
+            first++;
+        }
+
+        while (last >= first && IsBlank(lines[last]))
+        {
+            last--;
+        }
+
+        return lines[first..(last + 1)];
+    }
+
+    /// <summary>The text with blank lines at both ends removed, keeping its own line breaks.</summary>
+    private static string TrimBlankLines(string text)
+    {
+        var lines = LineBreak().Split(text);
+        var breaks = LineBreak().Matches(text);
+        int first = 0, last = lines.Length - 1;
+        while (first <= last && IsBlank(lines[first]))
+        {
+            first++;
+        }
+
+        while (last >= first && IsBlank(lines[last]))
+        {
+            last--;
+        }
+
+        if (first > last)
+        {
+            return "";
+        }
+
+        var sb = new System.Text.StringBuilder(lines[first]);
+        for (var i = first + 1; i <= last; i++)
+        {
+            sb.Append(breaks[i - 1].Value).Append(lines[i]);
+        }
+
+        return sb.ToString();
     }
 
     private static bool IsBlank(string line) => line.All(c => c is ' ' or '\t');
 
     [GeneratedRegex("^---[ \t]*$", RegexOptions.CultureInvariant)]
     private static partial Regex Fence();
+
+    [GeneratedRegex("\r\n|\r|\n", RegexOptions.CultureInvariant)]
+    private static partial Regex LineBreak();
 }

@@ -215,8 +215,7 @@ internal static class YamlEditor
         return i;
     }
 
-    private static int LineIndexOfEnd(SourceText source, YamlNode node) =>
-        source.LineIndexOf(node.ContentEnd > node.Start ? node.ContentEnd - 1 : node.Start);
+    private static int LineIndexOfEnd(SourceText source, YamlNode node) => source.LineIndexOf(node.LastLineOffset);
 
     private static int Column(SourceText source, int offset) => offset - source.Lines[source.LineIndexOf(offset)].Start;
 

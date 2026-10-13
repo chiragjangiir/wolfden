@@ -75,6 +75,11 @@ public sealed class Section
     /// <summary>The 1-based line where the heading starts.</summary>
     public int Line { get; internal set; }
 
+    /// <summary>The 1-based line where <see cref="Body"/> starts: the line
+    /// after the heading, or after its section comment. For an empty body at
+    /// the end of the file, it's the line after the last one.</summary>
+    public int BodyLine { get; internal set; }
+
     /// <summary>The section comment under the heading, or null if there isn't
     /// a valid one (format.md F-SEC-6).</summary>
     public SectionComment? Comment { get; internal set; }

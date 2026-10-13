@@ -32,7 +32,19 @@ internal static partial class BodyParser
     {
         var text = source.Text;
         var body = text[bodyStart..];
-        var document = Markdown.Parse(body, Pipeline);
+        MarkdigDocument document;
+        try
+        {
+            document = Markdown.Parse(body, Pipeline);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Markdig refuses very deep nesting (block quotes, lists) with an
+            // exception. Report it; the file still round-trips, with no sections.
+            diagnostics.Add(new Diagnostic("F-FM-2", DiagnosticSeverity.Error, source.LineIndexOf(bodyStart) + 1,
+                $"The body can't be read as CommonMark: {ex.Message}"));
+            return new Result([], null, null, text.Length);
+        }
 
         // Top-level HTML blocks by their first line, to find section comments.
         var htmlByLine = new Dictionary<int, HtmlBlock>();
@@ -129,6 +141,13 @@ internal static partial class BodyParser
                     break;
                 }
             }
+        }
+
+        foreach (var s in sections)
+        {
+            s.BodyLine = s.BodyStart >= text.Length && !source.EndsWithNewline && text.Length > 0
+                ? source.Lines.Count + 1
+                : source.LineIndexOf(s.BodyStart) + 1;
         }
 
         FindMisplacedComments(source, document, bodyStart, commentLines, diagnostics);
@@ -351,7 +370,7 @@ internal static partial class BodyParser
 
     /// <summary>The <c>pos-line</c> grammar of format.md §9.2.</summary>
     [GeneratedRegex(
-        """^[ \t]*<!--[ \t]*wolfden:[ \t]*(?<attrs>[a-z][a-z0-9_-]*=(?:"(?:(?!-->)[^"\r\n])*"|(?:(?!-->)[^"\p{Zs}\t\n\f\r])+)(?:[ \t]+[a-z][a-z0-9_-]*=(?:"(?:(?!-->)[^"\r\n])*"|(?:(?!-->)[^"\p{Zs}\t\n\f\r])+))*)[ \t]*-->[ \t]*$""",
+        """^ {0,3}<!--[ \t]*wolfden:[ \t]*(?<attrs>[a-z][a-z0-9_-]*=(?:"(?:(?!-->)[^"\r\n])*"|(?:(?!-->)[^"\p{Zs}\t\n\f\r])+)(?:[ \t]+[a-z][a-z0-9_-]*=(?:"(?:(?!-->)[^"\r\n])*"|(?:(?!-->)[^"\p{Zs}\t\n\f\r])+))*)[ \t]*-->[ \t]*$""",
         RegexOptions.CultureInvariant)]
     private static partial Regex PosLine();
 

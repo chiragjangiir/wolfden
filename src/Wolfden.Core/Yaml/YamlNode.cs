@@ -26,11 +26,12 @@ public enum YamlScalarStyle
 /// </summary>
 public abstract class YamlNode
 {
-    private protected YamlNode(int line, int start, int contentEnd)
+    private protected YamlNode(int line, int start, int contentEnd, int? lastLineOffset)
     {
         Line = line;
         Start = start;
         ContentEnd = contentEnd;
+        LastLineOffset = lastLineOffset ?? (contentEnd > start ? contentEnd - 1 : start);
     }
 
     /// <summary>The 1-based line in the file where the node starts.</summary>
@@ -42,13 +43,18 @@ public abstract class YamlNode
     /// <summary>Offset just after the node's last character, not counting
     /// trailing blank lines or comments.</summary>
     internal int ContentEnd { get; }
+
+    /// <summary>An offset on the node's last line. A new sibling goes after
+    /// that line. For a keep-chomped block scalar (<c>|+</c>), the last line
+    /// is its last kept blank line.</summary>
+    internal int LastLineOffset { get; }
 }
 
 /// <summary>A YAML scalar.</summary>
 public sealed class YamlScalar : YamlNode
 {
-    internal YamlScalar(string text, YamlScalarStyle style, int line, int start, int contentEnd)
-        : base(line, start, contentEnd)
+    internal YamlScalar(string text, YamlScalarStyle style, int line, int start, int contentEnd, int? lastLineOffset = null)
+        : base(line, start, contentEnd, lastLineOffset)
     {
         Text = text;
         Style = style;
@@ -86,8 +92,8 @@ public sealed class YamlScalar : YamlNode
 /// <summary>A YAML sequence (list).</summary>
 public sealed class YamlSequence : YamlNode
 {
-    internal YamlSequence(IReadOnlyList<YamlNode> items, bool isFlow, int line, int start, int contentEnd)
-        : base(line, start, contentEnd)
+    internal YamlSequence(IReadOnlyList<YamlNode> items, bool isFlow, int line, int start, int contentEnd, int? lastLineOffset = null)
+        : base(line, start, contentEnd, lastLineOffset)
     {
         Items = items;
         IsFlow = isFlow;
@@ -112,8 +118,8 @@ public sealed record YamlEntry(YamlNode Key, YamlNode Value)
 /// <summary>A YAML mapping, with its keys in file order.</summary>
 public sealed class YamlMapping : YamlNode
 {
-    internal YamlMapping(IReadOnlyList<YamlEntry> entries, bool isFlow, int line, int start, int contentEnd)
-        : base(line, start, contentEnd)
+    internal YamlMapping(IReadOnlyList<YamlEntry> entries, bool isFlow, int line, int start, int contentEnd, int? lastLineOffset = null)
+        : base(line, start, contentEnd, lastLineOffset)
     {
         Entries = entries;
         IsFlow = isFlow;

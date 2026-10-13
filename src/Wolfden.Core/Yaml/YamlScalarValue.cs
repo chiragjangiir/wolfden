@@ -107,7 +107,7 @@ public sealed partial class YamlScalarValue
             return false;
         }
 
-        if ("-?:,[]{}#&*!|>'\"%@`<=~.+".Contains(text[0], StringComparison.Ordinal) || char.IsDigit(text[0]))
+        if ("-?:,[]{}#&*!|>'\"%@`<=~.+".Contains(text[0], StringComparison.Ordinal) || NumberLike().IsMatch(text))
         {
             return false;
         }
@@ -132,7 +132,7 @@ public sealed partial class YamlScalarValue
     internal static bool IsSafeKey(string key) => SafeKey().IsMatch(key) && IsPlainSafe(key);
 
     private static bool IsSpecialChar(char c) =>
-        char.IsControl(c) || c is '\u2028' or '\u2029' or '\uFEFF';
+        char.IsControl(c) || c is '\u2028' or '\u2029' or '\uFEFF' or '\uFFFE' or '\uFFFF';
 
     private static bool HasUnpairedSurrogate(string value)
     {
@@ -180,6 +180,16 @@ public sealed partial class YamlScalarValue
 
         return sb.Append('"').ToString();
     }
+
+    /// <summary>
+    /// Anything a YAML 1.1 or 1.2 reader might take for a number, date, or
+    /// time: a digit first, then only digits, separators, signs, spaces, and
+    /// the letters of exponents, radix prefixes, and timestamps. Cautious on
+    /// purpose; <c>2291</c>, <c>014</c>, <c>1:20</c>, and <c>2026-10-13</c>
+    /// are quoted, while a ULID or <c>7th-fleet</c> isn't.
+    /// </summary>
+    [GeneratedRegex("^[0-9][0-9_:.,+ eExXoObBtTzZ-]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex NumberLike();
 
     [GeneratedRegex("^(?:null|true|false|yes|no|on|off|y|n)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ReservedWord();

@@ -11,10 +11,15 @@ namespace Wolfden.Core.Documents;
 /// </summary>
 public abstract class DenFile
 {
-    /// <summary>Rules whose errors leave a file too broken to edit safely.</summary>
+    /// <summary>
+    /// Rules whose errors leave a file too broken, or too ambiguous, to edit
+    /// safely. Anchors, aliases, tags, merge keys (F-YAML-4) and repeated
+    /// keys (F-YAML-3) are here because other YAML tools read such a file
+    /// differently from Wolfden, so an edit could mean something else to them.
+    /// </summary>
     private static readonly HashSet<string> StructuralRules = new(StringComparer.Ordinal)
     {
-        "F-ENC-1", "F-ENC-3", "F-FM-1", "F-YAML-1", "F-YAML-2",
+        "F-ENC-1", "F-ENC-3", "F-FM-1", "F-FM-2", "F-YAML-1", "F-YAML-2", "F-YAML-3", "F-YAML-4",
     };
 
     private readonly byte[] _bytes;
@@ -58,16 +63,23 @@ public abstract class DenFile
 
     /// <summary>
     /// True if the file parsed well enough to edit: valid UTF-8, no lone CR,
-    /// and frontmatter or YAML that parses to a mapping. Other errors don't
-    /// block an edit here; whether a write may go ahead is the caller's
-    /// decision (format.md §1.3).
+    /// a body CommonMark can parse, and frontmatter or YAML that parses to a
+    /// mapping with no repeated keys, anchors, aliases, or tags. Other errors
+    /// don't block an edit here; whether a write may go ahead is the caller's
+    /// decision (format.md §1.3). A markdown file whose only blocking error
+    /// is missing frontmatter can still have frontmatter added.
     /// </summary>
-    public bool CanEdit => !_diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error && StructuralRules.Contains(d.RuleId));
+    public bool CanEdit => !BlockingErrors(null).Any();
 
     private protected SourceText? Source { get; }
 
-    /// <summary>The file's bytes. Unedited, they're the bytes it was parsed from.</summary>
-    public byte[] ToBytes() => (byte[])_bytes.Clone();
+    /// <summary>
+    /// The file's bytes: its text encoded as UTF-8, after its byte order mark
+    /// if it has one. For an unedited file they equal the bytes it was parsed
+    /// from (format.md F-RT-3). A file that isn't valid UTF-8 returns its
+    /// original bytes.
+    /// </summary>
+    public byte[] ToBytes() => Source?.Encode() ?? (byte[])_bytes.Clone();
 
     internal string Slice(int start, int end) => Text[start..end];
 
@@ -80,14 +92,18 @@ public abstract class DenFile
         _diagnostics.AddRange(sorted);
     }
 
-    private protected void EnsureEditable()
+    /// <param name="allowed">One diagnostic the edit is allowed to ignore, because it fixes it.</param>
+    private protected void EnsureEditable(Diagnostic? allowed = null)
     {
-        if (!CanEdit)
+        var blocking = BlockingErrors(allowed).ToList();
+        if (blocking.Count > 0)
         {
-            var reasons = string.Join("; ", _diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error && StructuralRules.Contains(d.RuleId)));
-            throw new InvalidOperationException($"The file can't be edited until these errors are fixed: {reasons}");
+            throw new InvalidOperationException($"The file can't be edited until these errors are fixed: {string.Join("; ", blocking)}");
         }
     }
+
+    private IEnumerable<Diagnostic> BlockingErrors(Diagnostic? allowed) =>
+        _diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error && StructuralRules.Contains(d.RuleId) && !ReferenceEquals(d, allowed));
 
     /// <summary>Applies text edits and encodes the result, keeping the byte order mark.</summary>
     private protected byte[] ApplyEdits(IEnumerable<TextEdit> edits)
