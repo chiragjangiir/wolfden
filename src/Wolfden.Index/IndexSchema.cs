@@ -7,11 +7,23 @@ public static class IndexSchema
     /// The index's schema version. Bump it whenever the tables, or what goes
     /// into them, change: an index built with another version is rebuilt
     /// rather than migrated, since it holds nothing that isn't in the files.
+    /// Version 2 (#84) loads types and packs: standard sections hand over
+    /// (F-SEC-8), <c>ref</c> fields are type-checked (F-LINK-11), and
+    /// chapter-field values that don't match their definitions are ignored
+    /// (F-CHAP-3).
     /// </summary>
-    public const int Version = 1;
+    public const int Version = 2;
 
     /// <summary>The <c>meta</c> key for <see cref="Version"/>.</summary>
     public const string SchemaVersionKey = "schema_version";
+
+    /// <summary>
+    /// The <c>meta</c> key for the hash of the built-in packs the index was
+    /// built with (<c>BuiltInPacks.Hash</c>). Which sections hand over, which
+    /// refs are checked, and which enum values match depend on them, so an
+    /// index built with other built-in packs is rebuilt.
+    /// </summary>
+    public const string BuiltInPacksKey = "builtin_packs";
 
     /// <summary>The <c>meta</c> key for the den's <c>format</c> as written in <c>den.yaml</c> (empty if it has none).</summary>
     public const string DenFormatKey = "den_format";

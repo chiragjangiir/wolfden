@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Wolfden.Core.Documents;
 using Wolfden.Core.Structure;
+using Wolfden.Core.Types;
 using Wolfden.Core.Yaml;
 
 namespace Wolfden.Index;
@@ -23,6 +24,9 @@ public enum IndexStatus
 
     /// <summary>The den's <c>format</c>, or the format this version of Wolfden reads, changed since the index was built.</summary>
     FormatChanged,
+
+    /// <summary>The index was built with other built-in packs (<c>packs/core</c> changed in a Wolfden release).</summary>
+    PacksChanged,
 }
 
 /// <summary>
@@ -172,6 +176,11 @@ public static class IndexBuilder
             return IndexStatus.SchemaChanged;
         }
 
+        if (meta.GetValueOrDefault(IndexSchema.BuiltInPacksKey) != BuiltInPacks.Instance.Hash)
+        {
+            return IndexStatus.PacksChanged;
+        }
+
         return meta.GetValueOrDefault(IndexSchema.DenFormatKey) == DenFormatStamp(Path.GetFullPath(denRoot))
             && meta.GetValueOrDefault(IndexSchema.SupportedFormatKey) == DenStructure.SupportedFormat.ToString(CultureInfo.InvariantCulture)
             ? IndexStatus.Current
@@ -181,7 +190,8 @@ public static class IndexBuilder
     /// <summary>
     /// Rebuilds the index if it isn't <see cref="IndexStatus.Current"/>:
     /// missing, corrupt (for example after a sync conflict), or built by
-    /// another schema version or for another den format.
+    /// another schema version, with other built-in packs, or for another
+    /// den format.
     /// </summary>
     /// <returns>The status before any rebuild.</returns>
     public static IndexStatus EnsureCurrent(string denRoot)

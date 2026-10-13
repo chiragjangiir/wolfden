@@ -365,7 +365,9 @@ A field definition that is broken is a [warning], and that one definition
 is ignored, so the field is undefined (F-FLD-2) until it is fixed. The rest
 of the file still loads. A definition is broken if its field type is
 missing or unknown, if `list`, `temporal`, or `required` isn't a YAML
-boolean, if a key has the wrong shape, or if F-FT-1 or F-FT-8 says so.
+boolean, if a key has the wrong shape, or if F-FT-1 or F-FT-8 says so. A
+null `list`, `temporal`, or `required` (the key with no value) is the
+same as leaving it out, so it is `false` (F-FLD-4), not broken.
 `values` on a type other than `enum`, `to` on a type other than `ref`,
 or a `description` that isn't a string is a [warning], and only that key
 is ignored. Any other key is a [warning], and is kept.
@@ -482,7 +484,10 @@ time       = (SP / "T") 1*2DIGIT ":" 2DIGIT [":" 2DIGIT]
   `calendar` is reserved for custom
   calendars (#37): until they arrive, it is a [warning] ("custom calendars
   aren't supported yet"), and it is kept and otherwise ignored. Any other
-  key is a [warning], and is kept.
+  key is a [warning], and is kept. These two warnings are advisory: the
+  date still matches the `date` type, and its `text` and `sort` are read
+  as usual, so a chapter field's value (F-CHAP-3) or a `default`
+  (F-FT-15) with them isn't ignored.
 
 A value of any other shape, a `sort` that isn't an integer or a non-empty
 list of integers, or a mapping with neither `text` nor `sort` is a
@@ -542,7 +547,9 @@ field present.
 **F-FT-15.** `default` is a value that matches the field's type and
 `list` (§5.2, §5.3). A `ref` or `position` field has no default. A
 `default` that breaks either rule is a [warning], and the default is
-ignored. Where an entity has no value for the field at a position (it's
+ignored. An advisory warning, such as a date's `calendar` (F-FT-11), is
+still reported on the type file, but doesn't break the rule, so the
+default is kept. Where an entity has no value for the field at a position (it's
 missing, unset, or between entries), views and the index show the
 default, marked as a default. A default isn't a fact: it has no position,
 status, or pin of its own, and pinned canon (F-VIEW-2) leaves it out.
@@ -839,7 +846,9 @@ no items counts as not set. Every problem with a chapter's
 `fields`, including a value that doesn't match, a name that isn't a
 chapter field, and a `fields` that isn't a mapping, is a [warning], never
 an error, since an error in a container file would exclude the whole
-container (F-GEN-2). A chapter field is a fact about one
+container (F-GEN-2). A name that isn't a chapter field keeps its value
+as written, and it is inherited like any other (as F-FLD-2 keeps an
+entity's undefined field). A chapter field is a fact about one
 chapter, so it has no temporal form. Entries (format.md §7.3) don't exist
 here: the errors of §7.3 (F-TMP-1, F-TMP-2) and the `status` and `pin`
 errors inside an entry (F-STAT-1, F-PIN-1) don't apply. A value that is
@@ -1128,7 +1137,7 @@ fields:
     type: string
     temporal: true
     description: Military rank.
-  posting: { type: ref, to: ship, temporal: true }
+  posting: { type: ref, to: [ship, location], temporal: true }
 sections:
   - Service record
 ```
@@ -1174,7 +1183,8 @@ fields:
 
 With this pack enabled, Mara Voss's `rank` from format.md §13 no longer
 gets the F-FLD-2 warning, and her `posting` can link to the *Tessaly*,
-filed at `entities/ships/tessaly.md`. Character fields come in this
+filed at `entities/ships/tessaly.md`, or to a location such as Kessan
+Reach. Character fields come in this
 order: core's `role`, `gender`, `pronouns`, `occupation`, `skills`,
 `heritage`, `born`, `died`, `species`, and `factions`, then the
 extension's `rank` and `posting`, then `row` and `placeholder`. The

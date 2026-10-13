@@ -158,9 +158,26 @@ public sealed class DraculaIndexTests : IClassFixture<DraculaIndexTests.Built>
         Assert.Equal(3, sections.Count);
         Assert.Equal([chapter["5"], chapter["15"], chapter["16"]], sections.Select(s => s.FromOrdinal!.Value));
 
-        // Handover between standard sections needs the den's types, which
-        // aren't loaded yet, so each runs to the end of the story for now.
-        Assert.All(sections, s => Assert.Equal(long.MaxValue, s.UntilOrdinal));
+        // Appearance is a standard section of the core character, so each
+        // hands over to the next one (F-SEC-8), and the last runs on.
+        Assert.Equal([chapter["15"], chapter["16"], long.MaxValue], sections.Select(s => s.UntilOrdinal!.Value));
+    }
+
+    [Theory]
+    [InlineData("01M4TF5EZZJ0FZ8PAAT1WY4GR4", "13")]
+    [InlineData("01M4TF5F056Y24P4D8ZT8RMGGD", "23")]
+    public void TheCountAndHarkerAppearancesHandOver(string id, string chapterKey)
+    {
+        // Count Dracula's Appearance changes at chapter 13 (younger, in
+        // London) and Jonathan Harker's at chapter 23 (his hair turns white):
+        // the first section ends where the second starts (F-SEC-8).
+        var entity = Index.FindEntity(id)!;
+        var sections = Index.Context.Sections.Where(s => s.EntityId == entity.Id && s.Name == "Appearance").OrderBy(s => s.Index).ToList();
+        var chapter = Index.Context.Chapters.AsEnumerable().Single(c => c.Key == chapterKey).Ordinal;
+
+        Assert.Equal(2, sections.Count);
+        Assert.Equal(chapter, sections[0].UntilOrdinal);
+        Assert.Equal((chapter, long.MaxValue), (sections[1].FromOrdinal!.Value, sections[1].UntilOrdinal!.Value));
     }
 
     /// <summary>One index of a Dracula copy, shared by the tests in this class.</summary>

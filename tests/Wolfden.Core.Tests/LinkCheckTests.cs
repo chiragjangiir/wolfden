@@ -105,7 +105,7 @@ public class LinkCheckTests
             .Entity(Starfall, "unplaced", Character("Unplaced", "from: \"ash:9\""))
             .Entity(Ember, "pointer", Character("Pointer", "from: \"ember:1\""), "[[moon-born|to a later book]]\n[[unplaced|to an unresolved from]]\n")
             .With($"{Starfall}/universe.md", "---\nname: Starfall\norder: [long-dark, a-quiet-moon]\n---\n[[late|universe body]]\n")
-            .With($"{LongDark}/series.md", "---\nname: The Long Dark\nbooks: [ember, ash]\nchapter_defaults:\n  tense: \"[[late|series default]]\"\n---\n")
+            .With($"{LongDark}/series.md", "---\nname: The Long Dark\nbooks: [ember, ash]\nchapter_defaults:\n  when: \"[[late|series default]]\"\n---\n")
             .With($"{Ember}/book.md", """
                 ---
                 name: Ember

@@ -194,6 +194,17 @@ public sealed class StarfallIndexTests : IClassFixture<StarfallIndexTests.Built>
     }
 
     [Fact]
+    public void DenLocalPackFilesAreRecorded()
+    {
+        var packs = Index.Context.Files.Where(f => f.Kind == "pack").OrderBy(f => f.Path).ToList();
+
+        Assert.Equal(
+            ["packs/starfall/extensions/character.yaml", "packs/starfall/pack.yaml", "packs/starfall/templates/ship.md", "packs/starfall/types/ship.yaml"],
+            packs.Select(f => f.Path));
+        Assert.All(packs, f => Assert.True(f.IsLoaded));
+    }
+
+    [Fact]
     public void OutlineRowsUnescapeCellsAndMapChapters()
     {
         var rows = Index.Context.OutlineRows.OrderBy(r => r.Order).ToList();

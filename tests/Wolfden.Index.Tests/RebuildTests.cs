@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Wolfden.Core.Types;
 
 namespace Wolfden.Index.Tests;
 
@@ -100,6 +101,22 @@ public sealed class RebuildTests
         Assert.Equal(IndexStatus.SchemaChanged, IndexBuilder.Check(den.Root));
         using var index = DenIndex.Open(den.Root);
         Assert.Equal(IndexSchema.Version.ToString(), index.Context.Meta.Single(m => m.Key == IndexSchema.SchemaVersionKey).Value);
+    }
+
+    [Fact]
+    public void ABuiltInPacksChangeTriggersARebuild()
+    {
+        using var den = TempDen.Starfall();
+        IndexBuilder.Rebuild(den.Root);
+        Assert.Equal(BuiltInPacks.Instance.Hash, ReadMeta(den.IndexPath, IndexSchema.BuiltInPacksKey));
+
+        // As if the index were built by a release with another core pack.
+        SetMeta(den.IndexPath, IndexSchema.BuiltInPacksKey, "0000");
+
+        Assert.Equal(IndexStatus.PacksChanged, IndexBuilder.Check(den.Root));
+        Assert.Equal(IndexStatus.PacksChanged, IndexBuilder.EnsureCurrent(den.Root));
+        Assert.Equal(IndexStatus.Current, IndexBuilder.Check(den.Root));
+        Assert.Equal(BuiltInPacks.Instance.Hash, ReadMeta(den.IndexPath, IndexSchema.BuiltInPacksKey));
     }
 
     [Fact]
@@ -329,6 +346,16 @@ public sealed class RebuildTests
         command.Parameters.AddWithValue("$key", key);
         command.Parameters.AddWithValue("$value", value);
         Assert.Equal(1, command.ExecuteNonQuery());
+    }
+
+    private static string? ReadMeta(string indexPath, string key)
+    {
+        using var connection = new SqliteConnection(IndexBuilder.ConnectionString(indexPath, SqliteOpenMode.ReadOnly));
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM meta WHERE key = $key";
+        command.Parameters.AddWithValue("$key", key);
+        return command.ExecuteScalar() as string;
     }
 
     /// <summary>Every table's schema and rows, in a fixed order, as text.</summary>

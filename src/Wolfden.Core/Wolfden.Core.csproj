@@ -9,4 +9,13 @@
     <InternalsVisibleTo Include="Wolfden.Core.Tests" />
   </ItemGroup>
 
+  <!-- The built-in packs (docs/types.md F-PACK-4). packs/ stays the single
+       source of truth: its pack folders are embedded as they are, and
+       BuiltInPacksTests checks that the embedded copy matches the files. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\packs\*\**\*" Exclude="..\..\packs\**\.*;..\..\packs\**\.*\**">
+      <LogicalName>Wolfden/packs/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
 </Project>

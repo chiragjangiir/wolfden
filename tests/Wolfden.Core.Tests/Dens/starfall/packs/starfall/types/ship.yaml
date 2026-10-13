@@ -1,0 +1,14 @@
+name: Ship
+plural: ships
+fields:
+  class: string
+  captain: { type: ref, to: character, temporal: true }
+  condition:
+    type: enum
+    values: [active, damaged, lost]
+    default: active
+    temporal: true
+sections:
+  - Overview
+  - Crew
+  - Service history

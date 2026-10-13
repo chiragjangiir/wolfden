@@ -34,6 +34,13 @@ internal sealed class MemoryDenSource : IDenSource
         return this;
     }
 
+    /// <summary>Adds or replaces a file with exact bytes, such as invalid UTF-8.</summary>
+    public MemoryDenSource WithBytes(string path, byte[] bytes)
+    {
+        _files[path] = bytes;
+        return this;
+    }
+
     /// <summary>Removes a file.</summary>
     public MemoryDenSource Without(string path)
     {

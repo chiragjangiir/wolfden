@@ -148,20 +148,31 @@ public sealed class SectionFact
     public FactBound? EffectiveFrom { get; internal set; }
 
     /// <summary>
-    /// The effective <c>until</c> (exclusive): its own <c>until</c>, or the
-    /// end of the story, and for a subsection never after its parent's
-    /// (F-SEC-9). Null if a position on the way doesn't resolve.
+    /// The effective <c>until</c> (exclusive, F-SEC-8, F-SEC-9): its own
+    /// <c>until</c>; or for a live standard level-2 section, the
+    /// earliest <c>from</c> after its own among the other live level-2
+    /// sections with the same name (it <b>hands over</b>); or else the end
+    /// of the story. A subsection's is never after its parent's. Null if a
+    /// position on the way doesn't resolve.
     /// </summary>
-    /// <remarks>
-    /// Standard sections hand over to the next live section with the same
-    /// name (F-SEC-8), but which sections are standard depends on the
-    /// entity's type, and types aren't loaded yet, so no section hands over
-    /// here: every section without an <c>until</c> runs to the end of the
-    /// story (or of its parent), as a custom section does. That shows more
-    /// prose, never less. Loading types is #84; when it lands, bump the
-    /// index's schema version so existing indexes are rebuilt.
-    /// </remarks>
     public StoryPoint? EffectiveUntil { get; internal set; }
+
+    /// <summary>
+    /// True for a level-2 section that is one of the standard sections of
+    /// the entity's type (types.md F-TYPE-10), which hands over to the next
+    /// live one with the same name (F-SEC-8). Always false for a subsection,
+    /// and for every section of an untyped entity (F-ENT-2).
+    /// </summary>
+    public bool IsStandard { get; internal set; }
+
+    /// <summary>
+    /// True if the section is live (F-SEC-8): in canon (F-STAT-3), not
+    /// bookkeeping (F-SEC-12), its positions resolve (F-POS-4), and its
+    /// range isn't empty. For a subsection, the range is its effective one
+    /// (F-SEC-9), so a subsection that is never in effect isn't live.
+    /// </summary>
+    public bool IsLive => Status.IsInCanon() && !IsBookkeeping && EffectiveFrom is { } from && EffectiveUntil is { } until
+        && from.Point < until;
 }
 
 /// <summary>
@@ -178,6 +189,15 @@ public sealed class EntityFacts
         Entity = entity;
         Bookkeeping = bookkeeping;
         Fields = ReadFields();
+
+        // F-SEC-8: the level-2 sections first, so standard ones can hand over
+        // before their subsections take their ranges (F-SEC-9).
+        foreach (var section in entity.File.TopLevelSections)
+        {
+            Fact(section);
+        }
+
+        HandOver();
         Sections = entity.File.Sections.Select(Fact).ToList();
     }
 
@@ -283,14 +303,49 @@ public sealed class EntityFacts
         return own is null || own.Point < inherited.Point ? inherited : own;
     }
 
+    /// <summary>
+    /// F-SEC-8: a live standard level-2 section without an <c>until</c>
+    /// ends at the earliest <c>from</c> after its own among the other live
+    /// level-2 sections with the same name. Sections that share a
+    /// <c>from</c> overlap, and neither ends the other (F-SEC-4).
+    /// </summary>
+    private void HandOver()
+    {
+        if (Entity.Definition is not { } type)
+        {
+            return;
+        }
+
+        var standard = Entity.File.TopLevelSections
+            .Where(s => type.IsStandardSection(s.Name))
+            .Select(s => _sections[s])
+            .ToList();
+        foreach (var fact in standard)
+        {
+            fact.IsStandard = true;
+        }
+
+        foreach (var group in standard.Where(f => f.IsLive).GroupBy(f => LinkText.Normalize(f.Section.Name), StringComparer.Ordinal))
+        {
+            var live = group.ToList();
+            foreach (var fact in live.Where(f => f.UntilText is null))
+            {
+                var from = fact.EffectiveFrom!.Point;
+                var next = live.Select(f => f.EffectiveFrom!.Point).Where(p => p > from).DefaultIfEmpty(Entity.Universe.EndOfStory).Min();
+                fact.EffectiveUntil = next;
+            }
+        }
+    }
+
     /// <summary>F-STAT-2: a section without a status takes its parent's, and a level-2 one its entity's.</summary>
     private FactStatus OwnStatus(Section section) =>
         section.Comment?["status"] is { } s && FactStatuses.Parse(s) is { } parsed ? parsed
         : section.Parent is { } parent ? OwnStatus(parent)
         : Entity.Status;
 
+    /// <summary>F-CORE-4: a level-2 <c>## Payoff</c> of an entity whose type is the built-in core pack's thread.</summary>
     private bool IsPayoff(Section section) =>
-        Entity.Type == "thread" && LinkText.Normalize(section.Name) == "payoff";
+        Entity.Definition?.IsCoreThread == true && LinkText.Normalize(section.Name) == "payoff";
 
     /// <summary>
     /// A thread's <c>paid_off</c>, read from a plain value or a single

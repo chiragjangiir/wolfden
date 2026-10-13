@@ -1,8 +1,10 @@
-# An invented den for the position tests (#11) and the link tests (#12): a
-# series of two books, a standalone book, a series with no books yet, and a
-# second universe.
+# An invented den for the position tests (#11), the link tests (#12), and
+# the type tests (#84): a series of two books, a standalone book, a series
+# with no books yet, a second universe, and the den-local pack of
+# docs/types.md §10.
 format: 1
 name: Starfall Notes
 authors:
   wren-calder: { name: Wren Calder }
+packs: [starfall]
 spoiler_checks: true

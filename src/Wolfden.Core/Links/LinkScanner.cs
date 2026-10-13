@@ -97,13 +97,15 @@ internal sealed class LinkScanner(Bookkeeping bookkeeping, List<LinkOccurrence> 
                     continue;
                 }
 
-                var set = HasValue(field.Value);
-                var positions = set ? InheritingChapters(container, name) : [];
-                foreach (var link in ScalarLinks(path, file, field.Value))
+                // F-CHAP-3: a value, or a list item, that is ignored is as if it were left out.
+                var value = container.ChapterDefaults.GetValueOrDefault(name);
+                var positions = value is null ? [] : InheritingChapters(container, name);
+                foreach (var (item, link) in ItemLinks(path, file, field.Value))
                 {
+                    var held = value?.Holds(item) == true;
                     Add(new LinkOccurrence(path, link, LinkSite.ChapterDefault, container)
                     {
-                        Field = name, Positions = positions, IsIgnoredValue = !set,
+                        Field = name, Positions = held ? positions : [], IsIgnoredValue = !held,
                     });
                 }
             }
@@ -122,13 +124,13 @@ internal sealed class LinkScanner(Bookkeeping bookkeeping, List<LinkOccurrence> 
                 var position = Single(new LinkPosition(chapter.Point, chapter.ToString()));
                 foreach (var field in chapterFields.Entries)
                 {
-                    // F-CHAP-3: an ignored value (an entry) is as if the field were left out.
-                    var set = HasValue(field.Value);
-                    foreach (var link in ScalarLinks(path, file, field.Value))
+                    var value = field.KeyText is { } name ? chapter.OwnFields.GetValueOrDefault(name) : null;
+                    foreach (var (part, link) in ItemLinks(path, file, field.Value))
                     {
+                        var held = value?.Holds(part) == true;
                         Add(new LinkOccurrence(path, link, LinkSite.ChapterField, book)
                         {
-                            Field = field.KeyText, Chapter = chapter, Positions = set ? position : [], IsIgnoredValue = !set,
+                            Field = field.KeyText, Chapter = chapter, Positions = held ? position : [], IsIgnoredValue = !held,
                         });
                     }
                 }
@@ -181,39 +183,11 @@ internal sealed class LinkScanner(Bookkeeping bookkeeping, List<LinkOccurrence> 
         };
 
         var result = new List<LinkPosition>();
-        foreach (var book in books)
+        foreach (var chapter in books.SelectMany(b => b.Chapters))
         {
-            var own = OwnChapterFields(book);
-            foreach (var chapter in book.Chapters)
+            if (chapter.Fields.TryGetValue(field, out var value) && value.DefaultFrom == container)
             {
-                if (own.TryGetValue(chapter.Key, out var fields) && HasValue(fields[field]))
-                {
-                    continue;
-                }
-
-                var from = book.ScopeChain.FirstOrDefault(c => HasValue((c.File.Frontmatter?["chapter_defaults"] as YamlMapping)?[field]));
-                if (from == container)
-                {
-                    result.Add(new LinkPosition(chapter.Point, chapter.ToString(), chapter));
-                }
-            }
-        }
-
-        return result;
-    }
-
-    /// <summary>Each chapter's <c>fields</c> mapping in <c>book.md</c>, by chapter key.</summary>
-    private static Dictionary<string, YamlMapping> OwnChapterFields(Book book)
-    {
-        var result = new Dictionary<string, YamlMapping>(StringComparer.Ordinal);
-        if (book.File.Frontmatter?["chapters"] is YamlSequence items)
-        {
-            foreach (var item in items.Items.OfType<YamlMapping>())
-            {
-                if (item["key"] is YamlScalar { IsNull: false } key && item["fields"] is YamlMapping fields)
-                {
-                    result.TryAdd(key.Text, fields);
-                }
+                result.Add(new LinkPosition(chapter.Point, chapter.ToString(), chapter));
             }
         }
 
@@ -221,14 +195,20 @@ internal sealed class LinkScanner(Bookkeeping bookkeeping, List<LinkOccurrence> 
     }
 
     /// <summary>
-    /// True if a chapter field's value is set (F-CHAP-5): not null, and not
-    /// an entry or a list holding one, which is ignored (F-CHAP-3). An empty
-    /// list is a value.
+    /// The links in a chapter field's value, each with the top-level item it's
+    /// in: a list item, or the value itself if it isn't a list. Items are
+    /// what F-CHAP-3 keeps or ignores.
     /// </summary>
-    private static bool HasValue(YamlNode? value) =>
-        value is not (null or YamlScalar { IsNull: true })
-        && !EntityCatalog.IsEntry(value)
-        && !(value is YamlSequence list && list.Items.Any(EntityCatalog.IsEntry));
+    private IEnumerable<(YamlNode Item, WikiLink Link)> ItemLinks(string path, MarkdownFile file, YamlNode value)
+    {
+        foreach (var item in value is YamlSequence list ? list.Items : [value])
+        {
+            foreach (var link in ScalarLinks(path, file, item))
+            {
+                yield return (item, link);
+            }
+        }
+    }
 
     /// <summary>
     /// An entry's position for F-LINK-13: its <c>from</c>. Without one the

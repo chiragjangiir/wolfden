@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Wolfden.Core.Documents;
+using Wolfden.Core.Types;
 using Wolfden.Core.Yaml;
 
 namespace Wolfden.Core.Structure;
@@ -31,19 +32,85 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
             return;
         }
 
-        if (ReadFormat(file) is not int format || !ReadSettings(file))
+        if (ReadFormat(file) is not int format || !ReadSettings(file) || ReadPacks(file) is not { } packs)
         {
             return;
         }
 
         den.SetLoaded(format);
+
+        // Pack files are den configuration, read before any note (types.md §1).
+        den.Types = DenTypes.Load(source, packs);
+        foreach (var d in den.Types.Diagnostics)
+        {
+            den.Add(d.Path, d.Diagnostic);
+        }
+
         foreach (var key in Folders("universes"))
         {
             if (LoadUniverse(key) is { } universe)
             {
                 den.AddUniverse(universe);
+                new ChapterFieldReader(den, universe).Read();
             }
         }
+    }
+
+    /// <summary>
+    /// F-DEN-4: <c>packs</c> is an optional list of pack keys, each naming a
+    /// built-in pack or a den-local one (a folder <c>packs/&lt;key&gt;/</c>
+    /// with a <c>pack.yaml</c>), with no repeats. Returns null on an error,
+    /// which keeps the den from loading.
+    /// </summary>
+    private List<string>? ReadPacks(YamlFile file)
+    {
+        var node = file.GetValue("packs");
+        if (node is null or YamlScalar { IsNull: true })
+        {
+            return [];
+        }
+
+        if (node is not YamlSequence list)
+        {
+            den.Add(DenFile, new Diagnostic("F-DEN-4", DiagnosticSeverity.Error, node.Line,
+                "packs must be a list of pack keys, such as 'packs: [starfall]'."));
+            return null;
+        }
+
+        var result = new List<string>();
+        var ok = true;
+        foreach (var item in list.Items)
+        {
+            if (item is not YamlScalar { IsNull: false } scalar)
+            {
+                den.Add(DenFile, new Diagnostic("F-DEN-4", DiagnosticSeverity.Error, item.Line, "Each entry in packs must be a pack key."));
+                ok = false;
+                continue;
+            }
+
+            var key = scalar.Text;
+            if (result.Contains(key, StringComparer.Ordinal))
+            {
+                den.Add(DenFile, new Diagnostic("F-DEN-4", DiagnosticSeverity.Error, item.Line, $"'{key}' is listed more than once in packs."));
+                ok = false;
+                continue;
+            }
+
+            var isLocal = Keys.IsKey(key) && source.FileExists($"packs/{key}/pack.yaml");
+            if (!isLocal && !BuiltInPacks.Instance.Keys.Contains(key))
+            {
+                var message = Keys.IsKey(key) && source.FileExists($"packs/{key}/pack.yml")
+                    ? $"packs names '{key}', but packs/{key} has pack.yml, which isn't read: rename it to pack.yaml."
+                    : $"packs names '{key}', but there's no built-in pack '{key}' and no folder packs/{key}/ with a pack.yaml.";
+                den.Add(DenFile, new Diagnostic("F-DEN-4", DiagnosticSeverity.Error, item.Line, message));
+                ok = false;
+                continue;
+            }
+
+            result.Add(key);
+        }
+
+        return ok ? result : null;
     }
 
     /// <summary>F-DEN-1: <c>format</c> is a required integer, from 1 up to the highest this reader supports.</summary>
@@ -266,7 +333,7 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         }
 
         var book = new Book(universe, series, key, path, read.File, read.Name, read.Id, status);
-        book.Chapters = chapters.Select((c, i) => new Chapter(book, c.Key, i, c.Number, c.Title, c.Line)).ToList();
+        book.Chapters = chapters.Select((c, i) => new Chapter(book, c.Key, i, c.Number, c.Title, c.Line) { FieldsNode = c.Fields }).ToList();
         return new WorkInfo(ContainerKind.Book, key, path, read.FilePath, book, []);
     }
 
@@ -358,7 +425,7 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
                 lastNumber = current;
             }
 
-            result.Add(new ChapterInfo(key, number, title, item.Line));
+            result.Add(new ChapterInfo(key, number, title, item.Line, (item as YamlMapping)?["fields"]));
         }
 
         return result;
@@ -550,7 +617,7 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         }
     }
 
-    private sealed record ChapterInfo(string Key, long? Number, string? Title, int Line);
+    private sealed record ChapterInfo(string Key, long? Number, string? Title, int Line, YamlNode? Fields);
 
     /// <summary>A series or book folder that has a container file, loaded or not.</summary>
     /// <param name="Loaded">The container, or null if it has errors (F-GEN-2).</param>

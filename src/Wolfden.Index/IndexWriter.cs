@@ -11,6 +11,7 @@ using Wolfden.Core.Entities;
 using Wolfden.Core.Links;
 using Wolfden.Core.Outlines;
 using Wolfden.Core.Structure;
+using Wolfden.Core.Types;
 using Wolfden.Core.Yaml;
 
 namespace Wolfden.Index;
@@ -62,6 +63,7 @@ internal sealed class IndexWriter
             loaded.Add("den.yaml");
         }
 
+        loaded.UnionWith(LoadedPackFiles(structure));
         loaded.UnionWith(AllContainers(structure).Select(c => c.FilePath));
         loaded.UnionWith(catalog.Entities.Select(e => e.Path));
         loaded.UnionWith(outlines.Where(o => o.Rows is not null).Select(o => o.Path));
@@ -77,6 +79,7 @@ internal sealed class IndexWriter
             new MetaRecord { Key = IndexSchema.SchemaVersionKey, Value = IndexSchema.Version.ToString(CultureInfo.InvariantCulture) },
             new MetaRecord { Key = IndexSchema.DenFormatKey, Value = IndexBuilder.DenFormatStamp(_source.FileExists("den.yaml") ? _source.ReadFile("den.yaml") : null) },
             new MetaRecord { Key = IndexSchema.SupportedFormatKey, Value = DenStructure.SupportedFormat.ToString(CultureInfo.InvariantCulture) },
+            new MetaRecord { Key = IndexSchema.BuiltInPacksKey, Value = BuiltInPacks.Instance.Hash },
         ]);
         _rows.Add(new DenRecord
         {
@@ -482,6 +485,22 @@ internal sealed class IndexWriter
         return Expression.Lambda<Func<object, object?>>(Expression.Convert(value, typeof(object)), row).Compile();
     }
 
+    /// <summary>
+    /// The files of the enabled den-local packs that loaded: those without
+    /// an error, which would exclude them (types.md F-PACK-2).
+    /// </summary>
+    private IEnumerable<string> LoadedPackFiles(DenStructure structure)
+    {
+        var failed = structure.Types.Diagnostics
+            .Where(d => d.Diagnostic.Severity == DiagnosticSeverity.Error)
+            .Select(d => d.Path)
+            .ToHashSet(StringComparer.Ordinal);
+        var folders = structure.Types.Packs.Where(p => !p.IsBuiltIn).Select(p => p.Folder + "/").ToList();
+        return _source.Files.Select(f => f.Path)
+            .Where(p => folders.Any(f => p.StartsWith(f, StringComparison.Ordinal)) && !failed.Contains(p))
+            .ToList();
+    }
+
     private static IEnumerable<Container> AllContainers(DenStructure structure) =>
         structure.Universes.SelectMany(u => new Container[] { u }.Concat(u.Series).Concat(u.Books));
 
@@ -502,6 +521,7 @@ internal sealed class IndexWriter
     {
         var name = path[(path.LastIndexOf('/') + 1)..];
         return path == "den.yaml" ? "den"
+            : path.StartsWith("packs/", StringComparison.Ordinal) ? "pack"
             : name is "universe.md" or "series.md" or "book.md" ? "container"
             : name == "outline.md" ? "outline"
             : path.Contains("/entities/", StringComparison.Ordinal) ? "entity"

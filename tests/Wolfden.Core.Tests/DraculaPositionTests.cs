@@ -13,9 +13,6 @@ public class DraculaPositionTests
 {
     private static readonly Lazy<DenStructure> Den = new(() => DenStructure.Load(MemoryDenSource.DraculaRoot));
 
-    /// <summary>The core pack's position fields (packs/core/types/thread.yaml).</summary>
-    private static readonly HashSet<string> ThreadPositionFields = ["planted", "paid_off"];
-
     private static Universe Dracula => Den.Value.FindUniverse("dracula")!;
 
     public static TheoryData<string> EntityFiles() =>
@@ -26,8 +23,9 @@ public class DraculaPositionTests
     private static (MarkdownFile File, PositionScan Scan) ScanEntity(string path)
     {
         var file = MarkdownFile.Parse(TestFiles.ReadRepoFile($"samples/dracula/{path}"), requireFrontmatter: true);
-        var isThread = file.GetFrontmatterValue("type") is YamlScalar { Text: "thread" };
-        return (file, PositionScanner.Scan(file, isThread ? ThreadPositionFields : null));
+        // The position fields come from the loaded type, such as the core thread's planted and paid_off.
+        var type = file.GetFrontmatterValue("type") is YamlScalar { IsNull: false } t ? Den.Value.Types.Find(t.Text) : null;
+        return (file, PositionScanner.Scan(file, type?.PositionFields));
     }
 
     private static StoryPoint Resolve(string path, PositionReference reference)
