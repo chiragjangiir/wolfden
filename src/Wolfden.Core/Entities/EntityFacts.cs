@@ -158,7 +158,8 @@ public sealed class SectionFact
     /// entity's type, and types aren't loaded yet, so no section hands over
     /// here: every section without an <c>until</c> runs to the end of the
     /// story (or of its parent), as a custom section does. That shows more
-    /// prose, never less.
+    /// prose, never less. Loading types is #84; when it lands, bump the
+    /// index's schema version so existing indexes are rebuilt.
     /// </remarks>
     public StoryPoint? EffectiveUntil { get; internal set; }
 }
@@ -254,14 +255,19 @@ public sealed class EntityFacts
     {
         var fromText = fact.FromText ?? (parent is null && IsPayoff(section) ? PaidOff() : null);
         FactBound? own = null;
-        if (fromText is not null)
+
+        // A from that doesn't parse counts as unset (types.md F-FT-10). That
+        // can only be a thread's paid_off here: a bad from= in a section
+        // comment is an error that excludes the file. A well-formed position
+        // that doesn't resolve leaves the section with no range (F-POS-4).
+        if (fromText is not null && StoryPosition.TryParse(fromText, out var position, out _))
         {
-            if (Resolve(fromText) is not { } point)
+            if (Entity.Universe.Resolve(position).Resolved is not { } resolved)
             {
                 return null;
             }
 
-            own = new FactBound(point, fromText);
+            own = new FactBound(resolved.Point, fromText);
         }
 
         if (parent is null)

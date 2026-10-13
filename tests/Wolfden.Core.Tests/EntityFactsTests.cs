@@ -201,6 +201,54 @@ public class EntityFactsTests
         });
     }
 
+    [Theory]
+    [InlineData("someday soon")]
+    [InlineData("ash:1.2")]
+    [InlineData("ash:r3")]
+    [InlineData("")]
+    public void APaidOffThatDoesntParseCountsAsUnset(string paidOff)
+    {
+        // types.md F-FT-10: the Payoff then enters with its thread.
+        var (facts, links) = Thread($"paid_off: \"{paidOff}\"");
+        var payoff = facts.Sections.Single(s => s.Section.Name == "Payoff");
+
+        Assert.Equal((P("ember:1"), End), Range(payoff));
+        Assert.Equal("ember:1", payoff.EffectiveFrom!.Description);
+        Assert.Equal(P("ember:1"), Assert.Single(Assert.Single(links.Links).Occurrence.Positions).Point.Ordinal);
+    }
+
+    [Fact]
+    public void APaidOffThatDoesntResolveLeavesThePayoffWithNoRange()
+    {
+        // F-CORE-4: a well-formed paid_off is still the Payoff's from, so
+        // one that names no chapter keeps it out of views (F-POS-4).
+        var (facts, links) = Thread("paid_off: \"ash:99\"");
+        var payoff = facts.Sections.Single(s => s.Section.Name == "Payoff");
+
+        Assert.Null(payoff.EffectiveFrom);
+        Assert.Null(payoff.EffectiveUntil);
+        Assert.Empty(Assert.Single(links.Links).Occurrence.Positions);
+    }
+
+    [Fact]
+    public void APaidOffThatResolvesIsThePayoffsFrom()
+    {
+        var (facts, links) = Thread("paid_off: \"ash:2\"");
+
+        Assert.Equal((P("ash:2"), End), Range(facts.Sections.Single(s => s.Section.Name == "Payoff")));
+        Assert.Equal(P("ash:2"), Assert.Single(Assert.Single(links.Links).Occurrence.Positions).Point.Ordinal);
+    }
+
+    private static (EntityFacts Facts, Links.LinkIndex Links) Thread(string paidOff)
+    {
+        const string path = LinkDens.LongDark + "/entities/threads/manifest.md";
+        var source = LinkDens.Den().With(path,
+            $"---\ntype: thread\nname: Manifest\nstatus: canon\nfrom: \"ember:1\"\nfields:\n  {paidOff}\n---\n\n## Payoff\nSold by [[Manifest]].\n");
+        var links = Links.LinkIndex.Load(source);
+        Assert.DoesNotContain(links.Catalog.Diagnostics, d => d.Diagnostic.Severity == DiagnosticSeverity.Error);
+        return (EntityFacts.For(links.Catalog.FindByPath(path)!, new Bookkeeping()), links);
+    }
+
     [Fact]
     public void OrdinalsSortInStoryOrder()
     {
