@@ -12,6 +12,10 @@
     <PackageVersion Include="YamlDotNet" Version="18.1.0" />                   <!-- MIT -->
   </ItemGroup>
 
+  <ItemGroup Label="Index">
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />  <!-- MIT; bundles SQLite (public domain) via SQLitePCLRaw (Apache-2.0) -->
+  </ItemGroup>
+
   <ItemGroup Label="Testing">
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />      <!-- MIT -->
     <PackageVersion Include="xunit.v3" Version="3.2.2" />                      <!-- Apache-2.0 -->

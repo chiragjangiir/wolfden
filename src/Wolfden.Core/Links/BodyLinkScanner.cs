@@ -35,9 +35,9 @@ internal sealed record OutlineRowCells(string RowId, string? Status, string? Cha
 /// </summary>
 internal static class BodyLinkScanner
 {
-    private static readonly MarkdownPipeline Plain = new MarkdownPipelineBuilder().UsePreciseSourceLocation().Build();
+    internal static readonly MarkdownPipeline Plain = new MarkdownPipelineBuilder().UsePreciseSourceLocation().Build();
 
-    private static readonly MarkdownPipeline WithTables =
+    internal static readonly MarkdownPipeline WithTables =
         new MarkdownPipelineBuilder().UsePreciseSourceLocation().UsePipeTables().Build();
 
     /// <summary>The links in an entity or container file's body, in file order.</summary>
@@ -137,7 +137,7 @@ internal static class BodyLinkScanner
         return i == text.Length;
     }
 
-    private static MarkdigDocument? Parse(string text, int bodyStart, MarkdownPipeline pipeline)
+    internal static MarkdigDocument? Parse(string text, int bodyStart, MarkdownPipeline pipeline)
     {
         try
         {
@@ -191,7 +191,7 @@ internal static class BodyLinkScanner
     /// Splits a table line into cells at each unescaped <c>|</c>, as GFM
     /// does, dropping a leading and a trailing pipe.
     /// </summary>
-    private static List<(int Start, int End)> SplitCells(string text, int start, int end)
+    internal static List<(int Start, int End)> SplitCells(string text, int start, int end)
     {
         while (start < end && text[start] is ' ' or '\t')
         {
@@ -228,7 +228,7 @@ internal static class BodyLinkScanner
         return cells;
     }
 
-    private static bool IsDelimiterRow(string line)
+    internal static bool IsDelimiterRow(string line)
     {
         var cells = line.Trim().Trim('|').Split('|');
         return cells.Length > 0 && cells.All(c =>
@@ -286,7 +286,7 @@ internal static class BodyLinkScanner
     }
 
     /// <summary>The HTML comments in an HTML block: from each <c>&lt;!--</c> to the next <c>--&gt;</c>, or the end of the block.</summary>
-    private static void AddComments(string text, int start, int end, List<(int Start, int End)> ranges)
+    internal static void AddComments(string text, int start, int end, List<(int Start, int End)> ranges)
     {
         var i = start;
         while (i < end)

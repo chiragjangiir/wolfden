@@ -16,46 +16,36 @@ internal sealed class LinkScanner(Bookkeeping bookkeeping, List<LinkOccurrence> 
     public void ScanEntity(CatalogEntity entity)
     {
         var file = entity.File;
+        var facts = EntityFacts.For(entity, bookkeeping);
         var entityPosition = Single(entity.EntersCanon is { } p ? new LinkPosition(p, entity.EntersCanonDescription) : null);
-        if (file.Frontmatter?["fields"] is YamlMapping fields)
+        foreach (var field in facts.Fields)
         {
-            foreach (var field in fields.Entries)
+            if (field.Kind == FieldValueKind.Plain)
             {
-                if (field.KeyText is not { } name)
+                foreach (var link in ScalarLinks(entity.Path, file, field.Value))
                 {
-                    continue;
+                    Add(new LinkOccurrence(entity.Path, link, LinkSite.EntityField, entity.Scope)
+                    {
+                        Entity = entity, Field = field.Name, Status = entity.Status, Positions = entityPosition,
+                    });
                 }
 
-                var entries = Entries(field.Value);
-                if (entries is null)
-                {
-                    foreach (var link in ScalarLinks(entity.Path, file, field.Value))
-                    {
-                        Add(new LinkOccurrence(entity.Path, link, LinkSite.EntityField, entity.Scope)
-                        {
-                            Entity = entity, Field = name, Status = entity.Status, Positions = entityPosition,
-                        });
-                    }
+                continue;
+            }
 
-                    continue;
-                }
-
-                foreach (var entry in entries)
+            foreach (var entry in field.Entries)
+            {
+                var position = EntryPosition(entity, entry.Node);
+                foreach (var link in ScalarLinks(entity.Path, file, entry.Node))
                 {
-                    var status = EntryStatus(entity, entry);
-                    var position = EntryPosition(entity, entry);
-                    foreach (var link in ScalarLinks(entity.Path, file, entry))
+                    Add(new LinkOccurrence(entity.Path, link, LinkSite.EntityFieldEntry, entity.Scope)
                     {
-                        Add(new LinkOccurrence(entity.Path, link, LinkSite.EntityFieldEntry, entity.Scope)
-                        {
-                            Entity = entity, Field = name, Status = status, Positions = position,
-                        });
-                    }
+                        Entity = entity, Field = field.Name, Status = entry.Status, Positions = position,
+                    });
                 }
             }
         }
 
-        var sections = new SectionFacts(entity, bookkeeping);
         foreach (var found in BodyLinkScanner.ScanBody(file))
         {
             if (Empty(entity.Path, found))
@@ -65,19 +55,24 @@ internal sealed class LinkScanner(Bookkeeping bookkeeping, List<LinkOccurrence> 
 
             var link = found.ToWikiLink(file.Text);
             var section = file.Sections.FirstOrDefault(s => s.HeadingStart <= found.Offset && found.Offset < s.OwnEnd);
-            Add(section is null
-                ? new LinkOccurrence(entity.Path, link, LinkSite.EntityLead, entity.Scope)
+            if (section is null)
+            {
+                Add(new LinkOccurrence(entity.Path, link, LinkSite.EntityLead, entity.Scope)
                 {
                     Entity = entity, Status = entity.Status, Positions = entityPosition,
-                }
-                : new LinkOccurrence(entity.Path, link, LinkSite.EntitySection, entity.Scope)
-                {
-                    Entity = entity,
-                    Section = section,
-                    Status = sections.Status(section),
-                    IsBookkeeping = sections.IsBookkeeping(section),
-                    Positions = Single(sections.From(section)),
                 });
+                continue;
+            }
+
+            var fact = facts[section];
+            Add(new LinkOccurrence(entity.Path, link, LinkSite.EntitySection, entity.Scope)
+            {
+                Entity = entity,
+                Section = section,
+                Status = fact.Status,
+                IsBookkeeping = fact.IsBookkeeping,
+                Positions = Single(fact.EffectiveFrom is { } from ? new LinkPosition(from.Point, from.Description) : null),
+            });
         }
     }
 
@@ -235,21 +230,6 @@ internal sealed class LinkScanner(Bookkeeping bookkeeping, List<LinkOccurrence> 
         && !EntityCatalog.IsEntry(value)
         && !(value is YamlSequence list && list.Items.Any(EntityCatalog.IsEntry));
 
-    /// <summary>The entries of a field's value (F-TMP-1), or null for a plain value.</summary>
-    private static IReadOnlyList<YamlMapping>? Entries(YamlNode value) => value switch
-    {
-        YamlMapping map when EntityCatalog.IsEntry(map) => [map],
-        YamlSequence { Items.Count: > 0 } list when list.Items.All(EntityCatalog.IsEntry) => list.Items.Cast<YamlMapping>().ToList(),
-        _ => null,
-    };
-
-    /// <summary>An entry's effective status (F-STAT-2, F-STAT-3).</summary>
-    internal static FactStatus EntryStatus(CatalogEntity entity, YamlMapping entry)
-    {
-        var own = entry["status"] is YamlScalar { IsNull: false } s && FactStatuses.Parse(s.Text) is { } parsed ? parsed : entity.Status;
-        return FactStatuses.Effective(own, entity.Status);
-    }
-
     /// <summary>
     /// An entry's position for F-LINK-13: its <c>from</c>. Without one the
     /// entry starts at the start of the story, which isn't checked, and one
@@ -339,106 +319,4 @@ internal sealed class LinkScanner(Bookkeeping bookkeeping, List<LinkOccurrence> 
     }
 
     private void Add(LinkOccurrence occurrence) => links.Add(occurrence);
-
-    /// <summary>Statuses, bookkeeping, and effective <c>from</c>s of one entity's sections, computed once each.</summary>
-    private sealed class SectionFacts(CatalogEntity entity, Bookkeeping bookkeeping)
-    {
-        private readonly Dictionary<Section, LinkPosition?> _from = [];
-
-        public FactStatus Status(Section section)
-        {
-            var holder = section.Parent is { } parent ? Status(parent) : entity.Status;
-            return FactStatuses.Effective(OwnStatus(section), holder);
-        }
-
-        public bool IsBookkeeping(Section section) => bookkeeping.IsBookkeeping(section);
-
-        /// <summary>
-        /// The section's effective <c>from</c> (F-SEC-8, F-SEC-9): the later
-        /// of its own <c>from</c> and its parent's, a level-2 section without
-        /// one taking the entity's. Null if a position on the way doesn't
-        /// resolve.
-        /// </summary>
-        public LinkPosition? From(Section section)
-        {
-            if (!_from.TryGetValue(section, out var result))
-            {
-                result = Compute(section);
-                _from[section] = result;
-            }
-
-            return result;
-        }
-
-        private LinkPosition? Compute(Section section)
-        {
-            var own = OwnFrom(section, out var unresolved);
-            if (unresolved)
-            {
-                return null;
-            }
-
-            if (section.Parent is not { } parent)
-            {
-                return own ?? (entity.EntersCanon is { } p ? new LinkPosition(p, entity.EntersCanonDescription) : null);
-            }
-
-            var inherited = From(parent);
-            if (inherited is null || own is null)
-            {
-                return inherited;
-            }
-
-            return own.Point >= inherited.Point ? own : inherited;
-        }
-
-        /// <summary>
-        /// The section's own <c>from</c>: its comment's, or for a thread's
-        /// <c>## Payoff</c> without one, the thread's <c>paid_off</c>
-        /// (types.md F-CORE-4).
-        /// </summary>
-        private LinkPosition? OwnFrom(Section section, out bool unresolved)
-        {
-            unresolved = false;
-            var text = section.Comment?["from"];
-            if (text is null || PositionScanner.IsEmptyBound(text))
-            {
-                text = section.Parent is null && IsPayoff(section) ? PaidOff() : null;
-            }
-
-            if (text is null || !StoryPosition.TryParse(text, out var position, out _))
-            {
-                return null;
-            }
-
-            if (entity.Universe.Resolve(position).Resolved is not { } resolved)
-            {
-                unresolved = true;
-                return null;
-            }
-
-            return new LinkPosition(resolved.Point, text);
-        }
-
-        private bool IsPayoff(Section section) =>
-            entity.Type == "thread" && LinkText.Normalize(section.Name) == "payoff";
-
-        /// <summary>
-        /// A thread's <c>paid_off</c>, read from a plain value or a single
-        /// in-canon entry (types.md §9.1). Anything else counts as unset.
-        /// </summary>
-        private string? PaidOff() =>
-            (entity.File.Frontmatter?["fields"] as YamlMapping)?["paid_off"] switch
-            {
-                YamlScalar { IsNull: false } plain => plain.Text,
-                YamlMapping entry when EntityCatalog.IsEntry(entry) && EntryStatus(entity, entry).IsInCanon()
-                    && entry["value"] is YamlScalar { IsNull: false } value => value.Text,
-                _ => null,
-            };
-
-        private FactStatus OwnStatus(Section section) =>
-            section.Comment?["status"] is { } s && FactStatuses.Parse(s) is { } parsed ? parsed
-            : section.Parent is { } parent ? OwnStatus(parent)
-            : entity.Status;
-    }
 }

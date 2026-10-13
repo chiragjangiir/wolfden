@@ -119,11 +119,7 @@ public sealed class LinkIndex
                 }
 
                 var outline = MarkdownFile.Parse(source.ReadFile(path));
-                // F-GEN-2: an error excludes the outline. Errors in section
-                // comments don't, since wolfden comments do nothing in an outline (F-SEC-10).
-                var excluded = outline.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error
-                    && (d.RuleId is "F-ENC-1" or "F-ENC-3" or "F-FM-1" or "F-FM-2" || d.RuleId.StartsWith("F-YAML-", StringComparison.Ordinal)));
-                if (!excluded)
+                if (!Outlines.OutlineReader.IsExcluded(outline))
                 {
                     scanner.ScanOutline(book, path, outline);
                 }
