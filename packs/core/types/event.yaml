@@ -1,0 +1,30 @@
+name: Event
+plural: events
+description: >-
+  Something that happens in the story world. `when` says when it happens
+  in-world. The entity's `from` says where the reader learns of it, and a
+  `row` field ties it to outline rows.
+fields:
+  when:
+    type: date
+    description: When it happens in-world. Free text, with a sort key.
+  ends:
+    type: date
+    description: When it ends in-world, for an event that lasts.
+  location:
+    type: ref
+    to: location
+    description: Where it happens.
+  participants:
+    type: ref
+    to: [character, faction]
+    list: true
+    description: Who takes part.
+sections:
+  - name: Overview
+    description: What happens, in a paragraph.
+  - name: Causes
+    description: What led to it.
+  - name: Consequences
+    description: What it changed.
+template: event.md

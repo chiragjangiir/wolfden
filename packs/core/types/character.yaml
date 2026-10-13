@@ -1,0 +1,69 @@
+name: Character
+plural: characters
+description: A person, or any other being with a part in the story.
+fields:
+  role:
+    type: text
+    temporal: true
+    description: >-
+      Their part in the story, in a few words: protagonist, antagonist,
+      mentor, the reader's way in.
+  gender:
+    type: text
+    temporal: true
+    description: Their gender, in the story's own terms.
+  pronouns:
+    type: text
+    temporal: true
+    description: The pronouns used for them, such as she/her or they/them.
+  occupation:
+    type: text
+    list: true
+    temporal: true
+    description: What they do for a living, or the posts they hold.
+  skills:
+    type: text
+    list: true
+    temporal: true
+    description: What they're good at.
+  heritage:
+    type: text
+    temporal: true
+    description: Where they come from, such as a family, people, or culture.
+  born:
+    type: date
+    description: In-world date of birth.
+  died:
+    type: date
+    description: In-world date of death.
+  species:
+    type: text
+    description: >-
+      What kind of being they are, where that matters. Plain text, or a
+      link to a species entity when a pack defines a species type.
+  factions:
+    type: ref
+    to: faction
+    list: true
+    temporal: true
+    description: The groups they belong to.
+sections:
+  - name: Overview
+    description: Who they are, in a paragraph.
+  - name: Appearance
+    description: Physical description.
+  - name: Backstory
+    description: Their life before the story starts.
+  - name: Want
+    description: What they want most.
+  - name: Wound
+    description: The old hurt that still drives them.
+  - name: Voice
+    description: How they talk and think.
+  - name: Relationships
+    description: The people who matter to them, and how.
+  - name: Arc
+    description: How they change, and where the arc ends.
+  - name: Open questions
+    description: What isn't decided about them yet.
+template: character.md

@@ -1,0 +1,11 @@
+name: Note
+plural: notes
+description: >-
+  Free-form material that isn't a thing in the story: research, rules for
+  the setting, a style guide, an essay on a theme.
+fields:
+  about:
+    type: ref
+    list: true
+    description: The entities the note is about, if any.
+template: note.md

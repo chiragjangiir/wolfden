@@ -1,0 +1,21 @@
+name: Location
+plural: locations
+description: A place, at any size, from a room to a region.
+fields:
+  part_of:
+    type: ref
+    to: location
+    description: The larger place it's in.
+  controlled_by:
+    type: ref
+    to: faction
+    temporal: true
+    description: The group that holds it.
+sections:
+  - name: Overview
+    description: What the place is, in a paragraph.
+  - name: Description
+    description: What it looks, sounds, and smells like.
+  - name: History
+    description: What happened here before and during the story.
+template: location.md

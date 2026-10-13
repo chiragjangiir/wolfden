@@ -1,0 +1,37 @@
+name: Faction
+plural: factions
+description: >-
+  A group: a crew, a family, a guild, a government, a cult. Membership is
+  each member character's `factions` field, and the faction's page lists
+  those members. The Members section holds the rest: members without a
+  page yet, and roles within the group.
+fields:
+  leader:
+    type: ref
+    to: character
+    temporal: true
+    description: Who leads it.
+  part_of:
+    type: ref
+    to: faction
+    description: The larger group it belongs to.
+  base:
+    type: ref
+    to: location
+    temporal: true
+    description: Where it's based.
+sections:
+  - name: Overview
+    description: What the group is, in a paragraph.
+  - name: Goals
+    description: What it wants.
+  - name: Methods
+    description: How it goes about getting it.
+  - name: Members
+    description: >-
+      Members who don't have a page yet, and the roles people hold within
+      the group. Members with a page are listed from their `factions`
+      field.
+  - name: History
+    description: Where it came from and how it has changed.
+template: faction.md

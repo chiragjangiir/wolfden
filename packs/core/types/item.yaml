@@ -1,0 +1,22 @@
+name: Item
+plural: items
+description: An object that matters to the story.
+fields:
+  owner:
+    type: ref
+    to: [character, faction]
+    temporal: true
+    description: Who has it.
+  location:
+    type: ref
+    to: location
+    temporal: true
+    description: Where it is.
+sections:
+  - name: Overview
+    description: What it is and why it matters, in a paragraph.
+  - name: Description
+    description: What it looks like and what it does.
+  - name: History
+    description: Where it came from and whose hands it passed through.
+template: item.md

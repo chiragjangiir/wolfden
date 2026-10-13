@@ -1,0 +1,25 @@
+# Chapter fields (docs/types.md §8). They go in a chapter item's `fields`
+# mapping in book.md, or in a container's `chapter_defaults`:
+#
+#   - { key: prologue, fields: { pov: "[[mara-voss]]", when: "2284" } }
+fields:
+  pov:
+    type: ref
+    to: character
+    list: true
+    description: The point-of-view character, or characters, of the chapter.
+  narration:
+    type: enum
+    values: [first, second, third-limited, third-omniscient, third-objective]
+    description: >-
+      The narrative person and point of view: first person, second person,
+      or third person limited to one character, omniscient, or objective.
+  tense:
+    type: enum
+    values: [past, present, future]
+    description: The narrative tense.
+  when:
+    type: date
+    description: >-
+      When the chapter takes place in-world. Set it where it matters, such
+      as a flashback that is out of step with the chapters around it.
