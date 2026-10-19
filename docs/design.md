@@ -369,6 +369,16 @@ every writer tracks that, so the check that helps them is off unless
 not prose, so summary prose that runs ahead of the story is the writer's
 to place (format.md §9.5).
 
+`wolfden check [<den>] [--json]` reads the files directly, not the index,
+and never writes. It prints one line per diagnostic,
+`path:line: severity rule: message`, with paths relative to the den
+root, and then a summary. `--json` prints one JSON document instead, with
+a `version` for its shape, the counts, and each diagnostic's `path`,
+`line` (or null), `severity`, `rule`, and `message`. It exits 0 when the
+den has no errors (warnings alone pass, format.md F-GEN-1), 1 when it has
+at least one, and 2 when it couldn't check the den: a wrong command line,
+a folder that doesn't exist, or a `den.yaml` that doesn't load.
+
 Later rules: a character appearing after their death, travel times that
 don't fit the timeline, and open threads at a frozen book's end.
 
