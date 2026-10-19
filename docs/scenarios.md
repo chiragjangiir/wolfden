@@ -61,8 +61,8 @@ Book 1's folder.
 - Views at any point in Book 2, 3, or 4 include the character.
 - Links from Book 4 files to the character resolve.
 
-Spec: F-VIEW-1, F-ENT-6, F-ORD-1, F-LINK-5, F-LINK-7. Covered by: not yet
-(#86).
+Spec: F-VIEW-1, F-ENT-6, F-ORD-1, F-LINK-5, F-LINK-7. Covered by:
+`CanonViewScenarioTests.ASideCharacterFiledUnderBookOneReturnsInBookFourWithoutBeingMoved`.
 
 ### SC-CANON-2. A throwaway character in Book 3 comes back in Book 5
 
@@ -81,8 +81,8 @@ with no `from`. Later they decide to bring the character back in Book 5.
   the inherited `from` explicitly (#89).
 - Links from Book 5 resolve in all three cases.
 
-Spec: F-VIEW-1, F-ENT-6, F-ORD-3, F-LINK-5, F-LINK-7. Covered by: not yet
-(#86).
+Spec: F-VIEW-1, F-ENT-6, F-ORD-3, F-LINK-5, F-LINK-7. Covered by:
+`CanonViewScenarioTests.ThrowawayCharacterInBook3ReturnsInBook5`.
 
 ### SC-CANON-3. A character enters partway through a book
 
@@ -91,7 +91,8 @@ A character filed under `a1` has `from: a1:20`.
 - Absent from a view at `a1:10`. Present at `a1:20` and in every later
   book.
 
-Spec: F-ENT-6, F-VIEW-1. Covered by: not yet (#86).
+Spec: F-ENT-6, F-VIEW-1. Covered by:
+`CanonViewScenarioTests.ACharacterEntersPartwayThroughABook`.
 
 ### SC-CANON-4. A series-wide character who arrives late
 
@@ -100,7 +101,8 @@ A character filed at the series level (`a`) has `from: a3:14`.
 - Absent at `a3:13` and from all earlier books, even though the file sits
   above every book. Present from `a3:14` on.
 
-Spec: F-ENT-6, F-VIEW-1. Covered by: not yet (#86).
+Spec: F-ENT-6, F-VIEW-1. Covered by:
+`CanonViewScenarioTests.ASeriesLevelCharacterArrivesLateInTheSeries`.
 
 ### SC-CANON-5. A fact changes over time
 
@@ -110,7 +112,8 @@ A character's occupation is a temporal field with two entries: one with no
 
 - A Book 1 view shows the old occupation. A Book 4 view shows the new one.
 
-Spec: F-TMP-2, F-TMP-3, F-TMP-4, F-TMP-5, F-VIEW-1. Covered by: not yet (#86).
+Spec: F-TMP-2, F-TMP-3, F-TMP-4, F-TMP-5, F-VIEW-1. Covered by:
+`CanonViewScenarioTests.AnOccupationChangesInBookTwo`.
 
 ### SC-CANON-6. A secret identity the reader learns at a set chapter
 
@@ -120,7 +123,8 @@ learns the fact at that point, not that the value changes.
 
 - Views before `a3:20` leave the field out. Views from `a3:20` on show it.
 
-Spec: F-TMP-8, F-TMP-4, F-VIEW-1. Covered by: not yet (#86). See also #58
+Spec: F-TMP-8, F-TMP-4, F-VIEW-1. Covered by:
+`CanonViewScenarioTests.AHiddenIdentityStaysHiddenUntilTheReveal`. See also #58
 (who-knows-what tracking). A cover story that's later replaced by the truth
 is a different case: on a temporal field it's SC-CANON-5, and in a section
 it's covered by F-SEC-8 and F-SEC-9.
@@ -136,7 +140,8 @@ Series `b` comes after series `a` in story order. Its entities have no
   story. Entities filed at universe scope stay in that filtered view.
 
 Spec: F-VIEW-1, F-ORD-1, F-ORD-3, F-ENT-6; the filter rule is the #87
-decision. Covered by: not yet (#86).
+decision. Covered by:
+`CanonViewScenarioTests.ASpinOffSeriesStaysOutOfTheMainSeries`.
 
 ### SC-CANON-8. Retconned and idea material stays out of canon views
 
@@ -147,8 +152,9 @@ One entity is marked `retconned` and another is still an `idea`.
 - Both are still indexed, and views that ask for out-of-canon material
   (such as an idea bank) show them.
 
-Spec: F-VIEW-1, F-VIEW-2, F-STAT-3, F-STAT-4, §9.3. Covered by: not yet
-(#86).
+Spec: F-VIEW-1, F-VIEW-2, F-STAT-3, F-STAT-4, §9.3. Covered by:
+`CanonViewScenarioTests.RetconnedAndIdeaMaterialNeverShows`, except
+the out-of-canon view, which doesn't exist yet.
 
 ### SC-CANON-9. Two different side characters share a name
 
@@ -160,4 +166,5 @@ Hale". They're different people, each filed in their own book.
   Book 4 file it's ambiguous: a warning that lists both, and the link
   doesn't resolve.
 
-Spec: F-VIEW-1, F-VIEW-3, F-LINK-7. Covered by: not yet (#86).
+Spec: F-VIEW-1, F-VIEW-3, F-LINK-7. Covered by:
+`CanonViewScenarioTests.TwoCharactersShareANameInSiblingBooks`.

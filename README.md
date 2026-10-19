@@ -38,7 +38,8 @@ technical to use it.
 
 - **Story hierarchy:** Author Identity → Universe → Series (ordered) → Book.
   Notes live at the level they belong to and are inherited down. A Book sees
-  its own notes plus its Series' and Universe's.
+  its own notes plus its Series' and Universe's, and a point-in-story view
+  shows everything the reader has met so far, wherever it's filed.
 - **Canon over time:** facts are tagged with where they enter canon (book and
   chapter), which gives point-in-story views for continuity checks and
   spoiler-safe reference.

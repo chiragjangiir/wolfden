@@ -1132,8 +1132,10 @@ The MCP server serves it ahead of the rest of canon (design.md §8).
 **F-VIEW-3.** Views list entities in a fixed order, so output can be
 compared in tests: by scope (the universe, then series and books in story
 order), then by type key, then by normalized `name` (F-LINK-4), then by
-file path. Within an entity, fields come in frontmatter order and sections
-in file order.
+file path. A series orders at its start (F-ORD-3), just before its first
+book, and a series with no books yet at its own place in story order.
+Within an entity, fields come in frontmatter order and sections in file
+order.
 
 ### 9.5 Keeping reveals in place
 

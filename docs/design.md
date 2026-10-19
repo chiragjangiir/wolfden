@@ -44,10 +44,15 @@ there's code that depends on it. Decisions already made are recorded in
 
 ### Scope and inheritance
 
-Every entity lives at exactly one **scope**: Universe, Series, or Book. A view
-of a Book includes its own entities plus everything inherited from its Series
-and Universe. A character who appears across a whole series lives at Series
-(or Universe) scope. A one-book side character lives at Book scope.
+Every entity lives at exactly one **scope**: Universe, Series, or Book.
+Where an entity is filed decides where it enters canon when it has no
+`from`, which entities a series or book filter keeps, and which match wins
+when links tie. It doesn't decide whether a canon view shows the entity: a
+canon view at a position covers every scope of the universe, in story
+order, so a Book 4 view shows a side character filed under Book 1
+([`format.md`](format.md) F-VIEW-1). A character who appears across a whole
+series lives at Series (or Universe) scope. A one-book side character lives
+at Book scope.
 
 Entities can **reference across scopes** in any direction. Book 3 can link to
 a character introduced in a standalone book in the same universe. A reference
@@ -377,7 +382,7 @@ library the API uses. Draft tool surface:
 | `search` | Full-text and field search across a den or scope |
 | `get_entity` | One entity, optionally `as_of` a position |
 | `list_entities` | By type, scope, or status |
-| `canon_as_of` | A summary of canon at a position, for a scope |
+| `canon_as_of` | A summary of canon at a position, with an optional series or book filter |
 | `get_history` | Commit history and diffs for an entity |
 | `create_entity` | From a type template |
 | `update_fields` / `append_section` | Structured edits that keep everything else intact |
