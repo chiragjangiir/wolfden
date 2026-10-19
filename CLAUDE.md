@@ -24,7 +24,9 @@ fiction. See `README.md` for the pitch. Design docs live in `docs/`.
   never holds data that exists only in the database.
 - **Domain model:** Author Identity → Universe → Series (ordered) → Book.
   Standalone Books sit directly under a Universe. Notes are scoped to a
-  Universe, Series, or Book and inherited downward.
+  Universe, Series, or Book. Canon views are decided by story position, not
+  by folder: a view at a chapter includes everything the reader has met by
+  then, at any scope, and a scope filter narrows it (#87).
 - **Canon over time:** facts can be tagged with where they enter canon (book
   and chapter) to support point-in-story views.
 - **Entity types:** user-definable schemas (frontmatter fields, standard
