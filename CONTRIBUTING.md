@@ -29,6 +29,11 @@ Warnings fail the build, and package versions are kept in
 Windows for every pull request. To turn off .NET SDK telemetry locally (CI
 already does), set the environment variable `DOTNET_CLI_TELEMETRY_OPTOUT=1`.
 
+Tests that check a writer's situation carry its id from
+[`docs/scenarios.md`](docs/scenarios.md), for example
+`[Trait("Scenario", "SC-CANON-2")]`. When you describe a new situation in
+an issue or PR, add it to that list.
+
 ## Branches and pull requests
 
 - Fork the repo and work on a branch in your fork, never directly on `main`.
