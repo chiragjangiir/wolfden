@@ -28,8 +28,9 @@ public sealed record DenDiagnostic(string Path, Diagnostic Diagnostic)
 /// chapters, <c>order</c> and <c>books</c>, key clashes, <c>den.yaml</c>'s
 /// <c>packs</c> (F-DEN-4), pack files (<see cref="DenTypes.Diagnostics"/>),
 /// and chapter-field values, which are ignored when they don't match their
-/// definitions (types.md F-CHAP-3). Other checks of container files, such
-/// as authors, are left to <c>wolfden check</c> (#16).
+/// definitions (types.md F-CHAP-3). <see cref="Checks.DenCheck"/> adds the
+/// positions in container section comments (F-POS-4). Other checks of
+/// container files, such as authors, aren't made yet.
 /// </remarks>
 public sealed class DenStructure
 {

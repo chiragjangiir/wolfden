@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "den": {
+    "loaded": true,
+    "format": 1,
+    "spoilerChecks": true,
+    "entities": 3
+  },
+  "summary": {
+    "errors": 1,
+    "warnings": 4,
+    "files": 3
+  },
+  "diagnostics": [
+    {
+      "path": "universes/vael/series/a/books/a1/entities/characters/Old Notes.md",
+      "line": null,
+      "severity": "warning",
+      "rule": "F-KEY-4",
+      "message": "The file name 'Old Notes.md' isn't a valid slug (lowercase letters and digits, with single hyphens between words), so links reach this entity only by id, name, or alias."
+    },
+    {
+      "path": "universes/vael/series/a/books/a1/entities/characters/orrin-fell.md",
+      "line": 9,
+      "severity": "warning",
+      "rule": "F-POS-4",
+      "message": "a1:9: Book 'a1' has no chapter '9'. Until it resolves, the fact that uses it is left out of canon views."
+    },
+    {
+      "path": "universes/vael/series/a/books/a1/entities/characters/orrin-fell.md",
+      "line": 13,
+      "severity": "warning",
+      "rule": "F-LINK-13",
+      "message": "[[the-stranger]]: 'The Stranger' enters canon at the start of book 'a2', after this link's position, the start of book 'a1'. It may be a spoiler."
+    },
+    {
+      "path": "universes/vael/series/a/books/a1/entities/characters/orrin-fell.md",
+      "line": 13,
+      "severity": "warning",
+      "rule": "F-LINK-8",
+      "message": "[[Zoë Marr]]: 'Zoë Marr' matches no entity in universe 'vael'."
+    },
+    {
+      "path": "universes/vael/series/a/books/a1/entities/characters/torn.md",
+      "line": 5,
+      "severity": "error",
+      "rule": "F-YAML-1",
+      "message": "The YAML doesn't parse: While parsing a flow sequence, did not find expected ',' or ']'."
+    }
+  ]
+}

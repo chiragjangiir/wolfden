@@ -29,8 +29,8 @@ public sealed record OutlineRow(
 /// <summary>
 /// Reads the rows of a book's <c>outline.md</c> (format.md §11): every body
 /// line of each top-level GFM table whose header has both a <c>row</c> and
-/// a <c>beat</c> column. It doesn't report the F-OUT warnings; that's
-/// <c>wolfden check</c>'s job (#16).
+/// a <c>beat</c> column. It doesn't report the F-OUT warnings, and
+/// <c>wolfden check</c> doesn't check them yet either.
 /// </summary>
 public static class OutlineReader
 {

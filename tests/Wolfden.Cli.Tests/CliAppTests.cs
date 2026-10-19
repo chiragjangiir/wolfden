@@ -14,7 +14,7 @@ public class CliAppTests
     }
 
     [Fact]
-    public void NoArgumentsPrintsUsageNamingThePlannedCommands()
+    public void NoArgumentsPrintsUsageNamingTheCommands()
     {
         var output = new StringWriter();
 
@@ -23,21 +23,34 @@ public class CliAppTests
         Assert.Equal(0, exitCode);
         var text = output.ToString();
         Assert.StartsWith("usage: wolfden", text);
-        Assert.Contains("not yet implemented", text);
-        foreach (var command in new[] { "init", "index", "check", "query", "serve", "mcp" })
-        {
-            Assert.Contains(command, text);
-        }
+        Assert.Contains("check [<den>] [--json]", text);
+        Assert.Contains("not yet implemented: init, index, query, serve, mcp", text);
     }
 
     [Fact]
-    public void UnknownCommandPrintsUsageAndFails()
+    public void APlannedCommandSaysItIsntImplementedAndExitsTwo()
     {
         var output = new StringWriter();
+        var error = new StringWriter();
 
-        var exitCode = CliApp.Run(["init"], output);
+        var exitCode = CliApp.Run(["init"], output, error);
 
-        Assert.Equal(1, exitCode);
-        Assert.StartsWith("usage: wolfden", output.ToString());
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Empty(output.ToString());
+        Assert.StartsWith("wolfden: 'init' isn't implemented yet.", error.ToString());
+    }
+
+    [Fact]
+    public void AnUnknownCommandPrintsUsageAndExitsTwo()
+    {
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = CliApp.Run(["chek"], output, error);
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Empty(output.ToString());
+        Assert.StartsWith("wolfden: unknown command 'chek'.", error.ToString());
+        Assert.Contains("usage: wolfden", error.ToString());
     }
 }

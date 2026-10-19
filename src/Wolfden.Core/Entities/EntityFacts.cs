@@ -165,6 +165,15 @@ public sealed class SectionFact
     public StoryPoint? EffectiveUntil { get; internal set; }
 
     /// <summary>
+    /// True if the section has an explicit <c>until</c> that isn't after its
+    /// <c>from</c> (F-SEC-8): its own <c>from</c>, or for a level-2 section
+    /// without one, the <c>from</c> F-SEC-8 gives it. False if either doesn't
+    /// resolve. A subsection without its own <c>from</c> is never empty here:
+    /// its range against its parent's is F-SEC-9's.
+    /// </summary>
+    public bool IsEmptyRange { get; internal set; }
+
+    /// <summary>
     /// True for a level-2 section that is one of the standard sections of
     /// the entity's type (types.md F-TYPE-10), which hands over to the next
     /// live one with the same name (F-SEC-8). Always false for a subsection,
@@ -248,8 +257,23 @@ public sealed class EntityFacts
         };
         fact.Status = FactStatuses.Effective(fact.OwnStatus, parent?.Status ?? Entity.Status);
         (fact.EffectiveFrom, fact.EffectiveUntil) = Range(section, fact, parent);
+        fact.IsEmptyRange = IsEmptyRange(section, fact);
         _sections[section] = fact;
         return fact;
+    }
+
+    /// <summary>F-SEC-8: an explicit <c>until</c> that isn't after the section's <c>from</c>.</summary>
+    private bool IsEmptyRange(Section section, SectionFact fact)
+    {
+        if (fact.UntilText is not { } untilText || Resolve(untilText) is not { } until)
+        {
+            return false;
+        }
+
+        var from = fact.FromText is { } fromText ? Resolve(fromText)
+            : section.Parent is null ? fact.EffectiveFrom?.Point
+            : null;
+        return from is { } start && until <= start;
     }
 
     private (FactBound? From, StoryPoint? Until) Range(Section section, SectionFact fact, SectionFact? parent)

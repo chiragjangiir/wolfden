@@ -40,6 +40,7 @@ of Book 3 (format.md §8).
 | Area | What it covers |
 |---|---|
 | CANON | What a canon-as-of view shows at a point in the story |
+| CHECK | What `wolfden check` reports, and how it exits |
 
 ## CANON: what's canon at a point in the story
 
@@ -168,3 +169,150 @@ Hale". They're different people, each filed in their own book.
 
 Spec: F-VIEW-1, F-VIEW-3, F-LINK-7. Covered by:
 `CanonViewScenarioTests.TwoCharactersShareANameInSiblingBooks`.
+
+## CHECK: what `wolfden check` reports
+
+Background: `wolfden check` (design.md §7) lists every error and warning
+in a den, one per line with its file, line, and rule id, or as JSON with
+`--json`. It exits 0 when there are no errors, even with warnings
+(F-GEN-1), 1 when there's at least one error, and 2 when it couldn't
+check the den at all: a wrong command line, a missing folder, or a
+`den.yaml` that doesn't load. It reads the files as they are now, never
+the index, and never changes them.
+
+### SC-CHECK-1. I renamed a character and old links broke
+
+The writer renamed `mara-voss.md` to `mara-ellery.md` and changed her
+`name` to "Mara Ellery" by hand, without keeping the old name as an alias.
+Other notes still say `[[mara-voss]]` and `[[Mara Voss]]`.
+
+- Each old link is a broken-link warning on its own line, and check still
+  exits 0. Adding `aliases: [Mara Voss]` fixes the name link. The slug
+  link stays broken until it's rewritten.
+
+Spec: F-LINK-6, F-LINK-8, F-RT-5, F-GEN-1. Covered by:
+`ContinuityCheckTests.RenamingACharacterWithoutAnAliasBreaksTheOldLinks`,
+`CheckCommandTests.WarningsAloneExitZero`.
+
+### SC-CHECK-2. A Book 2 note mentions someone who doesn't appear until Book 4
+
+A location filed under `a2` links to a character filed under `a4` with no
+`from`.
+
+- With `spoiler_checks: true` in `den.yaml`, the link is a spoiler warning
+  that says the character enters canon at the start of `a4`. Without it,
+  there's no warning.
+
+Spec: F-LINK-13, F-DEN-7, F-ENT-6. Covered by:
+`ContinuityCheckTests.ABookTwoNoteThatNamesABookFourCharacterIsASpoilerOnlyWhenTheDenAsks`.
+
+### SC-CHECK-3. A link matches two characters
+
+Books 1 and 2 each have their own "Officer Hale". A Book 3 note links to
+`[[Officer Hale]]`.
+
+- The link is an ambiguous-link warning that names both files, and it
+  doesn't resolve.
+
+Spec: F-LINK-7. Covered by:
+`ContinuityCheckTests.ALinkThatMatchesTwoCharactersIsAmbiguous`. See also
+SC-CANON-9.
+
+### SC-CHECK-4. I copied a character file and kept its id
+
+To start a new character, the writer copied `orrin-fell.md` to
+`orrin-fell-copy.md` and changed the name, but not the `id`.
+
+- Both files get a duplicate-id warning. Until one gets a new id, links to
+  either are broken, and check still exits 0.
+
+Spec: F-ID-3, F-LINK-8. Covered by:
+`ContinuityCheckTests.ACopiedFileWithTheSameIdIsCaughtOnBothCopies`.
+
+### SC-CHECK-5. I cut chapters and a fact still points at one
+
+Book 2 had 30 chapters, and the writer cut it to 24 in `book.md`. A
+character's role still changes `from: "a2:27"`.
+
+- That line is a warning that names `a2:27` and says Book 2 has no chapter
+  27. The value stays in the file, out of canon views, until it's fixed.
+
+Spec: F-POS-4. Covered by:
+`ContinuityCheckTests.AFactThatPointsAtACutChapterIsWarned`.
+
+### SC-CHECK-6. Two values for one field claim the same chapters
+
+A character's occupation is "deckhand" from `a1:1` until `a2:10`, and
+"harbourmaster" from `a2:5`. The writer moved the promotion earlier and
+forgot the `until`.
+
+- The first entry is an overlap warning that names the second one's line
+  and `from`.
+
+Spec: F-TMP-5, F-TMP-4. Covered by:
+`ContinuityCheckTests.TwoPostingsThatClaimTheSameChaptersOverlap`.
+
+### SC-CHECK-7. A note is missing what its type requires
+
+The den's own `ship` type requires a `class` and a `crew` field and a
+`## Crew` section. A quickly written ship note has none of them.
+
+- Each missing field and the missing section is a warning naming it.
+
+Spec: F-FLD-3, F-SEC-5, types.md F-FT-14, F-TYPE-11. Covered by:
+`ContinuityCheckTests.AShipNoteWithoutItsRequiredFieldsAndSectionIsWarned`.
+
+### SC-CHECK-8. A typo in a note's type
+
+A note says `type: charcter`.
+
+- It's an unknown-type warning that quotes `charcter`. The note still
+  loads, untyped, and links to it work.
+
+Spec: F-ENT-2. Covered by:
+`ContinuityCheckTests.ATypoInATypeIsAnUnknownType`.
+
+### SC-CHECK-9. A note doesn't parse
+
+A note's frontmatter has a YAML mistake, such as `from: a1: 3`.
+
+- It's an error with the file and line, the note is left out, and check
+  exits 1.
+
+Spec: F-YAML-1, F-GEN-1, F-GEN-2. Covered by:
+`ContinuityCheckTests.ANoteThatDoesntParseIsAnErrorAndIsLeftOut`,
+`CheckCommandTests.AnErrorExitsOne`.
+
+### SC-CHECK-10. I reordered chapters and a range now ends before it starts
+
+A value holds `from: "a1:5"` `until: "a1:12"`. The writer moved chapter
+12 before chapter 5 in `book.md`.
+
+- The entry is a warning that says its `until` isn't after its `from`, so
+  it's never in effect.
+
+Spec: F-TMP-3, F-GEN-4. Covered by:
+`ContinuityCheckTests.AnEntryWhoseUntilIsNoLongerAfterItsFromIsNeverInEffect`.
+
+### SC-CHECK-11. A new Appearance for a time skip, without its `from`
+
+The writer added a second `## Appearance` for the character after a time
+skip, but forgot the `<!-- wolfden: from=... -->` comment under it.
+
+- The second section is an overlap warning, since both start where the
+  character enters canon. Views show both until it's fixed.
+
+Spec: F-SEC-4, F-SEC-8. Covered by:
+`ContinuityCheckTests.ASecondAppearanceWithoutAFromOverlapsTheFirst`.
+
+### SC-CHECK-12. My AI assistant fixes what check finds
+
+The writer asks an AI assistant to clean up the den's warnings. The
+assistant runs `wolfden check --json`.
+
+- It gets one JSON document with a version number, the counts, and each
+  diagnostic's path, line (or null), severity, rule id, and message, in a
+  fixed order.
+
+Spec: F-GEN-3. Covered by:
+`CheckCommandTests.JsonOutputMatchesTheGoldenFile`.
