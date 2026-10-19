@@ -85,17 +85,37 @@ public class CheckCommandTests
     {
         using var den = TempDen.FromFiles(MixedDen);
 
-        var (exitCode, output, error) = Check(den.Root, "--json");
+        // Raw output, not line-ending-normalized: the JSON is LF on every OS,
+        // and the golden file is checked out with LF (.gitattributes).
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var exitCode = CliApp.Run(["check", den.Root, "--json"], output, error);
 
         Assert.Equal(CliApp.ExitErrors, exitCode);
-        Assert.Empty(error);
+        Assert.Empty(error.ToString());
         var golden = Path.Combine(TempDen.RepoRoot, "tests", "Wolfden.Cli.Tests", "Golden", "check-mixed.json");
         if (Environment.GetEnvironmentVariable("WOLFDEN_UPDATE_GOLDEN") == "1")
         {
-            File.WriteAllText(golden, output);
+            File.WriteAllText(golden, output.ToString());
         }
 
-        Assert.Equal(File.ReadAllText(golden).ReplaceLineEndings("\n"), output);
+        Assert.DoesNotContain("\r", output.ToString(), StringComparison.Ordinal);
+        Assert.Equal(File.ReadAllText(golden), output.ToString());
+    }
+
+    [Fact]
+    public void AnUnexpectedFailureExitsTwoWithAShortMessage()
+    {
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = CheckCommand.Run([TempDen.DraculaRoot], output, error, _ => throw new InvalidOperationException("boom"));
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Empty(output.ToString());
+        Assert.StartsWith("wolfden check: unexpected failure while checking ", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("(InvalidOperationException: boom)", error.ToString(), StringComparison.Ordinal);
+        Assert.Single(error.ToString().TrimEnd().Split('\n'));
     }
 
     [Fact]
@@ -196,6 +216,7 @@ public class CheckCommandTests
         using var json = JsonDocument.Parse(output);
         Assert.False(json.RootElement.GetProperty("den").GetProperty("loaded").GetBoolean());
         Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("den").GetProperty("format").ValueKind);
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("den").GetProperty("spoilerChecks").ValueKind);
         Assert.Equal("F-DEN-1", json.RootElement.GetProperty("diagnostics")[0].GetProperty("rule").GetString());
     }
 
@@ -245,13 +266,22 @@ public class CheckCommandTests
     public void CheckNeverWritesToTheDen()
     {
         using var den = TempDen.FromFiles(MixedDen);
-        var before = Directory.EnumerateFileSystemEntries(den.Root, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal).ToList();
+        var before = Snapshot(den.Root);
 
         Check(den.Root);
         Check(den.Root, "--json");
 
-        Assert.Equal(before, Directory.EnumerateFileSystemEntries(den.Root, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal));
+        Assert.Equal(before, Snapshot(den.Root));
     }
+
+    /// <summary>Every file and folder, with each file's SHA-256 and last write time, so an in-place rewrite shows too.</summary>
+    private static List<string> Snapshot(string root) =>
+        Directory.EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories)
+            .Order(StringComparer.Ordinal)
+            .Select(p => File.Exists(p)
+                ? $"{p} {Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(p)))} {File.GetLastWriteTimeUtc(p).Ticks}"
+                : p)
+            .ToList();
 }
 
 /// <summary>Tests that change the process's current folder, so they don't run alongside others.</summary>

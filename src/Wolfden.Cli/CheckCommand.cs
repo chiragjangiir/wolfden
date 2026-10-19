@@ -20,8 +20,11 @@ namespace Wolfden.Cli;
 /// <para>
 /// Exit codes: 0 when the den has no errors (warnings alone don't fail it,
 /// F-GEN-1), 1 when it has at least one error, and 2 when the command line
-/// is wrong, the folder can't be read, or <c>den.yaml</c> doesn't load, so
-/// nothing else could be checked.
+/// is wrong, the folder can't be read, <c>den.yaml</c> doesn't load, or
+/// the check fails unexpectedly, so nothing else could be checked.
+/// </para>
+/// <para>
+/// This is v0 behaviour, which #17 may revise (design.md §7).
 /// </para>
 /// </remarks>
 internal static class CheckCommand
@@ -37,7 +40,11 @@ internal static class CheckCommand
         NewLine = "\n",
     };
 
-    public static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error)
+    public static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error) =>
+        Run(args, output, error, DenCheck.Run);
+
+    /// <summary>Runs the command with <paramref name="runCheck"/> in place of <see cref="DenCheck.Run(string)"/>, so tests can make it fail.</summary>
+    internal static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error, Func<string, DenCheck> runCheck)
     {
         var json = false;
         string? path = null;
@@ -75,17 +82,24 @@ internal static class CheckCommand
         DenCheck check;
         try
         {
-            check = DenCheck.Run(path);
+            check = runCheck(path);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             error.WriteLine($"wolfden check: couldn't read the den at '{path}': {e.Message}");
             return CliApp.ExitUsage;
         }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            // A bug, not a problem with the den: 2 still means "couldn't check".
+            error.WriteLine($"wolfden check: unexpected failure while checking '{path}' ({e.GetType().Name}: {e.Message}). This is a bug in Wolfden; please report it.");
+            return CliApp.ExitUsage;
+        }
 
         if (json)
         {
-            output.WriteLine(JsonSerializer.Serialize(CheckReport.From(check), JsonOptions));
+            // LF throughout, on every OS, so the bytes don't depend on where it runs.
+            output.Write(JsonSerializer.Serialize(CheckReport.From(check), JsonOptions) + "\n");
         }
         else
         {
@@ -148,9 +162,9 @@ internal sealed record CheckReport(int Version, CheckReport.DenInfo Den, CheckRe
     /// <summary>What was checked.</summary>
     /// <param name="Loaded">True if <c>den.yaml</c> loaded. If false, only den.yaml was checked.</param>
     /// <param name="Format">The den's format number, or null if it didn't load.</param>
-    /// <param name="SpoilerChecks">True if the den turns on spoiler checks (F-DEN-7).</param>
+    /// <param name="SpoilerChecks">True if the den turns on spoiler checks (F-DEN-7), or null if den.yaml didn't load.</param>
     /// <param name="Entities">The number of entities that loaded and were checked.</param>
-    internal sealed record DenInfo(bool Loaded, int? Format, bool SpoilerChecks, int Entities);
+    internal sealed record DenInfo(bool Loaded, int? Format, bool? SpoilerChecks, int Entities);
 
     /// <summary>The counts.</summary>
     /// <param name="Errors">Errors.</param>
@@ -168,7 +182,7 @@ internal sealed record CheckReport(int Version, CheckReport.DenInfo Den, CheckRe
 
     public static CheckReport From(DenCheck check) => new(
         1,
-        new DenInfo(check.IsLoaded, check.Structure.Format, check.Structure.SpoilerChecks, check.Catalog.Entities.Count),
+        new DenInfo(check.IsLoaded, check.Structure.Format, check.IsLoaded ? check.Structure.SpoilerChecks : null, check.Catalog.Entities.Count),
         new Counts(check.ErrorCount, check.WarningCount, check.Diagnostics.Select(d => d.Path).Distinct(StringComparer.Ordinal).Count()),
         check.Diagnostics
             .Select(d => new Item(d.Path, d.Diagnostic.Line, CheckCommand.Severity(d.Diagnostic.Severity), d.Diagnostic.RuleId, d.Diagnostic.Message))

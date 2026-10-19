@@ -163,16 +163,21 @@ public class ContinuityCheckTests
         var source = Vael();
         Note(source, A1, "orrin-fell", Character("Orrin Fell"), id: Copy);
         Note(source, A1, "orrin-fell-copy", Character("Dessa Fell"), id: Copy);
-        Note(source, A1, "the-wreck", "type: event\nname: The wreck\nstatus: canon", "\n## Overview\n[[orrin-fell]] survives.\n", folder: "events");
+        Note(source, A1, "the-wreck", "type: event\nname: The wreck\nstatus: canon", "\n## Overview\n[[orrin-fell]] survives. [[orrin-fell-copy]] doesn't.\n", folder: "events");
 
         var check = DenCheck.Run(source);
 
+        // Links to either copy are broken until one gets a new id.
         Assert.Equal(
         [
             ($"{A1}/entities/characters/orrin-fell-copy.md", "F-ID-3", 2),
             ($"{A1}/entities/characters/orrin-fell.md", "F-ID-3", 2),
             ($"{A1}/entities/events/the-wreck.md", "F-LINK-8", 9),
+            ($"{A1}/entities/events/the-wreck.md", "F-LINK-8", 9),
         ], Found(check));
+        var broken = check.Diagnostics.Where(d => d.Diagnostic.RuleId == "F-LINK-8").Select(d => d.Diagnostic.Message).ToList();
+        Assert.Contains(broken, m => m.StartsWith("[[orrin-fell]]", StringComparison.Ordinal));
+        Assert.Contains(broken, m => m.StartsWith("[[orrin-fell-copy]]", StringComparison.Ordinal));
         Assert.Equal(0, check.ErrorCount);
     }
 
@@ -241,6 +246,32 @@ public class ContinuityCheckTests
         Vael(denYaml: "packs: [fleet]\n")
             .With("packs/fleet/pack.yaml", "name: Fleet\n")
             .With("packs/fleet/types/ship.yaml", Ship);
+
+    [Theory]
+    [InlineData("packs/fleet/pack.yaml")]
+    [InlineData("packs/fleet/types/ship.yaml")]
+    public void ATypeWhosePackFileHasAnErrorSaysSoInsteadOfAskingToEnableIt(string broken)
+    {
+        // types.md F-PACK-2: the pack is enabled, but an error keeps the type from loading.
+        var source = ShipDen().With(broken, "name: [Fleet\n");
+        Note(source, A1, "kestrel", "type: ship\nname: Kestrel\nstatus: canon", folder: "ships");
+
+        var check = DenCheck.Run(source);
+
+        var message = Only(check, "F-ENT-2").Message;
+        Assert.StartsWith($"unknown type 'ship': {broken} has an error, so the type didn't load", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("enable the pack", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ATypeNoPackDefinesStillAsksToEnableThePack()
+    {
+        // A broken pack that has no file for the type doesn't explain it.
+        var source = ShipDen().With("packs/fleet/pack.yaml", "name: [Fleet\n");
+        Note(source, A1, "gadget", "type: gadget\nname: Gadget\nstatus: canon", folder: "gadgets");
+
+        Assert.Contains("enable the pack that defines it", Only(DenCheck.Run(source), "F-ENT-2").Message, StringComparison.Ordinal);
+    }
 
     [Fact]
     [Trait("Scenario", "SC-CHECK-7")]
@@ -452,6 +483,10 @@ public class ContinuityCheckTests
             ($"{A1}/entities/characters/orrin-fell.md", "F-SEC-8", 14),
         ], Found(check));
         Assert.Contains("until a1:4 isn't after from a1:10", check.Diagnostics[1].Diagnostic.Message, StringComparison.Ordinal);
+
+        // The rule reads SectionFact.IsEmptyRange, as F-TMP-3 reads EntryFact.IsEmptyRange.
+        var facts = Entities.EntityFacts.For(Assert.Single(check.Catalog.Entities), new Entities.Bookkeeping());
+        Assert.Equal([true, true, false], facts.Sections.Select(s => s.IsEmptyRange));
     }
 
     [Fact]

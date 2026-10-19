@@ -18,14 +18,14 @@ namespace Wolfden.Core.Checks;
 /// </summary>
 internal static class ContinuityChecks
 {
-    public static List<DenDiagnostic> Run(EntityCatalog catalog)
+    public static List<DenDiagnostic> Run(EntityCatalog catalog, IDenSource source)
     {
         var diagnostics = new List<DenDiagnostic>();
         var bookkeeping = new Bookkeeping(catalog.Structure.BookkeepingSections);
         foreach (var entity in catalog.Entities)
         {
             var found = new List<Diagnostic>();
-            CheckType(entity, found);
+            CheckType(entity, source, found);
             CheckPositions(entity.Universe, PositionScanner.Scan(entity.File, entity.Definition?.PositionFields), found);
             var facts = EntityFacts.For(entity, bookkeeping);
             CheckEntries(facts, found);
@@ -51,14 +51,16 @@ internal static class ContinuityChecks
     /// For a known type, F-FLD-3 with F-FT-14 (a missing required field) and
     /// F-SEC-5 with F-TYPE-11 (a missing required section).
     /// </summary>
-    private static void CheckType(CatalogEntity entity, List<Diagnostic> found)
+    private static void CheckType(CatalogEntity entity, IDenSource source, List<Diagnostic> found)
     {
         var fm = entity.File.Frontmatter!;
         var typeLine = fm["type"]?.Line ?? 1;
         if (entity.Definition is not { } type)
         {
-            found.Add(new Diagnostic("F-ENT-2", DiagnosticSeverity.Warning, typeLine,
-                $"unknown type '{entity.Type}': no enabled pack defines it, so the entity is untyped and isn't checked against a type. Check the spelling, or enable the pack that defines it in den.yaml."));
+            var why = ExcludedBy(entity.Universe.Den, source, entity.Type) is { } path
+                ? $"{path} has an error, so the type didn't load (types.md F-PACK-2). Until it's fixed, the entity is untyped and isn't checked against a type."
+                : "no enabled pack defines it, so the entity is untyped and isn't checked against a type. Check the spelling, or enable the pack that defines it in den.yaml.";
+            found.Add(new Diagnostic("F-ENT-2", DiagnosticSeverity.Warning, typeLine, $"unknown type '{entity.Type}': {why}"));
             return;
         }
 
@@ -81,6 +83,30 @@ internal static class ContinuityChecks
                     $"'## {section.Name}' is required for type '{type.Key}', but this entity has no such section."));
             }
         }
+    }
+
+    /// <summary>
+    /// The pack file whose error keeps <paramref name="typeKey"/> from loading
+    /// (types.md F-PACK-2): the type's own file, or the <c>pack.yaml</c> of an
+    /// enabled pack that has a file for the type. Null if neither, so the type
+    /// is really unknown.
+    /// </summary>
+    private static string? ExcludedBy(DenStructure den, IDenSource source, string typeKey)
+    {
+        if (!Keys.IsKey(typeKey))
+        {
+            return null;
+        }
+
+        var failed = den.Types.Diagnostics
+            .Where(d => d.Diagnostic.Severity == DiagnosticSeverity.Error && d.Path.StartsWith("packs/", StringComparison.Ordinal))
+            .Select(d => d.Path)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        return failed.FirstOrDefault(p => p.EndsWith($"/types/{typeKey}.yaml", StringComparison.Ordinal))
+            ?? failed.FirstOrDefault(p => p.EndsWith("/pack.yaml", StringComparison.Ordinal)
+                && source.FileExists($"{p[..^"pack.yaml".Length]}types/{typeKey}.yaml"));
     }
 
     /// <summary>
@@ -138,19 +164,10 @@ internal static class ContinuityChecks
     /// </summary>
     private static void CheckSections(EntityFacts facts, List<Diagnostic> found)
     {
-        var universe = facts.Entity.Universe;
-        foreach (var fact in facts.Sections.Where(f => f.UntilText is not null))
+        foreach (var fact in facts.Sections.Where(f => f.IsEmptyRange))
         {
-            // The section's own from, or for a level-2 section the one F-SEC-8 gives it.
-            // A subsection with no from of its own is F-SEC-9's business.
-            var from = fact.FromText is { } fromText ? Resolve(universe, fromText)
-                : fact.Section.Parent is null ? fact.EffectiveFrom?.Point
-                : null;
-            if (from is { } start && Resolve(universe, fact.UntilText!) is { } until && until <= start)
-            {
-                found.Add(new Diagnostic("F-SEC-8", DiagnosticSeverity.Warning, fact.Section.Comment?.Line ?? fact.Section.Line,
-                    $"'{fact.Section.Name}': until {fact.UntilText} isn't after from {fact.FromText ?? fact.EffectiveFrom!.Description}, so this section is never in effect."));
-            }
+            found.Add(new Diagnostic("F-SEC-8", DiagnosticSeverity.Warning, fact.Section.Comment?.Line ?? fact.Section.Line,
+                $"'{fact.Section.Name}': until {fact.UntilText} isn't after from {fact.FromText ?? fact.EffectiveFrom!.Description}, so this section is never in effect."));
         }
 
         var standard = facts.Sections.Where(f => f.IsStandard && f.IsLive)
@@ -205,7 +222,4 @@ internal static class ContinuityChecks
             }
         }
     }
-
-    private static StoryPoint? Resolve(Universe universe, string text) =>
-        StoryPosition.TryParse(text, out var position, out _) && universe.Resolve(position).Resolved is { } resolved ? resolved.Point : null;
 }

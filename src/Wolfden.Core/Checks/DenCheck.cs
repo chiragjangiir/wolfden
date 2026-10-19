@@ -61,7 +61,7 @@ public sealed class DenCheck
         var diagnostics = structure.Diagnostics
             .Concat(catalog.Diagnostics)
             .Concat(links.Diagnostics)
-            .Concat(ContinuityChecks.Run(catalog))
+            .Concat(ContinuityChecks.Run(catalog, source))
             .OrderBy(d => d.Path, StringComparer.Ordinal)
             .ThenBy(d => d.Diagnostic.Line ?? 0)
             .ThenBy(d => d.Diagnostic.RuleId, StringComparer.Ordinal)
