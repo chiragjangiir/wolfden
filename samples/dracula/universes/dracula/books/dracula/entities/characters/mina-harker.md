@@ -7,8 +7,10 @@ status: canon
 from: "dracula:1"
 fields:
   role:
-    - value: Jonathan's fiancée and Lucy's closest friend.
+    - value: Jonathan's fiancée.
       from: "dracula:1"
+    - value: Jonathan's fiancée and Lucy's closest friend.
+      from: "dracula:5"
     - value: >-
         The band's archivist, who turns everyone's papers into one record,
         and then, through her bond with the Count, its guide.
