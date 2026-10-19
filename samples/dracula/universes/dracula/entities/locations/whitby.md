@@ -13,8 +13,8 @@ A fishing and holiday town on the Yorkshire coast, circled on a map in
 the Count's library.
 
 ### A summer by the sea
-<!-- wolfden: from=dracula:5 -->
-Mina and Lucy plan to spend the summer here.
+<!-- wolfden: from=dracula:6 -->
+Mina and Lucy spend the summer here.
 
 ### Landfall
 <!-- wolfden: from=dracula:7 -->

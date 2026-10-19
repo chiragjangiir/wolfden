@@ -21,12 +21,8 @@ and nobody who knows what he is.
 A city of districts the story keeps returning to.
 
 ### Hampstead
-<!-- wolfden: from=dracula:5 -->
-Hampstead to the north, where Lucy lives.
-
-### Lucy's grave
 <!-- wolfden: from=dracula:13 -->
-Lucy is buried in a Hampstead churchyard.
+Hampstead to the north, where Lucy lived and is buried.
 
 ### The Count's London
 <!-- wolfden: from=dracula:20 -->

@@ -27,19 +27,27 @@ fields:
 # Mina Harker
 
 ## Overview
-Wilhelmina Murray, engaged to [[jonathan-harker]] and, from chapter 9,
-married to him. Calm, practical, and quick. Jonathan mentions her on the
-first page of the novel, and she writes or assembles much of the rest.
+Wilhelmina Murray, engaged to [[jonathan-harker]]. Calm, practical, and
+quick. Jonathan mentions her on the first page of the novel, and she
+writes much of what follows.
 
 ## Want
 To be useful to Jonathan, and to be a good wife to him.
 
 ## Voice
 Warm and orderly. She dates everything, copies everything, and makes
-lists. Van Helsing calls her "Madam Mina."
+lists.
+
+### Madam Mina
+<!-- wolfden: from=dracula:14 -->
+Van Helsing calls her "Madam Mina."
 
 ## Relationships
-- [[jonathan-harker]]: her fiancé, then her husband.
+- [[jonathan-harker]]: her fiancé.
+
+### Marriage
+<!-- wolfden: from=dracula:9 -->
+From 24 August, Jonathan's wife.
 
 ### Lucy
 <!-- wolfden: from=dracula:5 -->

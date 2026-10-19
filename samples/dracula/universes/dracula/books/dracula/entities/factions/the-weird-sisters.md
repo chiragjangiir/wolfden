@@ -13,8 +13,8 @@ fields:
 # The weird sisters
 
 ## Overview
-Three women who live in the castle with the Count and hunger for Harker's
-blood. Harker's name for them, in chapter 4, is "those weird sisters."
+Three women who live in the castle with the Count and come for Harker in
+the night. Harker's name for them, in chapter 4, is "those weird sisters."
 
 ### What they are
 <!-- wolfden: from=dracula:18 -->
