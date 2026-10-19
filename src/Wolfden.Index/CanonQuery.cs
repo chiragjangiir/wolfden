@@ -22,12 +22,12 @@ internal static class CanonQuery
             _ => throw new CanonViewException($"The den has no universe '{scope.UniverseKey}'."),
         };
         var containers = db.Containers.Where(c => c.UniverseId == universe.Id).ToDictionary(c => c.Id);
-        var chain = ScopeChain(Container(containers.Values, universe, scope), containers);
+        var covered = CoveredScopes(Container(containers.Values, universe, scope), containers);
         var point = Point(db, containers.Values, universe, position);
 
         // F-ENT-5, F-ENT-6: in-canon entities of the scope chain that have entered canon by p.
         var entityQuery = db.Entities
-            .Where(e => e.UniverseId == universe.Id && chain.Contains(e.ScopeId) && (e.Status == Draft || e.Status == Canon))
+            .Where(e => e.UniverseId == universe.Id && covered.Contains(e.ScopeId) && (e.Status == Draft || e.Status == Canon))
             .EnteredBy(point);
         var entityIds = entityQuery.Select(e => e.Id);
         var entities = entityQuery.ToList();
@@ -136,8 +136,14 @@ internal static class CanonQuery
         };
     }
 
-    /// <summary>The container and the ones that enclose it (design.md §2).</summary>
-    private static List<int> ScopeChain(ContainerRecord container, Dictionary<int, ContainerRecord> containers)
+    /// <summary>
+    /// The scopes whose entities a view of <paramref name="container"/>
+    /// covers. F-VIEW-1 read literally: the container and the ones that
+    /// enclose it (design.md §2), not the ones it encloses, so a universe
+    /// view leaves out series- and book-scope entities. This is the one
+    /// place that decides it, so another reading changes only this method.
+    /// </summary>
+    private static List<int> CoveredScopes(ContainerRecord container, Dictionary<int, ContainerRecord> containers)
     {
         var chain = new List<int>();
         for (ContainerRecord? c = container; c is not null; c = c.ParentId is { } parent ? containers[parent] : null)
