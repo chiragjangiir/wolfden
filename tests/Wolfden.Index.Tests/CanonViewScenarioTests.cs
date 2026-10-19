@@ -1,12 +1,13 @@
-using Wolfden.Core.Structure;
+using System.Text.Json;
 
 namespace Wolfden.Index.Tests;
 
 /// <summary>
-/// Canon-as-of views in the situations writers meet (format.md F-VIEW-1),
-/// on a hand-written, invented den: universe <c>vael</c> with the series
-/// <c>saltmarch</c> (books <c>a1</c> to <c>a5</c>, 24 chapters each) and the
-/// spin-off series <c>lantern</c> (book <c>b1</c>), after it in story order.
+/// Canon-as-of views in the situations writers meet (docs/scenarios.md,
+/// format.md F-VIEW-1), on a hand-written, invented den with the keys of
+/// the scenarios' example world: universe <c>vael</c>, the main series
+/// <c>a</c> (books <c>a1</c> to <c>a5</c>, 24 chapters each), and the
+/// spin-off series <c>b</c> (book <c>b1</c>), after it in story order.
 /// Each test is named for the writer's situation.
 /// </summary>
 public sealed class CanonViewScenarioTests : IClassFixture<CanonViewScenarioTests.Dens>
@@ -14,6 +15,7 @@ public sealed class CanonViewScenarioTests : IClassFixture<CanonViewScenarioTest
     private const string Universe = "vael";
     private const string Dessa = "01JC5CENA00000000000000002";
     private const string Compass = "01JC5CENA00000000000000003";
+    private const string A = "universes/vael/series/a";
 
     private readonly Dens _dens;
 
@@ -25,13 +27,15 @@ public sealed class CanonViewScenarioTests : IClassFixture<CanonViewScenarioTest
     private DenIndex Index => _dens.Base.Index;
 
     [Fact]
-    public void TheScenarioDensLoadWithoutDiagnostics()
+    public void TheScenarioDensLoadWithOnlyTheExpectedWarnings()
     {
         foreach (var den in new[] { _dens.Base, _dens.Moved, _dens.MovedWithoutFrom })
         {
-            // Most entities have no id yet (F-ID-2), on purpose. Nothing else is reported.
-            var diagnostics = den.Index.Context.Diagnostics.Where(d => d.RuleId != "F-ID-2").ToList().Select(d => $"{d.Path}:{d.Line} {d.RuleId} {d.Message}").ToList();
-            Assert.True(diagnostics.Count == 0, string.Join(Environment.NewLine, diagnostics));
+            // Most entities have no id yet (F-ID-2), on purpose. The one
+            // other warning is SC-CANON-9's ambiguous link from Book 4.
+            var diagnostics = den.Index.Context.Diagnostics.Where(d => d.RuleId != "F-ID-2").ToList()
+                .Select(d => $"{d.Path} {d.RuleId}").ToList();
+            Assert.Equal([$"{A}/books/a4/entities/events/the-harbour-trial.md F-LINK-7"], diagnostics);
         }
     }
 
@@ -39,47 +43,41 @@ public sealed class CanonViewScenarioTests : IClassFixture<CanonViewScenarioTest
     [Trait("Scenario", "SC-CANON-1")]
     public void ASideCharacterFiledUnderBookOneReturnsInBookFourWithoutBeingMoved()
     {
-        foreach (var position in new[] { "a1", "a1:12", "a2:1", "a3:10", "a4", "a4:24" })
-        {
-            Assert.Contains(Names(position), n => n == "Orrin Fell");
-        }
-
+        // No from, so Orrin enters at the start of a1 and is in every view after.
+        AssertPresentFrom("Orrin Fell", "a1");
         var orrin = Entity("a4:24", "Orrin Fell");
         Assert.Equal(("book", "a1"), (orrin.ScopeKind, orrin.ScopeKey));
+
+        // A link from a Book 4 file resolves to him.
+        var link = Assert.Single(Index.Backlinks(orrin.Key), l => l.Path.StartsWith($"{A}/books/a4/", StringComparison.Ordinal));
+        Assert.Equal("resolved", link.Outcome);
+        Assert.Equal("[[Orrin Fell]]", link.Text);
     }
 
     [Fact]
     [Trait("Scenario", "SC-CANON-2")]
     public void ThrowawayCharacterInBook3ReturnsInBook5()
     {
-        // (a) Left in a3 with no from: absent before a3, present from a3 on, and in a5.
-        foreach (var position in new[] { "a1", "a1:24", "a2:24" })
-        {
-            Assert.DoesNotContain(Keys(Index, position), k => k == Dessa);
-        }
-
-        foreach (var position in new[] { "a3", "a3:1", "a4:9", "a5", "a5:24", null })
-        {
-            Assert.Contains(Keys(Index, position), k => k == Dessa);
-        }
+        // (a) Left in a3 with no from: absent before a3, present from a3 on, Book 5 included.
+        AssertPresentFrom(_dens.Base, Dessa, "a3");
 
         // (b) Moved up to the series with from: "a3" written in, every view
         // is the same, but for the scope and path it reports.
         AssertSameViews(_dens.Base.Index, _dens.Moved.Index);
 
         // (c) Moved up without a from, she inherits the series' start
-        // (F-ENT-6), so she shows from a1. That's the rule as specified; an
-        // app or MCP move to a wider scope should write the inherited from.
-        Assert.Contains(Keys(_dens.MovedWithoutFrom.Index, "a1"), k => k == Dessa);
-        Assert.Contains(Keys(_dens.MovedWithoutFrom.Index, "a2:24"), k => k == Dessa);
-        Assert.Equal("series", _dens.MovedWithoutFrom.Index.CanonAsOf(Universe, "a1").Entities.Single(e => e.Key == Dessa).ScopeKind);
+        // (F-ENT-6), which is the start of a1, so she shows from a1. That's
+        // the rule as specified; an app or MCP move to a wider scope should
+        // write the inherited from (#89).
+        AssertPresentFrom(_dens.MovedWithoutFrom, Dessa, "a1");
+        Assert.Equal("series", _dens.MovedWithoutFrom.View("a1").Entities.Single(e => e.Key == Dessa).ScopeKind);
 
-        // A link from an a5 file resolves to her in all three setups.
-        foreach (var index in new[] { _dens.Base.Index, _dens.Moved.Index, _dens.MovedWithoutFrom.Index })
+        // A link from a Book 5 file resolves to her in all three setups.
+        foreach (var den in new[] { _dens.Base, _dens.Moved, _dens.MovedWithoutFrom })
         {
-            var link = index.Backlinks(Dessa).Single();
+            var link = den.Index.Backlinks(Dessa).Single();
             Assert.Equal("resolved", link.Outcome);
-            Assert.StartsWith("universes/vael/series/saltmarch/books/a5/", link.Path, StringComparison.Ordinal);
+            Assert.StartsWith($"{A}/books/a5/", link.Path, StringComparison.Ordinal);
         }
     }
 
@@ -87,105 +85,128 @@ public sealed class CanonViewScenarioTests : IClassFixture<CanonViewScenarioTest
     [Trait("Scenario", "SC-CANON-3")]
     public void ACharacterEntersPartwayThroughABook()
     {
-        Assert.DoesNotContain(Names("a1:10"), n => n == "Ysolde Carrow");
-        Assert.DoesNotContain(Names("a1:19"), n => n == "Ysolde Carrow");
-        Assert.Contains(Names("a1:20"), n => n == "Ysolde Carrow");
-        Assert.Contains(Names("a2"), n => n == "Ysolde Carrow");
-        Assert.Contains(Names("a2:5"), n => n == "Ysolde Carrow");
+        // Absent at a1:10 and up to a1:19; present at a1:20 and in every later book.
+        AssertPresentFrom("Ysolde Carrow", "a1:20");
     }
 
     [Fact]
     [Trait("Scenario", "SC-CANON-4")]
     public void ASeriesLevelCharacterArrivesLateInTheSeries()
     {
-        Assert.DoesNotContain(Names("a1"), n => n == "Captain Hesk");
-        Assert.DoesNotContain(Names("a3:13"), n => n == "Captain Hesk");
-        Assert.Contains(Names("a3:14"), n => n == "Captain Hesk");
-        foreach (var chapter in Enumerable.Range(1, 24))
-        {
-            Assert.Contains(Names($"a4:{chapter}"), n => n == "Captain Hesk");
-        }
+        // Filed above every book, but absent from a1, a2, and a3 up to a3:13.
+        AssertPresentFrom("Captain Hesk", "a3:14");
+        Assert.Equal("series", Entity(null, "Captain Hesk").ScopeKind);
     }
 
     [Fact]
     public void ABookLocalPlaceWithoutFromEntersAtTheStartOfItsBook()
     {
-        foreach (var chapter in Enumerable.Range(1, 24))
-        {
-            Assert.DoesNotContain(Names($"a2:{chapter}"), n => n == "The Drowned Stair");
-        }
-
-        Assert.DoesNotContain(Names("a2"), n => n == "The Drowned Stair");
-        Assert.Contains(Names("a3"), n => n == "The Drowned Stair");
-        Assert.Contains(Names("a3:1"), n => n == "The Drowned Stair");
+        // Absent from every a2 view, present from the bare a3 position on.
+        AssertPresentFrom("The Drowned Stair", "a3");
     }
 
     [Fact]
     [Trait("Scenario", "SC-CANON-5")]
     public void AnOccupationChangesInBookTwo()
     {
+        // The first entry has no from, so it holds from the start of the
+        // story until the next live entry's from (F-TMP-4).
         string Occupation(string position) => Entity(position, "Brann Tolley").Fields.Single(f => f.Name == "occupation").ValueJson;
 
-        Assert.Equal("[\"ferryman\"]", Occupation("a1:5"));
-        Assert.Equal("[\"ferryman\"]", Occupation("a2:2"));
-        Assert.Equal("[\"harbour pilot\"]", Occupation("a2:3"));
-        Assert.Equal("[\"harbour pilot\"]", Occupation("a4:24"));
+        foreach (var position in new[] { "a1", "a1:5", "a1:24", "a2", "a2:4" })
+        {
+            Assert.Equal("[\"ferryman\"]", Occupation(position));
+        }
+
+        foreach (var position in new[] { "a2:5", "a3:1", "a4", "a4:24" })
+        {
+            Assert.Equal("[\"harbour pilot\"]", Occupation(position));
+        }
+
+        Assert.Null(Entity("a1", "Brann Tolley").Fields.Single(f => f.Name == "occupation").From);
     }
 
     [Fact]
     [Trait("Scenario", "SC-CANON-6")]
     public void AHiddenIdentityStaysHiddenUntilTheReveal()
     {
-        var before = Entity("a3:19", "Mirela Vance");
-        Assert.Equal("\"A foundling from the river docks.\"", before.Fields.Single(f => f.Name == "heritage").ValueJson);
-        Assert.DoesNotContain(before.Fields, f => f.Name == "born");
-        Assert.DoesNotContain(before.Sections, s => s.Name == "Who she is");
-        Assert.DoesNotContain("Carrow", string.Join("\n", before.Fields.Select(f => f.ValueJson).Concat(before.Sections.Select(s => s.Body))), StringComparison.Ordinal);
+        foreach (var position in Ordered().TakeWhile(p => p != "a3:20"))
+        {
+            var before = Entity(position, "Mirela Vance");
+            Assert.DoesNotContain(before.Fields, f => f.Name == "born");
+            Assert.DoesNotContain(before.Sections, s => s.Name == "Who she is");
+        }
 
-        var after = Entity("a3:20", "Mirela Vance");
-        Assert.Equal("\"The lost heir of House Carrow.\"", after.Fields.Single(f => f.Name == "heritage").ValueJson);
-        Assert.Contains(after.Fields, f => f.Name == "born");
-        Assert.Contains(after.Sections, s => s.Name == "Who she is");
+        var justBefore = Entity("a3:19", "Mirela Vance");
+        Assert.Equal("\"A foundling from the river docks.\"", justBefore.Fields.Single(f => f.Name == "heritage").ValueJson);
+        Assert.DoesNotContain("Carrow", string.Join("\n", justBefore.Fields.Select(f => f.ValueJson).Concat(justBefore.Sections.Select(s => s.Body))), StringComparison.Ordinal);
+
+        foreach (var position in Ordered().SkipWhile(p => p != "a3:20"))
+        {
+            var after = Entity(position, "Mirela Vance");
+            Assert.Equal("\"The lost heir of House Carrow.\"", after.Fields.Single(f => f.Name == "heritage").ValueJson);
+            Assert.Contains(after.Fields, f => f.Name == "born");
+            Assert.Contains(after.Sections, s => s.Name == "Who she is");
+        }
     }
 
     [Fact]
     [Trait("Scenario", "SC-CANON-7")]
     public void ASpinOffSeriesStaysOutOfTheMainSeries()
     {
-        string[] spinOff = ["Pell Ashby", "Lantern House"];
-        foreach (var position in new[] { "a1", "a3:12", "a5:24" })
-        {
-            Assert.Empty(Names(position).Intersect(spinOff));
-        }
+        // No from (series b, book b1), or a from inside b1. Absent at every
+        // position in a, present from where each enters, and at the end.
+        AssertPresentFrom("Pell Ashby", "b1");
+        AssertPresentFrom("Lantern House", "b1");
+        AssertPresentFrom("Corin Vell", "b1:6");
 
-        Assert.Equal(spinOff.Order(), Names(null).Intersect(spinOff).Order());
-        Assert.Equal(spinOff.Order(), Names("b1").Intersect(spinOff).Order());
-
-        // A filter of the main series leaves the spin-off out, even at the end of the story.
-        var main = Index.CanonAsOf(Universe, null, CanonFilter.ForSeries("saltmarch")).Entities.Select(e => e.Name);
-        Assert.Empty(main.Intersect(spinOff));
-        Assert.Contains("Orrin Fell", main);
+        // A filter of series a leaves the spin-off out, even at the end of
+        // the story, and keeps what's filed at universe scope.
+        var main = Index.CanonAsOf(Universe, null, CanonFilter.ForSeries("a")).Entities;
+        Assert.DoesNotContain(main, e => e.Name is "Pell Ashby" or "Lantern House" or "Corin Vell");
+        Assert.Contains(main, e => e.Name == "The River Vael" && e.ScopeKind == "universe");
+        Assert.Contains(main, e => e.Name == "Orrin Fell");
+        Assert.DoesNotContain(main, e => e.ScopeKey == "b" || e.ScopeKey == "b1");
     }
 
     [Fact]
     [Trait("Scenario", "SC-CANON-8")]
     public void RetconnedAndIdeaMaterialNeverShows()
     {
-        foreach (var position in new[] { "a1", "a2:10", "a5:24", "b1", null })
+        foreach (var position in Ordered())
         {
-            Assert.DoesNotContain(Names(position), n => n is "Old Garrow" or "The Ninth Bell");
+            var view = _dens.Base.View(position);
+            Assert.DoesNotContain(view.Entities, e => e.Name is "Old Garrow" or "The Ninth Bell");
+            Assert.DoesNotContain(view.Pinned().Entities, e => e.Name is "Old Garrow" or "The Ninth Bell");
         }
+
+        // Both are still indexed (F-STAT-4), with their statuses.
+        Assert.Equal("retconned", Index.FindEntity($"{A}/entities/characters/old-garrow.md")!.Status);
+        Assert.Equal("idea", Index.FindEntity($"{A}/books/a2/entities/items/the-ninth-bell.md")!.Status);
     }
 
     [Fact]
     [Trait("Scenario", "SC-CANON-9")]
     public void TwoCharactersShareANameInSiblingBooks()
     {
-        var tamsins = Index.CanonAsOf(Universe, "a4:1").Entities.Where(e => e.Name == "Tamsin Reed").ToList();
+        var hales = Index.CanonAsOf(Universe, "a4:1").Entities.Where(e => e.Name == "Officer Hale").ToList();
+        Assert.Equal(["a1", "a2"], hales.Select(h => h.ScopeKey));
+        Assert.Equal([$"{A}/books/a1/entities/characters/officer-hale.md", $"{A}/books/a2/entities/characters/officer-hale.md"], hales.Select(h => h.Path));
+        Assert.Single(Index.CanonAsOf(Universe, "a1:24").Entities, e => e.Name == "Officer Hale");
 
-        Assert.Equal(["a1", "a2"], tamsins.Select(t => t.ScopeKey));
-        Assert.Equal(2, tamsins.Select(t => t.Path).Distinct().Count());
-        Assert.Single(Index.CanonAsOf(Universe, "a1:24").Entities, e => e.Name == "Tamsin Reed");
+        var links = Index.Context.Links.Where(l => l.Text == "[[Officer Hale]]").OrderBy(l => l.Path).ToList();
+
+        // From a Book 1 file, the nearest scope wins: a1's Hale (F-LINK-7).
+        var fromBook1 = Assert.Single(links, l => l.Path.StartsWith($"{A}/books/a1/", StringComparison.Ordinal));
+        Assert.Equal(("resolved", hales[0].Key), (fromBook1.Outcome, fromBook1.TargetKey));
+
+        // From a Book 4 file neither is in the scope chain: ambiguous, listing both, unresolved.
+        var fromBook4 = Assert.Single(links, l => l.Path.StartsWith($"{A}/books/a4/", StringComparison.Ordinal));
+        Assert.Equal("ambiguous", fromBook4.Outcome);
+        Assert.Null(fromBook4.TargetKey);
+        Assert.Equal(hales.Select(h => h.Key).Order(StringComparer.Ordinal), JsonSerializer.Deserialize<string[]>(fromBook4.MatchesJson!)!.Order(StringComparer.Ordinal));
+        var warning = Assert.Single(Index.Context.Diagnostics.ToList(), d => d.RuleId == "F-LINK-7");
+        Assert.Equal(("warning", fromBook4.Path), (warning.Severity, warning.Path));
     }
 
     [Fact]
@@ -193,9 +214,8 @@ public sealed class CanonViewScenarioTests : IClassFixture<CanonViewScenarioTest
     {
         // The compass has from: "a2:7". In the moved den it's filed at
         // universe scope, and every view still holds it from a2:7 on.
-        Assert.DoesNotContain(Keys(_dens.Moved.Index, "a2:6"), k => k == Compass);
-        Assert.Contains(Keys(_dens.Moved.Index, "a2:7"), k => k == Compass);
-        Assert.Equal("universe", _dens.Moved.Index.CanonAsOf(Universe, "a2:7").Entities.Single(e => e.Key == Compass).ScopeKind);
+        AssertPresentFrom(_dens.Moved, Compass, "a2:7");
+        Assert.Equal("universe", _dens.Moved.View("a2:7").Entities.Single(e => e.Key == Compass).ScopeKind);
         AssertSameViews(_dens.Base.Index, _dens.Moved.Index);
     }
 
@@ -205,12 +225,13 @@ public sealed class CanonViewScenarioTests : IClassFixture<CanonViewScenarioTest
         var book = Index.CanonAsOf(Universe, "a4:24", CanonFilter.ForBook("a3")).Entities;
         Assert.Contains(book, e => e.Name == "The Drowned Stair");
         Assert.Contains(book, e => e.Name == "Captain Hesk");
+        Assert.Contains(book, e => e.Name == "The River Vael");
         Assert.DoesNotContain(book, e => e.Name == "Orrin Fell");
-        Assert.All(book, e => Assert.Contains(e.ScopeKey, new[] { "vael", "saltmarch", "a3" }));
+        Assert.All(book, e => Assert.Contains(e.ScopeKey, new[] { "vael", "a", "a3" }));
 
         // A position outside the filter is fine: story order runs across the universe.
-        var spinOff = Index.CanonAsOf(Universe, "a2:1", CanonFilter.ForSeries("lantern")).Entities;
-        Assert.DoesNotContain(spinOff, e => e.Name == "Pell Ashby");
+        var spinOff = Index.CanonAsOf(Universe, "a2:1", CanonFilter.ForSeries("b")).Entities;
+        Assert.NotEmpty(spinOff);
         Assert.All(spinOff, e => Assert.Equal("universe", e.ScopeKind));
     }
 
@@ -222,7 +243,7 @@ public sealed class CanonViewScenarioTests : IClassFixture<CanonViewScenarioTest
     /// </summary>
     private static void AssertSameViews(DenIndex expected, DenIndex actual)
     {
-        foreach (var position in Positions())
+        foreach (var position in Ordered())
         {
             Assert.Equal(Comparable(expected.CanonAsOf(Universe, position)), Comparable(actual.CanonAsOf(Universe, position)));
         }
@@ -236,16 +257,32 @@ public sealed class CanonViewScenarioTests : IClassFixture<CanonViewScenarioTest
             .ToList();
     }
 
-    private static IEnumerable<string?> Positions() =>
-        new[] { "a1", "a2", "a3", "a4", "a5" }
+    private void AssertPresentFrom(string name, string first) =>
+        AssertPresentFrom(_dens.Base, Index.CanonAsOf(Universe).Entities.Single(e => e.Name == name).Key, first);
+
+    /// <summary>
+    /// Asserts the entity is in the unfiltered view at every position from
+    /// <paramref name="first"/> on, in story order, and in none before it.
+    /// </summary>
+    private static void AssertPresentFrom(Built den, string key, string first)
+    {
+        var positions = Ordered().ToList();
+        var from = positions.IndexOf(first);
+        Assert.True(from >= 0, $"'{first}' isn't a scenario position.");
+        for (var i = 0; i < positions.Count; i++)
+        {
+            var present = den.View(positions[i]).Entities.Any(e => e.Key == key);
+            Assert.True(present == i >= from, $"{key} should be {(i >= from ? "in" : "out of")} the view at '{positions[i] ?? "the end of the story"}'.");
+        }
+    }
+
+    /// <summary>Every position of the den in story order: each bare book, then its chapters, and the end of the story last.</summary>
+    private static IEnumerable<string?> Ordered() =>
+        new[] { "a1", "a2", "a3", "a4", "a5", "b1" }
             .SelectMany(b => Enumerable.Range(1, 24).Select(c => $"{b}:{c}").Prepend(b))
-            .Append("b1").Append("b1:1").Append(null);
+            .Append(null);
 
-    private List<string> Names(string? position) => Index.CanonAsOf(Universe, position).Entities.Select(e => e.Name).ToList();
-
-    private static List<string> Keys(DenIndex index, string? position) => index.CanonAsOf(Universe, position).Entities.Select(e => e.Key).ToList();
-
-    private CanonEntity Entity(string? position, string name) => Index.CanonAsOf(Universe, position).Entities.Single(e => e.Name == name);
+    private CanonEntity Entity(string? position, string name) => _dens.Base.View(position).Entities.Single(e => e.Name == name);
 
     /// <summary>The den, and two copies with Dessa Morrow and the compass filed at wider scopes.</summary>
     public sealed class Dens : IDisposable
@@ -280,25 +317,26 @@ public sealed class CanonViewScenarioTests : IClassFixture<CanonViewScenarioTest
         private static Dictionary<string, string> Files(Placement placement)
         {
             const string U = "universes/vael";
-            const string A = U + "/series/saltmarch";
-            const string B = U + "/series/lantern";
+            const string B = U + "/series/b";
             var chapters = $"[{string.Join(", ", Enumerable.Range(1, 24))}]";
             var files = new Dictionary<string, string>
             {
                 ["den.yaml"] = "format: 1\nname: Vael Notes\n",
-                [$"{U}/universe.md"] = "---\nname: Vael\norder: [saltmarch, lantern]\n---\n\nAn invented river kingdom.\n",
+                [$"{U}/universe.md"] = "---\nname: Vael\norder: [a, b]\n---\n\nAn invented river kingdom.\n",
+                [$"{U}/entities/locations/the-river-vael.md"] = Entity("location", "The River Vael", "status: canon", "The river the kingdom is named for."),
                 [$"{A}/series.md"] = "---\nname: The Saltmarch Cycle\nbooks: [a1, a2, a3, a4, a5]\n---\n",
                 [$"{B}/series.md"] = "---\nname: The Lantern Years\nbooks: [b1]\n---\n",
                 [$"{B}/books/b1/book.md"] = $"---\nname: Lantern One\nchapters: {chapters}\n---\n",
 
-                [$"{A}/books/a1/entities/characters/orrin-fell.md"] = Character("Orrin Fell", "status: canon", "A ferry hand who pulls Ysolde from the river."),
-                [$"{A}/books/a1/entities/characters/ysolde-carrow.md"] = Character("Ysolde Carrow", "status: canon\nfrom: \"a1:20\"", "A courier who arrives in the floods."),
-                [$"{A}/books/a1/entities/characters/brann-tolley.md"] = Character("Brann Tolley", """
+                [$"{A}/books/a1/entities/characters/orrin-fell.md"] = Entity("character", "Orrin Fell", "status: canon",
+                    "A ferry hand who drinks with [[Officer Hale]]."),
+                [$"{A}/books/a1/entities/characters/ysolde-carrow.md"] = Entity("character", "Ysolde Carrow", "status: canon\nfrom: \"a1:20\"", "A courier who arrives in the floods."),
+                [$"{A}/books/a1/entities/characters/brann-tolley.md"] = Entity("character", "Brann Tolley", """
                     status: canon
                     fields:
                       occupation:
-                        - { value: [ferryman], from: "a1" }
-                        - { value: [harbour pilot], from: "a2:3" }
+                        - { value: [ferryman] }
+                        - { value: [harbour pilot], from: "a2:5" }
                     """, "Orrin's uncle."),
                 [$"{A}/books/a1/entities/characters/mirela-vance.md"] = """
                     ---
@@ -322,43 +360,32 @@ public sealed class CanonViewScenarioTests : IClassFixture<CanonViewScenarioTest
                     The heir House Carrow thought it had lost to the flood.
 
                     """,
-                [$"{A}/books/a1/entities/characters/tamsin-reed.md"] = Character("Tamsin Reed", "status: canon", "A lock keeper on the upper river."),
-                [$"{A}/books/a2/entities/characters/tamsin-reed.md"] = Character("Tamsin Reed", "status: canon", "A singer in the harbour taverns."),
-                [$"{A}/books/a2/entities/items/the-ninth-bell.md"] = Item("The Ninth Bell", "status: idea", "Maybe a bell that rings for the drowned."),
-                [$"{A}/entities/characters/old-garrow.md"] = Character("Old Garrow", "status: retconned", "Cut: the first draft's harbour master."),
-                [$"{A}/entities/characters/captain-hesk.md"] = Character("Captain Hesk", "status: canon\nfrom: \"a3:14\"", "Master of the salt barge *Grey Wren*."),
-                [$"{A}/books/a3/entities/locations/the-drowned-stair.md"] = """
+                [$"{A}/books/a1/entities/characters/officer-hale.md"] = Entity("character", "Officer Hale", "status: canon", "A watchman on the upper river."),
+                [$"{A}/books/a2/entities/characters/officer-hale.md"] = Entity("character", "Officer Hale", "status: canon", "A harbour constable, no kin to the other."),
+                [$"{A}/books/a2/entities/items/the-ninth-bell.md"] = Entity("item", "The Ninth Bell", "status: idea", "Maybe a bell that rings for the drowned."),
+                [$"{A}/entities/characters/old-garrow.md"] = """
                     ---
-                    type: location
-                    name: The Drowned Stair
-                    status: canon
+                    type: character
+                    name: Old Garrow
+                    status: retconned
                     ---
 
-                    Steps cut into the river wall, under water at high tide.
+                    Cut: the first draft's harbour master.
 
-                    """,
-                [$"{A}/books/a5/entities/events/the-reckoning.md"] = """
-                    ---
-                    type: event
-                    name: The Reckoning
-                    status: canon
-                    from: "a5:22"
-                    ---
-
-                    The barges burn, and [[Dessa Morrow]] comes back to pay her debt.
+                    ## Overview
+                    <!-- wolfden: pin=true -->
+                    Ran the harbour for forty years.
 
                     """,
-                [$"{B}/entities/characters/pell-ashby.md"] = Character("Pell Ashby", "status: canon", "Keeper of the lantern house, a generation on."),
-                [$"{B}/books/b1/entities/locations/lantern-house.md"] = """
-                    ---
-                    type: location
-                    name: Lantern House
-                    status: canon
-                    ---
-
-                    A lighthouse at the river mouth.
-
-                    """,
+                [$"{A}/entities/characters/captain-hesk.md"] = Entity("character", "Captain Hesk", "status: canon\nfrom: \"a3:14\"", "Master of the salt barge *Grey Wren*."),
+                [$"{A}/books/a3/entities/locations/the-drowned-stair.md"] = Entity("location", "The Drowned Stair", "status: canon", "Steps cut into the river wall, under water at high tide."),
+                [$"{A}/books/a4/entities/events/the-harbour-trial.md"] = Entity("event", "The Harbour Trial", "status: canon\nfrom: \"a4:3\"",
+                    "[[Orrin Fell]] testifies, and [[Officer Hale]] gives evidence."),
+                [$"{A}/books/a5/entities/events/the-reckoning.md"] = Entity("event", "The Reckoning", "status: canon\nfrom: \"a5:22\"",
+                    "The barges burn, and [[Dessa Morrow]] comes back to pay her debt."),
+                [$"{B}/entities/characters/pell-ashby.md"] = Entity("character", "Pell Ashby", "status: canon", "Keeper of the lantern house, a generation on."),
+                [$"{B}/books/b1/entities/locations/lantern-house.md"] = Entity("location", "Lantern House", "status: canon", "A lighthouse at the river mouth."),
+                [$"{B}/books/b1/entities/characters/corin-vell.md"] = Entity("character", "Corin Vell", "status: canon\nfrom: \"b1:6\"", "Pell's apprentice, who arrives in a storm."),
             };
 
             foreach (var book in new[] { "a1", "a2", "a3", "a4", "a5" })
@@ -376,28 +403,39 @@ public sealed class CanonViewScenarioTests : IClassFixture<CanonViewScenarioTest
             return files;
         }
 
-        private static string Character(string name, string frontmatter, string lead) =>
-            $"---\ntype: character\nname: {name}\n{frontmatter}\n---\n\n{lead}\n";
-
-        private static string Item(string name, string frontmatter, string lead) =>
-            $"---\ntype: item\nname: {name}\n{frontmatter}\n---\n\n{lead}\n";
+        private static string Entity(string type, string name, string frontmatter, string lead) =>
+            $"---\ntype: {type}\nname: {name}\n{frontmatter}\n---\n\n{lead}\n";
     }
 
-    /// <summary>One den and its index.</summary>
+    /// <summary>One den and its index, with its unfiltered views cached by position.</summary>
     public sealed class Built : IDisposable
     {
+        private readonly Dictionary<string, CanonView> _views = new(StringComparer.Ordinal);
+
         public Built(Dictionary<string, string> files)
         {
             Den = TempDen.FromFiles(files);
             Index = DenIndex.Open(Den.Root);
-            Structure = DenStructure.Load(Den.Root);
         }
 
         public TempDen Den { get; }
 
         public DenIndex Index { get; }
 
-        public DenStructure Structure { get; }
+        /// <summary>The unfiltered view at <paramref name="position"/>, or at the end of the story for null.</summary>
+        public CanonView View(string? position)
+        {
+            lock (_views)
+            {
+                if (!_views.TryGetValue(position ?? "", out var view))
+                {
+                    view = Index.CanonAsOf(Universe, position);
+                    _views[position ?? ""] = view;
+                }
+
+                return view;
+            }
+        }
 
         public void Dispose()
         {

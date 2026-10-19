@@ -59,6 +59,22 @@ public sealed class DraculaCanonViewTests : IClassFixture<DraculaCanonViewTests.
     }
 
     [Fact]
+    public void MinasMarriageAndVanHelsingStayOutUntilChapterNine()
+    {
+        const string mina = "01M4TF5F0B7KDTSAS8D2NYT37J";
+        foreach (var chapter in Enumerable.Range(1, 8))
+        {
+            var text = Text(View($"dracula:{chapter}").Entities.Single(e => e.Id == mina));
+            foreach (var term in new[] { "married", "marries", "husband", "Madam Mina", "Van Helsing", "Buda-Pesth" })
+            {
+                Assert.DoesNotContain(term, text, StringComparison.Ordinal);
+            }
+        }
+
+        Assert.Contains("She marries Jonathan", Text(View("dracula:9").Entities.Single(e => e.Id == mina)), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheCountsNatureArrivesWhereTheSampleTagsIt()
     {
         var at18 = View("dracula:18").Entities.Single(e => e.Id == Count);
