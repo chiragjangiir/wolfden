@@ -14,21 +14,22 @@ namespace Wolfden.Index.Tests;
 internal static class CanonReference
 {
     /// <summary>
-    /// The view of <paramref name="scope"/> at <paramref name="position"/>,
-    /// or at the end of the story for null.
+    /// The view of universe <paramref name="universeKey"/> at
+    /// <paramref name="position"/>, or at the end of the story for null,
+    /// over every scope or only those <paramref name="filter"/> covers.
     /// Entities come in F-VIEW-3 order: the universe's, then series and
     /// books in story order (a series just before its first book).
     /// </summary>
-    public static CanonView Compute(EntityCatalog catalog, CanonScope scope, string? position)
+    public static CanonView Compute(EntityCatalog catalog, string universeKey, string? position, CanonFilter? filter = null)
     {
         var structure = catalog.Structure;
-        var universe = structure.FindUniverse(scope.UniverseKey)
-            ?? throw new ArgumentException($"No universe '{scope.UniverseKey}'.", nameof(scope));
-        Container container = scope.Kind switch
+        var universe = structure.FindUniverse(universeKey)
+            ?? throw new ArgumentException($"No universe '{universeKey}'.", nameof(universeKey));
+        Container container = filter?.Kind switch
         {
-            CanonScopeKind.Universe => universe,
-            CanonScopeKind.Series => universe.Series.Single(s => s.Key == scope.Key),
-            _ => universe.FindBook(scope.Key!) ?? throw new ArgumentException($"No book '{scope.Key}'.", nameof(scope)),
+            null => universe,
+            CanonFilterKind.Series => universe.Series.Single(s => s.Key == filter.Key),
+            _ => universe.FindBook(filter.Key) ?? throw new ArgumentException($"No book '{filter.Key}'.", nameof(filter)),
         };
         var point = position is null
             ? universe.EndOfStory
@@ -38,7 +39,7 @@ internal static class CanonReference
         var covered = Covered(container);
         var bookkeeping = new Bookkeeping(structure.BookkeepingSections);
 
-        return new CanonView(scope, position, catalog.Entities
+        return new CanonView(universe.Key, position, filter, catalog.Entities
             .Where(e => covered.Contains(e.Scope) && e.Status.IsInCanon() && e.EntersCanon is { } enters && enters <= point)
             .OrderBy(e => e.Scope.Kind != ContainerKind.Universe)
             .ThenBy(e => e.Scope.Start)
@@ -51,11 +52,16 @@ internal static class CanonReference
     }
 
     /// <summary>
-    /// The scopes a view of <paramref name="container"/> covers: the literal
-    /// F-VIEW-1 reading, the container and the ones that enclose it, not the
-    /// ones it encloses. Nearest first.
+    /// The scopes a view filtered to <paramref name="container"/> covers
+    /// (F-VIEW-1): its scope chain and everything inside it. For a universe,
+    /// every scope.
     /// </summary>
-    public static IReadOnlyList<Container> Covered(Container container) => container.ScopeChain;
+    public static IReadOnlyList<Container> Covered(Container container) => container switch
+    {
+        Universe u => [u, .. u.Series, .. u.Books],
+        Series s => [.. s.ScopeChain, .. s.Books],
+        _ => container.ScopeChain,
+    };
 
     /// <summary>
     /// True if a fact with this range is in effect at <paramref name="p"/>:

@@ -1,12 +1,9 @@
 namespace Wolfden.Index;
 
-/// <summary>The kind of container a canon view is for.</summary>
-public enum CanonScopeKind
+/// <summary>The kind of container a canon view is filtered to.</summary>
+public enum CanonFilterKind
 {
-    /// <summary>A universe: its own entities.</summary>
-    Universe,
-
-    /// <summary>A series: its entities and its universe's.</summary>
+    /// <summary>A series: its entities, its books', and its universe's.</summary>
     Series,
 
     /// <summary>A book: its entities, its series' (if it's in one), and its universe's.</summary>
@@ -14,40 +11,40 @@ public enum CanonScopeKind
 }
 
 /// <summary>
-/// The scope a canon view is for (format.md F-VIEW-1, design.md §2): a
-/// universe, a series, or a book, named by keys. A view of a scope covers the
-/// entities of that scope and of the scopes that enclose it.
+/// A filter on a canon view (format.md F-VIEW-1): a series or book of the
+/// view's universe, named by key. The filtered view covers the entities
+/// filed in that container's scope chain and in the containers inside it.
+/// A filter only narrows what's covered; where each entity enters canon
+/// still comes from story order across the universe.
 /// </summary>
-/// <param name="Kind">Universe, series, or book.</param>
-/// <param name="UniverseKey">The universe's key (its folder name).</param>
-/// <param name="Key">The series or book key, or null for a universe.</param>
-public sealed record CanonScope(CanonScopeKind Kind, string UniverseKey, string? Key)
+/// <param name="Kind">Series or book.</param>
+/// <param name="Key">The series or book key (its folder name).</param>
+public sealed record CanonFilter(CanonFilterKind Kind, string Key)
 {
-    /// <summary>A universe scope.</summary>
-    public static CanonScope ForUniverse(string universeKey) => new(CanonScopeKind.Universe, universeKey, null);
+    /// <summary>A series filter.</summary>
+    public static CanonFilter ForSeries(string seriesKey) => new(CanonFilterKind.Series, seriesKey);
 
-    /// <summary>A series scope.</summary>
-    public static CanonScope ForSeries(string universeKey, string seriesKey) => new(CanonScopeKind.Series, universeKey, seriesKey);
-
-    /// <summary>A book scope, for a book in a series or a standalone book.</summary>
-    public static CanonScope ForBook(string universeKey, string bookKey) => new(CanonScopeKind.Book, universeKey, bookKey);
+    /// <summary>A book filter, for a book in a series or a standalone book.</summary>
+    public static CanonFilter ForBook(string bookKey) => new(CanonFilterKind.Book, bookKey);
 
     /// <inheritdoc />
-    public override string ToString() => Key is null ? $"universe '{UniverseKey}'" : $"{Kind.ToString().ToLowerInvariant()} '{UniverseKey}/{Key}'";
+    public override string ToString() => $"{Kind.ToString().ToLowerInvariant()} '{Key}'";
 }
 
 /// <summary>
-/// A canon-as-of view (format.md §9.4, F-VIEW-1): the entities of a scope
-/// that are in canon at a story position, each with its lead, the field
-/// values in effect there, and the in-canon sections in effect there.
-/// Nothing that enters canon after the position is in it. Entities and
-/// their parts come in the fixed order of F-VIEW-3, so two views of the same
-/// files compare equal.
+/// A canon-as-of view (format.md §9.4, F-VIEW-1): the entities of a
+/// universe, at every scope or only those a filter covers, that are in
+/// canon at a story position, each with its lead, the field values in
+/// effect there, and the in-canon sections in effect there. Nothing that
+/// enters canon after the position is in it. Entities and their parts come
+/// in the fixed order of F-VIEW-3, so two views of the same files compare
+/// equal.
 /// </summary>
-/// <param name="Scope">The scope the view is for.</param>
+/// <param name="Universe">The universe's key.</param>
 /// <param name="Position">The position as given, or null for the end of the story: all canon so far (F-VIEW-1).</param>
+/// <param name="Filter">The series or book the view is filtered to, or null for every scope of the universe.</param>
 /// <param name="Entities">The entities in F-VIEW-3 order.</param>
-public sealed record CanonView(CanonScope Scope, string? Position, IReadOnlyList<CanonEntity> Entities)
+public sealed record CanonView(string Universe, string? Position, CanonFilter? Filter, IReadOnlyList<CanonEntity> Entities)
 {
     /// <summary>True if the view is as of the end of the story.</summary>
     public bool IsEndOfStory => Position is null;
@@ -131,7 +128,7 @@ public sealed record CanonSection(
     string Name, int Level, IReadOnlyList<string> HeadingPath, string Body, string Status, bool Pinned, string? From, string? Until,
     string Path, int Line);
 
-/// <summary>A canon view can't be made: its scope doesn't exist, or its position doesn't parse or resolve.</summary>
+/// <summary>A canon view can't be made: its universe or filter doesn't exist, or its position doesn't parse or resolve.</summary>
 public sealed class CanonViewException : Exception
 {
     /// <summary>An exception with a message for the writer.</summary>

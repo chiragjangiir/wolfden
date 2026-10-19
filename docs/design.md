@@ -193,7 +193,8 @@ Key points:
   entity.
 - **Pinned facts are hard canon.** `pin=true` on a section or `pin: true`
   on a field entry marks the facts most important to check before drafting.
-  A **pinned canon** view lists them for a scope as of a position.
+  A **pinned canon** view lists them as of a position, for the whole
+  universe or filtered to a series or book.
 - Unknown frontmatter keys and sections are kept intact. The app must never
   discard what a human or an agent wrote.
 

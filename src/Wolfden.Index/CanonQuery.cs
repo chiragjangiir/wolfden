@@ -13,19 +13,23 @@ internal static class CanonQuery
     private const string Draft = "draft";
     private const string Canon = "canon";
 
-    /// <summary>F-VIEW-1: the canon-as-of view of <paramref name="scope"/> at <paramref name="position"/>, or at the end of the story.</summary>
-    public static CanonView Run(IndexDbContext db, CanonScope scope, string? position)
+    /// <summary>
+    /// F-VIEW-1: the canon-as-of view of universe <paramref name="universeKey"/>
+    /// at <paramref name="position"/>, or at the end of the story, over every
+    /// scope or only those <paramref name="filter"/> covers.
+    /// </summary>
+    public static CanonView Run(IndexDbContext db, string universeKey, string? position, CanonFilter? filter)
     {
-        var universe = db.Containers.Where(c => c.Kind == "universe" && c.Key == scope.UniverseKey).ToList() switch
+        var universe = db.Containers.Where(c => c.Kind == "universe" && c.Key == universeKey).ToList() switch
         {
             [var only] => only,
-            _ => throw new CanonViewException($"The den has no universe '{scope.UniverseKey}'."),
+            _ => throw new CanonViewException($"The den has no universe '{universeKey}'."),
         };
         var containers = db.Containers.Where(c => c.UniverseId == universe.Id).ToDictionary(c => c.Id);
-        var covered = CoveredScopes(Container(containers.Values, universe, scope), containers);
+        var covered = CoveredScopes(filter is null ? universe : Container(containers.Values, universe, filter), containers);
         var point = Point(db, containers.Values, universe, position);
 
-        // F-ENT-5, F-ENT-6: in-canon entities of the scope chain that have entered canon by p.
+        // F-ENT-5, F-ENT-6: in-canon entities of the covered scopes that have entered canon by p.
         var entityQuery = db.Entities
             .Where(e => e.UniverseId == universe.Id && covered.Contains(e.ScopeId) && (e.Status == Draft || e.Status == Canon))
             .EnteredBy(point);
@@ -70,7 +74,7 @@ internal static class CanonQuery
                 Fields(e, values[e.Id], written[e.Id].Select(w => (w.Field, w.FieldOrder)), defaults[e.Type]),
                 sections[e.Id].OrderBy(s => s.Index).Select(s => Section(e, s)).ToList()))
             .ToList();
-        return new CanonView(scope, position, view);
+        return new CanonView(universe.Key, position, filter, view);
     }
 
     /// <summary>
@@ -120,38 +124,34 @@ internal static class CanonQuery
         _ => (c.StartOrdinal, 2),
     };
 
-    private static ContainerRecord Container(IEnumerable<ContainerRecord> containers, ContainerRecord universe, CanonScope scope)
+    private static ContainerRecord Container(IEnumerable<ContainerRecord> containers, ContainerRecord universe, CanonFilter filter)
     {
-        if (scope.Kind == CanonScopeKind.Universe)
-        {
-            return universe;
-        }
-
-        var kind = scope.Kind == CanonScopeKind.Series ? "series" : "book";
-        return containers.Where(c => c.Kind == kind && c.Key == scope.Key).ToList() switch
+        var kind = filter.Kind == CanonFilterKind.Series ? "series" : "book";
+        return containers.Where(c => c.Kind == kind && c.Key == filter.Key).ToList() switch
         {
             [var only] => only,
-            [] => throw new CanonViewException($"Universe '{universe.Key}' has no {kind} '{scope.Key}'."),
-            _ => throw new CanonViewException($"More than one {kind} of universe '{universe.Key}' has the key '{scope.Key}' (F-KEY-5)."),
+            [] => throw new CanonViewException($"Universe '{universe.Key}' has no {kind} '{filter.Key}'."),
+            _ => throw new CanonViewException($"More than one {kind} of universe '{universe.Key}' has the key '{filter.Key}' (F-KEY-5)."),
         };
     }
 
     /// <summary>
-    /// The scopes whose entities a view of <paramref name="container"/>
-    /// covers. F-VIEW-1 read literally: the container and the ones that
-    /// enclose it (design.md §2), not the ones it encloses, so a universe
-    /// view leaves out series- and book-scope entities. This is the one
-    /// place that decides it, so another reading changes only this method.
+    /// The scopes whose entities a view filtered to <paramref name="container"/>
+    /// covers (F-VIEW-1): its scope chain (format.md §1.4) and every
+    /// container inside it. For the universe, that's every scope. Whether an
+    /// entity shows is then down to its position alone.
     /// </summary>
     private static List<int> CoveredScopes(ContainerRecord container, Dictionary<int, ContainerRecord> containers)
     {
-        var chain = new List<int>();
+        var covered = new List<int>();
         for (ContainerRecord? c = container; c is not null; c = c.ParentId is { } parent ? containers[parent] : null)
         {
-            chain.Add(c.Id);
+            covered.Add(c.Id);
         }
 
-        return chain;
+        bool Inside(ContainerRecord c) => c.ParentId is { } parent && (parent == container.Id || Inside(containers[parent]));
+        covered.AddRange(containers.Values.Where(Inside).Select(c => c.Id));
+        return covered;
     }
 
     /// <summary>

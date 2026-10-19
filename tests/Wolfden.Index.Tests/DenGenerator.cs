@@ -5,7 +5,8 @@ namespace Wolfden.Index.Tests;
 
 /// <summary>
 /// Writes a random but deterministic den for a seed: invented names only,
-/// two universes, series (one with no books), standalone books, and entities
+/// two universes, two series in the first and one in the second (and
+/// sometimes one with no books), standalone books, and entities
 /// at every scope. The entities mix what canon views have to get right:
 /// every status, entity <c>from</c>s that resolve and don't, plain values,
 /// single entries and temporal lists with gaps, overlaps, nulls, empty
@@ -76,59 +77,68 @@ internal sealed class DenGenerator
 
             """;
 
-        Universe(Key(), books: _random.Next(2, 5));
-        Universe(Key(), books: _random.Next(1, 3));
+        Universe(Key(), series: 2);
+        Universe(Key(), series: 1);
     }
 
-    private void Universe(string key, int books)
+    /// <summary>
+    /// A universe with <paramref name="series"/> series of 1 to 3 books
+    /// each, 0 to 2 standalone books between them, and maybe an empty series
+    /// at the end.
+    /// </summary>
+    private void Universe(string key, int series)
     {
         var root = $"universes/{key}";
         var order = new List<string>();
-        var works = new List<(string Path, string Kind, string Key)>();
-        var seriesBooks = new List<string>();
+        var works = new List<string>();
         _books = [];
 
-        // One series with books, standalone books, and maybe an empty series.
-        var series = Key();
-        order.Add(series);
-        var inSeries = Math.Max(1, books - 1);
-        for (var i = 0; i < books; i++)
+        for (var s = 0; s < series; s++)
         {
-            var book = Key();
-            var chapters = Chapters();
-            _books.Add((book, chapters));
-            var path = i < inSeries ? $"{root}/series/{series}/books/{book}" : $"{root}/books/{book}";
-            if (i < inSeries)
+            var seriesKey = Key();
+            order.Add(seriesKey);
+            var seriesPath = $"{root}/series/{seriesKey}";
+            works.Add(seriesPath);
+            var books = new List<string>();
+            for (var i = _random.Next(1, 4); i > 0; i--)
             {
-                seriesBooks.Add(book);
-            }
-            else
-            {
-                order.Add(book);
+                books.Add(Book($"{seriesPath}/books", works));
             }
 
-            var chapterList = string.Join(", ", chapters);
-            _files[$"{path}/book.md"] = $"---\nname: {Name()}\nstatus: draft\nchapters: [{chapterList}]\n---\n";
-            works.Add((path, "book", book));
+            _files[$"{seriesPath}/series.md"] = $"---\nname: {Name()}\nbooks: [{string.Join(", ", books)}]\n---\n";
+            for (var i = _random.Next(0, 3); i > 0; i--)
+            {
+                order.Add(Book($"{root}/books", works));
+            }
         }
 
-        _files[$"{root}/series/{series}/series.md"] = $"---\nname: {Name()}\nbooks: [{string.Join(", ", seriesBooks)}]\n---\n";
-        works.Insert(0, ($"{root}/series/{series}", "series", series));
         if (_random.Next(2) == 0)
         {
             var empty = Key();
             order.Add(empty);
             _files[$"{root}/series/{empty}/series.md"] = $"---\nname: {Name()}\n---\n\nNo books yet.\n";
-            works.Add(($"{root}/series/{empty}", "series", empty));
+            works.Add($"{root}/series/{empty}");
         }
 
         _files[$"{root}/universe.md"] = $"---\nname: {Name()}\norder: [{string.Join(", ", order)}]\n---\n\nAn invented universe.\n";
 
         Entities(root, _random.Next(3, 7));
-        foreach (var (path, _, _) in works)
+        foreach (var path in works)
         {
             Entities(path, _random.Next(1, 5));
         }
+    }
+
+    /// <summary>Writes a book under <paramref name="parent"/> and returns its key.</summary>
+    private string Book(string parent, List<string> works)
+    {
+        var book = Key();
+        var chapters = Chapters();
+        _books.Add((book, chapters));
+        var path = $"{parent}/{book}";
+        _files[$"{path}/book.md"] = $"---\nname: {Name()}\nstatus: draft\nchapters: [{string.Join(", ", chapters)}]\n---\n";
+        works.Add(path);
+        return book;
     }
 
     private List<string> Chapters()

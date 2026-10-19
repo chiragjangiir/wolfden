@@ -20,8 +20,6 @@ public sealed class DraculaCanonViewTests : IClassFixture<DraculaCanonViewTests.
         _built = built;
     }
 
-    private static CanonScope Book => CanonScope.ForBook("dracula", "dracula");
-
     [Theory]
     [InlineData("dracula")]
     [InlineData("dracula:1")]
@@ -30,7 +28,7 @@ public sealed class DraculaCanonViewTests : IClassFixture<DraculaCanonViewTests.
     [InlineData("dracula:4")]
     public void AnEarlyViewLeaksNothingAboutLucyRenfieldOrWhatTheCountIs(string position)
     {
-        var view = _built.Index.CanonAsOf(Book, position);
+        var view = View(position);
 
         // Lucy and Renfield enter canon at chapter 5, and what the Count is
         // comes out in chapter 18. No entity of the view, book or universe
@@ -48,7 +46,7 @@ public sealed class DraculaCanonViewTests : IClassFixture<DraculaCanonViewTests.
     [InlineData("dracula:17")]
     public void AnEarlyViewLeaksNothingAboutTheCountsNature(string position)
     {
-        var count = _built.Index.CanonAsOf(Book, position).Entities.Single(e => e.Id == Count);
+        var count = View(position).Entities.Single(e => e.Id == Count);
 
         // species, born, and the Voivode subsection are known from chapter
         // 18, and died from chapter 27 (F-TMP-8).
@@ -63,7 +61,7 @@ public sealed class DraculaCanonViewTests : IClassFixture<DraculaCanonViewTests.
     [Fact]
     public void TheCountsNatureArrivesWhereTheSampleTagsIt()
     {
-        var at18 = _built.Index.CanonAsOf(Book, "dracula:18").Entities.Single(e => e.Id == Count);
+        var at18 = View("dracula:18").Entities.Single(e => e.Id == Count);
         var species = at18.Fields.Single(f => f.Name == "species");
         Assert.Equal("\"vampire (Un-Dead)\"", species.ValueJson);
         Assert.True(species.Pinned);
@@ -71,14 +69,14 @@ public sealed class DraculaCanonViewTests : IClassFixture<DraculaCanonViewTests.
         Assert.DoesNotContain(at18.Fields, f => f.Name == "died");
         Assert.Contains("Voivode", at18.Sections.Single(s => s.Name == "Who he was").Body, StringComparison.Ordinal);
 
-        var atEnd = _built.Index.CanonAsOf(Book).Entities.Single(e => e.Id == Count);
+        var atEnd = View(null).Entities.Single(e => e.Id == Count);
         Assert.Contains(atEnd.Fields, f => f.Name == "died");
     }
 
     [Fact]
     public void LucyAppearsAtChapterFiveWithoutHerFate()
     {
-        var lucy = _built.Index.CanonAsOf(Book, "dracula:5").Entities.Single(e => e.Id == Lucy);
+        var lucy = View("dracula:5").Entities.Single(e => e.Id == Lucy);
 
         Assert.Equal("\"Mina's friend, courted by three men at once.\"", lucy.Fields.Single(f => f.Name == "role").ValueJson);
         Assert.DoesNotContain(lucy.Fields, f => f.Name == "died");
@@ -89,7 +87,7 @@ public sealed class DraculaCanonViewTests : IClassFixture<DraculaCanonViewTests.
     [Fact]
     public void LucysUnDeadSubsectionEndsAtItsUntil()
     {
-        string[] Arc(string position) => _built.Index.CanonAsOf(Book, position).Entities.Single(e => e.Id == Lucy)
+        string[] Arc(string position) => View(position).Entities.Single(e => e.Id == Lucy)
             .Sections.Where(s => s.HeadingPath[0] == "Arc").Select(s => s.Name).ToArray();
 
         Assert.Equal(["Arc", "Death"], Arc("dracula:13"));
@@ -103,29 +101,30 @@ public sealed class DraculaCanonViewTests : IClassFixture<DraculaCanonViewTests.
     public void NoViewHoldsAnythingThatStartsAfterItsPosition()
     {
         var universe = _built.Structure.FindUniverse("dracula")!;
-        foreach (var scope in CanonCrossCheckTests.Scopes(universe))
+        foreach (var filter in CanonCrossCheckTests.Filters(universe))
         {
             foreach (var position in CanonCrossCheckTests.Positions(universe))
             {
-                CanonCrossCheckTests.NothingStartsAfter(universe, _built.Index.CanonAsOf(scope, position));
+                CanonCrossCheckTests.NothingStartsAfter(universe, _built.Index.CanonAsOf("dracula", position, filter));
             }
         }
     }
 
     [Fact]
-    public void AUniverseViewHoldsOnlyUniverseScopeEntities()
+    public void TheWholeUniverseViewHoldsTheBooksEntities()
     {
-        // F-VIEW-1 read literally: a scope's view covers it and the scopes
-        // that enclose it, not the ones it encloses.
-        var universe = _built.Index.CanonAsOf(CanonScope.ForUniverse("dracula"));
-        var book = _built.Index.CanonAsOf(Book);
+        // F-VIEW-1: a view covers every scope, so the one book's entities
+        // are in the unfiltered view, after the universe's places.
+        var all = View(null);
+        var book = _built.Index.CanonAsOf("dracula", null, CanonFilter.ForBook("dracula"));
 
-        Assert.All(universe.Entities, e => Assert.Equal("universe", e.ScopeKind));
-        Assert.Contains(universe.Entities, e => e.Name == "London");
-        Assert.DoesNotContain(universe.Entities, e => e.Id == Count);
-        Assert.Equal(universe.Entities.Select(e => e.Key), book.Entities.TakeWhile(e => e.ScopeKind == "universe").Select(e => e.Key));
-        Assert.Contains(book.Entities, e => e.Id == Count);
+        Assert.Contains(all.Entities, e => e.Name == "London" && e.ScopeKind == "universe");
+        Assert.Contains(all.Entities, e => e.Id == Count && e.ScopeKind == "book");
+        Assert.Equal(["universe", "book"], all.Entities.Select(e => e.ScopeKind).Distinct());
+        Assert.Equal(all.Entities.Select(e => e.Key), book.Entities.Select(e => e.Key));
     }
+
+    private CanonView View(string? position) => _built.Index.CanonAsOf("dracula", position);
 
     private static string Text(CanonView view) => string.Join("\n", view.Entities.Select(Text));
 

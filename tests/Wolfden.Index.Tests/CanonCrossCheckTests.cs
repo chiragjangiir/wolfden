@@ -8,7 +8,7 @@ namespace Wolfden.Index.Tests;
 
 /// <summary>
 /// The index's canon-as-of view equals the reference one worked out from
-/// Core (<see cref="CanonReference"/>) for every scope at every chapter,
+/// Core (<see cref="CanonReference"/>) for every filter at every chapter,
 /// every bare book, and the end of the story: on the Dracula sample, the
 /// Starfall den, and seeded generated dens.
 /// </summary>
@@ -57,14 +57,20 @@ public sealed class CanonCrossCheckTests
         var fields = new List<CanonFieldValue>();
         var sections = new List<CanonSection>();
         var statuses = new HashSet<string>(StringComparer.Ordinal);
+        var seriesWithBooks = 0;
         foreach (var seed in Seeds)
         {
             var (files, _) = DenGenerator.Generate(seed);
             using var den = TempDen.FromFiles(files);
-            var (_, views) = CrossCheck(den);
+            using var index = DenIndex.Open(den.Root);
+            var catalog = EntityCatalog.Load(den.Root);
+            var views = catalog.Structure.Universes
+                .SelectMany(u => Positions(u).Select(p => index.CanonAsOf(u.Key, p)))
+                .ToList();
             fields.AddRange(views.SelectMany(v => v.Entities).SelectMany(e => e.Fields));
             sections.AddRange(views.SelectMany(v => v.Entities).SelectMany(e => e.Sections));
-            statuses.UnionWith(EntityCatalog.Load(den.Root).Entities.Select(e => e.Status.ToKey()));
+            statuses.UnionWith(catalog.Entities.Select(e => e.Status.ToKey()));
+            seriesWithBooks = Math.Max(seriesWithBooks, catalog.Structure.Universes.Max(u => u.Series.Count(s => s.Books.Count > 0)));
         }
 
         Assert.Equal(["default", "entry", "plain", "temporal"], fields.Select(f => f.Kind).Distinct().Order(StringComparer.Ordinal));
@@ -77,10 +83,11 @@ public sealed class CanonCrossCheckTests
         Assert.Contains(sections, s => s.Pinned);
         Assert.Contains(sections, s => s.Name == "Payoff");
         Assert.Superset(new HashSet<string> { "idea", "retconned", "candidate", "draft", "canon" }, statuses);
+        Assert.Equal(2, seriesWithBooks);
     }
 
     /// <summary>
-    /// Checks the index against the reference for every scope and position
+    /// Checks the index against the reference for every filter and position
     /// of every universe of the den, and that nothing in a view starts
     /// after its position. Returns the views checked.
     /// </summary>
@@ -91,12 +98,12 @@ public sealed class CanonCrossCheckTests
         var all = new List<CanonView>();
         foreach (var universe in catalog.Structure.Universes)
         {
-            foreach (var scope in Scopes(universe))
+            foreach (var filter in Filters(universe))
             {
                 foreach (var position in Positions(universe))
                 {
-                    var actual = index.CanonAsOf(scope, position);
-                    var expected = CanonReference.Compute(catalog, scope, position);
+                    var actual = index.CanonAsOf(universe.Key, position, filter);
+                    var expected = CanonReference.Compute(catalog, universe.Key, position, filter);
                     AssertSame(expected, actual);
                     AssertSame(expected.Pinned(), actual.Pinned());
                     NothingStartsAfter(universe, actual);
@@ -108,11 +115,11 @@ public sealed class CanonCrossCheckTests
         return (all.Count, all);
     }
 
-    /// <summary>Every scope of a universe: itself, its series, and its books.</summary>
-    internal static IEnumerable<CanonScope> Scopes(Universe universe) =>
-        new[] { CanonScope.ForUniverse(universe.Key) }
-            .Concat(universe.Series.Select(s => CanonScope.ForSeries(universe.Key, s.Key)))
-            .Concat(universe.Books.Select(b => CanonScope.ForBook(universe.Key, b.Key)));
+    /// <summary>Every filter of a universe: none, each series, and each book.</summary>
+    internal static IEnumerable<CanonFilter?> Filters(Universe universe) =>
+        new CanonFilter?[] { null }
+            .Concat(universe.Series.Select(s => CanonFilter.ForSeries(s.Key)))
+            .Concat(universe.Books.Select(b => CanonFilter.ForBook(b.Key)));
 
     /// <summary>Every position of a universe: each bare book, each chapter, and the end of the story (null).</summary>
     internal static IEnumerable<string?> Positions(Universe universe) =>
@@ -162,7 +169,8 @@ public sealed class CanonCrossCheckTests
     /// <summary>Asserts two views are the same, naming the first entity where they differ.</summary>
     internal static void AssertSame(CanonView expected, CanonView actual)
     {
-        Assert.Equal(expected.Scope, actual.Scope);
+        Assert.Equal(expected.Universe, actual.Universe);
+        Assert.Equal(expected.Filter, actual.Filter);
         Assert.Equal(expected.Position, actual.Position);
         var want = expected.Entities.Select(e => JsonSerializer.Serialize(e)).ToList();
         var got = actual.Entities.Select(e => JsonSerializer.Serialize(e)).ToList();
@@ -172,7 +180,7 @@ public sealed class CanonCrossCheckTests
             var g = i < got.Count ? got[i] : "(none)";
             if (w != g)
             {
-                Assert.Fail($"The views of {expected.Scope} at '{expected.Position ?? "the end of the story"}' differ at entity {i}.\nReference: {w}\nIndex:     {g}");
+                Assert.Fail($"The views of universe '{expected.Universe}' ({expected.Filter?.ToString() ?? "no filter"}) at '{expected.Position ?? "the end of the story"}' differ at entity {i}.\nReference: {w}\nIndex:     {g}");
             }
         }
     }
