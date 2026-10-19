@@ -197,6 +197,9 @@ public sealed class EntityRecord
 
     /// <summary>The lead: the body before the first section (F-SEC-2).</summary>
     public string Lead { get; set; } = "";
+
+    /// <summary>The 1-based line where the lead starts: the line after the frontmatter.</summary>
+    public int LeadLine { get; set; }
 }
 
 /// <summary>One of an entity's aliases (F-ENT-4).</summary>
@@ -246,6 +249,9 @@ public sealed class FieldValueRecord
     /// <summary>The entry's 0-based place in its field, or null for a plain value.</summary>
     public int? EntryIndex { get; set; }
 
+    /// <summary>The 1-based line in the entity file: the entry's, or for a plain value the field name's.</summary>
+    public int Line { get; set; }
+
     /// <summary>The value as JSON: strings stay strings (YAML scalars are kept as written), lists are arrays, and mappings are objects.</summary>
     public string ValueJson { get; set; } = "null";
 
@@ -276,6 +282,37 @@ public sealed class FieldValueRecord
     /// has no end; query with <see cref="IndexQueries.InEffectAt(IQueryable{FieldValueRecord}, long)"/>.
     /// </summary>
     public long? UntilOrdinal { get; set; }
+}
+
+/// <summary>
+/// A field <c>default</c> of an enabled type (types.md F-FT-15): the value
+/// views show where an entity of that type has no value for the field. Only
+/// fields with a default have a row. Types come from the built-in packs and
+/// the den's enabled packs (types.md F-PACK-7), so these rows hang off no one
+/// file: a change to any pack file rebuilds them all.
+/// </summary>
+public sealed class FieldDefaultRecord
+{
+    /// <summary>Row id.</summary>
+    public int Id { get; set; }
+
+    /// <summary>The type key, as entities write it in <c>type</c>.</summary>
+    public string TypeKey { get; set; } = "";
+
+    /// <summary>The field name.</summary>
+    public string Field { get; set; } = "";
+
+    /// <summary>The field's 0-based place in the type's field order (types.md F-FT-3).</summary>
+    public int FieldOrder { get; set; }
+
+    /// <summary>The default as JSON, in the same form as <see cref="FieldValueRecord.ValueJson"/>.</summary>
+    public string DefaultJson { get; set; } = "null";
+
+    /// <summary>The pack file that defines the field, as diagnostics name it.</summary>
+    public string Path { get; set; } = "";
+
+    /// <summary>The 1-based line of the field's name in that file.</summary>
+    public int Line { get; set; }
 }
 
 /// <summary>A section of an entity (format.md §9), with its effective range.</summary>

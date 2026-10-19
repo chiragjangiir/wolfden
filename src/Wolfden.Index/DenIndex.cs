@@ -76,6 +76,22 @@ public sealed class DenIndex : IDisposable
             .FirstOrDefault();
     }
 
+    /// <summary>
+    /// The canon-as-of view (format.md F-VIEW-1) of the universe with key
+    /// <paramref name="universeKey"/> at <paramref name="position"/>: a
+    /// <c>book:chapter</c> or bare book position, or null for the end of the
+    /// story (all canon so far). It covers entities at every scope of the
+    /// universe, or with a <paramref name="filter"/> only those filed in that
+    /// series or book, the scopes enclosing it, and the scopes inside it.
+    /// The position can be anywhere in the universe, inside the filter or not.
+    /// </summary>
+    /// <exception cref="CanonViewException">The universe or filter doesn't exist, or the position doesn't parse or resolve.</exception>
+    public CanonView CanonAsOf(string universeKey, string? position = null, CanonFilter? filter = null)
+    {
+        ArgumentNullException.ThrowIfNull(universeKey);
+        return CanonQuery.Run(Context, universeKey, position, filter);
+    }
+
     /// <summary>The links that resolve to the entity with this key: its backlinks, by path and place in the file.</summary>
     public IReadOnlyList<LinkRecord> Backlinks(string entityKey)
     {

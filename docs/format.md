@@ -1100,26 +1100,42 @@ written as a single entry (`born: { value: "2291", pin: true }`). `pin` is
 
 ### 9.4 Canon views
 
-**F-VIEW-1.** A **canon-as-of** view for scope `S` at position `p` covers
-the entities of `S` and of the scopes that enclose it (design.md §2). It
-includes an entity if its `status` is `draft` or `canon` and `p` isn't
-before its `from` (F-ENT-6). For each included entity it shows the lead,
-each field's value at `p` from its live entries (F-TMP-4), and the in-canon
-sections in effect at `p` (F-SEC-8, F-SEC-9), except bookkeeping sections
-(F-SEC-12). Facts whose positions don't
+**F-VIEW-1.** A **canon-as-of** view of universe `U` at position `p`
+covers the entities of every scope of `U`: the universe, each series, and
+each book, wherever they sit in story order. It includes an entity if its
+`status` is `draft` or `canon` and `p` isn't before its `from` (F-ENT-6),
+compared in the universe's story order (F-ORD-1). So the folder an entity
+is filed in decides only where it enters canon when it has no `from`, not
+whether a later view shows it: a view late in the story shows a side
+character filed under an earlier book, and a later book's entities
+are left out of an earlier view by position alone. For each included
+entity it shows the lead, each field's value at `p` from its live entries
+(F-TMP-4), and the in-canon sections in effect at `p` (F-SEC-8, F-SEC-9),
+except bookkeeping sections (F-SEC-12). Facts whose positions don't
 resolve are left out (F-POS-4). `p` MAY be omitted, which means the end of
 the story: all canon so far.
 
-**F-VIEW-2.** A **pinned canon** view for `S` at `p` is the part of the
-canon-as-of view that is pinned: every pinned section and field entry that
-the canon-as-of view includes, grouped by entity. The MCP server serves it
-ahead of the rest of canon (design.md §8).
+A view MAY be **filtered** to a series or book `S` of `U`. It then covers
+only the entities filed in `S`'s scope chain (§1.4) and in the scopes
+inside `S`: a series filter keeps the universe's entities,
+the series', and those of all its books, and leaves out other series and
+standalone books, and a book filter keeps the book's entities and those of
+its series and universe. `p` doesn't have to be in `S`, since story order
+runs across the whole universe. A filter of `U` itself, like no filter,
+covers every scope.
+
+**F-VIEW-2.** A **pinned canon** view at `p`, with or without a filter,
+is the part of the canon-as-of view that is pinned: every pinned section
+and field entry that the canon-as-of view includes, grouped by entity.
+The MCP server serves it ahead of the rest of canon (design.md §8).
 
 **F-VIEW-3.** Views list entities in a fixed order, so output can be
 compared in tests: by scope (the universe, then series and books in story
 order), then by type key, then by normalized `name` (F-LINK-4), then by
-file path. Within an entity, fields come in frontmatter order and sections
-in file order.
+file path. A series orders at its start (F-ORD-3), just before its first
+book, and a series with no books yet at its own place in story order.
+Within an entity, fields come in frontmatter order and sections in file
+order.
 
 ### 9.5 Keeping reveals in place
 

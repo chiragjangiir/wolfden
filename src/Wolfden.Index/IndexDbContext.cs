@@ -44,6 +44,9 @@ public sealed class IndexDbContext : DbContext
     /// <summary>Field values and entries.</summary>
     public DbSet<FieldValueRecord> FieldValues => Set<FieldValueRecord>();
 
+    /// <summary>Field defaults of the enabled types.</summary>
+    public DbSet<FieldDefaultRecord> FieldDefaults => Set<FieldDefaultRecord>();
+
     /// <summary>Entity sections.</summary>
     public DbSet<SectionRecord> Sections => Set<SectionRecord>();
 
@@ -117,6 +120,12 @@ public sealed class IndexDbContext : DbContext
             e.HasOne<EntityRecord>().WithMany().HasForeignKey(v => v.EntityId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(v => new { v.EntityId, v.FieldOrder, v.EntryIndex });
             e.HasIndex(v => new { v.UniverseId, v.FromOrdinal, v.UntilOrdinal });
+        });
+
+        modelBuilder.Entity<FieldDefaultRecord>(e =>
+        {
+            e.ToTable("field_defaults");
+            e.HasIndex(d => new { d.TypeKey, d.Field }).IsUnique();
         });
 
         modelBuilder.Entity<SectionRecord>(e =>

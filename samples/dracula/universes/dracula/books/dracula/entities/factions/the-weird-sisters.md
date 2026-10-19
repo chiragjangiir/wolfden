@@ -13,8 +13,13 @@ fields:
 # The weird sisters
 
 ## Overview
-Three vampire women who live in the castle with the Count. Harker's name
-for them, in chapter 4, is "those weird sisters."
+Three women who live in the castle with the Count and come for Harker in
+the night. Harker's name for them, in chapter 4, is "those weird sisters."
+
+### What they are
+<!-- wolfden: from=dracula:18 -->
+Vampires, like their master. Van Helsing's account of the Un-Dead
+explains what Harker saw.
 
 ## Members
 No one names them. Two are dark, with high aquiline noses like the

@@ -26,10 +26,11 @@ public enum FieldValueKind
 /// <summary>One field under an entity's <c>fields</c> (format.md §7.2).</summary>
 public sealed class FieldFact
 {
-    internal FieldFact(string name, int order, FieldValueKind kind, YamlNode value, IReadOnlyList<EntryFact> entries)
+    internal FieldFact(string name, int order, int line, FieldValueKind kind, YamlNode value, IReadOnlyList<EntryFact> entries)
     {
         Name = name;
         Order = order;
+        Line = line;
         Kind = kind;
         Value = value;
         Entries = entries;
@@ -40,6 +41,9 @@ public sealed class FieldFact
 
     /// <summary>The field's 0-based place in <c>fields</c>, in frontmatter order (F-VIEW-3).</summary>
     public int Order { get; }
+
+    /// <summary>The 1-based line of the field's name in the file.</summary>
+    public int Line { get; }
 
     /// <summary>Plain, a single entry, or a temporal list.</summary>
     public FieldValueKind Kind { get; }
@@ -71,6 +75,9 @@ public sealed class EntryFact
 
     /// <summary>The entry's <c>value</c>.</summary>
     public YamlNode? Value => Node["value"];
+
+    /// <summary>The 1-based line where the entry starts in the file.</summary>
+    public int Line => Node.Line;
 
     /// <summary>The <c>from</c> as written, or null if it has none.</summary>
     public string? FromText { get; internal set; }
@@ -383,7 +390,7 @@ public sealed class EntityFacts
                 _ => (FieldValueKind.Plain, []),
             };
 
-            result.Add(new FieldFact(name, result.Count, kind, field.Value, Entries(nodes)));
+            result.Add(new FieldFact(name, result.Count, field.Key.Line, kind, field.Value, Entries(nodes)));
         }
 
         return result;
