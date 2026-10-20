@@ -35,7 +35,7 @@ public class PropertyTests
 
     public static TheoryData<string> EditableFiles()
     {
-        var files = TestFiles.RepoFiles("samples/dracula", "packs/core")
+        var files = TestFiles.SampleAndPackFiles()
             .Where(f => f.EndsWith(".md", StringComparison.Ordinal))
             .Concat(Directory.EnumerateFiles(TestFiles.FixturesDir, "*.md")
                 .Select(f => Path.GetRelativePath(TestFiles.RepoRoot, f).Replace('\\', '/')))

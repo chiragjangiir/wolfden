@@ -371,7 +371,7 @@ public class HardeningTests
     {
         // ToBytes re-encodes the decoded text, which is what every edit
         // builds on, so this is the real round-trip guarantee.
-        var paths = TestFiles.RepoFiles("samples/dracula", "packs/core")
+        var paths = TestFiles.SampleAndPackFiles()
             .Concat(Directory.EnumerateFiles(TestFiles.FixturesDir).Select(f => Path.GetRelativePath(TestFiles.RepoRoot, f)));
         foreach (var path in paths)
         {
