@@ -45,12 +45,34 @@ public sealed class FileSystemDenSource : IDenSource
 
     /// <summary>
     /// The folders directly in <paramref name="path"/>, by their names on
-    /// disk. The path itself must match in exact case, as for <see cref="FileExists"/>.
+    /// disk, leaving out folder links (<see cref="IsFolderLink"/>). The path
+    /// itself must match in exact case, as for <see cref="FileExists"/>.
     /// </summary>
     public IEnumerable<string> GetDirectories(string path) =>
         ExactPathExists(path, file: false)
-            ? Directory.EnumerateDirectories(Full(path)).Select(d => Path.GetFileName(d)!).Order(StringComparer.Ordinal).ToList()
+            ? new DirectoryInfo(Full(path)).EnumerateDirectories().Where(d => !IsFolderLink(d)).Select(d => d.Name).Order(StringComparer.Ordinal).ToList()
             : [];
+
+    /// <summary>
+    /// True for a folder that's a link to another folder: a symbolic link,
+    /// or a junction on Windows. A den's walks skip them, as git does, so
+    /// links can't loop, and every note is read from one path. Other reparse
+    /// points, such as the placeholders of cloud-synced folders (OneDrive,
+    /// Dropbox), have no link target, so they're read as ordinary folders.
+    /// </summary>
+    public static bool IsFolderLink(FileSystemInfo folder)
+    {
+        ArgumentNullException.ThrowIfNull(folder);
+        try
+        {
+            return folder.Attributes.HasFlag(FileAttributes.ReparsePoint) && folder.LinkTarget is not null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Gone or unreadable: whatever reads it next reports that.
+            return false;
+        }
+    }
 
     /// <summary>
     /// The files directly in <paramref name="path"/>, by their names on
@@ -73,8 +95,10 @@ public sealed class FileSystemDenSource : IDenSource
                 return false;
             }
 
-            var entries = last && file ? Directory.EnumerateFiles(current) : Directory.EnumerateDirectories(current);
-            if (!entries.Any(e => string.Equals(Path.GetFileName(e), segments[i], StringComparison.Ordinal)))
+            var found = last && file
+                ? Directory.EnumerateFiles(current).Any(e => string.Equals(Path.GetFileName(e), segments[i], StringComparison.Ordinal))
+                : new DirectoryInfo(current).EnumerateDirectories().Any(d => string.Equals(d.Name, segments[i], StringComparison.Ordinal) && !IsFolderLink(d));
+            if (!found)
             {
                 return false;
             }

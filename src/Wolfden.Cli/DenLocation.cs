@@ -85,7 +85,7 @@ internal static class DenLocation
                 {
                     foreach (var child in children)
                     {
-                        if (child.Name.StartsWith('.') || child.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                        if (child.Name.StartsWith('.') || Core.Structure.FileSystemDenSource.IsFolderLink(child))
                         {
                             continue;
                         }

@@ -344,6 +344,12 @@ from the files:
   unreadable (say, after a sync conflict), or from another schema version
   is rebuilt, not repaired. Wolfden puts a `.gitignore` inside `.wolfden/`
   so git skips the folder without changes to the den's own `.gitignore`.
+- **Folder links are skipped** (#102; v0 behaviour, not a recorded
+  decision). Every walk of a den (the loader, the files hash, the watcher,
+  and `init`'s search for dens below) skips symbolic links and junctions
+  to folders, as git does, so links can't loop and each note has one
+  path. Cloud-sync placeholders (OneDrive, Dropbox) aren't links and are
+  read as usual.
 - **Watched** (#14; v0 behaviour, not a recorded decision). The file
   watcher collects a burst of saves (an editor's temporary file and
   rename, a git checkout) into one batch, and ignores hidden paths such as

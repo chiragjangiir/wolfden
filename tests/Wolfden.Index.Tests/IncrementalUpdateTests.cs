@@ -417,7 +417,7 @@ public sealed class IncrementalUpdateTests
     }
 
     /// <summary>A batch of events, by den-relative path, as the watcher would collect them.</summary>
-    private static ChangeBatch Batch(TempDen den, params (WatcherChangeTypes Kind, string Path, string? OldPath)[] events)
+    internal static ChangeBatch Batch(TempDen den, params (WatcherChangeTypes Kind, string Path, string? OldPath)[] events)
     {
         var batcher = new ChangeBatcher(den.Root, TimeSpan.Zero, TimeSpan.Zero);
         var now = DateTime.UtcNow;

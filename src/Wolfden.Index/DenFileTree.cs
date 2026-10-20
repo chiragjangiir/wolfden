@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Wolfden.Core.Structure;
 
 namespace Wolfden.Index;
 
@@ -7,13 +8,14 @@ namespace Wolfden.Index;
 /// The den's tree as the files fingerprint sees it (<see cref="IndexBuilder.FilesFingerprint"/>):
 /// every folder, and every <c>.md</c>, <c>.yaml</c>, and <c>.yml</c> file
 /// with the SHA-256 of its bytes, leaving out names that start with
-/// <c>.</c> at any depth (F-LAY-2). A file watcher (#14) keeps one up to
+/// <c>.</c> at any depth (F-LAY-2) and folder links, which the den loader
+/// skips too (<see cref="FileSystemDenSource.IsFolderLink"/>). A file watcher (#14) keeps one up to
 /// date as files change, so it can record the fingerprint of the files an
 /// update read without hashing the whole den again.
 /// </summary>
 internal sealed class DenFileTree
 {
-    /// <summary>Folder links can loop; no real den is this deep.</summary>
+    /// <summary>No real den is this deep; a last guard, as folder links are skipped.</summary>
     private const int MaxDepth = 64;
 
     private readonly Dictionary<string, string> _files;
@@ -139,13 +141,13 @@ internal sealed class DenFileTree
             }
         }
 
-        foreach (var sub in Directory.EnumerateDirectories(folder))
+        foreach (var sub in new DirectoryInfo(folder).EnumerateDirectories())
         {
-            var name = Path.GetFileName(sub);
-            if (!name.StartsWith('.'))
+            var name = sub.Name;
+            if (!name.StartsWith('.') && !FileSystemDenSource.IsFolderLink(sub))
             {
                 _folders.Add($"{relative}{name}");
-                Walk(sub, $"{relative}{name}/", depth + 1, collect);
+                Walk(sub.FullName, $"{relative}{name}/", depth + 1, collect);
             }
         }
     }

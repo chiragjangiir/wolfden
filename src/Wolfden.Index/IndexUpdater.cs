@@ -403,7 +403,8 @@ internal sealed class IndexUpdater
     /// <summary>
     /// Whether paths exist with every name in exactly that case, as the den
     /// loader matches them (<see cref="FileSystemDenSource"/>), listing
-    /// each folder once per batch.
+    /// each folder once per batch. Folder links aren't folders here, as the
+    /// loader skips them, so nothing under one is a file either.
     /// </summary>
     private sealed class ExactListing(string root)
     {
@@ -441,7 +442,7 @@ internal sealed class IndexUpdater
                 {
                     listing = (
                         Directory.EnumerateFiles(full).Select(f => Path.GetFileName(f)).ToHashSet(StringComparer.Ordinal),
-                        Directory.EnumerateDirectories(full).Select(d => Path.GetFileName(d)).ToHashSet(StringComparer.Ordinal));
+                        new DirectoryInfo(full).EnumerateDirectories().Where(d => !FileSystemDenSource.IsFolderLink(d)).Select(d => d.Name).ToHashSet(StringComparer.Ordinal));
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException)
                 {
