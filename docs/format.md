@@ -288,9 +288,10 @@ any depth (`.git`, `.obsidian`, `.vscode`). `.wolfden/` at the root is
 reserved for the index and local state, SHOULD be gitignored, and is never
 a source of truth (design.md §7). Folder links (symbolic links and
 junctions) aren't followed either, so the files in a linked folder are
-ignored. A folder link where the den reads files (under `packs/`, a
-container folder that F-LAY-4 lists, or an `entities/` folder) is a
-[warning], so notes there aren't dropped silently.
+ignored. A folder link where the den reads files is a [warning], so notes
+there aren't dropped silently. That is a link that is `packs/` or inside
+it, `universes/`, a container folder (F-LAY-4) or the `series/` or
+`books/` folder holding one, or an `entities/` folder or inside one.
 
 **F-LAY-3.** `notes/` and `authors/` at the den root are reserved for
 Author and den notes (#45). If either exists, v0 ignores its contents and

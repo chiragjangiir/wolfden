@@ -355,8 +355,8 @@ public class LinkResolutionTests
     [Fact]
     public void ATieWithOneUniqueIdIsStillAmbiguous()
     {
-        // Both Alphas tie by name. first.md's id is duplicated (by b.md), but c.md's is
-        // unique, so linking to c by its slug or id does pick it.
+        // Both Alphas tie by name. first.md's id is duplicated (by b.md), but c.md has
+        // no id, so it can't clash, and linking to c by its slug does pick it.
         const string id = "01JA7Q8M4XK3V9R2D5W8HN6TQB";
         var source = Den()
             .Entity(Starfall, "first", Character("Alpha", $"id: {id}"))
