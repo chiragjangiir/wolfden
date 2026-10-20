@@ -54,6 +54,10 @@ public class RoundTripTests
         var files = TestFiles.SampleAndPackFiles().ToList();
 
         Assert.Contains("samples/dracula", dens);
+        // Every folder under samples/ must be a den, so a misspelled or
+        // missing den.yaml can't drop a sample from the suite silently.
+        Assert.All(Directory.EnumerateDirectories(Path.Combine(TestFiles.RepoRoot, "samples")), dir =>
+            Assert.True(File.Exists(Path.Combine(dir, "den.yaml")), $"{Path.GetFileName(dir)} under samples/ has no den.yaml."));
         Assert.Contains("packs/core", TestFiles.ShippedPacks());
         Assert.All(dens, den => Assert.Contains($"{den}/den.yaml", files));
         Assert.Contains("packs/core/pack.yaml", files);
@@ -141,19 +145,23 @@ public class RoundTripTests
     }
 
     [Theory]
-    [InlineData("crlf")]
-    [InlineData("bom-crlf")]
-    [InlineData("crlf-no-final-newline")]
-    public void VariantsReallyHaveTheirEncoding(string variant)
+    [InlineData("crlf", false, true, true)]
+    [InlineData("bom", true, false, true)]
+    [InlineData("bom-crlf", true, true, true)]
+    [InlineData("no-final-newline", false, false, false)]
+    [InlineData("crlf-no-final-newline", false, true, false)]
+    public void VariantsReallyHaveTheirEncoding(string variant, bool bom, bool crlf, bool finalNewline)
     {
+        Assert.Contains(variant, Variants);
         var bytes = Variant(TestFiles.ReadRepoFile("samples/dracula/den.yaml"), variant);
         var text = Encoding.UTF8.GetString(bytes);
+        var bareLf = text.Replace("\r\n", "", StringComparison.Ordinal).Contains('\n', StringComparison.Ordinal);
 
-        Assert.Equal(variant.StartsWith("bom", StringComparison.Ordinal), bytes.AsSpan().StartsWith((byte[])[0xEF, 0xBB, 0xBF]));
-        Assert.DoesNotContain("\n", text.Replace("\r\n", "", StringComparison.Ordinal), StringComparison.Ordinal);
-        Assert.Equal(!variant.EndsWith("no-final-newline", StringComparison.Ordinal), text.EndsWith('\n'));
+        Assert.Equal(bom, bytes.AsSpan().StartsWith((byte[])[0xEF, 0xBB, 0xBF]));
+        Assert.Equal(crlf, text.Contains("\r\n", StringComparison.Ordinal));
+        Assert.Equal(!crlf, bareLf);
+        Assert.Equal(finalNewline, text.EndsWith('\n'));
     }
-
     /// <summary>
     /// The sample's bytes re-encoded as <paramref name="variant"/>. Line
     /// endings are made LF first, so the result is the same whatever line
@@ -162,7 +170,7 @@ public class RoundTripTests
     internal static byte[] Variant(byte[] bytes, string variant)
     {
         var text = Encoding.UTF8.GetString(bytes).Replace("\r\n", "\n", StringComparison.Ordinal);
-        if (text.StartsWith('﻿'))
+        if (text.StartsWith((char)0xFEFF))
         {
             text = text[1..];
         }

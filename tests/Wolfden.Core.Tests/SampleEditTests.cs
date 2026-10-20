@@ -32,17 +32,22 @@ public class SampleEditTests
     /// <paramref name="oldText"/> replaced by <paramref name="newText"/>,
     /// both written with LF and converted to the file's line ending.
     /// </summary>
-    private static string ReplaceOnce(DenFile file, string oldText, string newText)
+    private static string ReplaceOnce(DenFile file, string oldText, string newText) =>
+        ReplaceOnce(file.Text, Newline(file), oldText, newText);
+
+    /// <summary>The same for <paramref name="text"/>, whose line ending is <paramref name="nl"/>.</summary>
+    private static string ReplaceOnce(string text, string nl, string oldText, string newText)
     {
-        var nl = file.LineEndings == LineEndingKind.CrLf ? "\r\n" : "\n";
         oldText = oldText.Replace("\n", nl, StringComparison.Ordinal);
         newText = newText.Replace("\n", nl, StringComparison.Ordinal);
-        var at = file.Text.IndexOf(oldText, StringComparison.Ordinal);
+        var at = text.IndexOf(oldText, StringComparison.Ordinal);
 
         Assert.True(at >= 0, $"The sample no longer contains: {oldText}");
-        Assert.True(file.Text.IndexOf(oldText, at + 1, StringComparison.Ordinal) < 0, $"The sample contains more than one: {oldText}");
-        return file.Text[..at] + newText + file.Text[(at + oldText.Length)..];
+        Assert.True(text.IndexOf(oldText, at + 1, StringComparison.Ordinal) < 0, $"The sample contains more than one: {oldText}");
+        return text[..at] + newText + text[(at + oldText.Length)..];
     }
+
+    private static string Newline(DenFile file) => file.LineEndings == LineEndingKind.CrLf ? "\r\n" : "\n";
 
     [Fact]
     [Trait("Scenario", "SC-RT-2")]
@@ -101,7 +106,7 @@ public class SampleEditTests
             .WithValue("spoiler_checks", YamlScalarValue.Boolean(false));
 
         var expected = ReplaceOnce(file, "name: Dracula\n", "name: Dracula Notes\n");
-        expected = expected.Replace("spoiler_checks: true", "spoiler_checks: false", StringComparison.Ordinal);
+        expected = ReplaceOnce(expected, Newline(file), "spoiler_checks: true\n", "spoiler_checks: false\n");
         Assert.Equal(expected, edited.Text);
     }
 
@@ -205,7 +210,7 @@ public class SampleEditTests
 
         var edited = file.WithNewSection("Open questions", "Who else did the Count visit at Whitby?");
 
-        var nl = file.LineEndings == LineEndingKind.CrLf ? "\r\n" : "\n";
+        var nl = Newline(file);
         Assert.Equal(file.Text + nl + "## Open questions" + nl + "Who else did the Count visit at Whitby?" + nl, edited.Text);
         Assert.Equal("Open questions", edited.Sections[^1].Name);
         Assert.Null(edited.Sections[^1].Parent);
@@ -215,6 +220,7 @@ public class SampleEditTests
     [Trait("Scenario", "SC-RT-6")]
     [InlineData("crlf")]
     [InlineData("bom-crlf")]
+    [InlineData("crlf-no-final-newline")]
     [InlineData("bom-crlf-no-final-newline")]
     public void EditsOnAWindowsSavedSampleKeepCrlfBomAndFinalNewline(string variant)
     {
@@ -224,15 +230,21 @@ public class SampleEditTests
         var edited = file
             .WithField("role", YamlScalarValue.String("The vampire who comes to England."))
             .WithField("height", YamlScalarValue.String("tall"));
-        edited = edited.WithSectionBody(edited.Sections[later.Index], "In London he looks far younger.\nJonathan knows him.");
+        edited = edited
+            .WithSectionBody(edited.Sections[later.Index], "In London he looks far younger.\nJonathan knows him.")
+            .WithNewSection("Open questions", "Where are the last boxes?\nWho moved them?");
 
+        const string nl = "\r\n";
         var expected = ReplaceOnce(file, "  role: The antagonist.\n", "  role: The vampire who comes to England.\n");
-        expected = expected
-            .Replace("pin: true }\r\n---\r\n", "pin: true }\r\n  height: tall\r\n---\r\n", StringComparison.Ordinal)
-            .Replace(
-                "In London he looks far younger, with a black moustache and a pointed\r\nbeard. Jonathan knows him at once.\r\n",
-                "In London he looks far younger.\r\nJonathan knows him.\r\n",
-                StringComparison.Ordinal);
+        expected = ReplaceOnce(expected, nl, "pin: true }\n---\n", "pin: true }\n  height: tall\n---\n");
+        expected = ReplaceOnce(expected, nl,
+            "In London he looks far younger, with a black moustache and a pointed\nbeard. Jonathan knows him at once.\n",
+            "In London he looks far younger.\nJonathan knows him.\n");
+        // An appended section starts after a blank line and ends the way the
+        // file did: with CRLF, or with no final newline at all.
+        expected += file.EndsWithNewline
+            ? nl + "## Open questions" + nl + "Where are the last boxes?" + nl + "Who moved them?" + nl
+            : nl + nl + "## Open questions" + nl + "Where are the last boxes?" + nl + "Who moved them?";
         Assert.Equal(expected, edited.Text);
         Assert.Equal(LineEndingKind.CrLf, edited.LineEndings);
         Assert.Equal(file.HasByteOrderMark, edited.HasByteOrderMark);
@@ -254,13 +266,15 @@ public class SampleEditTests
     }
 
     [Fact]
-    public void AddingAnItemToAListIsRefused()
+    public void TreatingAListAsAMappingIsRefusedAndChangesNothing()
     {
         // There's no API yet to add or remove one item of `aliases` or of a
-        // temporal list (a follow-up to #18). Treating the list as a mapping
-        // is refused.
+        // temporal list (a follow-up to #18). A path that treats the list as
+        // a mapping is refused, and the file is left as it was.
         var file = Md(Lucy);
+        var before = file.ToBytes();
 
         Assert.Throws<InvalidOperationException>(() => file.WithFrontmatterValue(["aliases", "extra"], YamlScalarValue.String("Miss Lucy")));
+        Assert.Equal(before, file.ToBytes());
     }
 }

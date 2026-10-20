@@ -326,7 +326,8 @@ changes only what the writer asked for and keeps everything else byte for
 byte: comments, key order, quoting, blank lines, sections it doesn't
 know, line endings, a byte order mark, and the final newline (format.md
 §12). The sample dens under `samples/` are the test fixtures, so a new
-sample is checked too (#18).
+sample is checked too (#18). That's why the RT scenarios use the
+public-domain Dracula sample instead of the invented example world.
 
 ### SC-RT-1. I open a note and save it without changing anything
 
@@ -399,8 +400,8 @@ Spec: F-RT-2. Covered by:
 ### SC-RT-6. I edit a note that was saved on Windows
 
 The note has CRLF line endings and a byte order mark, and maybe no
-newline at the end. The writer changes a field, adds one, and rewrites a
-section.
+newline at the end. The writer changes a field, adds one, rewrites a
+section, and adds a section at the end.
 
 - The new and changed lines end in CRLF like the rest, the byte order
   mark stays, and the file still ends the way it did.
@@ -418,5 +419,6 @@ a temporal field's list.
   are unchanged.
 
 Spec: F-RT-2. Covered by: not yet. Wolfden can't add or remove a single
-list item yet, and refuses rather than rewriting the list
-(`SampleEditTests.AddingAnItemToAListIsRefused`).
+list item yet. A path that treats a list as a mapping is refused and
+leaves the file unchanged
+(`SampleEditTests.TreatingAListAsAMappingIsRefusedAndChangesNothing`).
