@@ -87,15 +87,14 @@ internal static class InitCommand
         try
         {
             CreateFolder(root, made);
-            WriteNew(root, DenLocation.DenFile, DenYaml(name));
-            made.Add(Path.Combine(root, DenLocation.DenFile));
+            WriteNew(root, DenLocation.DenFile, DenYaml(name), made);
             created.Add(DenLocation.DenFile);
             if (universe is not null)
             {
                 var path = $"universes/{universe}/universe.md";
                 CreateFolder(Path.Combine(root, "universes"), made);
                 CreateFolder(Path.Combine(root, "universes", universe), made);
-                WriteNew(root, path, UniverseFile(universe));
+                WriteNew(root, path, UniverseFile(universe), made);
                 created.Add(path);
             }
         }
@@ -202,11 +201,16 @@ internal static class InitCommand
         return left;
     }
 
-    /// <summary>Writes a new file, failing if one is already there.</summary>
-    private static void WriteNew(string root, string path, byte[] bytes)
+    /// <summary>
+    /// Writes a new file, failing if one is already there. The file goes into
+    /// <paramref name="made"/> as soon as it exists, so a write that fails part
+    /// way (a full disk, say) still leaves it to be undone.
+    /// </summary>
+    private static void WriteNew(string root, string path, byte[] bytes, List<string> made)
     {
         var full = Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar));
         using var stream = new FileStream(full, FileMode.CreateNew, FileAccess.Write);
+        made.Add(full);
         stream.Write(bytes);
     }
 

@@ -82,7 +82,7 @@ public static class IdFix
         }
         catch (Exception e) when (e is InvalidOperationException or NotSupportedException or EditVerificationException)
         {
-            return Skip(char.ToLowerInvariant(e.Message[0]) + e.Message[1..]);
+            return Skip(e.Message.Length == 0 ? "the id couldn't be added." : char.ToLowerInvariant(e.Message[0]) + e.Message[1..]);
         }
 
         var full = Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar));
