@@ -80,6 +80,30 @@ public class IncrementalLoadTests
         Assert.NotSame(catalog.FindByPath(Pike), updated.FindByPath(Pike));
     }
 
+    [Fact]
+    public void AnUpdateDoesntChangeThePreviousCatalog()
+    {
+        // Pike takes Mara's id: in the update, Mara (the same object in both
+        // catalogs) has a duplicate id, but the old catalog and its links
+        // must still say what they said (#107).
+        var source = MemoryDenSource.FromDirectory(MemoryDenSource.StarfallRoot);
+        var catalog = EntityCatalog.Load(source);
+        var links = LinkIndex.Build(catalog, source);
+        var before = Describe(catalog, links);
+        var text = System.Text.Encoding.UTF8.GetString(source.ReadFile(Pike));
+        source.With(Pike, text.Replace("id: 01JA7Q8M4XK3V9R2D5W8HN6TQC", "id: 01JA7Q8M4XK3V9R2D5W8HN6TQB", StringComparison.Ordinal));
+
+        var updated = catalog.Update(source, [Pike]);
+        var mara = updated.FindByPath(Mara)!;
+
+        Assert.Same(catalog.FindByPath(Mara), mara);
+        Assert.True(updated.HasDuplicateId(mara));
+        Assert.False(catalog.HasDuplicateId(mara));
+        Assert.Equal(LinkOutcome.Resolved, new LinkResolver(catalog).Resolve(mara.Scope, "Mara Voss").Outcome);
+        Assert.Equal(LinkOutcome.Broken, new LinkResolver(updated).Resolve(mara.Scope, "Mara Voss").Outcome);
+        Assert.Equal(before, Describe(catalog, links));
+    }
+
     [Theory]
     [InlineData(Mara, "universes/starfall/series/long-dark")]
     [InlineData("universes/starfall/entities/deep/down/here.md", "universes/starfall")]
@@ -99,7 +123,7 @@ public class IncrementalLoadTests
     }
 
     private static List<string> Describe(EntityCatalog catalog, LinkIndex links) =>
-        catalog.Entities.Select(e => $"entity {e.Path} {e.Name} {e.Key} dup={e.HasDuplicateId}")
+        catalog.Entities.Select(e => $"entity {e.Path} {e.Name} {e.Key} dup={catalog.HasDuplicateId(e)}")
             .Concat(catalog.Diagnostics.Select(d => $"catalog {d}"))
             .Concat(links.Links.Select(l => $"link {l.Occurrence.Path}:{l.Occurrence.Link.Line}:{l.Occurrence.Link.Column} {l} {l.Resolution.Problem}"))
             .Concat(links.Diagnostics.Select(d => $"links {d}"))

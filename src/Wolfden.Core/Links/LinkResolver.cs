@@ -176,9 +176,9 @@ public sealed class LinkResolver
     /// duplicated: then the link is broken (F-ID-3), not resolved to
     /// whatever would match next.
     /// </summary>
-    private static TargetResolution Winner(CatalogEntity winner, LinkMatchKind matchedBy, IReadOnlyList<CatalogEntity> matches, string target)
+    private TargetResolution Winner(CatalogEntity winner, LinkMatchKind matchedBy, IReadOnlyList<CatalogEntity> matches, string target)
     {
-        if (!winner.HasDuplicateId)
+        if (!_catalog.HasDuplicateId(winner))
         {
             return new TargetResolution(LinkOutcome.Resolved, winner, matchedBy, matches, null);
         }
