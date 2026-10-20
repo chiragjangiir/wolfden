@@ -383,6 +383,12 @@ public sealed class RebuildTests
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
+                // New on every write, so a file watcher can tell who wrote last (#14).
+                if (name == "meta" && reader.GetString(0) == IndexSchema.WriteIdKey)
+                {
+                    continue;
+                }
+
                 for (var i = 0; i < reader.FieldCount; i++)
                 {
                     sb.Append(reader.IsDBNull(i) ? "NULL" : Convert.ToString(reader.GetValue(i), System.Globalization.CultureInfo.InvariantCulture)).Append('\t');

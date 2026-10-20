@@ -31,7 +31,8 @@ public sealed record SearchHit(
 /// index that's missing, corrupt, or from another schema version or den
 /// format (<see cref="IndexBuilder.EnsureCurrent"/>). It doesn't notice
 /// edits to the den's files since the last build: keeping the index up to
-/// date with the files is the file watcher's job (#14).
+/// date with the files is the job of <see cref="DenWatcher"/> (#14), or of
+/// <see cref="IndexBuilder.EnsureUpToDate"/> for a one-off command.
 /// The connection is read-only, and it's open only while a query runs, so
 /// a rebuild can swap in a new index file between queries, even on Windows,
 /// where an open file can't be replaced. Later queries read the new file.
@@ -157,7 +158,7 @@ public sealed class DenIndex : IDisposable
             JOIN entities e ON e.id = search.entity_id
             LEFT JOIN sections s ON s.id = search.section_id
             WHERE search MATCH $query
-            ORDER BY rank, search.rowid
+            ORDER BY rank, e.path, coalesce(s."index", -1)
             LIMIT $limit
             """;
         command.Parameters.AddWithValue("$query", fts5Query);

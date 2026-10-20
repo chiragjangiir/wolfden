@@ -14,8 +14,10 @@ public static class IndexSchema
     /// need: field defaults (types.md F-FT-15), and the line of each field
     /// value and lead, so a view can point at its source. Version 4 (#17)
     /// records a hash of the den's files (<see cref="FilesFingerprintKey"/>).
+    /// Version 5 (#14) records a <see cref="WriteIdKey"/>, and gives search
+    /// rows explicit rowids, so a file watcher can update the index in place.
     /// </summary>
-    public const int Version = 4;
+    public const int Version = 5;
 
     /// <summary>The <c>meta</c> key for <see cref="Version"/>.</summary>
     public const string SchemaVersionKey = "schema_version";
@@ -35,6 +37,15 @@ public static class IndexSchema
     /// as stale there.
     /// </summary>
     public const string FilesFingerprintKey = "files_fingerprint";
+
+    /// <summary>
+    /// The <c>meta</c> key for a random id that's new each time the index is
+    /// written, by a rebuild or by a file watcher's update (#14). A watcher
+    /// remembers the one it wrote, and if it finds another, someone else
+    /// rebuilt the index under it, so it rebuilds instead of updating rows
+    /// it no longer knows.
+    /// </summary>
+    public const string WriteIdKey = "write_id";
 
     /// <summary>The <c>meta</c> key for the den's <c>format</c> as written in <c>den.yaml</c> (empty if it has none).</summary>
     public const string DenFormatKey = "den_format";
@@ -65,5 +76,5 @@ public static class IndexSchema
         "tokenize = 'unicode61 remove_diacritics 2')";
 
     internal const string InsertSearchRow =
-        "INSERT INTO search (title, body, comments, kind, entity_id, section_id) VALUES ($title, $body, $comments, $kind, $entity, $section)";
+        "INSERT INTO search (rowid, title, body, comments, kind, entity_id, section_id) VALUES ($rowid, $title, $body, $comments, $kind, $entity, $section)";
 }

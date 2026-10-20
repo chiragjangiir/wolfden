@@ -26,6 +26,13 @@ internal static class CliApp
     /// <summary>The command couldn't do its job: a wrong command line, no den, a <c>den.yaml</c> that doesn't load, or a failure.</summary>
     internal const int ExitUsage = 2;
 
+    /// <summary>
+    /// True while a command that runs until it's stopped (<c>index --watch</c>)
+    /// is running, so Ctrl+C stops it cleanly instead of ending the process.
+    /// Other commands end at Ctrl+C as usual.
+    /// </summary>
+    internal static volatile bool RunsUntilStopped;
+
     /// <summary>Commands that work, in the order the usage lists them.</summary>
     internal static readonly string[] Commands = ["init", "check", "index", "query", "new-id"];
 
@@ -47,6 +54,7 @@ internal static class CliApp
           check [<den>]            check a den for errors and continuity problems
                                    (--fix adds missing ids)
           index [<den>]            rebuild the den's index from its files
+                                   (--watch keeps it up to date as files change)
           query [<universe>]       show canon as of a story position (--at book:chapter)
           new-id [<count>]         print new ids for files made by hand
 
@@ -64,7 +72,18 @@ internal static class CliApp
     /// <param name="args">The command line, without the program name.</param>
     /// <param name="output">Standard output: the command's results.</param>
     /// <param name="error">Standard error: usage problems and failures.</param>
-    internal static int Run(string[] args, TextWriter output, TextWriter error)
+    internal static int Run(string[] args, TextWriter output, TextWriter error) => RunUntil(args, output, error, CancellationToken.None);
+
+    /// <summary>
+    /// Runs the command and returns the process exit code. A command that
+    /// runs until it's stopped, such as <c>index --watch</c>, stops when
+    /// <paramref name="stop"/> is cancelled (Ctrl+C).
+    /// </summary>
+    /// <param name="args">The command line, without the program name.</param>
+    /// <param name="output">Standard output: the command's results.</param>
+    /// <param name="error">Standard error: usage problems and failures.</param>
+    /// <param name="stop">Cancelled to stop a command that runs until stopped.</param>
+    internal static int RunUntil(string[] args, TextWriter output, TextWriter error, CancellationToken stop)
     {
         ArgumentNullException.ThrowIfNull(args);
         switch (args)
@@ -76,13 +95,13 @@ internal static class CliApp
                 output.WriteLine(Usage);
                 return ExitOk;
             case ["help", var command] when Commands.Contains(command):
-                return Run([command, "--help"], output, error);
+                return RunUntil([command, "--help"], output, error, stop);
             case ["init", .. var rest]:
                 return InitCommand.Run(rest, output, error);
             case ["check", .. var rest]:
                 return CheckCommand.Run(rest, output, error);
             case ["index", .. var rest]:
-                return IndexCommand.Run(rest, output, error);
+                return IndexCommand.Run(rest, output, error, stop);
             case ["query", .. var rest]:
                 return QueryCommand.Run(rest, output, error);
             case ["new-id", .. var rest]:

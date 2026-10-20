@@ -6,6 +6,13 @@ namespace Wolfden.Index;
 // entity or container, and cascade from it, so one file's rows can be
 // replaced on their own (#14).
 //
+// Row ids are handles within one index file, not data. A full rebuild gives
+// them out in a fixed order, but a file watcher's update keeps the ids of
+// rows that didn't change and gives new rows new ids (IndexIds), so ids of
+// rows that come from single files don't follow path order after updates.
+// Queries order by columns, never by id. Containers, chapters, field
+// defaults, and diagnostics always have a full rebuild's ids.
+//
 // Story positions are stored as ordinals (StoryPoint.Ordinal): one integer
 // per point that sorts in story order within a universe, with the start and
 // end of the story as long.MinValue and long.MaxValue. A fact holds at point

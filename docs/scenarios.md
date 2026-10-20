@@ -43,6 +43,7 @@ of Book 3 (format.md §8).
 | CHECK | What `wolfden check` reports, and how it exits |
 | RT | What saving a note keeps, and what an edit changes |
 | CLI | Using the other `wolfden` commands: init, index, query, check --fix, new-id |
+| WATCH | Keeping the index up to date while notes are edited outside Wolfden |
 
 ## CANON: what's canon at a point in the story
 
@@ -526,3 +527,98 @@ frontmatter.
 
 Spec: F-ID-1, F-ID-5. Covered by:
 `NewIdCommandTests.ItPrintsOneValidId`.
+
+## WATCH: keeping the index up to date while notes change
+
+Background: `wolfden index --watch` (design.md §7, #14) keeps the index up
+to date while the writer, or an AI agent, edits notes in other tools. It
+reads only the notes that changed where that's safe, and rebuilds the
+index where it isn't. Either way the index ends up as a full rebuild of the
+same files would make it.
+
+### SC-WATCH-1. I edit notes in my editor while Wolfden watches
+
+The writer runs `wolfden index --watch` in a terminal, then edits Mara
+Voss's note in a text editor and saves it a few times, adds a location,
+and moves the `characters/` folder of series `a` to `crew/`.
+
+- Within moments each burst of saves shows up in the index as one
+  change, and the terminal prints one line for it: the note that changed,
+  how long it took, and what the index holds. Only the changed notes are
+  read again, so a single save is quick even in a den of thousands of
+  notes. Ctrl+C stops watching and exits 0.
+
+Spec: design.md §7. Covered by:
+`IncrementalUpdateTests.AnEditedNoteIsUpdatedWithoutARebuild`,
+`IncrementalUpdateTests.AMovedFolderOfNotesIsFollowed`,
+`IncrementalUpdatePropertyTests.AnyChangeSequenceGivesTheSameIndexAsAFullRebuild`,
+`ChangeBatcherTests.ABurstOfSavesIsOneBatchOnceEventsStop`,
+`DenWatcherTests.AnEditIsInTheIndexWithinMoments`,
+`DenWatcherTests.ANewNoteAndADeletedNoteAreFollowed`,
+`IndexWatchTests.ItRebuildsThenPrintsALineForEachChangeUntilStopped`,
+`IndexWatchTests.JsonPrintsOneObjectPerLine`,
+`PerformanceTests.OneEditOnALargeDenIsUpdatedQuickly`.
+
+### SC-WATCH-2. I rename a character while Wolfden watches
+
+With the watcher running, the writer renames Halden Pike to Halden Marsh.
+Other notes still say `[[Halden Pike]]`. Then they add `Halden Pike` to
+his aliases.
+
+- After the rename, the links that used the old name are broken in the
+  index, as `wolfden check` would report them, though only his note
+  changed. After the alias, they resolve again. The index matches a full
+  rebuild at every step.
+
+Spec: F-LINK-6, F-LINK-8. Covered by:
+`IncrementalUpdateTests.RenamingACharacterBreaksTheOldLinksAndAnAliasMendsThem`,
+`IncrementalUpdatePropertyTests.AnyChangeSequenceGivesTheSameIndexAsAFullRebuild`.
+
+### SC-WATCH-3. I change the den's settings or a book's chapters while Wolfden watches
+
+The writer turns on `spoiler_checks` in `den.yaml`, or edits `book.md` of
+`a2` to add a chapter.
+
+- The watcher rebuilds the whole index, since such a change can change
+  what every note means, and its line says why, such as "den.yaml
+  changed". If a typo leaves `den.yaml` unable to load, the line says so,
+  and the watcher keeps going until it's fixed.
+
+Spec: F-DEN-1, F-DEN-7, F-BOOK-3, design.md §7. Covered by:
+`IncrementalUpdateTests.AStructureChangeRebuilds`,
+`IncrementalUpdateTests.AContainerFileChangeRebuilds`,
+`IncrementalUpdateTests.AFolderThatCanBeAContainerRebuilds`,
+`IndexWatchTests.ItKeepsWatchingWhileDenYamlIsBrokenSoItCanBeFixed`.
+
+### SC-WATCH-4. My tools write files that aren't notes
+
+While the watcher runs, the editor writes swap files, git updates
+`.git/`, Obsidian saves its workspace, and the writer drops a map image
+into an `entities/` folder and keeps loose notes in `notes/`.
+
+- None of it changes what the index holds, and the watcher prints
+  nothing for it. `wolfden query` still finds the index up to date.
+
+Spec: F-LAY-2. Covered by:
+`IncrementalUpdateTests.FilesTheIndexDoesntReadChangeOnlyTheFingerprint`,
+`ChangeBatcherTests.HiddenPathsAreIgnored`.
+
+### SC-WATCH-5. Something else rebuilds the index while Wolfden watches
+
+With the watcher running, the writer runs `wolfden index` in another
+terminal, deletes `.wolfden/`, or starts a second `wolfden index --watch`
+on the same den.
+
+- The watcher notices that the index isn't the one it wrote and rebuilds
+  it at the next change, rather than patching rows it no longer knows. A
+  second watcher on the same den says another one is already watching and
+  exits 2. If the operating system stops reporting changes, say because
+  the den is on a drive that went away, the watcher says so, listens
+  again, and rebuilds, and keeps saying so while it can't.
+
+Spec: design.md §7. Covered by:
+`DenWatcherTests.WhenFileEventsStopItListensAgainRebuildsAndSaysSo`,
+`IncrementalUpdateTests.AnIndexRebuiltByAnotherCommandIsRebuiltNotPatched`,
+`IncrementalUpdateTests.ADeletedIndexIsRebuilt`,
+`DenWatcherTests.OnlyOneWatcherRunsPerDen`,
+`IndexWatchTests.ASecondWatcherOnTheSameDenExits2`.
