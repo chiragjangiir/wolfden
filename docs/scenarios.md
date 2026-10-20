@@ -41,6 +41,7 @@ of Book 3 (format.md §8).
 |---|---|
 | CANON | What a canon-as-of view shows at a point in the story |
 | CHECK | What `wolfden check` reports, and how it exits |
+| RT | What saving a note keeps, and what an edit changes |
 
 ## CANON: what's canon at a point in the story
 
@@ -316,3 +317,108 @@ assistant runs `wolfden check --json`.
 
 Spec: F-GEN-3. Covered by:
 `CheckCommandTests.JsonOutputMatchesTheGoldenFile`.
+
+## RT: saving a note keeps what the writer wrote
+
+Background: the files are the writer's, and Wolfden is only one of the
+tools that edits them. When Wolfden or an AI assistant saves a note, it
+changes only what the writer asked for and keeps everything else byte for
+byte: comments, key order, quoting, blank lines, sections it doesn't
+know, line endings, a byte order mark, and the final newline (format.md
+§12). The sample dens under `samples/` are the test fixtures, so a new
+sample is checked too (#18). That's why the RT scenarios use the
+public-domain Dracula sample instead of the invented example world.
+
+### SC-RT-1. I open a note and save it without changing anything
+
+The writer opens a note and saves it, or a tool reads it and writes it
+back, with no edits. Some of the writer's notes were saved on Windows,
+with CRLF line endings, a byte order mark, or no newline at the end.
+
+- The file's bytes are exactly the same as before, so version history
+  shows no change.
+
+Spec: F-RT-3, F-RT-1, F-ENC-2, F-ENC-3, F-ENC-4. Covered by:
+`RoundTripTests.RepoFileRoundTrips`,
+`RoundTripTests.SampleFileRoundTripsWithOtherEncodings`,
+`RoundTripTests.FixtureRoundTrips`.
+
+### SC-RT-2. I change one field and the rest of the frontmatter stays as I wrote it
+
+The writer changes the Count's `role`, his quoted `from`, or a book's
+`status` that sits just above a block of YAML comments.
+
+- Only that value changes. The other fields, their order, the YAML
+  comments, the quotes (`"dracula:1"` becomes `"dracula:2"`, still
+  quoted), and the flow lists and mappings are untouched.
+
+Spec: F-RT-1, F-RT-2. Covered by:
+`SampleEditTests.ChangingOneFieldKeepsCommentsFlowValuesAndTheOtherFields`,
+`SampleEditTests.ChangingAQuotedValueKeepsItsQuotes`,
+`SampleEditTests.ChangingATopLevelValueKeepsTheYamlCommentsAroundIt`,
+`SampleEditTests.ChangingANestedValueChangesOnlyThatValue`,
+`SampleEditTests.ChangingDenYamlValuesKeepsTheRest`.
+
+### SC-RT-3. I add a field the note didn't have
+
+The writer gives the Count a `height`. His last field has a YAML comment
+above it.
+
+- The new field goes on its own line after the last field, so the comment
+  stays with the field it describes. Nothing else moves.
+
+Spec: F-RT-4, F-RT-2. Covered by:
+`SampleEditTests.ANewFieldGoesAfterTheLastFieldAndItsComment`,
+`SampleEditTests.ANewTopLevelKeyGoesAfterTheLongChaptersList`,
+`SampleEditTests.ANewNestedDenYamlKeyGoesAfterItsSiblings`.
+
+### SC-RT-4. I rewrite one section
+
+The Count has two `## Appearance` sections, the second one for London
+from chapter 13. The writer rewrites the second one.
+
+- Only the second section's text changes. Its heading, its
+  `<!-- wolfden: from=dracula:13 -->` comment, the first Appearance, and
+  every other section stay as they were. Rewriting a subsection leaves its
+  parent's text alone.
+
+Spec: F-RT-2, F-SEC-4, F-SEC-6. Covered by:
+`SampleEditTests.EditingOneOfTwoSameNamedSectionsLeavesTheOtherAlone`,
+`SampleEditTests.EditingASubsectionKeepsItsCommentAndItsParent`,
+`SampleEditTests.EditingASectionWithAListKeepsTheSectionsAroundIt`.
+
+### SC-RT-5. I add a section at the end of a note
+
+The writer adds `## Open questions` to Lucy's note.
+
+- The new section goes after everything else, with a blank line before
+  it. Everything above it is unchanged.
+
+Spec: F-RT-2. Covered by:
+`SampleEditTests.AddingASectionAtTheEndKeepsEverythingBeforeIt`.
+
+### SC-RT-6. I edit a note that was saved on Windows
+
+The note has CRLF line endings and a byte order mark, and maybe no
+newline at the end. The writer changes a field, adds one, rewrites a
+section, and adds a section at the end.
+
+- The new and changed lines end in CRLF like the rest, the byte order
+  mark stays, and the file still ends the way it did.
+
+Spec: F-RT-1, F-ENC-2, F-ENC-3, F-ENC-4. Covered by:
+`SampleEditTests.EditsOnAWindowsSavedSampleKeepCrlfBomAndFinalNewline`.
+
+### SC-RT-7. I add an alias, or a new value for a field that changes over time
+
+The writer adds `Miss Lucy` to Lucy's `aliases`, or adds another entry to
+a temporal field's list.
+
+- The new item goes at the end of the list, in the list's own style
+  (flow or block), and the other items, their quoting, and any comments
+  are unchanged.
+
+Spec: F-RT-2. Covered by: not yet. Wolfden can't add or remove a single
+list item yet. A path that treats a list as a mapping is refused and
+leaves the file unchanged
+(`SampleEditTests.TreatingAListAsAMappingIsRefusedAndChangesNothing`).
