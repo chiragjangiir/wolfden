@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Data.Sqlite;
 using Wolfden.Core.Documents;
 using Wolfden.Core.Structure;
@@ -82,9 +80,10 @@ public static class IndexBuilder
     /// <summary>
     /// <see cref="Rebuild(string)"/>, calling <paramref name="beforeSwap"/>
     /// with the temporary file's path once it's built, so tests can fail a
-    /// rebuild at the last moment.
+    /// rebuild at the last moment. Returns what the index was built from,
+    /// for a file watcher to update it from (#14).
     /// </summary>
-    internal static void Rebuild(string denRoot, Action<string>? beforeSwap)
+    internal static IndexState Rebuild(string denRoot, Action<string>? beforeSwap)
     {
         ArgumentNullException.ThrowIfNull(denRoot);
         var root = Path.GetFullPath(denRoot);
@@ -112,23 +111,38 @@ public static class IndexBuilder
         }
 
         var temp = Path.Combine(folder, $"{IndexFileName}.{Guid.NewGuid():N}{TempSuffix}");
-        try
+        lock (IndexLock.For(root))
         {
-            // Taken before the build reads anything, so an edit made during
-            // the build makes the new index look stale, never fresh.
-            var fingerprint = FilesFingerprint(root);
-            Build(root, temp, fingerprint);
-            beforeSwap?.Invoke(temp);
-            Swap(temp, target);
-        }
-        finally
-        {
-            TryDelete(temp);
-            foreach (var side in SideFiles)
+            try
             {
-                TryDelete(temp + side);
+                // Taken before the build reads anything, so an edit made during
+                // the build makes the new index look stale, never fresh.
+                var tree = DenFileTree.Scan(root);
+                var state = Build(root, temp, tree);
+                beforeSwap?.Invoke(temp);
+                Swap(temp, target);
+                return state;
+            }
+            finally
+            {
+                TryDelete(temp);
+                foreach (var side in SideFiles)
+                {
+                    TryDelete(temp + side);
+                }
             }
         }
+    }
+
+    /// <summary>
+    /// Builds a full index of the den at <paramref name="denRoot"/> into
+    /// <paramref name="path"/>, leaving the den's own index alone, so tests
+    /// can compare an updated index with a full rebuild of the same files.
+    /// </summary>
+    internal static void BuildInto(string denRoot, string path)
+    {
+        var root = Path.GetFullPath(denRoot);
+        Build(root, path, DenFileTree.Scan(root));
     }
 
     /// <summary>
@@ -271,44 +285,7 @@ public static class IndexBuilder
     /// while the hash is the same, a rebuild would read the same bytes.
     /// Other files, such as images, never change the index.
     /// </summary>
-    internal static string FilesFingerprint(string root)
-    {
-        var entries = new List<string>();
-        Walk(root, "", 0);
-        entries.Sort(StringComparer.Ordinal);
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', entries))));
-
-        void Walk(string folder, string relative, int depth)
-        {
-            // Folder links can loop; no real den is this deep.
-            if (depth > 64)
-            {
-                return;
-            }
-
-            foreach (var file in Directory.EnumerateFiles(folder))
-            {
-                var name = Path.GetFileName(file);
-                var extension = Path.GetExtension(name);
-                if (!name.StartsWith('.') && (extension.Equals(".md", StringComparison.OrdinalIgnoreCase)
-                    || extension.Equals(".yaml", StringComparison.OrdinalIgnoreCase)
-                    || extension.Equals(".yml", StringComparison.OrdinalIgnoreCase)))
-                {
-                    entries.Add($"f {relative}{name} {Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(file)))}");
-                }
-            }
-
-            foreach (var sub in Directory.EnumerateDirectories(folder))
-            {
-                var name = Path.GetFileName(sub);
-                if (!name.StartsWith('.'))
-                {
-                    entries.Add($"d {relative}{name}");
-                    Walk(sub, $"{relative}{name}/", depth + 1);
-                }
-            }
-        }
-    }
+    internal static string FilesFingerprint(string root) => DenFileTree.Scan(root).Fingerprint();
 
     /// <summary>
     /// The connection string for an index file. Pooling is off so that
@@ -324,8 +301,10 @@ public static class IndexBuilder
             ForeignKeys = true,
         }.ToString();
 
-    private static void Build(string root, string temp, string fingerprint)
+    /// <summary>Loads the den and writes a full index into the new file <paramref name="temp"/>, returning what it was built from.</summary>
+    private static IndexState Build(string root, string temp, DenFileTree tree)
     {
+        var state = IndexWriter.Load(root, tree, tree.Fingerprint());
         using (var connection = new SqliteConnection(ConnectionString(temp, SqliteOpenMode.ReadWriteCreate)))
         {
             connection.Open();
@@ -346,14 +325,7 @@ public static class IndexBuilder
                     Execute(connection, $"DROP INDEX \"{name}\"");
                 }
 
-                IndexWriter.Write(root, db, connection);
-                using (var meta = connection.CreateCommand())
-                {
-                    meta.CommandText = "INSERT INTO meta (key, value) VALUES ($key, $value)";
-                    meta.Parameters.AddWithValue("$key", IndexSchema.FilesFingerprintKey);
-                    meta.Parameters.AddWithValue("$value", fingerprint);
-                    meta.ExecuteNonQuery();
-                }
+                state.Rows.Insert(db, connection);
 
                 foreach (var (_, sql) in indexes)
                 {
@@ -366,8 +338,12 @@ public static class IndexBuilder
 
         // synchronous = OFF skips SQLite's flushes; flush once here so the
         // file is on disk before it replaces the old index.
-        using var stream = new FileStream(temp, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-        stream.Flush(flushToDisk: true);
+        using (var stream = new FileStream(temp, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            stream.Flush(flushToDisk: true);
+        }
+
+        return state;
     }
 
     /// <summary>The model's secondary indexes, by name, with the SQL that creates each one, in a fixed order.</summary>
