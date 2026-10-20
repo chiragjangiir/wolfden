@@ -180,6 +180,58 @@ public sealed partial class MarkdownFile : DenFile
     }
 
     /// <summary>
+    /// Gives the file an <c>id</c> (format.md F-ID-6): it replaces an empty
+    /// <c>id:</c>, or else adds <c>id: &lt;id&gt;</c> as the first
+    /// frontmatter key, after any comment lines that open the frontmatter,
+    /// at the indent of the other top-level keys. Nothing else changes.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="id"/> isn't a valid id (F-ID-1).</exception>
+    /// <exception cref="InvalidOperationException">The file can't be edited, has no frontmatter, or already has an id.</exception>
+    /// <exception cref="NotSupportedException">The frontmatter is a flow mapping (<c>{ name: x }</c>).</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public MarkdownFile WithId(string id)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        if (!Structure.Keys.IsId(id))
+        {
+            throw new ArgumentException($"'{id}' isn't a valid id.", nameof(id));
+        }
+
+        EnsureEditable();
+        if (_frontmatter is null)
+        {
+            throw new InvalidOperationException("The file has no frontmatter to add an id to.");
+        }
+
+        var value = YamlScalarValue.String(id);
+        switch (_frontmatter.Root)
+        {
+            case null:
+            case YamlMapping { IsFlow: false } m when m.Find("id") is { Value: YamlScalar { IsNull: true } }:
+                // No keys yet (maybe comment lines), or an empty `id:`: set it in place.
+                return WithFrontmatterValue(["id"], value);
+            case YamlMapping { IsFlow: false } m when m.ContainsKey("id"):
+                throw new InvalidOperationException("The file already has an id.");
+            case YamlMapping { IsFlow: true }:
+                throw new NotSupportedException("The frontmatter is a flow mapping, so an id can't be added as its first key.");
+            case YamlMapping m:
+                var source = Source!;
+                var first = m.Entries[0].Key;
+                var line = source.Lines[source.LineIndexOf(first.Start)];
+                var indent = new string(' ', first.Start - line.Start);
+                var result = Reparse([new TextEdit(line.Start, 0, $"{indent}id: {value.Render(null)}{source.Newline}")]);
+                if (result.Body != Body || !result.CanEdit || !YamlTreeCheck.SameWithFirstKey(m, result.Frontmatter, "id", value))
+                {
+                    throw new EditVerificationException("Adding the id didn't read back as written, or changed another value, so the edit was refused.");
+                }
+
+                return result;
+            default:
+                throw new InvalidOperationException("The frontmatter isn't a mapping.");
+        }
+    }
+
+    /// <summary>
     /// Replaces a section's own text (<see cref="Section.Body"/>): what
     /// follows its heading and section comment, up to the next heading. The
     /// heading, comment, subsections, and the blank lines around the old
