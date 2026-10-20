@@ -54,6 +54,15 @@ public sealed class DenWatcher : IDisposable
     // Set when the OS stopped reporting events: why, and when to listen again.
     private Exception? _broken;
     private DateTime? _restartAt;
+    private TimeSpan? _restartPauseValue;
+    private DateTime? _listeningSince;
+
+    // The pause before the next attempt to listen again.
+    private TimeSpan NextRestartPause
+    {
+        get => _restartPauseValue ?? FirstPause;
+        set => _restartPauseValue = value;
+    }
 
     /// <summary>A watcher for the den at <paramref name="denRoot"/>. Call <see cref="Start"/> to start it.</summary>
     /// <param name="denRoot">The den's folder.</param>
@@ -87,6 +96,14 @@ public sealed class DenWatcher : IDisposable
 
     /// <summary>The longest pause before trying again while failures repeat. Tests shorten it.</summary>
     internal TimeSpan MaxPause { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// How long a new watch must run without an error before the pause
+    /// before listening again starts from <see cref="FirstPause"/> again.
+    /// Until then, each break waits longer, up to <see cref="MaxPause"/>.
+    /// Tests shorten it.
+    /// </summary>
+    internal TimeSpan HealthyAfter { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>Makes the file system watcher for a folder. Tests replace it to fail on purpose.</summary>
     internal Func<string, FileSystemWatcher> CreateWatcher { get; init; } = root => new FileSystemWatcher(root);
@@ -124,6 +141,11 @@ public sealed class DenWatcher : IDisposable
 
             // Listen before the first build reads anything, so no edit is missed.
             Listen();
+            lock (_gate)
+            {
+                _listeningSince = DateTime.UtcNow;
+            }
+
             var first = _updater.Rebuild("the watcher started");
             _thread = new Thread(Run) { IsBackground = true, Name = "Wolfden index watcher" };
             _thread.Start();
@@ -163,15 +185,35 @@ public sealed class DenWatcher : IDisposable
         }
 
         // The watch itself broke (on Windows it stops for good; on Linux new
-        // folders may go unwatched): listen again, on the watcher's thread.
+        // folders may go unwatched): listen again, on the watcher's thread,
+        // after a pause. A watch that breaks again soon after it was made
+        // (Linux at its limit of folder watches) waits longer each time; one
+        // that ran without trouble for HealthyAfter starts from FirstPause.
         lock (_gate)
         {
             _broken = error;
-            _restartAt ??= DateTime.UtcNow;
+            if (_restartAt is not null)
+            {
+                // A restart is already on its way: no second one, no second report.
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+            if (_listeningSince is { } since && now - since >= HealthyAfter)
+            {
+                NextRestartPause = FirstPause;
+            }
+
+            LastRestartPause = NextRestartPause;
+            _restartAt = now + NextRestartPause;
+            NextRestartPause = NextPause(NextRestartPause, MaxPause);
         }
 
         Wake();
     }
+
+    /// <summary>How long the watcher waited, or will wait, before its latest attempt to listen again. For tests.</summary>
+    internal TimeSpan LastRestartPause { get; private set; }
 
     /// <summary>The pause after <paramref name="pause"/> while failures repeat: twice as long, up to <paramref name="max"/>.</summary>
     internal static TimeSpan NextPause(TimeSpan pause, TimeSpan max) => pause * 2 > max ? max : pause * 2;
@@ -259,7 +301,19 @@ public sealed class DenWatcher : IDisposable
 
     private void OnRenamed(object sender, RenamedEventArgs e) => Add(b => b.Add(WatcherChangeTypes.Renamed, e.FullPath, e.OldFullPath, DateTime.UtcNow));
 
-    private void OnError(object sender, ErrorEventArgs e) => ReportWatcherError(e.GetException());
+    private void OnError(object sender, ErrorEventArgs e)
+    {
+        lock (_gate)
+        {
+            // An old watcher's last word, after it was replaced: not this watch's problem.
+            if (!ReferenceEquals(sender, _watcher))
+            {
+                return;
+            }
+        }
+
+        ReportWatcherError(e.GetException());
+    }
 
     private void Add(Action<ChangeBatcher> add)
     {
@@ -287,7 +341,6 @@ public sealed class DenWatcher : IDisposable
     {
         var token = _stop.Token;
         var pause = FirstPause;
-        var restartPause = FirstPause;
         while (!token.IsCancellationRequested)
         {
             var now = DateTime.UtcNow;
@@ -303,7 +356,7 @@ public sealed class DenWatcher : IDisposable
 
             if (restartAt <= now)
             {
-                restartPause = Restart(restartPause);
+                Restart();
                 continue;
             }
 
@@ -364,8 +417,14 @@ public sealed class DenWatcher : IDisposable
         }
     }
 
-    /// <summary>Listens for file events again after the watch broke, and rebuilds. Returns the pause before the next attempt if this one fails.</summary>
-    private TimeSpan Restart(TimeSpan pause)
+    /// <summary>
+    /// Listens for file events again after the watch broke, and rebuilds;
+    /// or, if that fails, tries again after a longer pause. Reports once per
+    /// attempt. The pause isn't reset here: only a watch that then runs
+    /// without trouble for <see cref="HealthyAfter"/> starts the next break
+    /// from <see cref="FirstPause"/>.
+    /// </summary>
+    private void Restart()
     {
         Exception? why;
         lock (_gate)
@@ -379,25 +438,29 @@ public sealed class DenWatcher : IDisposable
         }
         catch (Exception e)
         {
+            TimeSpan pause;
             lock (_gate)
             {
+                pause = NextRestartPause;
+                LastRestartPause = pause;
                 _restartAt = DateTime.UtcNow + pause;
+                NextRestartPause = NextPause(pause, MaxPause);
             }
 
             Report(new IOException(
                 $"file events stopped ({why?.Message.TrimEnd('.')}), and listening again failed: {e.Message.TrimEnd('.')}. Trying again in {Seconds(pause)}; until then the index may fall behind the files.", e));
-            return NextPause(pause, MaxPause);
+            return;
         }
 
         lock (_gate)
         {
             _broken = null;
             _restartAt = null;
+            _listeningSince = DateTime.UtcNow;
             _batcher.AddOverflow(DateTime.UtcNow - _batcher.Quiet);
         }
 
         Report(new IOException($"file events stopped ({why?.Message.TrimEnd('.')}). Listening again, and rebuilding the index in case changes were missed.", why));
-        return FirstPause;
     }
 
     private void Report(Exception e)

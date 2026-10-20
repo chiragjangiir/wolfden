@@ -153,11 +153,96 @@ public sealed class DenWatcherTests
         var first = WaitFor(failures, _ => true);
         var second = WaitFor(failures, _ => true);
         var third = WaitFor(failures, _ => true);
-        Assert.Contains("listening again failed: No space left on device. Trying again in 20 ms", first.Message, StringComparison.Ordinal);
-        Assert.Contains("Trying again in 40 ms", second.Message, StringComparison.Ordinal);
+        Assert.Contains("listening again failed: No space left on device. Trying again in 40 ms", first.Message, StringComparison.Ordinal);
+        Assert.Contains("Trying again in 80 ms", second.Message, StringComparison.Ordinal);
         Assert.Contains("Listening again", third.Message, StringComparison.Ordinal);
         WaitFor(updates, u => u.Kind == IndexUpdateKind.Rebuilt);
         Assert.Equal(4, created);
+    }
+
+    [Fact]
+    public void AWatchThatBreaksAgainRightAwayWaitsLongerEachTime()
+    {
+        // As on Linux at the limit of folder watches: the new watch starts,
+        // then breaks again at once.
+        using var den = TempDen.Starfall();
+        using var watcher = new DenWatcher(den.Root, TimeSpan.FromMilliseconds(50))
+        {
+            FirstPause = TimeSpan.FromMilliseconds(20),
+            MaxPause = TimeSpan.FromMilliseconds(160),
+            HealthyAfter = TimeSpan.FromSeconds(30),
+        };
+        var restarts = Restarts(watcher, breaksAgain: 5, out var updates, out var failures);
+        watcher.Start();
+        var start = DateTime.UtcNow;
+
+        watcher.ReportWatcherError(new IOException("The watch limit was reached."));
+
+        var seen = Enumerable.Range(0, 6).Select(_ => WaitFor(restarts, _ => true)).ToList();
+        Assert.Equal([20, 40, 80, 160, 160, 160], seen.Select(r => (int)r.Pause.TotalMilliseconds));
+        var previous = start;
+        foreach (var (at, pause) in seen)
+        {
+            // Each attempt waited at least its pause (less a little for clock grain).
+            Assert.True(at - previous >= pause * 0.8, $"Listened again {(at - previous).TotalMilliseconds} ms after the break; the pause was {pause.TotalMilliseconds} ms.");
+            previous = at;
+        }
+
+        // One report per attempt, not one per error, and no more rebuilds than attempts.
+        Thread.Sleep(500);
+        Assert.Equal(6, failures.Count);
+        var rebuilds = updates.Count(u => u.Kind == IndexUpdateKind.Rebuilt);
+        Assert.InRange(rebuilds, 1, 6);
+    }
+
+    [Fact]
+    public void AfterRunningWellForAWhileTheNextBreakStartsFromTheFirstPause()
+    {
+        using var den = TempDen.Starfall();
+        using var watcher = new DenWatcher(den.Root, TimeSpan.FromMilliseconds(50))
+        {
+            FirstPause = TimeSpan.FromMilliseconds(20),
+            MaxPause = TimeSpan.FromMilliseconds(160),
+            HealthyAfter = TimeSpan.FromMilliseconds(300),
+        };
+        var restarts = Restarts(watcher, breaksAgain: 1, out _, out _);
+        watcher.Start();
+
+        watcher.ReportWatcherError(new IOException("The watch limit was reached."));
+        Assert.Equal(TimeSpan.FromMilliseconds(20), WaitFor(restarts, _ => true).Pause);
+        Assert.Equal(TimeSpan.FromMilliseconds(40), WaitFor(restarts, _ => true).Pause);
+
+        // The new watch runs without trouble for longer than HealthyAfter.
+        Thread.Sleep(600);
+        watcher.ReportWatcherError(new IOException("The drive went away."));
+
+        Assert.Equal(TimeSpan.FromMilliseconds(20), WaitFor(restarts, _ => true).Pause);
+    }
+
+    /// <summary>
+    /// Records each time the watcher listens again, with the pause it waited,
+    /// and breaks the new watch again at once, <paramref name="breaksAgain"/> times.
+    /// </summary>
+    private static BlockingCollection<(DateTime At, TimeSpan Pause)> Restarts(
+        DenWatcher watcher, int breaksAgain, out BlockingCollection<IndexUpdate> updates, out BlockingCollection<Exception> failures)
+    {
+        var restarts = new BlockingCollection<(DateTime, TimeSpan)>();
+        var seenUpdates = updates = new BlockingCollection<IndexUpdate>();
+        var seenFailures = failures = new BlockingCollection<Exception>();
+        watcher.Updated += (_, u) => seenUpdates.Add(u);
+        watcher.Failed += (_, e) =>
+        {
+            seenFailures.Add(e);
+            if (e.Message.Contains("Listening again", StringComparison.Ordinal))
+            {
+                restarts.Add((DateTime.UtcNow, watcher.LastRestartPause));
+                if (Interlocked.Decrement(ref breaksAgain) >= 0)
+                {
+                    watcher.ReportWatcherError(new IOException("The watch limit was reached."));
+                }
+            }
+        };
+        return restarts;
     }
 
     [Fact]
