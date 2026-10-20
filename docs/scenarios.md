@@ -827,13 +827,16 @@ Spec: F-DEN-1, F-DEN-7, F-BOOK-3, design.md §7. Covered by:
 
 While the watcher runs, the editor writes swap files, git updates
 `.git/`, Obsidian saves its workspace, and the writer drops a map image
-into an `entities/` folder and keeps loose notes in `notes/`.
+into an `entities/` folder, keeps loose notes in `notes/`, edits the
+den's `README.md`, and drafts chapters in a book's `drafts/` folder.
 
 - None of it changes what the index holds, and the watcher prints
-  nothing for it. `wolfden query` still finds the index up to date.
+  nothing for it. `wolfden query` still finds the index up to date, and
+  doesn't rebuild it.
 
 Spec: F-LAY-2. Covered by:
-`IncrementalUpdateTests.FilesTheIndexDoesntReadChangeOnlyTheFingerprint`,
+`IncrementalUpdateTests.FilesTheIndexDoesntReadChangeNothing`,
+`FingerprintTests.FilesTheIndexDoesntReadDontChangeARebuild`,
 `ChangeBatcherTests.HiddenPathsAreIgnored`.
 
 ### SC-WATCH-5. Something else rebuilds the index while Wolfden watches

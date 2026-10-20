@@ -234,7 +234,7 @@ public static class IndexBuilder
     /// <see cref="Check"/>, and then, for an index that's otherwise current,
     /// whether the den's files changed since it was built:
     /// <see cref="IndexStatus.FilesChanged"/> if they did. It reads and
-    /// hashes the den's markdown and YAML files, which is much faster than a
+    /// hashes the files the index reads, which is much faster than a
     /// rebuild, so a one-off command such as <c>wolfden query</c> can use it
     /// where no file watcher (#14) keeps the index up to date.
     /// </summary>
@@ -278,12 +278,14 @@ public static class IndexBuilder
     }
 
     /// <summary>
-    /// A hash of the den's tree: every folder, and every <c>.md</c>,
-    /// <c>.yaml</c>, and <c>.yml</c> file with the SHA-256 of its bytes,
+    /// A hash of the den's tree as <see cref="DenFileTree"/> sees it: every
+    /// file the index can read (<see cref="DenFileTree.IsRead"/>) with the
+    /// SHA-256 of its bytes, and the folders that can change the structure,
     /// leaving out names that start with <c>.</c> at any depth, as the
-    /// loader does (F-LAY-2). Every file the index reads is one of these, so
-    /// while the hash is the same, a rebuild would read the same bytes.
-    /// Other files, such as images, never change the index.
+    /// loader does (F-LAY-2). While the hash is the same, a rebuild would
+    /// read the same bytes. Other files, such as images or a
+    /// <c>README.md</c> at the den root, never change the index, so they
+    /// don't change the hash either (#103).
     /// </summary>
     internal static string FilesFingerprint(string root) => DenFileTree.Scan(root).Fingerprint();
 

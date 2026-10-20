@@ -99,21 +99,28 @@ public sealed class IncrementalUpdateTests
 
     [Fact]
     [Trait("Scenario", "SC-WATCH-4")]
-    public void FilesTheIndexDoesntReadChangeOnlyTheFingerprint()
+    public void FilesTheIndexDoesntReadChangeNothing()
     {
         using var den = TempDen.Starfall();
         var updater = new IndexUpdater(den.Root);
         updater.Rebuild("start");
+        var before = File.ReadAllBytes(den.IndexPath);
+        const string drafts = "universes/starfall/series/long-dark/books/ash/drafts";
         den.Write("notes/ideas.md", "Some loose ideas.\n");
+        den.Write("README.md", "# My notes\n");
+        den.Write($"{drafts}/chapter-1.md", "It was a dark night on Kessan Reach.\n");
         den.Write("universes/starfall/entities/locations/map.png", "not really a picture");
         den.Write(".git/HEAD", "ref: refs/heads/main\n");
 
         var update = updater.Apply(
             Batch(den, (WatcherChangeTypes.Created, "notes", null), (WatcherChangeTypes.Created, "notes/ideas.md", null),
+                (WatcherChangeTypes.Created, "README.md", null), (WatcherChangeTypes.Created, drafts, null), (WatcherChangeTypes.Created, $"{drafts}/chapter-1.md", null),
                 (WatcherChangeTypes.Created, "universes/starfall/entities/locations/map.png", null), (WatcherChangeTypes.Created, ".git/HEAD", null)),
             out _);
 
         Assert.Null(update);
+        // Not even the files fingerprint changed, so the index wasn't written.
+        Assert.Equal(before, File.ReadAllBytes(den.IndexPath));
         Assert.Equal(IndexStatus.Current, IndexBuilder.CheckFiles(den.Root));
         AssertSameAsFullRebuild(den, "after the notes");
     }

@@ -359,7 +359,8 @@ from the files:
   change to `den.yaml`, a pack, or a universe, series, or book file, a
   folder added, moved, or deleted where it can change the structure, lost
   events, or an index someone else rebuilt meanwhile gets a full rebuild
-  instead. Files the index doesn't read change only the files hash. Each
+  instead. Files the index doesn't read, such as a `README.md` at the den
+  root, change nothing, not even the files hash (#103). Each
   batch is written in one transaction, so a query sees the index before
   the batch or after it. The index always ends up as a full rebuild of the
   same files would make it, apart from the ids of rows that came from
@@ -430,8 +431,9 @@ They share one surface:
   none named), or an unexpected failure. A `query` whose view is empty,
   such as one for a character the reader hasn't met yet, exits 0.
 - **A fresh index.** `query` reads the index, but first compares a hash
-  of the den's markdown and YAML files with the one recorded when the
-  index was built, and rebuilds it if they differ, so an answer never
+  of the files the index reads (`den.yaml`, packs, container files,
+  entity files, and outlines) with the one recorded when the index was
+  built, and rebuilds it if they differ, so an answer never
   lags behind an edit. `index --watch` keeps both the index and that hash
   up to date as files change, so while it runs a query rarely needs to
   rebuild. The long-running `serve` and `mcp` will host the same watcher.
