@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using Wolfden.Core.Documents;
 using Wolfden.Core.Structure;
@@ -27,6 +29,12 @@ public enum IndexStatus
 
     /// <summary>The index was built with other built-in packs (<c>packs/core</c> changed in a Wolfden release).</summary>
     PacksChanged,
+
+    /// <summary>
+    /// The index is otherwise current, but the den's files changed since it
+    /// was built. Only <see cref="IndexBuilder.CheckFiles"/> reports this.
+    /// </summary>
+    FilesChanged,
 }
 
 /// <summary>
@@ -106,7 +114,10 @@ public static class IndexBuilder
         var temp = Path.Combine(folder, $"{IndexFileName}.{Guid.NewGuid():N}{TempSuffix}");
         try
         {
-            Build(root, temp);
+            // Taken before the build reads anything, so an edit made during
+            // the build makes the new index look stale, never fresh.
+            var fingerprint = FilesFingerprint(root);
+            Build(root, temp, fingerprint);
             beforeSwap?.Invoke(temp);
             Swap(temp, target);
         }
@@ -206,6 +217,100 @@ public static class IndexBuilder
     }
 
     /// <summary>
+    /// <see cref="Check"/>, and then, for an index that's otherwise current,
+    /// whether the den's files changed since it was built:
+    /// <see cref="IndexStatus.FilesChanged"/> if they did. It reads and
+    /// hashes the den's markdown and YAML files, which is much faster than a
+    /// rebuild, so a one-off command such as <c>wolfden query</c> can use it
+    /// where no file watcher (#14) keeps the index up to date.
+    /// </summary>
+    public static IndexStatus CheckFiles(string denRoot)
+    {
+        var status = Check(denRoot);
+        if (status != IndexStatus.Current)
+        {
+            return status;
+        }
+
+        string? recorded;
+        try
+        {
+            using var connection = new SqliteConnection(ConnectionString(IndexPath(denRoot), SqliteOpenMode.ReadOnly));
+            connection.Open();
+            recorded = ReadMeta(connection).GetValueOrDefault(IndexSchema.FilesFingerprintKey);
+        }
+        catch (Exception ex) when (ex is SqliteException or InvalidOperationException or InvalidCastException)
+        {
+            return IndexStatus.Corrupt;
+        }
+
+        return recorded == FilesFingerprint(Path.GetFullPath(denRoot)) ? IndexStatus.Current : IndexStatus.FilesChanged;
+    }
+
+    /// <summary>
+    /// Rebuilds the index unless <see cref="CheckFiles"/> says it's
+    /// current: usable, and built from the files as they are now.
+    /// </summary>
+    /// <returns>The status before any rebuild.</returns>
+    public static IndexStatus EnsureUpToDate(string denRoot)
+    {
+        var status = CheckFiles(denRoot);
+        if (status != IndexStatus.Current)
+        {
+            Rebuild(denRoot);
+        }
+
+        return status;
+    }
+
+    /// <summary>
+    /// A hash of the den's tree: every folder, and every <c>.md</c>,
+    /// <c>.yaml</c>, and <c>.yml</c> file with the SHA-256 of its bytes,
+    /// leaving out names that start with <c>.</c> at any depth, as the
+    /// loader does (F-LAY-2). Every file the index reads is one of these, so
+    /// while the hash is the same, a rebuild would read the same bytes.
+    /// Other files, such as images, never change the index.
+    /// </summary>
+    internal static string FilesFingerprint(string root)
+    {
+        var entries = new List<string>();
+        Walk(root, "", 0);
+        entries.Sort(StringComparer.Ordinal);
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', entries))));
+
+        void Walk(string folder, string relative, int depth)
+        {
+            // Folder links can loop; no real den is this deep.
+            if (depth > 64)
+            {
+                return;
+            }
+
+            foreach (var file in Directory.EnumerateFiles(folder))
+            {
+                var name = Path.GetFileName(file);
+                var extension = Path.GetExtension(name);
+                if (!name.StartsWith('.') && (extension.Equals(".md", StringComparison.OrdinalIgnoreCase)
+                    || extension.Equals(".yaml", StringComparison.OrdinalIgnoreCase)
+                    || extension.Equals(".yml", StringComparison.OrdinalIgnoreCase)))
+                {
+                    entries.Add($"f {relative}{name} {Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(file)))}");
+                }
+            }
+
+            foreach (var sub in Directory.EnumerateDirectories(folder))
+            {
+                var name = Path.GetFileName(sub);
+                if (!name.StartsWith('.'))
+                {
+                    entries.Add($"d {relative}{name}");
+                    Walk(sub, $"{relative}{name}/", depth + 1);
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// The connection string for an index file. Pooling is off so that
     /// closing a connection releases the file at once, which the swap needs
     /// on Windows.
@@ -219,7 +324,7 @@ public static class IndexBuilder
             ForeignKeys = true,
         }.ToString();
 
-    private static void Build(string root, string temp)
+    private static void Build(string root, string temp, string fingerprint)
     {
         using (var connection = new SqliteConnection(ConnectionString(temp, SqliteOpenMode.ReadWriteCreate)))
         {
@@ -242,6 +347,14 @@ public static class IndexBuilder
                 }
 
                 IndexWriter.Write(root, db, connection);
+                using (var meta = connection.CreateCommand())
+                {
+                    meta.CommandText = "INSERT INTO meta (key, value) VALUES ($key, $value)";
+                    meta.Parameters.AddWithValue("$key", IndexSchema.FilesFingerprintKey);
+                    meta.Parameters.AddWithValue("$value", fingerprint);
+                    meta.ExecuteNonQuery();
+                }
+
                 foreach (var (_, sql) in indexes)
                 {
                     Execute(connection, sql);
