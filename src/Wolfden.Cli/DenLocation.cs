@@ -10,18 +10,42 @@ internal static class DenLocation
 {
     internal const string DenFile = "den.yaml";
 
+    /// <summary>
+    /// For tests: when set, a search that starts inside this folder stops
+    /// at it and never looks above it, so a test's result doesn't depend on
+    /// what's above the temporary folder on the machine running it. A
+    /// search that starts elsewhere isn't affected.
+    /// </summary>
+    internal static string? Ceiling { get; set; }
+
     /// <summary>The nearest folder at or above <paramref name="start"/> that holds a <c>den.yaml</c>, or null.</summary>
     public static string? FindAbove(string start)
     {
-        for (var dir = new DirectoryInfo(Path.GetFullPath(start)); dir is not null; dir = dir.Parent)
+        var from = Path.TrimEndingDirectorySeparator(Path.GetFullPath(start));
+        var ceiling = Ceiling is null ? null : Path.TrimEndingDirectorySeparator(Path.GetFullPath(Ceiling));
+        if (ceiling is not null && !IsAtOrInside(from, ceiling))
+        {
+            ceiling = null;
+        }
+
+        for (var dir = new DirectoryInfo(from); dir is not null; dir = dir.Parent)
         {
             if (File.Exists(Path.Combine(dir.FullName, DenFile)))
             {
                 return dir.FullName;
             }
+
+            if (ceiling is not null && string.Equals(Path.TrimEndingDirectorySeparator(dir.FullName), ceiling, StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
         }
 
         return null;
+
+        static bool IsAtOrInside(string path, string folder) =>
+            string.Equals(path, folder, StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

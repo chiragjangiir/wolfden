@@ -82,22 +82,30 @@ internal static class InitCommand
         }
 
         var created = new List<string>();
+        // Everything this run creates, folders included, so a failure part way can undo it.
+        var made = new List<string>();
         try
         {
-            Directory.CreateDirectory(root);
+            CreateFolder(root, made);
             WriteNew(root, DenLocation.DenFile, DenYaml(name));
+            made.Add(Path.Combine(root, DenLocation.DenFile));
             created.Add(DenLocation.DenFile);
             if (universe is not null)
             {
                 var path = $"universes/{universe}/universe.md";
-                Directory.CreateDirectory(Path.Combine(root, "universes", universe));
+                CreateFolder(Path.Combine(root, "universes"), made);
+                CreateFolder(Path.Combine(root, "universes", universe), made);
                 WriteNew(root, path, UniverseFile(universe));
                 created.Add(path);
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return Fail($"couldn't create the den at '{folder}': {e.Message}");
+            var left = Undo(made);
+            var leftNote = left.Count == 0
+                ? " Nothing was left behind."
+                : $" These couldn't be removed and are still there: {string.Join(", ", left.Select(p => $"'{p}'"))}.";
+            return Fail($"couldn't create the den at '{folder}': {e.Message}{leftNote}");
         }
 
         if (line.Has("--json"))
@@ -150,6 +158,48 @@ internal static class InitCommand
             .WithId(Ids.New())
             .WithFrontmatterValue("name", YamlScalarValue.String(name))
             .ToBytes();
+    }
+
+    /// <summary>Creates a folder and any missing folders above it, recording in <paramref name="made"/> each one this run made, outermost first.</summary>
+    private static void CreateFolder(string path, List<string> made)
+    {
+        var missing = new Stack<string>();
+        for (var dir = Path.GetFullPath(path); !Directory.Exists(dir); dir = Path.GetDirectoryName(dir)!)
+        {
+            missing.Push(dir);
+        }
+
+        foreach (var dir in missing)
+        {
+            Directory.CreateDirectory(dir);
+            made.Add(dir);
+        }
+    }
+
+    /// <summary>Removes what this run made, newest first, and returns what couldn't be removed.</summary>
+    private static List<string> Undo(List<string> made)
+    {
+        var left = new List<string>();
+        for (var i = made.Count - 1; i >= 0; i--)
+        {
+            try
+            {
+                if (File.Exists(made[i]))
+                {
+                    File.Delete(made[i]);
+                }
+                else if (Directory.Exists(made[i]))
+                {
+                    Directory.Delete(made[i]);
+                }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                left.Add(made[i]);
+            }
+        }
+
+        return left;
     }
 
     /// <summary>Writes a new file, failing if one is already there.</summary>

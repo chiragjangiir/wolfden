@@ -41,7 +41,9 @@ internal static class CheckCommand
           <den>, --den <den>  the den's folder; by default, the current folder or
                               the nearest folder above it with a den.yaml
           --fix               first add a new id to every container and entity
-                              file that has none (F-ID-2); nothing else changes
+                              file that has none (F-ID-2); nothing else changes.
+                              Files in a final book and files with errors are
+                              left alone.
           --json              print one JSON document instead of text
 
         Exits 0 if the den has no errors (warnings alone pass), 1 if it has at

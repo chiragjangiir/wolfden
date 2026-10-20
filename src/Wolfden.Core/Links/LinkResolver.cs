@@ -262,26 +262,11 @@ public sealed class LinkResolver
         }
 
         /// <summary>The first tier with any match (F-LINK-6), and its matches, or null if none matches.</summary>
-        public (LinkMatchKind? Kind, IReadOnlyList<CatalogEntity> Matches) Match(string target)
-        {
-            if (Keys.IsId(target) && _byId.TryGetValue(target, out var byId))
-            {
-                return (LinkMatchKind.Id, byId);
-            }
+        public (LinkMatchKind? Kind, IReadOnlyList<CatalogEntity> Matches) Match(string target) =>
+            LinkMatching.FirstTier(target, k => Lookup(_byId, k), k => Lookup(_bySlug, k), k => Lookup(_byName, k), k => Lookup(_byAlias, k));
 
-            var normalized = LinkText.Normalize(target);
-            if (_bySlug.TryGetValue(normalized, out var bySlug))
-            {
-                return (LinkMatchKind.Slug, bySlug);
-            }
-
-            if (_byName.TryGetValue(normalized, out var byName))
-            {
-                return (LinkMatchKind.Name, byName);
-            }
-
-            return _byAlias.TryGetValue(normalized, out var byAlias) ? (LinkMatchKind.Alias, byAlias) : (null, []);
-        }
+        private static IReadOnlyList<CatalogEntity> Lookup(Dictionary<string, List<CatalogEntity>> index, string key) =>
+            index.TryGetValue(key, out var list) ? list : [];
 
         private static void Add(Dictionary<string, List<CatalogEntity>> index, string key, CatalogEntity entity)
         {

@@ -12,6 +12,17 @@ public sealed class TempDen : IDisposable
         Root = root;
     }
 
+    /// <summary>The folder every temporary den goes in, outside the repo.</summary>
+    public static string TempRoot { get; } = Path.Combine(Path.GetTempPath(), "wolfden-cli-tests");
+
+    /// <summary>
+    /// Stops the den search at <see cref="TempRoot"/> for every test, so a
+    /// den.yaml somewhere above the system's temporary folder can't change
+    /// what "no den here" or "inside another den" means in a test.
+    /// </summary>
+    [System.Runtime.CompilerServices.ModuleInitializer]
+    internal static void IsolateDenSearch() => DenLocation.Ceiling = TempRoot;
+
     /// <summary>The repo root: the nearest folder above the test binaries that holds Wolfden.slnx.</summary>
     public static string RepoRoot => RepoRootValue.Value;
 
@@ -36,7 +47,7 @@ public sealed class TempDen : IDisposable
     /// <summary>An empty temporary folder, for commands that create a den or write an index.</summary>
     public static TempDen Empty()
     {
-        var path = Path.Combine(Path.GetTempPath(), "wolfden-cli-tests", Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(TempRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         return new TempDen(path);
     }

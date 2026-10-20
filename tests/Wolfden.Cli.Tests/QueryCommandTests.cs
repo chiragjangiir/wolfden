@@ -185,8 +185,8 @@ public sealed class QueryCommandTests : IDisposable
     [InlineData(new[] { "--at", "dracula:99" }, "Book 'dracula' has no chapter '99'.")]
     [InlineData(new[] { "--at", "lost:1" }, "Universe 'dracula' has no book 'lost'.")]
     [InlineData(new[] { "--series", "lost" }, "Universe 'dracula' has no series 'lost'.")]
-    [InlineData(new[] { "--type", "starship" }, "no entity in universe 'dracula' has the type 'starship'.")]
-    [InlineData(new[] { "--entity", "Sherlock" }, "universe 'dracula' has no entity 'Sherlock' (matched as a link is: by name, alias, file name, or id).")]
+    [InlineData(new[] { "--type", "starship" }, "there's no type 'starship': no enabled pack defines it, and no entity in universe 'dracula' uses it.")]
+    [InlineData(new[] { "--entity", "Sherlock" }, "universe 'dracula' has no entity 'Sherlock' (matched as a link is: by id, file name, name, or alias).")]
     public void SomethingThatDoesntExistExitsTwo(string[] args, string message)
     {
         var (exitCode, output, error) = Query(args);
@@ -194,6 +194,105 @@ public sealed class QueryCommandTests : IDisposable
         Assert.Equal(CliApp.ExitUsage, exitCode);
         Assert.Empty(output);
         Assert.Equal($"wolfden query: {message}\n", error);
+    }
+
+    // ----- --entity matches as a link does (F-LINK-4, F-LINK-6) -----
+
+    [Theory]
+    [InlineData("01M4TF5F056Y24P4D8ZT8RMGGD")] // id
+    [InlineData("jonathan-harker")] // slug
+    [InlineData("Jonathan-Harker")] // slug, in another case (F-LINK-4)
+    [InlineData("jonathan harker")] // name, in another case
+    [InlineData("  Jonathan   Harker ")] // name, with extra spaces
+    [InlineData("Harker")] // alias
+    public void AnEntityCanBeNamedAnyWayALinkCan(string name)
+    {
+        var (exitCode, output, _) = Query("--entity", name, "--brief");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Equal(
+            $"Canon of universe 'dracula' at the end of the story: 1 entity.\n- Jonathan Harker (character, canon, filed in book 'dracula', from dracula:1): {Jonathan}\n",
+            output);
+    }
+
+    [Fact]
+    public void AMixedCaseSlugMatchesAsItsLinkDoes()
+    {
+        // [[Count-Dracula]] resolves, so --entity Count-Dracula must too.
+        var (exitCode, output, _) = Query("--entity", "Count-Dracula", "--brief");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Contains("- Count Dracula (character", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheFirstTierThatMatchesWins()
+    {
+        // F-LINK-6: slug, then name, then alias. "Ash" is one entity's slug,
+        // another's name, and a third's alias; "Ember" is a name and an alias.
+        using var den = TempDen.FromFiles(new Dictionary<string, string>
+        {
+            ["den.yaml"] = "format: 1\n",
+            ["universes/vael/universe.md"] = "---\nid: 01JC5CK7000000000000000001\nname: Vael\n---\n",
+            ["universes/vael/entities/characters/ash.md"] = "---\nid: 01JC5CK7000000000000000002\ntype: character\nname: Cinder\n---\n",
+            ["universes/vael/entities/characters/the-smith.md"] = "---\nid: 01JC5CK7000000000000000003\ntype: character\nname: Ash\naliases: [Ember]\n---\n",
+            ["universes/vael/entities/characters/orrin.md"] = "---\nid: 01JC5CK7000000000000000004\ntype: character\nname: Orrin\naliases: [Ash]\n---\n",
+            ["universes/vael/entities/characters/ember.md"] = "---\nid: 01JC5CK7000000000000000005\ntype: character\nname: Ember\n---\n",
+        });
+
+        var names = (string name) => Cli.Run("query", "--den", den.Root, "--entity", name, "--brief").Output
+            .Split('\n').Skip(1).Where(l => l.Length > 0).Select(l => l[2..l.IndexOf(' ', 2)]).ToList();
+
+        Assert.Equal(["Cinder"], names("ash"));
+        Assert.Equal(["Ember"], names("Ember"));
+        Assert.Equal(["Orrin"], names("orrin"));
+    }
+
+    [Fact]
+    public void ANameMatchBeatsAnAliasOnAnotherEntity()
+    {
+        using var den = TempDen.FromFiles(new Dictionary<string, string>
+        {
+            ["den.yaml"] = "format: 1\n",
+            ["universes/vael/universe.md"] = "---\nid: 01JC5CK8000000000000000001\nname: Vael\n---\n",
+            ["universes/vael/entities/characters/wren-calder.md"] = "---\nid: 01JC5CK8000000000000000002\ntype: character\nname: The Captain\n---\n",
+            ["universes/vael/entities/characters/orrin-fell.md"] = "---\nid: 01JC5CK8000000000000000003\ntype: character\nname: Orrin Fell\naliases: [The Captain]\n---\n",
+        });
+
+        var (_, output, _) = Cli.Run("query", "--den", den.Root, "--entity", "the captain", "--brief");
+
+        Assert.Contains("- The Captain (character", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Orrin Fell", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ADefinedTypeWithNoEntitiesGivesAnEmptyView()
+    {
+        // The core pack defines 'idea', and the Dracula sample has none in canon.
+        var (exitCode, output, error) = Query("--type", "idea");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Empty(error);
+        Assert.Equal("Canon of universe 'dracula' at the end of the story: 0 entities.\n", output);
+    }
+
+    // ----- The parser: --opt=value and -- -----
+
+    [Fact]
+    public void AnOptionValueCanFollowAnEqualsSign()
+    {
+        Assert.Equal(Query("--at", "dracula:5", "--brief").Output, Query("--at=dracula:5", "--brief").Output);
+    }
+
+    [Fact]
+    public void ADoubleDashEndsTheOptions()
+    {
+        // After --, '--brief' is a plain argument: here, a universe name.
+        var (exitCode, output, error) = Query("--", "--brief");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Empty(output);
+        Assert.Equal("wolfden query: The den has no universe '--brief'.\n", error);
     }
 
     [Fact]

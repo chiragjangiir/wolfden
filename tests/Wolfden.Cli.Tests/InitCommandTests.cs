@@ -108,6 +108,22 @@ public class InitCommandTests
     }
 
     [Fact]
+    public void AFailurePartWayRemovesWhatThisRunCreated()
+    {
+        // universe.md is already there, so writing it fails after den.yaml was written.
+        using var folder = TempDen.FromFiles(new Dictionary<string, string> { ["universes/vael/universe.md"] = "---\nname: Mine\n---\n" });
+
+        var (exitCode, output, error) = Cli.Run("init", folder.Root, "--universe", "vael");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Empty(output);
+        Assert.StartsWith($"wolfden init: couldn't create the den at '{folder.Root}': ", error, StringComparison.Ordinal);
+        Assert.EndsWith(" Nothing was left behind.\n", error, StringComparison.Ordinal);
+        Assert.False(folder.Exists("den.yaml"));
+        Assert.Equal("---\nname: Mine\n---\n", folder.Read("universes/vael/universe.md"));
+    }
+
+    [Fact]
     public void ADenInsideADenIsRefused()
     {
         using var den = TempDen.FromFiles(new Dictionary<string, string> { ["den.yaml"] = "format: 1\n" });

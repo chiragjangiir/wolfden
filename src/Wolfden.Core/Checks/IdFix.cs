@@ -18,7 +18,7 @@ public enum IdFixOutcome
 /// <param name="Path">The file, relative to the den root, with <c>/</c>.</param>
 /// <param name="Outcome">Whether it was changed.</param>
 /// <param name="Id">The id it was given, or null if it was skipped.</param>
-/// <param name="Reason">Why it was skipped, or null.</param>
+/// <param name="Reason">Why it was skipped, starting in lowercase so it reads after a colon, or null.</param>
 public sealed record IdFixResult(string Path, IdFixOutcome Outcome, string? Id, string? Reason);
 
 /// <summary>
@@ -71,7 +71,7 @@ public static class IdFix
     {
         if (book is { Status: BookStatus.Final })
         {
-            return Skip($"It's in book '{book.Key}', which is final (frozen), so it can't be edited until the book is unfrozen (F-BOOK-1).");
+            return Skip($"it's in book '{book.Key}', which is final (frozen), so it can't be edited until the book is unfrozen (F-BOOK-1).");
         }
 
         var id = newId();
@@ -82,7 +82,7 @@ public static class IdFix
         }
         catch (Exception e) when (e is InvalidOperationException or NotSupportedException or EditVerificationException)
         {
-            return Skip(e.Message);
+            return Skip(char.ToLowerInvariant(e.Message[0]) + e.Message[1..]);
         }
 
         var full = Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar));
@@ -91,14 +91,14 @@ public static class IdFix
             // The file may have changed since it was read; don't overwrite that.
             if (!File.ReadAllBytes(full).AsSpan().SequenceEqual(file.ToBytes()))
             {
-                return Skip("It changed while the den was being checked; run the fix again.");
+                return Skip("it changed while the den was being checked; run the fix again.");
             }
 
             File.WriteAllBytes(full, fixedFile.ToBytes());
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return Skip($"It couldn't be written: {e.Message}");
+            return Skip($"it couldn't be written: {e.Message}");
         }
 
         return new IdFixResult(path, IdFixOutcome.Added, id, null);

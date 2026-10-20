@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Wolfden.Core.Links;
+using Wolfden.Core.Structure;
 using Wolfden.Index;
 
 namespace Wolfden.Cli;
@@ -92,7 +93,7 @@ internal static partial class QueryCommand
         {
             IndexBuilder.EnsureUpToDate(root);
             using var index = DenIndex.Open(root);
-            var result = Query(index, line, filter, out var problem);
+            var result = Query(index, root, line, filter, out var problem);
             if (result is null)
             {
                 error.WriteLine($"wolfden query: {problem}");
@@ -118,7 +119,7 @@ internal static partial class QueryCommand
     }
 
     /// <summary>The view the command line asks for, or null with <paramref name="problem"/> saying why there's none.</summary>
-    private static CanonView? Query(DenIndex index, CommandLine line, CanonFilter? filter, out string problem)
+    private static CanonView? Query(DenIndex index, string root, CommandLine line, CanonFilter? filter, out string problem)
     {
         var db = index.Context;
         problem = "";
@@ -167,10 +168,14 @@ internal static partial class QueryCommand
         var types = line.Values("--type");
         if (types.Count > 0)
         {
-            var known = db.Entities.Where(e => e.UniverseId == universeId).Select(e => e.Type).Distinct().ToHashSet(StringComparer.Ordinal);
+            // Defined types (built-in and den-local packs), plus any type an
+            // entity uses without a definition (F-ENT-2), so it can still be picked out.
+            var known = DenStructure.Load(root).Types.Types.Select(t => t.Key)
+                .Concat(db.Entities.Where(e => e.UniverseId == universeId).Select(e => e.Type).Distinct())
+                .ToHashSet(StringComparer.Ordinal);
             if (types.FirstOrDefault(t => !known.Contains(t)) is { } unknown)
             {
-                problem = $"no entity in universe '{universe}' has the type '{unknown}'.";
+                problem = $"there's no type '{unknown}': no enabled pack defines it, and no entity in universe '{universe}' uses it.";
                 return null;
             }
 
@@ -182,7 +187,7 @@ internal static partial class QueryCommand
             var keys = MatchEntities(db, universeId, name);
             if (keys.Count == 0)
             {
-                problem = $"universe '{universe}' has no entity '{name}' (matched as a link is: by name, alias, file name, or id).";
+                problem = $"universe '{universe}' has no entity '{name}' (matched as a link is: by id, file name, name, or alias).";
                 return null;
             }
 
@@ -192,16 +197,28 @@ internal static partial class QueryCommand
         return view;
     }
 
-    /// <summary>The keys of the universe's entities that <paramref name="name"/> names, matched as a link matches (F-LINK-4): by id, slug, name, or alias.</summary>
+    /// <summary>
+    /// The keys of the universe's entities that <paramref name="name"/>
+    /// names, matched as a link is (<see cref="LinkMatching"/>, F-LINK-4,
+    /// F-LINK-6): every match in the first tier that has any. With no file
+    /// to resolve from, there's no scope chain to break a tie (F-LINK-7),
+    /// so a tie keeps all its matches.
+    /// </summary>
     private static HashSet<string> MatchEntities(IndexDbContext db, int universeId, string name)
     {
-        var normalized = LinkText.Normalize(name);
-        var byAlias = db.Aliases.Where(a => a.AliasNormalized == normalized).Select(a => a.EntityId);
-        return db.Entities
-            .Where(e => e.UniverseId == universeId
-                && (e.Ulid == name || e.Slug == name || e.NameNormalized == normalized || byAlias.Contains(e.Id)))
-            .Select(e => e.Key)
-            .ToHashSet(StringComparer.Ordinal);
+        var entities = db.Entities.Where(e => e.UniverseId == universeId)
+            .Select(e => new { e.Id, e.Key, e.Ulid, e.Slug, e.NameNormalized })
+            .ToList();
+        var ids = entities.Select(e => e.Id).ToList();
+        var aliases = db.Aliases.Where(a => ids.Contains(a.EntityId)).Select(a => new { a.EntityId, a.AliasNormalized }).ToList();
+        var keyById = entities.ToDictionary(e => e.Id, e => e.Key);
+        var (_, matches) = LinkMatching.FirstTier<string>(
+            name,
+            id => entities.Where(e => e.Ulid == id).Select(e => e.Key).ToList(),
+            slug => entities.Where(e => e.Slug is not null && LinkText.Normalize(e.Slug) == slug).Select(e => e.Key).ToList(),
+            normalized => entities.Where(e => e.NameNormalized == normalized).Select(e => e.Key).ToList(),
+            normalized => aliases.Where(a => a.AliasNormalized == normalized).Select(a => keyById[a.EntityId]).Distinct().ToList());
+        return matches.ToHashSet(StringComparer.Ordinal);
     }
 
     private static void WriteText(CanonView view, bool pinned, bool brief, TextWriter output)

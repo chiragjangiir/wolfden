@@ -108,6 +108,32 @@ public class CliAppTests
     }
 
     [Fact]
+    public void ADoubleDashMakesTheRestPlainArguments()
+    {
+        var (exitCode, output, _) = Cli.Run("new-id", "--", "2");
+        var (rejected, _, error) = Cli.Run("new-id", "--", "--json");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Equal(2, output.TrimEnd('\n').Split('\n').Length);
+        Assert.Equal(CliApp.ExitUsage, rejected);
+        Assert.StartsWith("wolfden new-id: the count must be a whole number from 1 to 1000, not '--json'.", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AValueOptionTakesItsValueAfterAnEqualsSignOrAsTheNextArgument()
+    {
+        using var folder = TempDen.Empty();
+
+        var (byEquals, _, _) = Cli.Run("init", Path.Combine(folder.Root, "a"), "--name=Notes A");
+        var (bySpace, _, _) = Cli.Run("init", Path.Combine(folder.Root, "b"), "--name", "Notes A");
+
+        Assert.Equal(CliApp.ExitOk, byEquals);
+        Assert.Equal(CliApp.ExitOk, bySpace);
+        Assert.Equal(File.ReadAllText(Path.Combine(folder.Root, "a", "den.yaml")), File.ReadAllText(Path.Combine(folder.Root, "b", "den.yaml")));
+        Assert.Contains("name: Notes A\n", File.ReadAllText(Path.Combine(folder.Root, "a", "den.yaml")), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AFlagWithAValueExitsTwo()
     {
         var (exitCode, _, error) = Cli.Run("check", "--json=yes");

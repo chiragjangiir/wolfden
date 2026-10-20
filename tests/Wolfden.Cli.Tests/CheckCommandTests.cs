@@ -317,7 +317,12 @@ public class CheckCommandTests
     {
         using var den = TempDen.FromFiles(NoIdsDen);
         var before = Check(den.Root);
-        Assert.Contains("orrin-fell.md:1: warning F-ID-2", before.Output, StringComparison.Ordinal);
+        Assert.Contains("orrin-fell.md:1: warning F-ID-2: no id; run `wolfden check --fix` to add one.", before.Output, StringComparison.Ordinal);
+        // In a final book, --fix won't help, so the warning doesn't suggest it.
+        Assert.Contains(
+            "the-stranger.md:1: warning F-ID-2: no id, and book 'a2' is final (frozen), so `wolfden check --fix` won't add one until the book is unfrozen.",
+            before.Output,
+            StringComparison.Ordinal);
 
         var (exitCode, output, error) = Check(den.Root, "--fix");
 
@@ -327,9 +332,9 @@ public class CheckCommandTests
         Assert.Matches(@"^universes/vael/series/a/books/a1/book\.md: fixed F-ID-2: added id [0-7][0-9A-HJKMNP-TV-Z]{25}$", lines[0]);
         Assert.Matches(@"^universes/vael/series/a/books/a1/entities/characters/orrin-fell\.md: fixed F-ID-2: added id ", lines[1]);
         Assert.Equal(
-            "universes/vael/series/a/books/a2/book.md: not fixed F-ID-2: It's in book 'a2', which is final (frozen), so it can't be edited until the book is unfrozen (F-BOOK-1).",
+            "universes/vael/series/a/books/a2/book.md: not fixed F-ID-2: it's in book 'a2', which is final (frozen), so it can't be edited until the book is unfrozen (F-BOOK-1).",
             lines[2]);
-        Assert.StartsWith("universes/vael/series/a/books/a2/entities/characters/the-stranger.md: not fixed F-ID-2: It's in book 'a2'", lines[3], StringComparison.Ordinal);
+        Assert.StartsWith("universes/vael/series/a/books/a2/entities/characters/the-stranger.md: not fixed F-ID-2: it's in book 'a2'", lines[3], StringComparison.Ordinal);
         Assert.Matches(@"^universes/vael/universe\.md: fixed F-ID-2: added id ", lines[4]);
         Assert.Equal("", lines[5]);
         Assert.DoesNotContain("orrin-fell.md:1: warning F-ID-2", output, StringComparison.Ordinal);

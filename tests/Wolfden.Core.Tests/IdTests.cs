@@ -124,7 +124,7 @@ public class IdTests
             Assert.Equal(
                 [
                     new IdFixResult("universes/vael/books/a1/entities/notes/flow.md", IdFixOutcome.Skipped, null,
-                        "The frontmatter is a flow mapping, so an id can't be added as its first key."),
+                        "the frontmatter is a flow mapping, so an id can't be added as its first key."),
                     new IdFixResult("universes/vael/universe.md", IdFixOutcome.Added, "01JC5CK6000000000000000002", null),
                 ],
                 results);
