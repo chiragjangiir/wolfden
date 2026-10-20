@@ -127,7 +127,7 @@ public class CheckCommandTests
 
         using var json = JsonDocument.Parse(output);
         var root = json.RootElement;
-        Assert.Equal(["version", "den", "summary", "diagnostics"], root.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(["version", "den", "summary", "diagnostics", "fixes"], root.EnumerateObject().Select(p => p.Name));
         Assert.Equal(1, root.GetProperty("version").GetInt32());
         Assert.Equal(["loaded", "format", "spoilerChecks", "entities"], root.GetProperty("den").EnumerateObject().Select(p => p.Name));
         Assert.Equal(["errors", "warnings", "files"], root.GetProperty("summary").EnumerateObject().Select(p => p.Name));
@@ -233,7 +233,7 @@ public class CheckCommandTests
     }
 
     [Theory]
-    [InlineData("--fix")]
+    [InlineData("--frob")]
     [InlineData("-q")]
     public void AnUnknownOptionExitsTwo(string option)
     {
@@ -259,29 +259,133 @@ public class CheckCommandTests
         var (exitCode, output, _) = Check("--help");
 
         Assert.Equal(CliApp.ExitOk, exitCode);
-        Assert.Equal("usage: wolfden check [<den>] [--json]\n", output);
+        Assert.StartsWith("usage: wolfden check [<den>] [--den <den>] [--fix] [--json]\n\n", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheDenCanBeNamedWithTheDenOption()
+    {
+        var (exitCode, output, _) = Check("--den", TempDen.DraculaRoot);
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.StartsWith("No errors or warnings. Checked 50 entities", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ADenGivenBothWaysExitsTwo()
+    {
+        var (exitCode, output, error) = Check(TempDen.DraculaRoot, "--den", TempDen.DraculaRoot);
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Empty(output);
+        Assert.StartsWith("wolfden check: give the den folder once, as an argument or with '--den', not both.", error, StringComparison.Ordinal);
     }
 
     [Fact]
     public void CheckNeverWritesToTheDen()
     {
         using var den = TempDen.FromFiles(MixedDen);
-        var before = Snapshot(den.Root);
+        var before = Cli.Snapshot(den.Root);
 
         Check(den.Root);
         Check(den.Root, "--json");
 
-        Assert.Equal(before, Snapshot(den.Root));
+        Assert.Equal(before, Cli.Snapshot(den.Root));
     }
 
-    /// <summary>Every file and folder, with each file's SHA-256 and last write time, so an in-place rewrite shows too.</summary>
-    private static List<string> Snapshot(string root) =>
-        Directory.EnumerateFileSystemEntries(root, "*", SearchOption.AllDirectories)
-            .Order(StringComparer.Ordinal)
-            .Select(p => File.Exists(p)
-                ? $"{p} {Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(p)))} {File.GetLastWriteTimeUtc(p).Ticks}"
-                : p)
-            .ToList();
+    // ----- --fix -----
+
+    /// <summary>A den whose universe, book, and one entity have no id, with a frozen book and a file with an error.</summary>
+    private static readonly Dictionary<string, string> NoIdsDen = new()
+    {
+        ["den.yaml"] = "format: 1\n",
+        ["universes/vael/universe.md"] = "---\nname: Vael\norder: [a]\n---\n\nThe world.\n",
+        ["universes/vael/series/a/series.md"] = "---\nid: 01JC5CK2000000000000000002\nname: A\nbooks: [a1, a2]\n---\n",
+        ["universes/vael/series/a/books/a1/book.md"] = "---\nname: Book 1\nchapters: [1, 2]\n---\n",
+        ["universes/vael/series/a/books/a2/book.md"] = "---\nname: Book 2\nstatus: final\nchapters: [1]\n---\n",
+        ["universes/vael/series/a/books/a1/entities/characters/orrin-fell.md"] =
+            "---\r\n# Orrin's notes\r\ntype: character\r\nname: Orrin Fell\r\nstatus: canon\r\n---\r\n\r\n## Overview\r\nA deckhand.\r\n",
+        ["universes/vael/series/a/books/a1/entities/characters/zoe-marr.md"] =
+            "---\nid: 01JC5CK2000000000000000005\ntype: character\nname: Zoë Marr\n---\n",
+        ["universes/vael/series/a/books/a1/entities/characters/torn.md"] = "---\ntype: character\nname: [Torn\n---\n",
+        ["universes/vael/series/a/books/a2/entities/characters/the-stranger.md"] = "---\ntype: character\nname: The Stranger\n---\n",
+    };
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-4")]
+    public void FixAddsMissingIdsAndReportsEachFile()
+    {
+        using var den = TempDen.FromFiles(NoIdsDen);
+        var before = Check(den.Root);
+        Assert.Contains("orrin-fell.md:1: warning F-ID-2", before.Output, StringComparison.Ordinal);
+
+        var (exitCode, output, error) = Check(den.Root, "--fix");
+
+        Assert.Empty(error);
+        Assert.Equal(CliApp.ExitErrors, exitCode); // torn.md still has its error
+        var lines = output.Split('\n');
+        Assert.Matches(@"^universes/vael/series/a/books/a1/book\.md: fixed F-ID-2: added id [0-7][0-9A-HJKMNP-TV-Z]{25}$", lines[0]);
+        Assert.Matches(@"^universes/vael/series/a/books/a1/entities/characters/orrin-fell\.md: fixed F-ID-2: added id ", lines[1]);
+        Assert.Equal(
+            "universes/vael/series/a/books/a2/book.md: not fixed F-ID-2: It's in book 'a2', which is final (frozen), so it can't be edited until the book is unfrozen (F-BOOK-1).",
+            lines[2]);
+        Assert.StartsWith("universes/vael/series/a/books/a2/entities/characters/the-stranger.md: not fixed F-ID-2: It's in book 'a2'", lines[3], StringComparison.Ordinal);
+        Assert.Matches(@"^universes/vael/universe\.md: fixed F-ID-2: added id ", lines[4]);
+        Assert.Equal("", lines[5]);
+        Assert.DoesNotContain("orrin-fell.md:1: warning F-ID-2", output, StringComparison.Ordinal);
+
+        // Only the id line is new; the comment line stays first, and CRLF stays CRLF.
+        var id = lines[1][^26..];
+        Assert.Equal(
+            $"---\r\n# Orrin's notes\r\nid: {id}\r\ntype: character\r\nname: Orrin Fell\r\nstatus: canon\r\n---\r\n\r\n## Overview\r\nA deckhand.\r\n",
+            den.Read("universes/vael/series/a/books/a1/entities/characters/orrin-fell.md"));
+        Assert.StartsWith("---\nid: ", den.Read("universes/vael/universe.md"), StringComparison.Ordinal);
+        Assert.EndsWith("\nname: Vael\norder: [a]\n---\n\nThe world.\n", den.Read("universes/vael/universe.md"), StringComparison.Ordinal);
+
+        // Files that were skipped, already had an id, or have an error are untouched.
+        foreach (var path in new[]
+        {
+            "universes/vael/series/a/books/a2/book.md",
+            "universes/vael/series/a/books/a2/entities/characters/the-stranger.md",
+            "universes/vael/series/a/series.md",
+            "universes/vael/series/a/books/a1/entities/characters/zoe-marr.md",
+            "universes/vael/series/a/books/a1/entities/characters/torn.md",
+        })
+        {
+            Assert.Equal(NoIdsDen[path], den.Read(path));
+        }
+    }
+
+    [Fact]
+    public void FixIsReportedInJsonAndASecondRunHasNothingToDo()
+    {
+        using var den = TempDen.FromFiles(NoIdsDen);
+
+        var (_, output, _) = Check(den.Root, "--fix", "--json");
+        var (_, again, _) = Check(den.Root, "--fix", "--json");
+
+        using var json = JsonDocument.Parse(output);
+        var fixes = json.RootElement.GetProperty("fixes").EnumerateArray().ToList();
+        Assert.Equal(5, fixes.Count);
+        Assert.Equal(["path", "rule", "outcome", "id", "message"], fixes[0].EnumerateObject().Select(p => p.Name));
+        Assert.Equal(3, fixes.Count(f => f.GetProperty("outcome").GetString() == "fixed"));
+        Assert.All(fixes.Where(f => f.GetProperty("outcome").GetString() == "skipped"), f => Assert.Equal(JsonValueKind.Null, f.GetProperty("id").ValueKind));
+        using var second = JsonDocument.Parse(again);
+        Assert.All(second.RootElement.GetProperty("fixes").EnumerateArray(), f => Assert.Equal("skipped", f.GetProperty("outcome").GetString()));
+    }
+
+    [Fact]
+    public void FixOnACleanDenChangesNothing()
+    {
+        using var den = TempDen.DraculaCopy();
+        var before = Cli.Snapshot(den.Root);
+
+        var (exitCode, output, _) = Check(den.Root, "--fix");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Equal("No errors or warnings. Checked 50 entities; spoiler checks are on.\n", output);
+        Assert.Equal(before, Cli.Snapshot(den.Root));
+    }
 }
 
 /// <summary>Tests that change the process's current folder, so they don't run alongside others.</summary>
@@ -309,5 +413,28 @@ public class CheckCommandCurrentFolderTests
         {
             Environment.CurrentDirectory = saved;
         }
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-5")]
+    public void FromAFolderInsideADenItFindsTheDenAbove()
+    {
+        var inside = Path.Combine(TempDen.DraculaRoot, "universes", "dracula", "books", "dracula", "entities", "characters");
+
+        var (exitCode, output, _) = Cli.RunIn(inside, "check");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.StartsWith("No errors or warnings. Checked 50 entities", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OutsideAnyDenItReportsThatTheCurrentFolderIsntOne()
+    {
+        using var empty = TempDen.Empty();
+
+        var (exitCode, output, _) = Cli.RunIn(empty.Root, "check");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.StartsWith("den.yaml: error F-DEN-1: This folder has no den.yaml", output, StringComparison.Ordinal);
     }
 }

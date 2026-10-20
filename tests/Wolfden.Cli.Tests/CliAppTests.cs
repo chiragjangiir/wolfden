@@ -23,8 +23,40 @@ public class CliAppTests
         Assert.Equal(0, exitCode);
         var text = output.ToString();
         Assert.StartsWith("usage: wolfden", text);
-        Assert.Contains("check [<den>] [--json]", text);
-        Assert.Contains("not yet implemented: init, index, query, serve, mcp", text);
+        foreach (var command in CliApp.Commands)
+        {
+            Assert.Contains($"\n  {command} ", text.ReplaceLineEndings("\n"));
+        }
+
+        Assert.Contains("not yet implemented: serve, mcp", text);
+    }
+
+    [Theory]
+    [InlineData("init")]
+    [InlineData("check")]
+    [InlineData("index")]
+    [InlineData("query")]
+    [InlineData("new-id")]
+    public void EveryCommandHasHelpThatStartsWithItsUsage(string command)
+    {
+        var (exitCode, output, error) = Cli.Run(command, "--help");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Empty(error);
+        Assert.StartsWith($"usage: wolfden {command}", output, StringComparison.Ordinal);
+        Assert.Equal(output, Cli.Run("help", command).Output);
+    }
+
+    [Theory]
+    [InlineData("check")]
+    [InlineData("index")]
+    [InlineData("query")]
+    public void EveryCommandThatReadsADenTakesDenAndJson(string command)
+    {
+        var (_, output, _) = Cli.Run(command, "--help");
+
+        Assert.Contains("--den <den>", output, StringComparison.Ordinal);
+        Assert.Contains("--json", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -33,11 +65,11 @@ public class CliAppTests
         var output = new StringWriter();
         var error = new StringWriter();
 
-        var exitCode = CliApp.Run(["init"], output, error);
+        var exitCode = CliApp.Run(["serve"], output, error);
 
         Assert.Equal(CliApp.ExitUsage, exitCode);
         Assert.Empty(output.ToString());
-        Assert.StartsWith("wolfden: 'init' isn't implemented yet.", error.ToString());
+        Assert.StartsWith("wolfden: 'serve' isn't implemented yet.", error.ToString());
     }
 
     [Fact]
@@ -52,5 +84,35 @@ public class CliAppTests
         Assert.Empty(output.ToString());
         Assert.StartsWith("wolfden: unknown command 'chek'.", error.ToString());
         Assert.Contains("usage: wolfden", error.ToString());
+    }
+
+    [Theory]
+    [InlineData("query", "--at")]
+    [InlineData("init", "--name")]
+    public void AnOptionWithoutItsValueExitsTwo(string command, string option)
+    {
+        var (exitCode, output, error) = Cli.Run(command, option);
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Empty(output);
+        Assert.StartsWith($"wolfden {command}: '{option}' needs a value.\nusage: wolfden {command}", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnOptionGivenTwiceExitsTwoUnlessItRepeats()
+    {
+        var (exitCode, _, error) = Cli.Run("query", "--at", "a1:1", "--at=a1:2");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.StartsWith("wolfden query: give '--at' only once.", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFlagWithAValueExitsTwo()
+    {
+        var (exitCode, _, error) = Cli.Run("check", "--json=yes");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.StartsWith("wolfden check: '--json' doesn't take a value.", error, StringComparison.Ordinal);
     }
 }

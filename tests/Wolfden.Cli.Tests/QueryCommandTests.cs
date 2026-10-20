@@ -1,0 +1,342 @@
+using System.Text.Json;
+
+namespace Wolfden.Cli.Tests;
+
+/// <summary>
+/// <c>wolfden query</c>: canon as of a story position, from the index. The
+/// view itself is tested in Wolfden.Index (<c>CanonViewTests</c>); these
+/// tests cover the command line, the output, and keeping the index fresh.
+/// Each test works on its own copy of <c>samples/dracula</c>, since a query
+/// writes the index into the den's <c>.wolfden/</c> folder.
+/// </summary>
+public sealed class QueryCommandTests : IDisposable
+{
+    private const string Jonathan = "universes/dracula/books/dracula/entities/characters/jonathan-harker.md";
+
+    private readonly TempDen _den = TempDen.DraculaCopy();
+
+    public void Dispose() => _den.Dispose();
+
+    private (int ExitCode, string Output, string Error) Query(params string[] args) =>
+        Cli.Run(["query", "--den", _den.Root, .. args]);
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-3")]
+    public void AFieldShowsTheValueInEffectAtThePosition()
+    {
+        var (exitCode, early, error) = Query("--at", "dracula:5", "--entity", "Jonathan Harker");
+        var (_, later, _) = Query("--at", "dracula:12", "--entity", "Jonathan Harker");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Empty(error);
+        Assert.StartsWith("Canon of universe 'dracula' as of dracula:5: 1 entity.\n\n# Jonathan Harker\n", early, StringComparison.Ordinal);
+        Assert.Contains($"character, canon, filed in book 'dracula', from dracula:1: {Jonathan}\n", early, StringComparison.Ordinal);
+        Assert.Contains("\n- occupation: solicitor (from dracula:1)\n", early, StringComparison.Ordinal);
+        Assert.DoesNotContain("factions", early, StringComparison.Ordinal);
+        Assert.Contains("\n- occupation: solicitor, junior partner in Hawkins & Harker (from dracula:12)\n", later, StringComparison.Ordinal);
+        Assert.Contains("\n## Overview\nA young solicitor sent from Exeter", early, StringComparison.Ordinal);
+        // The lead's title is the entity's heading, so it isn't repeated.
+        Assert.Single(early.Split('\n'), l => l == "# Jonathan Harker");
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-3")]
+    public void ACharacterIsLeftOutBeforeTheReaderMeetsThem()
+    {
+        var (_, before, _) = Query("--at", "dracula:4", "--brief", "--type", "character");
+        var (_, after, _) = Query("--at", "dracula:5", "--brief", "--type", "character");
+
+        Assert.DoesNotContain("Arthur Holmwood", before, StringComparison.Ordinal);
+        Assert.Contains(
+            "- Arthur Holmwood (character, canon, filed in book 'dracula', from dracula:5): universes/dracula/books/dracula/entities/characters/arthur-holmwood.md\n",
+            after,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithoutAPositionItShowsTheEndOfTheStory()
+    {
+        var (exitCode, output, _) = Query("--brief");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.StartsWith("Canon of universe 'dracula' at the end of the story: ", output, StringComparison.Ordinal);
+        Assert.Equal(output, Query("dracula", "--brief").Output);
+    }
+
+    [Fact]
+    public void BriefListsOneLinePerEntity()
+    {
+        var (_, output, _) = Query("--at", "dracula:5", "--brief");
+
+        var lines = output.TrimEnd('\n').Split('\n');
+        Assert.Equal("Canon of universe 'dracula' as of dracula:5: 25 entities.", lines[0]);
+        Assert.Equal(25, lines.Length - 1);
+        Assert.All(lines.Skip(1), l => Assert.StartsWith("- ", l, StringComparison.Ordinal));
+        // F-VIEW-3: universe-scope entities first.
+        Assert.StartsWith("- Bistritz (location, canon, filed in universe 'dracula'", lines[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-3")]
+    public void PinnedShowsOnlyPinnedFacts()
+    {
+        var (_, output, _) = Query("--pinned", "--entity", "Count Dracula");
+
+        Assert.StartsWith("Pinned canon of universe 'dracula' at the end of the story: 1 entity.\n\n# Count Dracula\n", output, StringComparison.Ordinal);
+        Assert.Contains("\n- species: vampire (Un-Dead) (from dracula:18, pinned)\n", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n## Overview", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ABookFilterKeepsTheUniversesEntities()
+    {
+        var (exitCode, output, _) = Query("--at", "dracula:5", "--book", "dracula", "--brief");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.StartsWith("Canon of universe 'dracula' as of dracula:5, filtered to book 'dracula': 25 entities.\n", output, StringComparison.Ordinal);
+        Assert.Contains("- Bistritz (location", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void JsonHasAStableShape()
+    {
+        var (exitCode, output, _) = Query("--at", "dracula:12", "--entity", "jonathan-harker", "--json");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.DoesNotContain("\r", output, StringComparison.Ordinal);
+        using var json = JsonDocument.Parse(output);
+        var root = json.RootElement;
+        Assert.Equal(["version", "universe", "position", "filter", "pinned", "entities"], root.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(1, root.GetProperty("version").GetInt32());
+        Assert.Equal("dracula:12", root.GetProperty("position").GetString());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("filter").ValueKind);
+        var entity = Assert.Single(root.GetProperty("entities").EnumerateArray());
+        Assert.Equal(
+            ["key", "id", "name", "type", "status", "scopeKind", "scopeKey", "path", "from", "title", "lead", "leadLine", "fields", "sections"],
+            entity.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(Jonathan, entity.GetProperty("path").GetString());
+        var occupation = entity.GetProperty("fields").EnumerateArray().Single(f => f.GetProperty("name").GetString() == "occupation");
+        Assert.Equal(
+            ["name", "value", "kind", "entryIndex", "status", "pinned", "from", "until", "path", "line"],
+            occupation.EnumerateObject().Select(p => p.Name));
+        // The value is JSON, not a string holding JSON.
+        Assert.Equal(["solicitor", "junior partner in Hawkins & Harker"], occupation.GetProperty("value").EnumerateArray().Select(v => v.GetString()));
+        var section = entity.GetProperty("sections")[0];
+        Assert.Equal(
+            ["name", "level", "headingPath", "body", "status", "pinned", "from", "until", "path", "line"],
+            section.EnumerateObject().Select(p => p.Name));
+    }
+
+    [Fact]
+    public void JsonNamesTheFilter()
+    {
+        var (_, output, _) = Query("--book", "dracula", "--type", "location", "--json");
+
+        using var json = JsonDocument.Parse(output);
+        var filter = json.RootElement.GetProperty("filter");
+        Assert.Equal("book", filter.GetProperty("kind").GetString());
+        Assert.Equal("dracula", filter.GetProperty("key").GetString());
+        Assert.All(json.RootElement.GetProperty("entities").EnumerateArray(), e => Assert.Equal("location", e.GetProperty("type").GetString()));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-6")]
+    public void AQueryAfterAnEditSeesTheEdit()
+    {
+        Query("--entity", "Jonathan Harker");
+        var text = _den.Read(Jonathan).Replace("heritage: English, of Exeter", "heritage: English, of Exeter and later Purfleet", StringComparison.Ordinal);
+        _den.Write(Jonathan, text);
+
+        var (_, output, _) = Query("--entity", "Jonathan Harker");
+
+        Assert.Contains("\n- heritage: English, of Exeter and later Purfleet\n", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-6")]
+    public void AQueryAfterANewNoteSeesTheNote()
+    {
+        Query("--brief");
+        _den.Write(
+            "universes/dracula/entities/locations/varna.md",
+            "---\nid: 01M4TF5EZK6918PFXASD6B9V0A\ntype: location\nname: Varna\nstatus: canon\nfrom: \"dracula:24\"\n---\n\n## Overview\nA Black Sea port.\n");
+
+        var (_, output, _) = Query("--brief", "--type", "location");
+
+        Assert.Contains("- Varna (location, canon, filed in universe 'dracula', from dracula:24)", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void QueryWritesOnlyTheIndex()
+    {
+        var before = Cli.Snapshot(_den.Root);
+
+        Query();
+        Query("--json");
+
+        Assert.Equal(before, Cli.Snapshot(_den.Root));
+        Assert.True(_den.Exists(".wolfden/index.db"));
+    }
+
+    // ----- Mistakes: exit 2, a message on standard error, nothing on standard output -----
+
+    [Theory]
+    [InlineData(new[] { "nowhere" }, "The den has no universe 'nowhere'.")]
+    [InlineData(new[] { "--at", "dracula:99" }, "Book 'dracula' has no chapter '99'.")]
+    [InlineData(new[] { "--at", "lost:1" }, "Universe 'dracula' has no book 'lost'.")]
+    [InlineData(new[] { "--series", "lost" }, "Universe 'dracula' has no series 'lost'.")]
+    [InlineData(new[] { "--type", "starship" }, "no entity in universe 'dracula' has the type 'starship'.")]
+    [InlineData(new[] { "--entity", "Sherlock" }, "universe 'dracula' has no entity 'Sherlock' (matched as a link is: by name, alias, file name, or id).")]
+    public void SomethingThatDoesntExistExitsTwo(string[] args, string message)
+    {
+        var (exitCode, output, error) = Query(args);
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Empty(output);
+        Assert.Equal($"wolfden query: {message}\n", error);
+    }
+
+    [Fact]
+    public void AnEntityThatExistsButIsntInCanonYetGivesAnEmptyView()
+    {
+        var (exitCode, output, _) = Query("--at", "dracula:1", "--entity", "Arthur Holmwood");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Equal("Canon of universe 'dracula' as of dracula:1: 0 entities.\n", output);
+    }
+
+    [Fact]
+    public void AMalformedPositionExitsTwo()
+    {
+        var (exitCode, _, error) = Query("--at", "dracula:1.2");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.StartsWith("wolfden query: ", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SeriesAndBookTogetherExitTwo()
+    {
+        var (exitCode, _, error) = Query("--series", "a", "--book", "b");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.StartsWith("wolfden query: give '--series' or '--book', not both.", error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ADenWithSeveralUniversesNeedsOneNamed()
+    {
+        using var den = TempDen.FromFiles(new Dictionary<string, string>
+        {
+            ["den.yaml"] = "format: 1\n",
+            ["universes/vael/universe.md"] = "---\nid: 01JC5CK3000000000000000001\nname: Vael\n---\n",
+            ["universes/orn/universe.md"] = "---\nid: 01JC5CK3000000000000000002\nname: Orn\n---\n",
+        });
+
+        var (exitCode, _, error) = Cli.Run("query", "--den", den.Root);
+        var (named, output, _) = Cli.Run("query", "vael", "--den", den.Root);
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Equal("wolfden query: the den has 2 universes (orn, vael); name one, as in 'wolfden query orn'.\n", error);
+        Assert.Equal(CliApp.ExitOk, named);
+        Assert.Equal("Canon of universe 'vael' at the end of the story: 0 entities.\n", output);
+    }
+
+    [Fact]
+    public void ADenYamlThatDoesntLoadExitsTwo()
+    {
+        using var den = TempDen.FromFiles(new Dictionary<string, string> { ["den.yaml"] = "format: 2\n" });
+
+        var (exitCode, output, error) = Cli.Run("query", "--den", den.Root);
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Empty(output);
+        Assert.Equal("wolfden query: den.yaml doesn't load, so there's nothing to query. Run 'wolfden check' to see why.\n", error);
+    }
+
+    [Fact]
+    public void AFolderThatIsntADenExitsTwo()
+    {
+        using var folder = TempDen.Empty();
+
+        var (exitCode, _, error) = Cli.Run("query", "--den", folder.Root);
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Equal($"wolfden query: '{folder.Root}' has no den.yaml, so it isn't a den. Create one there with 'wolfden init'.\n", error);
+    }
+
+    [Fact]
+    public void DraftAndTimedFactsAreMarked()
+    {
+        using var den = TempDen.FromFiles(new Dictionary<string, string>
+        {
+            ["den.yaml"] = "format: 1\n",
+            ["universes/vael/universe.md"] = "---\nid: 01JC5CK4000000000000000001\nname: Vael\n---\n",
+            ["universes/vael/books/a1/book.md"] = "---\nid: 01JC5CK4000000000000000002\nname: Book 1\nchapters: [1, 2, 3]\n---\n",
+            ["universes/vael/books/a1/entities/characters/orrin-fell.md"] = """
+                ---
+                id: 01JC5CK4000000000000000003
+                type: character
+                name: Orrin Fell
+                fields:
+                  role:
+                    - { value: deckhand, until: "a1:3" }
+                    - { value: captain, from: "a1:3", status: canon }
+                ---
+
+                Orrin's lead paragraph.
+
+                ## Overview
+                <!-- wolfden: until=a1:3 pin=true -->
+                A deckhand.
+                """,
+        });
+
+        var (_, output, _) = Cli.Run("query", "--den", den.Root, "--at", "a1:2");
+
+        Assert.Equal(
+            """
+            Canon of universe 'vael' as of a1:2: 1 entity.
+
+            # Orrin Fell
+            character, draft, filed in book 'a1': universes/vael/books/a1/entities/characters/orrin-fell.md
+
+            - role: deckhand (until a1:3, draft)
+
+            Orrin's lead paragraph.
+
+            ## Overview (until a1:3, pinned, draft)
+            A deckhand.
+
+            """.ReplaceLineEndings("\n"),
+            output);
+    }
+}
+
+[Collection(nameof(CurrentFolder))]
+public class QueryCommandCurrentFolderTests
+{
+    [Fact]
+    [Trait("Scenario", "SC-CLI-5")]
+    public void FromAFolderInsideADenItFindsTheDenAbove()
+    {
+        using var den = TempDen.DraculaCopy();
+
+        var (exitCode, output, _) = Cli.RunIn(Path.Combine(den.Root, "universes", "dracula", "entities"), "query", "--at", "dracula:1", "--brief");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.StartsWith("Canon of universe 'dracula' as of dracula:1: ", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OutsideAnyDenItSaysSo()
+    {
+        using var empty = TempDen.Empty();
+
+        var (exitCode, output, error) = Cli.RunIn(empty.Root, "query");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Empty(output);
+        Assert.StartsWith("wolfden query: there's no den here: neither this folder nor any folder above it has a den.yaml.", error, StringComparison.Ordinal);
+    }
+}

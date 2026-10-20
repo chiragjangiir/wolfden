@@ -47,5 +47,6 @@
       "rule": "F-YAML-1",
       "message": "The YAML doesn't parse: While parsing a flow sequence, did not find expected ',' or ']'."
     }
-  ]
+  ],
+  "fixes": []
 }

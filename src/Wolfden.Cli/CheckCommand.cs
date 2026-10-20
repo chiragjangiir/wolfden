@@ -1,13 +1,11 @@
-using System.Text.Encodings.Web;
-using System.Text.Json;
 using Wolfden.Core.Checks;
 using Wolfden.Core.Documents;
 
 namespace Wolfden.Cli;
 
 /// <summary>
-/// <c>wolfden check [&lt;den&gt;] [--json]</c>: runs every check on a den and
-/// reports the errors and warnings (design.md §7, format.md §1.3).
+/// <c>wolfden check [&lt;den&gt;] [--fix] [--json]</c>: runs every check on a
+/// den and reports the errors and warnings (design.md §7, format.md §1.3).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -18,27 +16,42 @@ namespace Wolfden.Cli;
 /// (<see cref="CheckReport"/>).
 /// </para>
 /// <para>
+/// <c>--fix</c> first gives every container and entity file that loads
+/// without an <c>id</c> a new one (F-ID-2, F-ID-6, <see cref="IdFix"/>),
+/// reports each file it changed or had to skip, and then checks the den as
+/// it is after the fix. Without <c>--fix</c>, check never writes.
+/// </para>
+/// <para>
 /// Exit codes: 0 when the den has no errors (warnings alone don't fail it,
 /// F-GEN-1), 1 when it has at least one error, and 2 when the command line
 /// is wrong, the folder can't be read, <c>den.yaml</c> doesn't load, or
 /// the check fails unexpectedly, so nothing else could be checked.
 /// </para>
-/// <para>
-/// This is v0 behaviour, which #17 may revise (design.md §7).
-/// </para>
 /// </remarks>
 internal static class CheckCommand
 {
-    private const string Usage = "usage: wolfden check [<den>] [--json]";
+    internal static readonly CommandSpec Spec = new(
+        "check",
+        "usage: wolfden check [<den>] [--den <den>] [--fix] [--json]",
+        """
+        Checks a den for errors and continuity problems: broken links, positions
+        that don't resolve, missing ids, and the rest of format.md's rules. It
+        reads the files, not the index.
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        // Keep names and quotes readable ("Zoë", 'x'). The JSON never goes into HTML.
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-        NewLine = "\n",
-    };
+          <den>, --den <den>  the den's folder; by default, the current folder or
+                              the nearest folder above it with a den.yaml
+          --fix               first add a new id to every container and entity
+                              file that has none (F-ID-2); nothing else changes
+          --json              print one JSON document instead of text
+
+        Exits 0 if the den has no errors (warnings alone pass), 1 if it has at
+        least one, and 2 if it couldn't be checked.
+        """,
+        ["--json", "--fix"],
+        ["--den"],
+        [],
+        1,
+        "give at most one den folder.");
 
     public static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error) =>
         Run(args, output, error, DenCheck.Run);
@@ -46,42 +59,33 @@ internal static class CheckCommand
     /// <summary>Runs the command with <paramref name="runCheck"/> in place of <see cref="DenCheck.Run(string)"/>, so tests can make it fail.</summary>
     internal static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error, Func<string, DenCheck> runCheck)
     {
-        var json = false;
-        string? path = null;
-        foreach (var arg in args)
+        if (CommandLine.Parse(Spec, args, output, error, out var line) is { } exit)
         {
-            switch (arg)
-            {
-                case "--json":
-                    json = true;
-                    break;
-                case "--help" or "-h":
-                    output.WriteLine(Usage);
-                    return CliApp.ExitOk;
-                case var option when option.StartsWith('-') && option.Length > 1:
-                    error.WriteLine($"wolfden check: unknown option '{option}'.");
-                    error.WriteLine(Usage);
-                    return CliApp.ExitUsage;
-                case var _ when path is not null:
-                    error.WriteLine("wolfden check: give at most one den folder.");
-                    error.WriteLine(Usage);
-                    return CliApp.ExitUsage;
-                default:
-                    path = arg;
-                    break;
-            }
+            return exit;
         }
 
-        path ??= ".";
+        if (!DenLocation.TryGetGiven(Spec, line, error, out var given))
+        {
+            return CliApp.ExitUsage;
+        }
+
+        // A folder with no den.yaml is still checked, so the report says why it isn't a den (F-DEN-1).
+        var path = given ?? DenLocation.FindAbove(Environment.CurrentDirectory) ?? ".";
         if (!Directory.Exists(path))
         {
             error.WriteLine($"wolfden check: there's no folder at '{path}'.");
             return CliApp.ExitUsage;
         }
 
+        IReadOnlyList<IdFixResult> fixes = [];
         DenCheck check;
         try
         {
+            if (line.Has("--fix"))
+            {
+                fixes = IdFix.Run(path);
+            }
+
             check = runCheck(path);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -96,14 +100,13 @@ internal static class CheckCommand
             return CliApp.ExitUsage;
         }
 
-        if (json)
+        if (line.Has("--json"))
         {
-            // LF throughout, on every OS, so the bytes don't depend on where it runs.
-            output.Write(JsonSerializer.Serialize(CheckReport.From(check), JsonOptions) + "\n");
+            CliJson.Write(output, CheckReport.From(check, fixes));
         }
         else
         {
-            WriteText(check, output);
+            WriteText(check, fixes, output);
         }
 
         return !check.IsLoaded ? CliApp.ExitUsage
@@ -111,8 +114,18 @@ internal static class CheckCommand
             : CliApp.ExitOk;
     }
 
-    private static void WriteText(DenCheck check, TextWriter output)
+    private static void WriteText(DenCheck check, IReadOnlyList<IdFixResult> fixes, TextWriter output)
     {
+        foreach (var fix in fixes)
+        {
+            output.WriteLine($"{fix.Path}: {FixMessage(fix)}");
+        }
+
+        if (fixes.Count > 0)
+        {
+            output.WriteLine();
+        }
+
         foreach (var d in check.Diagnostics)
         {
             var line = d.Diagnostic.Line is int n ? $":{n}" : "";
@@ -126,6 +139,10 @@ internal static class CheckCommand
 
         output.WriteLine(Summary(check));
     }
+
+    internal static string FixMessage(IdFixResult fix) => fix.Outcome == IdFixOutcome.Added
+        ? $"fixed F-ID-2: added id {fix.Id}"
+        : $"not fixed F-ID-2: {fix.Reason}";
 
     internal static string Summary(DenCheck check)
     {
@@ -144,7 +161,7 @@ internal static class CheckCommand
 
     internal static string Severity(DiagnosticSeverity severity) => severity == DiagnosticSeverity.Error ? "error" : "warning";
 
-    private static string Count(int n, string one, string? many = null) => $"{n} {(n == 1 ? one : many ?? one + "s")}";
+    internal static string Count(int n, string one, string? many = null) => $"{n} {(n == 1 ? one : many ?? one + "s")}";
 }
 
 /// <summary>
@@ -157,7 +174,9 @@ internal static class CheckCommand
 /// <param name="Den">What was checked.</param>
 /// <param name="Summary">The counts.</param>
 /// <param name="Diagnostics">Every diagnostic, sorted as <see cref="DenCheck.Diagnostics"/> is.</param>
-internal sealed record CheckReport(int Version, CheckReport.DenInfo Den, CheckReport.Counts Summary, IReadOnlyList<CheckReport.Item> Diagnostics)
+/// <param name="Fixes">What <c>--fix</c> did, file by file, in path order; empty without <c>--fix</c>.</param>
+internal sealed record CheckReport(
+    int Version, CheckReport.DenInfo Den, CheckReport.Counts Summary, IReadOnlyList<CheckReport.Item> Diagnostics, IReadOnlyList<CheckReport.Fix> Fixes)
 {
     /// <summary>What was checked.</summary>
     /// <param name="Loaded">True if <c>den.yaml</c> loaded. If false, only den.yaml was checked.</param>
@@ -180,11 +199,22 @@ internal sealed record CheckReport(int Version, CheckReport.DenInfo Den, CheckRe
     /// <param name="Message">The message for the writer.</param>
     internal sealed record Item(string Path, int? Line, string Severity, string Rule, string Message);
 
-    public static CheckReport From(DenCheck check) => new(
+    /// <summary>One file <c>--fix</c> changed or had to leave alone.</summary>
+    /// <param name="Path">The file, relative to the den root, with <c>/</c>.</param>
+    /// <param name="Rule">The rule it fixes, <c>F-ID-2</c>.</param>
+    /// <param name="Outcome"><c>fixed</c> or <c>skipped</c>.</param>
+    /// <param name="Id">The id it was given, or null if it was skipped.</param>
+    /// <param name="Message">What happened, for the writer.</param>
+    internal sealed record Fix(string Path, string Rule, string Outcome, string? Id, string Message);
+
+    public static CheckReport From(DenCheck check, IReadOnlyList<IdFixResult>? fixes = null) => new(
         1,
         new DenInfo(check.IsLoaded, check.Structure.Format, check.IsLoaded ? check.Structure.SpoilerChecks : null, check.Catalog.Entities.Count),
         new Counts(check.ErrorCount, check.WarningCount, check.Diagnostics.Select(d => d.Path).Distinct(StringComparer.Ordinal).Count()),
         check.Diagnostics
             .Select(d => new Item(d.Path, d.Diagnostic.Line, CheckCommand.Severity(d.Diagnostic.Severity), d.Diagnostic.RuleId, d.Diagnostic.Message))
+            .ToList(),
+        (fixes ?? [])
+            .Select(f => new Fix(f.Path, "F-ID-2", f.Outcome == IdFixOutcome.Added ? "fixed" : "skipped", f.Id, CheckCommand.FixMessage(f)))
             .ToList());
 }
