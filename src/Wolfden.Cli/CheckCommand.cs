@@ -35,8 +35,9 @@ internal static class CheckCommand
         "usage: wolfden check [<den>] [--den <den>] [--fix] [--json]",
         """
         Checks a den for errors and continuity problems: broken links, positions
-        that don't resolve, missing ids, and the rest of format.md's rules. It
-        reads the files, not the index.
+        that don't resolve, missing ids, values that don't fit their fields,
+        outlines, and the rest of the rules in format.md and types.md. It reads
+        the files, not the index.
 
           <den>, --den <den>  the den's folder; by default, the current folder or
                               the nearest folder above it with a den.yaml
@@ -56,10 +57,10 @@ internal static class CheckCommand
         "give at most one den folder.");
 
     public static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error) =>
-        Run(args, output, error, DenCheck.Run);
+        Run(args, output, error, DenCheck.Run, Environment.GetEnvironmentVariable("WOLFDEN_DEBUG") == "1");
 
     /// <summary>Runs the command with <paramref name="runCheck"/> in place of <see cref="DenCheck.Run(string)"/>, so tests can make it fail.</summary>
-    internal static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error, Func<string, DenCheck> runCheck)
+    internal static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error, Func<string, DenCheck> runCheck, bool debug = false)
     {
         if (CommandLine.Parse(Spec, args, output, error, out var line) is { } exit)
         {
@@ -98,22 +99,62 @@ internal static class CheckCommand
         catch (Exception e) when (e is not OutOfMemoryException)
         {
             // A bug, not a problem with the den: 2 still means "couldn't check".
-            error.WriteLine($"wolfden check: unexpected failure while checking '{path}' ({e.GetType().Name}: {e.Message}). This is a bug in Wolfden; please report it.");
-            return CliApp.ExitUsage;
+            return Unexpected(error, debug, $"while checking '{path}'", e);
         }
 
-        if (line.Has("--json"))
+        try
         {
-            CliJson.Write(output, CheckReport.From(check, fixes));
+            if (line.Has("--json"))
+            {
+                CliJson.Write(output, CheckReport.From(check, fixes));
+            }
+            else
+            {
+                WriteText(check, fixes, output);
+            }
         }
-        else
+        catch (IOException e)
         {
-            WriteText(check, fixes, output);
+            // Such as a closed pipe: the report didn't get out, so the check didn't do its job.
+            TryWrite(error, $"wolfden check: couldn't write the report: {e.Message}");
+            return CliApp.ExitUsage;
+        }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            return Unexpected(error, debug, "while writing the report", e);
         }
 
         return !check.IsLoaded ? CliApp.ExitUsage
             : check.ErrorCount > 0 ? CliApp.ExitErrors
             : CliApp.ExitOk;
+    }
+
+    /// <summary>
+    /// Reports a bug in one line, and with <c>WOLFDEN_DEBUG=1</c> the whole
+    /// exception with its stack trace, so it can be reported.
+    /// </summary>
+    private static int Unexpected(TextWriter error, bool debug, string when, Exception e)
+    {
+        TryWrite(error, $"wolfden check: unexpected failure {when} ({e.GetType().Name}: {e.Message}). This is a bug in Wolfden; please report it."
+            + (debug ? "" : " Set WOLFDEN_DEBUG=1 to see the details."));
+        if (debug)
+        {
+            TryWrite(error, e.ToString());
+        }
+
+        return CliApp.ExitUsage;
+    }
+
+    /// <summary>Writes a line to standard error, ignoring a failure there, since there's nowhere left to report it.</summary>
+    private static void TryWrite(TextWriter error, string message)
+    {
+        try
+        {
+            error.WriteLine(message);
+        }
+        catch (IOException)
+        {
+        }
     }
 
     private static void WriteText(DenCheck check, IReadOnlyList<IdFixResult> fixes, TextWriter output)
