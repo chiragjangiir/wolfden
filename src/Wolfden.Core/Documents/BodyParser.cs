@@ -29,7 +29,16 @@ internal static partial class BodyParser
 
     internal sealed record Result(IReadOnlyList<Section> Sections, string? Title, int? TitleLine, int LeadEnd);
 
-    public static Result Parse(MarkdownFile owner, SourceText source, int bodyStart, List<Diagnostic> diagnostics)
+    /// <param name="owner">The file the sections belong to.</param>
+    /// <param name="source">The file's text.</param>
+    /// <param name="bodyStart">Where the body starts.</param>
+    /// <param name="diagnostics">Where problems go.</param>
+    /// <param name="isOutline">
+    /// True for <c>outline.md</c>, where wolfden comments do nothing
+    /// (F-SEC-10): none is read as a section comment, so none can have an
+    /// error, each is a warning, and F-SEC-2's stray level-1 heading doesn't apply.
+    /// </param>
+    public static Result Parse(MarkdownFile owner, SourceText source, int bodyStart, List<Diagnostic> diagnostics, bool isOutline = false)
     {
         var text = source.Text;
         var body = text[bodyStart..];
@@ -93,8 +102,12 @@ internal static partial class BodyParser
             var level = heading.Level;
             if (level == 1)
             {
-                diagnostics.Add(new Diagnostic("F-SEC-2", DiagnosticSeverity.Warning, firstLine + 1,
-                    $"A level-1 heading after the first level-2 heading is read as level 2: '{name}'."));
+                if (!isOutline)
+                {
+                    diagnostics.Add(new Diagnostic("F-SEC-2", DiagnosticSeverity.Warning, firstLine + 1,
+                        $"A level-1 heading after the first level-2 heading is read as level 2: '{name}'."));
+                }
+
                 level = 2;
             }
 
@@ -110,7 +123,10 @@ internal static partial class BodyParser
             };
             section.BodyStart = section.HeadingEnd;
 
-            ReadSectionComment(source, bodyStart, section, lastLine, htmlByLine, commentLines, diagnostics);
+            if (!isOutline)
+            {
+                ReadSectionComment(source, bodyStart, section, lastLine, htmlByLine, commentLines, diagnostics);
+            }
 
             while (stack.Count > 0 && stack.Peek().Level >= level)
             {
@@ -151,7 +167,7 @@ internal static partial class BodyParser
                 : source.LineIndexOf(s.BodyStart) + 1;
         }
 
-        FindMisplacedComments(source, document, bodyStart, commentLines, diagnostics);
+        FindMisplacedComments(source, document, bodyStart, commentLines, diagnostics, isOutline);
         var leadEnd = sections.Count > 0 ? sections[0].HeadingStart : text.Length;
         return new Result(sections, title, titleLine, leadEnd);
     }
@@ -244,10 +260,12 @@ internal static partial class BodyParser
         section.BodyStart = source.Lines[candidate].EndIncludingTerminator;
     }
 
-    /// <summary>Reports wolfden comments outside a section comment's place (F-SEC-10).</summary>
+    /// <summary>Reports wolfden comments outside a section comment's place, and every one in an outline (F-SEC-10).</summary>
     private static void FindMisplacedComments(SourceText source, MarkdigDocument document, int bodyStart,
-        HashSet<int> commentLines, List<Diagnostic> diagnostics)
+        HashSet<int> commentLines, List<Diagnostic> diagnostics, bool isOutline)
     {
+        const string InOutline = "A wolfden comment does nothing in outline.md, so it's ignored. Rows have no positions: map a row to a chapter with its chapter cell.";
+        const string Elsewhere = "A wolfden comment does nothing here. Its only place is the line under a section heading.";
         var found = new SortedDictionary<int, string>();
         foreach (var html in document.Descendants<HtmlBlock>())
         {
@@ -258,7 +276,7 @@ internal static partial class BodyParser
                 var line = source.LineIndexOf(start + m.Index);
                 if (!commentLines.Contains(line))
                 {
-                    found.TryAdd(line, "A wolfden comment does nothing here. Its only place is the line under a section heading.");
+                    found.TryAdd(line, isOutline ? InOutline : Elsewhere);
                 }
             }
         }
@@ -271,9 +289,9 @@ internal static partial class BodyParser
             }
 
             var line = source.LineIndexOf(bodyStart + inline.Span.Start);
-            var message = OwningBlock(inline) is HeadingBlock
-                ? "A wolfden comment on a heading line does nothing. Move it to the line under the heading."
-                : "A wolfden comment does nothing here. Its only place is the line under a section heading.";
+            var message = isOutline ? InOutline
+                : OwningBlock(inline) is HeadingBlock ? "A wolfden comment on a heading line does nothing. Move it to the line under the heading."
+                : Elsewhere;
             found[line] = message;
         }
 

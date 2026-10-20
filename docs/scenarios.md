@@ -321,6 +321,234 @@ assistant runs `wolfden check --json`.
 Spec: F-GEN-3. Covered by:
 `CheckCommandTests.JsonOutputMatchesTheGoldenFile`.
 
+### SC-CHECK-13. A typo in a field name
+
+A character's note says `occupaton: [deckhand]`.
+
+- It's a warning that the character type doesn't define `occupaton`. The
+  value is kept and indexed as written. The universal `row` and
+  `placeholder` never get this warning, and an untyped note gets no field
+  warnings at all.
+
+Spec: F-FLD-2, F-ENT-2, types.md §5.5. Covered by:
+`SpecWarningCheckTests.AFieldTheTypeDoesntDefineIsWarned`.
+
+### SC-CHECK-14. A value that doesn't fit its field
+
+The den's own `ship` type has a number `crew`, an enum `condition`, and a
+`ref` to a captain. A ship note says `crew: "140"`, `condition: damagd`,
+and `captain: Orrin Fell` without a link.
+
+- Each value is a warning that names the field and what it should be,
+  and the misspelled enum value suggests `damaged`. In a temporal list,
+  each entry's value is checked. Nothing is an error, and the values are
+  kept as written.
+
+Spec: F-FLD-3, types.md F-FT-4 to F-FT-12. Covered by:
+`SpecWarningCheckTests.ValuesThatDontMatchTheirFieldTypesAreWarned`.
+
+### SC-CHECK-15. A link without quotes
+
+A character's note says `species: [[velari]]`, which YAML reads as a list
+inside a list.
+
+- It's one warning that says to write `"[[velari]]"` in quotes, not a
+  second one about the field's type.
+
+Spec: F-FLD-6. Covered by:
+`SpecWarningCheckTests.AnUnquotedLinkIsAListInsideAListAndSaysToQuoteIt`.
+
+### SC-CHECK-16. Values that change, on a field that doesn't
+
+The writer gave a character's `born` (not a temporal field) a list of
+values from different chapters.
+
+- It's a warning that the field isn't temporal. It's still read as
+  temporal. A single value with only a `from`, such as a death the reader
+  learns about later, gets no warning.
+
+Spec: F-TMP-8, types.md F-FT-13. Covered by:
+`SpecWarningCheckTests.EntriesOnAFieldThatIsntTemporalAreWarned`.
+
+### SC-CHECK-17. A typo in an entry
+
+A value is written `{ value: deckhand, form: "a1:3" }`.
+
+- It's a warning that `form` isn't an entry key, so the writer sees why
+  the value holds from the start of the story.
+
+Spec: F-TMP-2. Covered by:
+`SpecWarningCheckTests.AnEntryKeyThatIsntOneIsWarned`.
+
+### SC-CHECK-18. An event points at an outline row that isn't there
+
+An event's `row: 4` names a row the writer deleted from the outline. Another
+says `row: 02`.
+
+- Each is a warning: row 4 isn't in the series' outlines, and `02` isn't
+  a row id. A row id in the outlines of two series is ambiguous for a
+  universe-level note. A `row` entry with a `from` is a warning too.
+
+Spec: F-FLD-7, F-OUT-5. Covered by:
+`SpecWarningCheckTests.ARowFieldThatDoesntMatchTheOutlineIsWarned`,
+`SpecWarningCheckTests.ARowIdFoundInTwoSeriesIsAmbiguousForAUniverseEntityButNotForABookEntity`.
+
+### SC-CHECK-19. A Book 2 character who first appears in Book 3
+
+A character filed under `a2` has `from: "a3:2"`.
+
+- It's a warning that the `from` is outside the book the character is
+  filed in. Views still use it.
+
+Spec: F-ENT-6. Covered by:
+`SpecWarningCheckTests.ABookEntityWhoseFromIsInAnotherBookIsWarned`.
+
+### SC-CHECK-20. A subsection placed outside its section
+
+A `### Recovery` subsection has `from=a1:5`, but its `## Shoulder injury`
+starts at `a1:10`.
+
+- It's a warning that the subsection starts before its parent, so it
+  starts with its parent instead. A subsection that runs past its parent,
+  or starts after its parent hands over, is a warning too.
+
+Spec: F-SEC-9, F-SEC-8. Covered by:
+`SpecWarningCheckTests.ASubsectionOutsideItsParentIsWarned`.
+
+### SC-CHECK-21. A note saved straight into a book folder
+
+The writer saved `scratch.md` next to `book.md`.
+
+- It's a warning that the file is ignored, with a hint to move it into
+  `entities/`. A book's `outline.md` is fine, but an `outline.md` in a
+  series folder is a warning, since outlines are read only in books.
+
+Spec: F-LAY-7, F-OUT-1. Covered by:
+`SpecWarningCheckTests.AMarkdownFileDirectlyInAContainerFolderIsWarned`.
+
+### SC-CHECK-22. A character filed with the locations
+
+A character's note is in `entities/locations/`.
+
+- It's a warning that names the folder it belongs in,
+  `entities/characters/`. A folder that isn't any type's, such as
+  `entities/crew/`, gets no warning.
+
+Spec: F-LAY-6. Covered by:
+`SpecWarningCheckTests.AnEntityInAnotherTypesFolderIsWarned`,
+`SpecWarningCheckTests.AnEntityDirectlyInEntitiesIsWarned`.
+
+### SC-CHECK-23. An old copy of the den inside the den
+
+The writer keeps `archive/old-den/` in the den, with its own `den.yaml`.
+
+- That `den.yaml` is a warning that dens don't nest, and it's ignored.
+
+Spec: F-LAY-1, F-LAY-8. Covered by:
+`SpecWarningCheckTests.ADenYamlBelowTheRootIsWarned`.
+
+### SC-CHECK-24. A notes folder at the den root
+
+The writer made `notes/` at the den root for a style guide.
+
+- It's a warning that `notes/` is reserved and ignored for now, with a
+  hint to keep notes in a universe's `entities/notes/`.
+
+Spec: F-LAY-3. Covered by:
+`SpecWarningCheckTests.NotesAndAuthorsAtTheDenRootAreReserved`.
+
+### SC-CHECK-25. I split an outline row and typed the same id twice
+
+Splitting row 38, the writer typed `38` twice and put row 36 after them.
+
+- Each repeated id is a warning on every row that has it, across the
+  series' outlines, and row 36 is a warning that it's out of order.
+
+Spec: F-OUT-4, F-OUT-5. Covered by:
+`SpecWarningCheckTests.OutlineRowsOutOfOrderOrRepeatedAreWarned`.
+
+### SC-CHECK-26. Book 2's outline starts again at row 1
+
+Book 1's outline ends at row 2, and the writer started Book 2's at row 1.
+
+- It's a warning on Book 2's outline: row ids keep counting across a
+  series, so its first row should come after Book 1's last.
+
+Spec: F-OUT-6. Covered by:
+`SpecWarningCheckTests.RowsThatRestartInTheNextBookAreWarned`.
+
+### SC-CHECK-27. Outline rows and chapters disagree
+
+Book 1 was cut to 24 chapters, but a row still says chapter 30, and a
+beat moved up the table still says a later chapter than the rows below
+it.
+
+- The row for chapter 30 is a warning that the book has no such chapter.
+  The row mapped to an earlier chapter than a row above it is a warning
+  that names that row.
+
+Spec: F-OUT-9, F-OUT-10. Covered by:
+`SpecWarningCheckTests.OutlineRowsWithMissingOrOutOfOrderChaptersAreWarned`.
+
+### SC-CHECK-28. An outline table that doesn't read as I meant
+
+An outline row has `[[orrin-fell|Orrin]]` with an unescaped `|`, a row id
+`069`, a status `maybe`, a header typed twice, and a second table that
+has a `row` column but no `beat`.
+
+- Each is a warning on its line: the extra cell and the unclosed `[[`,
+  the bad row id (the row is ignored), the unknown status (read as
+  `draft`), the ignored column, and "did you mean an outline table?".
+  None is an error.
+
+Spec: F-OUT-2, F-OUT-3, F-OUT-9, F-OUT-11, F-OUT-12. Covered by:
+`SpecWarningCheckTests.AnOutlineTableThatDoesntReadAsMeantIsWarned`.
+
+### SC-CHECK-29. A section comment pasted into an outline
+
+The writer pasted `<!-- wolfden: from=a1:14.2 status=maybe -->` under a
+heading in `outline.md`.
+
+- It's a warning that wolfden comments do nothing in an outline. Its bad
+  values aren't errors, and the outline's rows and links are still read.
+
+Spec: F-SEC-10, F-GEN-2 (#80). Covered by:
+`SpecWarningCheckTests.AWolfdenCommentInAnOutlineIsAWarningAndTheOutlineStillLoads`,
+`SpecWarningCheckTests.AnOutlineParsedAsAnOutlineHasNoSectionCommentsOrCommentErrors`.
+
+### SC-CHECK-30. `den.yaml` lists an author without a name
+
+`den.yaml` says `authors: { wren-calder: Wren Calder }` instead of giving
+the author a `name`.
+
+- It's an error in `den.yaml`, so the den doesn't load and check exits
+  2. So is an author key that isn't a key, such as `Wren Calder`.
+
+Spec: F-DEN-3, F-KEY-1, F-GEN-2. Covered by:
+`SpecWarningCheckTests.AnAuthorsThatIsntAMappingOfNamedIdentitiesKeepsTheDenFromLoading`.
+
+### SC-CHECK-31. A series names an author `den.yaml` doesn't have
+
+A series says `authors: [wren-calder, ash-morrow]`, and `den.yaml` lists
+only `wren-calder`.
+
+- `ash-morrow` is a warning that lists the den's authors.
+
+Spec: F-CTR-2. Covered by:
+`SpecWarningCheckTests.AContainerAuthorThatDenYamlDoesntListIsWarned`.
+
+### SC-CHECK-32. A book file written by hand has no id
+
+The writer made `book.md` and `universe.md` by hand, without ids.
+
+- Each is the same no-id warning an entity gets, suggesting
+  `wolfden check --fix`. In a final book, the warning says `--fix` won't
+  add one until the book is unfrozen.
+
+Spec: F-ID-2, F-ID-6, F-BOOK-1 (#100). Covered by:
+`SpecWarningCheckTests.AContainerFileWithoutAnIdIsWarnedLikeAnEntity`,
+`CheckCommandTests.FixAddsMissingIdsAndReportsEachFile`.
+
 ## RT: saving a note keeps what the writer wrote
 
 Background: the files are the writer's, and Wolfden is only one of the

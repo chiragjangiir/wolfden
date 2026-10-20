@@ -29,9 +29,9 @@ namespace Wolfden.Core.Entities;
 /// Each entity's type is looked up among the den's enabled types
 /// (<see cref="CatalogEntity.Definition"/>). Checks against types and
 /// checks that only warn, such as unknown types, missing required fields
-/// and sections, and positions that don't resolve, are made by
-/// <see cref="Checks.DenCheck"/> (<c>wolfden check</c>). Field values
-/// aren't checked against their field types yet (F-FLD-2, F-FLD-3).
+/// and sections, field values that don't match their field types (F-FLD-2,
+/// F-FLD-3), and positions that don't resolve, are made by
+/// <see cref="Checks.DenCheck"/> (<c>wolfden check</c>).
 /// </para>
 /// </remarks>
 public sealed partial class EntityCatalog

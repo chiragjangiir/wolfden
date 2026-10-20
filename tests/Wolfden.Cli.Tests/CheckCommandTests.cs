@@ -40,7 +40,7 @@ public class CheckCommandTests
             Sails with [[Zoë Marr]]. Owes [[the-stranger]] a debt.
             """,
         [$"{A1}/entities/characters/torn.md"] = "---\nid: 01JC5CK1000000000000000006\ntype: character\nname: [Torn\n---\n",
-        [$"{A1}/entities/characters/Old Notes.md"] = "---\nid: 01JC5CK1000000000000000007\ntype: note\nname: Old notes\nstatus: draft\n---\n",
+        [$"{A1}/entities/notes/Old Notes.md"] = "---\nid: 01JC5CK1000000000000000007\ntype: note\nname: Old notes\nstatus: draft\n---\n",
         [$"{A2}/entities/characters/the-stranger.md"] = "---\nid: 01JC5CK1000000000000000008\ntype: character\nname: The Stranger\nstatus: canon\n---\n",
     };
 
@@ -63,11 +63,11 @@ public class CheckCommandTests
         Assert.Empty(error);
         Assert.Equal(
             $"""
-            {A1}/entities/characters/Old Notes.md: warning F-KEY-4: The file name 'Old Notes.md' isn't a valid slug (lowercase letters and digits, with single hyphens between words), so links reach this entity only by id, name, or alias.
             {A1}/entities/characters/orrin-fell.md:9: warning F-POS-4: a1:9: Book 'a1' has no chapter '9'. Until it resolves, the fact that uses it is left out of canon views.
             {A1}/entities/characters/orrin-fell.md:13: warning F-LINK-13: [[the-stranger]]: 'The Stranger' enters canon at the start of book 'a2', after this link's position, the start of book 'a1'. It may be a spoiler.
             {A1}/entities/characters/orrin-fell.md:13: warning F-LINK-8: [[Zoë Marr]]: 'Zoë Marr' matches no entity in universe 'vael'.
             {A1}/entities/characters/torn.md:5: error F-YAML-1: {ErrorMessage(den)}
+            {A1}/entities/notes/Old Notes.md: warning F-KEY-4: The file name 'Old Notes.md' isn't a valid slug (lowercase letters and digits, with single hyphens between words), so links reach this entity only by id, name, or alias.
 
             1 error and 4 warnings in 3 files. Checked 3 entities; spoiler checks are on.
 
@@ -116,6 +116,45 @@ public class CheckCommandTests
         Assert.StartsWith("wolfden check: unexpected failure while checking ", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("(InvalidOperationException: boom)", error.ToString(), StringComparison.Ordinal);
         Assert.Single(error.ToString().TrimEnd().Split('\n'));
+        Assert.Contains("Set WOLFDEN_DEBUG=1 to see the details.", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithDebugOnAnUnexpectedFailurePrintsTheStackTrace()
+    {
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = CheckCommand.Run([TempDen.DraculaRoot], output, error, _ => throw new InvalidOperationException("boom"), debug: true);
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Contains("(InvalidOperationException: boom)", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("System.InvalidOperationException: boom", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains(" at ", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AReportThatCantBeWrittenExitsTwo()
+    {
+        // Such as output piped to a program that has already exited.
+        var error = new StringWriter();
+
+        var exitCode = CheckCommand.Run([TempDen.DraculaRoot], new FailingWriter(), error, Core.Checks.DenCheck.Run);
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Equal("wolfden check: couldn't write the report: The pipe has been closed.\n", error.ToString().ReplaceLineEndings("\n"));
+    }
+
+    /// <summary>A writer whose every write fails, as a closed pipe's does.</summary>
+    private sealed class FailingWriter : StringWriter
+    {
+        public override void Write(char value) => throw new IOException("The pipe has been closed.");
+
+        public override void Write(string? value) => throw new IOException("The pipe has been closed.");
+
+        public override void Write(char[] buffer, int index, int count) => throw new IOException("The pipe has been closed.");
+
+        public override void WriteLine(string? value) => throw new IOException("The pipe has been closed.");
     }
 
     [Fact]
@@ -313,6 +352,7 @@ public class CheckCommandTests
 
     [Fact]
     [Trait("Scenario", "SC-CLI-4")]
+    [Trait("Scenario", "SC-CHECK-32")]
     public void FixAddsMissingIdsAndReportsEachFile()
     {
         using var den = TempDen.FromFiles(NoIdsDen);
@@ -323,6 +363,18 @@ public class CheckCommandTests
             "the-stranger.md:1: warning F-ID-2: no id, and book 'a2' is final (frozen), so `wolfden check --fix` won't add one until the book is unfrozen.",
             before.Output,
             StringComparison.Ordinal);
+
+        // Container files get the same warning (#100), and the same wording in a final book.
+        Assert.Contains(
+            "universes/vael/universe.md:1: warning F-ID-2: no id; run `wolfden check --fix` to add one. Until then, the index knows this universe by its path.",
+            before.Output,
+            StringComparison.Ordinal);
+        Assert.Contains("universes/vael/series/a/books/a1/book.md:1: warning F-ID-2: no id; run `wolfden check --fix` to add one.", before.Output, StringComparison.Ordinal);
+        Assert.Contains(
+            "universes/vael/series/a/books/a2/book.md:1: warning F-ID-2: no id, and book 'a2' is final (frozen), so `wolfden check --fix` won't add one until the book is unfrozen. Until then, the index knows this book by its path.",
+            before.Output,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("series.md:1: warning F-ID-2", before.Output, StringComparison.Ordinal);
 
         var (exitCode, output, error) = Check(den.Root, "--fix");
 
@@ -338,6 +390,9 @@ public class CheckCommandTests
         Assert.Matches(@"^universes/vael/universe\.md: fixed F-ID-2: added id ", lines[4]);
         Assert.Equal("", lines[5]);
         Assert.DoesNotContain("orrin-fell.md:1: warning F-ID-2", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("universe.md:1: warning F-ID-2", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("a1/book.md:1: warning F-ID-2", output, StringComparison.Ordinal);
+        Assert.Contains("a2/book.md:1: warning F-ID-2: no id, and book 'a2' is final (frozen)", output, StringComparison.Ordinal);
 
         // Only the id line is new; the comment line stays first, and CRLF stays CRLF.
         var id = lines[1][^26..];

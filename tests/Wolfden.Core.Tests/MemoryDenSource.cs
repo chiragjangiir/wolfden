@@ -78,12 +78,31 @@ internal sealed class MemoryDenSource : IDenSource
     /// <summary>A minimal valid den.yaml.</summary>
     public static MemoryDenSource Den() => new MemoryDenSource().With("den.yaml", "format: 1\n");
 
-    /// <summary>Adds a container file with the given frontmatter lines after its name.</summary>
+    /// <summary>
+    /// Adds a container file with the given frontmatter lines after its name,
+    /// then an id made from its folder, so F-ID-2 stays quiet and the lines
+    /// above it don't move. A line that sets <c>id</c> replaces it: pass
+    /// <c>"id:"</c> for a container with no id.
+    /// </summary>
     public MemoryDenSource Container(string folder, string fileName, params string[] frontmatter)
     {
         var name = folder.Split('/')[^1];
+        var id = frontmatter.Any(l => l.StartsWith("id:", StringComparison.Ordinal)) ? "" : $"id: {ContainerId(folder)}\n";
         var body = string.Join("", frontmatter.Select(l => l + "\n"));
-        return With($"{folder}/{fileName}", $"---\nname: {name}\n{body}---\n");
+        return With($"{folder}/{fileName}", $"---\nname: {name}\n{body}{id}---\n");
+    }
+
+    /// <summary>The id <see cref="Container"/> gives a container folder: a valid ULID made from the path.</summary>
+    public static string ContainerId(string folder)
+    {
+        // FNV-1a, so the id is the same in every run.
+        var hash = 14695981039346656037UL;
+        foreach (var c in folder)
+        {
+            hash = (hash ^ c) * 1099511628211UL;
+        }
+
+        return "01JCNTR" + (hash % 10_000_000_000_000_000_000UL).ToString("D19", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public MemoryDenSource Universe(string key, params string[] frontmatter) =>

@@ -13,13 +13,6 @@
   },
   "diagnostics": [
     {
-      "path": "universes/vael/series/a/books/a1/entities/characters/Old Notes.md",
-      "line": null,
-      "severity": "warning",
-      "rule": "F-KEY-4",
-      "message": "The file name 'Old Notes.md' isn't a valid slug (lowercase letters and digits, with single hyphens between words), so links reach this entity only by id, name, or alias."
-    },
-    {
       "path": "universes/vael/series/a/books/a1/entities/characters/orrin-fell.md",
       "line": 9,
       "severity": "warning",
@@ -46,6 +39,13 @@
       "severity": "error",
       "rule": "F-YAML-1",
       "message": "The YAML doesn't parse: While parsing a flow sequence, did not find expected ',' or ']'."
+    },
+    {
+      "path": "universes/vael/series/a/books/a1/entities/notes/Old Notes.md",
+      "line": null,
+      "severity": "warning",
+      "rule": "F-KEY-4",
+      "message": "The file name 'Old Notes.md' isn't a valid slug (lowercase letters and digits, with single hyphens between words), so links reach this entity only by id, name, or alias."
     }
   ],
   "fixes": []

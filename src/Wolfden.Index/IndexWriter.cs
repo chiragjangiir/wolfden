@@ -562,7 +562,7 @@ internal sealed class IndexWriter
 
             if (source.FileExists(path))
             {
-                var file = MarkdownFile.Parse(source.ReadFile(path));
+                var file = MarkdownFile.ParseOutline(source.ReadFile(path));
                 result.Add(new OutlineFile(book, path, OutlineReader.IsExcluded(file) ? null : OutlineReader.ReadRows(file)));
             }
         }
