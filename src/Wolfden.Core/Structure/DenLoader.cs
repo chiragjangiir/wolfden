@@ -32,10 +32,13 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
             return;
         }
 
-        if (ReadFormat(file) is not int format || !ReadSettings(file) || ReadPacks(file) is not { } packs)
+        if (ReadFormat(file) is not int format || !ReadSettings(file) || ReadAuthors(file) is not { } authors
+            || ReadPacks(file) is not { } packs)
         {
             return;
         }
+
+        den.Authors = authors;
 
         den.SetLoaded(format);
 
@@ -111,6 +114,59 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         }
 
         return ok ? result : null;
+    }
+
+    /// <summary>
+    /// F-DEN-3: <c>authors</c> is an optional mapping from author key
+    /// (F-KEY-1) to an Author Identity, a mapping with a non-empty
+    /// <c>name</c>. Any other shape is an error, which keeps the den from
+    /// loading. Other keys in an identity are kept. Returns the author keys,
+    /// in file order, or null on an error.
+    /// </summary>
+    private List<string>? ReadAuthors(YamlFile file)
+    {
+        var node = file.GetValue("authors");
+        if (node is null or YamlScalar { IsNull: true })
+        {
+            return [];
+        }
+
+        if (node is not YamlMapping map)
+        {
+            den.Add(DenFile, new Diagnostic("F-DEN-3", DiagnosticSeverity.Error, node.Line,
+                "authors must be a mapping from author key to an identity with a name, such as 'authors: { wren-calder: { name: Wren Calder } }'."));
+            return null;
+        }
+
+        var keys = new List<string>();
+        var ok = true;
+        foreach (var entry in map.Entries)
+        {
+            var key = entry.KeyText ?? "";
+            if (!Keys.IsKey(key))
+            {
+                den.Add(DenFile, new Diagnostic("F-KEY-1", DiagnosticSeverity.Error, entry.Key.Line,
+                    $"'{key}' isn't a valid author key: use 1 to 64 lowercase letters and digits, with single hyphens between words."));
+                ok = false;
+            }
+
+            if (entry.Value is not YamlMapping identity)
+            {
+                den.Add(DenFile, new Diagnostic("F-DEN-3", DiagnosticSeverity.Error, entry.Value.Line,
+                    $"Author '{key}' must be a mapping with a name, such as '{{ name: Wren Calder }}'."));
+                ok = false;
+            }
+            else if (identity["name"] is not YamlScalar { IsNull: false } name || name.Text.Trim().Length == 0)
+            {
+                den.Add(DenFile, new Diagnostic("F-DEN-3", DiagnosticSeverity.Error, identity["name"]?.Line ?? entry.Key.Line,
+                    $"Author '{key}' needs a non-empty name."));
+                ok = false;
+            }
+
+            keys.Add(key);
+        }
+
+        return ok ? keys : null;
     }
 
     /// <summary>F-DEN-1: <c>format</c> is a required integer, from 1 up to the highest this reader supports.</summary>

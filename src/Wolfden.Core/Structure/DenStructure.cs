@@ -26,11 +26,13 @@ public sealed record DenDiagnostic(string Path, Diagnostic Diagnostic)
 /// <see cref="Diagnostics"/> holds the problems that decide the structure:
 /// container files' parse errors, names and ids, a book's status and
 /// chapters, <c>order</c> and <c>books</c>, key clashes, <c>den.yaml</c>'s
-/// <c>packs</c> (F-DEN-4), pack files (<see cref="DenTypes.Diagnostics"/>),
-/// and chapter-field values, which are ignored when they don't match their
-/// definitions (types.md F-CHAP-3). <see cref="Checks.DenCheck"/> adds the
-/// positions in container section comments (F-POS-4). Other checks of
-/// container files, such as authors, aren't made yet.
+/// <c>authors</c> (F-DEN-3) and <c>packs</c> (F-DEN-4), pack files
+/// (<see cref="DenTypes.Diagnostics"/>), and chapter-field values, which are
+/// ignored when they don't match their definitions (types.md F-CHAP-3).
+/// <see cref="Checks.DenCheck"/> adds the warnings that don't change the
+/// structure, such as positions in container section comments (F-POS-4), a
+/// container without an id (F-ID-2), its <c>authors</c> (F-CTR-2), and the
+/// layout of the den's folders (F-LAY-1, F-LAY-3, F-LAY-7).
 /// </remarks>
 public sealed class DenStructure
 {
@@ -62,6 +64,12 @@ public sealed class DenStructure
     /// (F-SEC-12) aren't included.
     /// </summary>
     public IReadOnlyList<string> BookkeepingSections { get; internal set; } = [];
+
+    /// <summary>
+    /// The author keys from <c>den.yaml</c>'s <c>authors</c> (F-DEN-3), in
+    /// file order. Containers' <c>authors</c> name them (F-CTR-2).
+    /// </summary>
+    public IReadOnlyList<string> Authors { get; internal set; } = [];
 
     /// <summary>
     /// The den's enabled packs and types (types.md F-PACK-9). Until
