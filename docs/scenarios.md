@@ -864,3 +864,21 @@ Spec: design.md §7. Covered by:
 `IncrementalUpdateTests.ADeletedIndexIsRebuilt`,
 `DenWatcherTests.OnlyOneWatcherRunsPerDen`,
 `IndexWatchTests.ASecondWatcherOnTheSameDenExits2`.
+
+### SC-WATCH-6. I query right after a save while Wolfden watches
+
+With the watcher running on a large den, the writer saves Mara Voss's
+note and runs `wolfden query --entity "Mara Voss"` at once, before the
+watcher has applied the save.
+
+- The query shows the saved note. It waits a moment (up to about a
+  second) for the watcher to apply the save, rather than rebuilding the
+  whole index itself, which on a large den takes several seconds and
+  makes the watcher rebuild too. If the watcher hasn't caught up by
+  then, the query rebuilds the index, so the answer still matches the
+  files.
+
+Spec: design.md §7. Covered by:
+`FreshnessTests.EnsureUpToDateWaitsForARunningWatcherInsteadOfRebuilding`,
+`FreshnessTests.EnsureUpToDateRebuildsWhenTheWatcherDoesntCatchUpInTime`,
+`QueryCommandTests.AQueryWaitsBrieflyForAWatcherThenRebuildsIfItHasnt`.

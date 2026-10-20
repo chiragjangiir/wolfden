@@ -439,7 +439,8 @@ They share one surface:
   built, and rebuilds it if they differ, so an answer never
   lags behind an edit. `index --watch` keeps both the index and that hash
   up to date as files change, so while it runs a query rarely needs to
-  rebuild. The long-running `serve` and `mcp` will host the same watcher.
+  rebuild: when the hash differs and a watcher is running, `query` first
+  waits up to about a second for it to catch up (#108). The long-running `serve` and `mcp` will host the same watcher.
   `--watch` keeps going when `den.yaml` stops loading, so the writer can
   fix it, and reports a batch that fails on standard error, then rebuilds.
 

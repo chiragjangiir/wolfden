@@ -261,14 +261,42 @@ public static class IndexBuilder
         return recorded == FilesFingerprint(Path.GetFullPath(denRoot)) ? IndexStatus.Current : IndexStatus.FilesChanged;
     }
 
+    /// <summary>The longest <see cref="EnsureUpToDate(string)"/> waits for a running watcher to catch up before it rebuilds the index itself.</summary>
+    public static readonly TimeSpan WatcherWait = TimeSpan.FromSeconds(1);
+
+    /// <summary>How often <see cref="EnsureUpToDate(string, TimeSpan)"/> looks again while it waits for a watcher.</summary>
+    private static readonly TimeSpan WatcherPoll = TimeSpan.FromMilliseconds(100);
+
     /// <summary>
     /// Rebuilds the index unless <see cref="CheckFiles"/> says it's
-    /// current: usable, and built from the files as they are now.
+    /// current: usable, and built from the files as they are now. If only
+    /// the files changed and a watcher is running (<see cref="DenWatcher.IsWatching"/>),
+    /// it first waits up to <see cref="WatcherWait"/> for the watcher to
+    /// apply them, since a save is usually in the index well within that
+    /// (#108). A full rebuild of a large den takes far longer, and the
+    /// watcher would then rebuild again too.
     /// </summary>
-    /// <returns>The status before any rebuild.</returns>
-    public static IndexStatus EnsureUpToDate(string denRoot)
+    /// <returns>The status before any rebuild or wait.</returns>
+    public static IndexStatus EnsureUpToDate(string denRoot) => EnsureUpToDate(denRoot, WatcherWait);
+
+    /// <summary><see cref="EnsureUpToDate(string)"/>, waiting at most <paramref name="watcherWait"/> for a running watcher.</summary>
+    /// <returns>The status before any rebuild or wait.</returns>
+    public static IndexStatus EnsureUpToDate(string denRoot, TimeSpan watcherWait)
     {
         var status = CheckFiles(denRoot);
+        if (status == IndexStatus.FilesChanged && watcherWait > TimeSpan.Zero && DenWatcher.IsWatching(denRoot))
+        {
+            var waited = System.Diagnostics.Stopwatch.StartNew();
+            for (var left = watcherWait; left > TimeSpan.Zero; left = watcherWait - waited.Elapsed)
+            {
+                Thread.Sleep(left < WatcherPoll ? left : WatcherPoll);
+                if (CheckFiles(denRoot) == IndexStatus.Current)
+                {
+                    return status;
+                }
+            }
+        }
+
         if (status != IndexStatus.Current)
         {
             Rebuild(denRoot);

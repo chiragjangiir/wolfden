@@ -239,17 +239,53 @@ public sealed class DenWatcher : IDisposable
         _lock = null;
     }
 
+    /// <summary>
+    /// True if a watcher, in this process or another, is watching the den at
+    /// <paramref name="denRoot"/>: it holds the den's watch lock open. A
+    /// query uses it to wait briefly for the watcher instead of rebuilding
+    /// the index itself (<see cref="IndexBuilder.EnsureUpToDate(string)"/>).
+    /// </summary>
+    public static bool IsWatching(string denRoot)
+    {
+        ArgumentNullException.ThrowIfNull(denRoot);
+        var path = Path.Combine(Path.GetFullPath(denRoot), IndexBuilder.StateFolder, LockFileName);
+        try
+        {
+            // Opening it with sharing fails only while a watcher holds it with none.
+            using var probe = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return false;
+        }
+        catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return true;
+        }
+    }
+
     private void TakeLock()
     {
         var folder = Path.Combine(_root, IndexBuilder.StateFolder);
         Directory.CreateDirectory(folder);
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            _lock = new FileStream(Path.Combine(folder, LockFileName), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        }
-        catch (IOException e)
-        {
-            throw new InvalidOperationException($"Another Wolfden process is already watching the den at '{_root}'.", e);
+            try
+            {
+                _lock = new FileStream(Path.Combine(folder, LockFileName), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                return;
+            }
+            catch (IOException e)
+            {
+                if (attempt >= 3)
+                {
+                    throw new InvalidOperationException($"Another Wolfden process is already watching the den at '{_root}'.", e);
+                }
+
+                // A query looking to see whether a watcher runs (IsWatching) holds the file for a moment.
+                Thread.Sleep(50);
+            }
         }
     }
 
