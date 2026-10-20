@@ -50,6 +50,11 @@ public sealed class LinkIndex
     private readonly Dictionary<CatalogEntity, List<ResolvedLink>> _backlinks = [];
     private readonly List<DenDiagnostic> _diagnostics = [];
 
+    // What each file's scan found, kept for a later build over the same structure (#14).
+    private readonly Dictionary<CatalogEntity, Scan> _entityScans = [];
+    private readonly Dictionary<Container, Scan> _containerScans = [];
+    private readonly Dictionary<string, Scan?> _outlineScans = new(StringComparer.Ordinal);
+
     private LinkIndex(EntityCatalog catalog)
     {
         Catalog = catalog;
@@ -79,49 +84,103 @@ public sealed class LinkIndex
     /// because they or a container above them have errors (F-GEN-2), are
     /// skipped. <paramref name="source"/> is read only for <c>outline.md</c> files.
     /// </summary>
-    public static LinkIndex Build(EntityCatalog catalog, IDenSource source)
+    public static LinkIndex Build(EntityCatalog catalog, IDenSource source) => Build(catalog, source, null, new HashSet<string>(StringComparer.Ordinal));
+
+    /// <summary>
+    /// <see cref="Build(EntityCatalog, IDenSource)"/> after some files
+    /// changed, for a file watcher (#14). Finding the links in a file
+    /// depends only on that file and the den's structure, so the links found
+    /// in entities that are the same objects in <paramref name="previous"/>'s
+    /// catalog (see <see cref="EntityCatalog.Update"/>), in its containers,
+    /// and in outlines not named in <paramref name="changedOutlines"/>, are
+    /// kept. Every link is resolved and checked again, since a change to one
+    /// entity can change what links anywhere resolve to. The result is the
+    /// same as a full build's.
+    /// </summary>
+    /// <param name="catalog">The entities as they are now.</param>
+    /// <param name="source">The den as it is now; read only for <c>outline.md</c> files.</param>
+    /// <param name="previous">An earlier build over the same structure, or null to find every link again.</param>
+    /// <param name="changedOutlines">The <c>outline.md</c> paths that may have changed since <paramref name="previous"/>.</param>
+    public static LinkIndex Build(EntityCatalog catalog, IDenSource source, LinkIndex? previous, IReadOnlySet<string> changedOutlines)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(changedOutlines);
         var index = new LinkIndex(catalog);
-        index.Run(source);
+        var reuse = previous is not null && previous.Catalog.Structure == catalog.Structure ? previous : null;
+        index.Run(source, reuse, changedOutlines);
         return index;
     }
 
     /// <summary>The links that resolve to <paramref name="entity"/>: its backlinks.</summary>
     public IReadOnlyList<ResolvedLink> LinksTo(CatalogEntity entity) => _backlinks.TryGetValue(entity, out var links) ? links : [];
 
-    private void Run(IDenSource source)
+    private void Run(IDenSource source, LinkIndex? previous, IReadOnlySet<string> changedOutlines)
     {
         var structure = Catalog.Structure;
-        var occurrences = new List<LinkOccurrence>();
-        var scanner = new LinkScanner(new Bookkeeping(structure.BookkeepingSections), occurrences, _diagnostics);
+        var bookkeeping = new Bookkeeping(structure.BookkeepingSections);
+        var scans = new List<Scan>();
+
+        Scan ScanWith(Action<LinkScanner> scan)
+        {
+            var result = new Scan([], []);
+            scan(new LinkScanner(bookkeeping, result.Occurrences, result.Diagnostics));
+            return result;
+        }
+
         foreach (var entity in Catalog.Entities)
         {
-            scanner.ScanEntity(entity);
+            if (previous is null || !previous._entityScans.TryGetValue(entity, out var scan))
+            {
+                scan = ScanWith(s => s.ScanEntity(entity));
+            }
+
+            _entityScans[entity] = scan;
+            scans.Add(scan);
         }
 
         foreach (var universe in structure.Universes)
         {
             foreach (var container in new Container[] { universe }.Concat(universe.Series).Concat(universe.Books))
             {
-                scanner.ScanContainer(container);
+                if (previous is null || !previous._containerScans.TryGetValue(container, out var scan))
+                {
+                    scan = ScanWith(s => s.ScanContainer(container));
+                }
+
+                _containerScans[container] = scan;
+                scans.Add(scan);
             }
 
             foreach (var book in universe.Books)
             {
                 var path = $"{book.Path}/outline.md";
-                if (!source.FileExists(path))
+                if (previous is null || changedOutlines.Contains(path) || !previous._outlineScans.TryGetValue(path, out var scan))
                 {
-                    continue;
+                    scan = null;
+                    if (source.FileExists(path))
+                    {
+                        var outline = MarkdownFile.Parse(source.ReadFile(path));
+                        if (!Outlines.OutlineReader.IsExcluded(outline))
+                        {
+                            scan = ScanWith(s => s.ScanOutline(book, path, outline));
+                        }
+                    }
                 }
 
-                var outline = MarkdownFile.Parse(source.ReadFile(path));
-                if (!Outlines.OutlineReader.IsExcluded(outline))
+                _outlineScans[path] = scan;
+                if (scan is not null)
                 {
-                    scanner.ScanOutline(book, path, outline);
+                    scans.Add(scan);
                 }
             }
+        }
+
+        var occurrences = new List<LinkOccurrence>();
+        foreach (var scan in scans)
+        {
+            occurrences.AddRange(scan.Occurrences);
+            _diagnostics.AddRange(scan.Diagnostics);
         }
 
         foreach (var occurrence in occurrences.OrderBy(o => o.Path, StringComparer.Ordinal).ThenBy(o => o.Link.Line).ThenBy(o => o.Link.Column))
@@ -218,4 +277,7 @@ public sealed class LinkIndex
 
     private void Warn(LinkOccurrence occurrence, string rule, string message) =>
         _diagnostics.Add(new DenDiagnostic(occurrence.Path, new Diagnostic(rule, DiagnosticSeverity.Warning, occurrence.Link.Line, message)));
+
+    /// <summary>The links found in one file, and the problems finding them, before they're resolved.</summary>
+    private sealed record Scan(List<LinkOccurrence> Occurrences, List<DenDiagnostic> Diagnostics);
 }

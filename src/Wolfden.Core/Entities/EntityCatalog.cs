@@ -41,9 +41,17 @@ public sealed partial class EntityCatalog
     private readonly Dictionary<string, CatalogEntity> _byPath = new(StringComparer.Ordinal);
     private readonly List<ExcludedEntity> _excluded = [];
 
+    /// <summary>What reading each entity file gave, by path, so <see cref="Update"/> can keep the files that didn't change.</summary>
+    private readonly Dictionary<string, FileResult> _files = new(StringComparer.Ordinal);
+
+    private readonly List<Container> _containers;
+
     private EntityCatalog(DenStructure structure)
     {
         Structure = structure;
+        _containers = structure.Universes
+            .SelectMany(u => new Container[] { u }.Concat(u.Series).Concat(u.Books))
+            .ToList();
     }
 
     /// <summary>The den's structure, which the entities' scopes and positions refer to.</summary>
@@ -80,36 +88,145 @@ public sealed partial class EntityCatalog
     /// <summary>Entity files left out for errors, with the texts a link could have matched them by.</summary>
     internal IReadOnlyList<ExcludedEntity> ExcludedEntities => _excluded;
 
-    private void LoadEntities(IDenSource source)
+    /// <summary>
+    /// The catalog after some files changed, for a file watcher (#14): the
+    /// same as <see cref="Load(DenStructure, IDenSource)"/> on the den as it
+    /// is now, but it reads only <paramref name="changedPaths"/> again and
+    /// keeps what it read for every other entity file. The den's structure
+    /// must be unchanged; a change to <c>den.yaml</c>, a pack, or a
+    /// container file needs a full load.
+    /// </summary>
+    /// <param name="source">The den as it is now.</param>
+    /// <param name="changedPaths">
+    /// Every path that may have been added, changed, or deleted since this
+    /// catalog was loaded. Paths that aren't entity files (see
+    /// <see cref="EntityFileScope"/>) are ignored.
+    /// </param>
+    /// <remarks>
+    /// Entities of files that didn't change are the same objects in both
+    /// catalogs, and <see cref="CatalogEntity.HasDuplicateId"/> is worked out
+    /// again on them, so this catalog's entities belong to it from now on.
+    /// </remarks>
+    public EntityCatalog Update(IDenSource source, IEnumerable<string> changedPaths)
     {
-        var containers = Structure.Universes
-            .SelectMany(u => new Container[] { u }.Concat(u.Series).Concat(u.Books))
-            .ToList();
-        foreach (var container in containers)
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(changedPaths);
+        var catalog = new EntityCatalog(Structure);
+        foreach (var (path, result) in _files)
         {
-            foreach (var path in EntityFiles(source, $"{container.Path}/entities").Order(StringComparer.Ordinal))
-            {
-                var diagnostics = new List<Diagnostic>();
-                var entity = Read(path, source.ReadFile(path), container, diagnostics, _excluded);
-                foreach (var d in diagnostics)
-                {
-                    _diagnostics.Add(new DenDiagnostic(path, d));
-                }
+            catalog._files[path] = result;
+        }
 
-                if (entity is not null)
+        foreach (var path in changedPaths)
+        {
+            catalog._files.Remove(path);
+            if (EntityFileScope(Structure, path) is { } scope && source.FileExists(path))
+            {
+                catalog._files[path] = ReadFile(path, source, scope, catalog._containers.IndexOf(scope));
+            }
+        }
+
+        catalog.Assemble();
+        return catalog;
+    }
+
+    /// <summary>
+    /// The container whose entity file <paramref name="path"/> would be if
+    /// it exists: a <c>.md</c> file at any depth under the <c>entities/</c>
+    /// folder of a container that loaded (F-LAY-5), with no hidden name on
+    /// the way (F-LAY-2). Null for any other path. It's how <see cref="Load(DenStructure, IDenSource)"/>
+    /// finds entity files, for one path.
+    /// </summary>
+    public static Container? EntityFileScope(DenStructure structure, string path)
+    {
+        ArgumentNullException.ThrowIfNull(structure);
+        ArgumentNullException.ThrowIfNull(path);
+        if (!path.EndsWith(".md", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        foreach (var universe in structure.Universes)
+        {
+            foreach (var container in new Container[] { universe }.Concat(universe.Series).Concat(universe.Books))
+            {
+                var folder = $"{container.Path}/entities/";
+                if (path.StartsWith(folder, StringComparison.Ordinal))
                 {
-                    _entities.Add(entity);
-                    _byPath[path] = entity;
+                    var rest = path[folder.Length..].Split('/');
+                    return rest.All(name => name.Length > 0 && !name.StartsWith('.')) ? container : null;
                 }
             }
         }
 
+        return null;
+    }
+
+    private void LoadEntities(IDenSource source)
+    {
+        for (var i = 0; i < _containers.Count; i++)
+        {
+            var container = _containers[i];
+            foreach (var path in EntityFiles(source, $"{container.Path}/entities"))
+            {
+                _files[path] = ReadFile(path, source, container, i);
+            }
+        }
+
+        Assemble();
+    }
+
+    private static FileResult ReadFile(string path, IDenSource source, Container scope, int containerOrder)
+    {
+        var diagnostics = new List<Diagnostic>();
+        var excluded = new List<ExcludedEntity>();
+        var entity = Read(path, source.ReadFile(path), scope, diagnostics, excluded);
+        return new FileResult(containerOrder, entity, diagnostics, excluded.Count > 0 ? excluded[0] : null);
+    }
+
+    /// <summary>
+    /// Builds the lists from the files read, in the order a full load reads
+    /// them (containers in structure order, then paths in ASCII order), so
+    /// a catalog from <see cref="Update"/> is the same as a full load's.
+    /// </summary>
+    private void Assemble()
+    {
+        var ordered = _files
+            .OrderBy(f => f.Value.ContainerOrder)
+            .ThenBy(f => f.Key, StringComparer.Ordinal);
+        foreach (var (path, result) in ordered)
+        {
+            foreach (var d in result.Diagnostics)
+            {
+                _diagnostics.Add(new DenDiagnostic(path, d));
+            }
+
+            if (result.Excluded is { } excluded)
+            {
+                _excluded.Add(excluded);
+            }
+
+            if (result.Entity is { } entity)
+            {
+                entity.HasDuplicateId = false;
+                _entities.Add(entity);
+                _byPath[path] = entity;
+            }
+        }
+
         _entities.Sort((a, b) => string.CompareOrdinal(a.Path, b.Path));
-        FindDuplicateIds(containers);
+        FindDuplicateIds(_containers);
         var sorted = _diagnostics.OrderBy(d => d.Path, StringComparer.Ordinal).ThenBy(d => d.Diagnostic.Line ?? 0).ToList();
         _diagnostics.Clear();
         _diagnostics.AddRange(sorted);
     }
+
+    /// <summary>What reading one entity file gave.</summary>
+    /// <param name="ContainerOrder">Its container's place in the structure, which decides the order of a full load.</param>
+    /// <param name="Entity">The entity, or null if the file has errors.</param>
+    /// <param name="Diagnostics">The file's own diagnostics.</param>
+    /// <param name="Excluded">For a file with errors, what a broken link could have matched it by.</param>
+    private sealed record FileResult(int ContainerOrder, CatalogEntity? Entity, IReadOnlyList<Diagnostic> Diagnostics, ExcludedEntity? Excluded);
 
     /// <summary>Every <c>.md</c> file under <paramref name="folder"/>, at any depth, skipping hidden names (F-LAY-2).</summary>
     private static IEnumerable<string> EntityFiles(IDenSource source, string folder)
