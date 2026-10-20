@@ -158,12 +158,18 @@ public sealed class LinkResolver
             return Winner(winner, matchedBy, matches, target);
         }
 
-        var listed = string.Join("; ", matches.Take(ListedMatches).Select(m => $"'{m.Name}' ({m.Path})"));
-        if (matches.Count > ListedMatches)
+        // F-ID-3: copies with a duplicated id are out of link resolution, so
+        // when every tied match is one, nothing can be picked and the link
+        // is broken. "Link by slug or id" couldn't help: a slug link to a
+        // copy is broken too, and the id link is the one that's tied (#82).
+        var tied = nearest.Count > 0 ? nearest : matches;
+        if (tied.All(_catalog.HasDuplicateId))
         {
-            listed += $"; and {matches.Count - ListedMatches} more";
+            return new TargetResolution(LinkOutcome.Broken, null, matchedBy, matches,
+                $"'{target}' would match {tied.Count} entities by {matchedBy.ToString().ToLowerInvariant()} ({List(tied)}), but each of their ids is used by more than one file (F-ID-3), so links don't reach them until the ids are unique. Give each copy a new id.");
         }
 
+        var listed = List(matches);
         var why = nearest.Count == 0
             ? "and none of them is in this file's scope chain"
             : $"and {nearest.Count} of them are in the nearest scope, {Describe(nearest[0].Scope)}";
@@ -185,6 +191,13 @@ public sealed class LinkResolver
 
         return new TargetResolution(LinkOutcome.Broken, null, matchedBy, matches,
             $"'{target}' would match '{winner.Name}' ({winner.Path}), but that entity's id is used by more than one file (F-ID-3), so links don't reach it until the id is unique.");
+    }
+
+    /// <summary>The matches for a message, up to <see cref="ListedMatches"/> of them and then "and N more".</summary>
+    private static string List(IReadOnlyList<CatalogEntity> matches)
+    {
+        var listed = string.Join("; ", matches.Take(ListedMatches).Select(m => $"'{m.Name}' ({m.Path})"));
+        return matches.Count > ListedMatches ? $"{listed}; and {matches.Count - ListedMatches} more" : listed;
     }
 
     private static int IndexOf(IReadOnlyList<Container> chain, Container scope)

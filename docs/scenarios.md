@@ -228,10 +228,14 @@ To start a new character, the writer copied `orrin-fell.md` to
 `orrin-fell-copy.md` and changed the name, but not the `id`.
 
 - Both files get a duplicate-id warning. Until one gets a new id, links to
-  either are broken, and check still exits 0.
+  either are broken, and check still exits 0. That holds even for a link
+  by the shared id, or by a name both copies still have: the broken-link
+  warning names the copies and says to give each copy a new id, rather
+  than suggesting a link by slug or id that couldn't work.
 
 Spec: F-ID-3, F-LINK-8. Covered by:
-`ContinuityCheckTests.ACopiedFileWithTheSameIdIsCaughtOnBothCopies`.
+`ContinuityCheckTests.ACopiedFileWithTheSameIdIsCaughtOnBothCopies`,
+`LinkResolutionTests.TiedCopiesWithTheSameIdBreakTheLinkAndSayToGiveThemNewIds`.
 
 ### SC-CHECK-5. I cut chapters and a fact still points at one
 
