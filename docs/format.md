@@ -236,8 +236,8 @@ caught.) Files without an `id` never clash as duplicates.
 `id`. Moving or renaming a file keeps its `id`, and a copy needs a new one.
 
 **F-ID-5.** Writers generating ids by hand can use any implementation
-listed in the [ULID] spec, uppercasing the result if needed. The CLI will
-add a `wolfden new-id` command (#17).
+listed in the [ULID] spec, uppercasing the result if needed, or run
+`wolfden new-id`, which prints new ids.
 
 **F-ID-6.** Reading and indexing MUST NOT write to files, so they never add
 a missing `id`. A writer that creates a container or entity file MUST give
@@ -247,8 +247,9 @@ moving it, F-RT-5), as the first frontmatter key, after any YAML comment
 lines that open the frontmatter. That is the
 one exception to F-RT-2 and F-RT-4. A write that changes nothing (F-RT-3)
 never adds one.
-`wolfden check --fix` (#17) adds missing ids to container and entity files
-in bulk. No writer adds an id to any other file, such as `outline.md`
+`wolfden check --fix` adds missing ids to container and entity files
+in bulk, the same way, except in a final book (F-BOOK-1) and in files
+with errors, which it leaves alone. No writer adds an id to any other file, such as `outline.md`
 (F-OUT-1) or a pack's template (types.md F-TPL-3).
 
 Valid: `01JA7Q8M4XK3V9R2D5W8HN6TQB`. Invalid: `01ja7q8m4xk3v9r2d5w8hn6tqb`
