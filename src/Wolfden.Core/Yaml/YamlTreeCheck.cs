@@ -64,6 +64,30 @@ internal static class YamlTreeCheck
         return hadKey || (edited.Entries[^1].KeyText == target && Check(null, edited.Entries[^1].Value, path, index + 1, value));
     }
 
+    /// <summary>
+    /// True if <paramref name="after"/> is <paramref name="before"/> with one
+    /// new first entry, <paramref name="key"/> set to <paramref name="value"/>,
+    /// and every other entry identical and in the same order.
+    /// </summary>
+    public static bool SameWithFirstKey(YamlMapping before, YamlMapping? after, string key, YamlScalarValue value)
+    {
+        if (after is null || after.IsFlow != before.IsFlow || after.Entries.Count != before.Entries.Count + 1
+            || after.Entries[0].KeyText != key || !value.MatchesAsWritten(after.Entries[0].Value))
+        {
+            return false;
+        }
+
+        for (var i = 0; i < before.Entries.Count; i++)
+        {
+            if (!Same(before.Entries[i].Key, after.Entries[i + 1].Key) || !Same(before.Entries[i].Value, after.Entries[i + 1].Value))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>True if two nodes read the same, down to scalar styles.</summary>
     public static bool Same(YamlNode? a, YamlNode? b)
     {

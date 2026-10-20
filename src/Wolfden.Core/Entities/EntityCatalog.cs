@@ -178,8 +178,10 @@ public sealed partial class EntityCatalog
         switch (fm["id"])
         {
             case null or YamlScalar { IsNull: true }:
-                diagnostics.Add(new Diagnostic("F-ID-2", DiagnosticSeverity.Warning, 1,
-                    "no id; run `wolfden check --fix` to add one. Until then, links can't reach this entity by id."));
+                // --fix doesn't edit a final book's files (F-BOOK-1), so don't suggest it there.
+                diagnostics.Add(new Diagnostic("F-ID-2", DiagnosticSeverity.Warning, 1, scope is Book { Status: BookStatus.Final } frozen
+                    ? $"no id, and book '{frozen.Key}' is final (frozen), so `wolfden check --fix` won't add one until the book is unfrozen. Until then, links can't reach this entity by id."
+                    : "no id; run `wolfden check --fix` to add one. Until then, links can't reach this entity by id."));
                 break;
             case YamlScalar s when Keys.IsId(s.Text):
                 id = s.Text;

@@ -12,9 +12,10 @@ public static class IndexSchema
     /// chapter-field values that don't match their definitions are ignored
     /// (F-CHAP-3). Version 3 (#15) adds what canon views (format.md §9.4)
     /// need: field defaults (types.md F-FT-15), and the line of each field
-    /// value and lead, so a view can point at its source.
+    /// value and lead, so a view can point at its source. Version 4 (#17)
+    /// records a hash of the den's files (<see cref="FilesFingerprintKey"/>).
     /// </summary>
-    public const int Version = 3;
+    public const int Version = 4;
 
     /// <summary>The <c>meta</c> key for <see cref="Version"/>.</summary>
     public const string SchemaVersionKey = "schema_version";
@@ -26,6 +27,14 @@ public static class IndexSchema
     /// index built with other built-in packs is rebuilt.
     /// </summary>
     public const string BuiltInPacksKey = "builtin_packs";
+
+    /// <summary>
+    /// The <c>meta</c> key for a hash of the den's files when the index was
+    /// built (<see cref="IndexBuilder.CheckFiles"/>), so a one-off command
+    /// can tell whether they've changed since. An index without it counts
+    /// as stale there.
+    /// </summary>
+    public const string FilesFingerprintKey = "files_fingerprint";
 
     /// <summary>The <c>meta</c> key for the den's <c>format</c> as written in <c>den.yaml</c> (empty if it has none).</summary>
     public const string DenFormatKey = "den_format";

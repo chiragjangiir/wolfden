@@ -1,0 +1,179 @@
+using System.Text.Json;
+using Wolfden.Core.Documents;
+using Wolfden.Core.Structure;
+using Wolfden.Core.Yaml;
+
+namespace Wolfden.Cli.Tests;
+
+/// <summary><c>wolfden init</c>: making a new den that <c>wolfden check</c> passes.</summary>
+public class InitCommandTests
+{
+    [Fact]
+    [Trait("Scenario", "SC-CLI-1")]
+    public void ANewDenWithAUniversePassesCheckAndCanBeQueried()
+    {
+        using var parent = TempDen.Empty();
+        var folder = Path.Combine(parent.Root, "kestrel-notes");
+
+        var (exitCode, output, error) = Cli.Run("init", folder, "--universe", "the-long-dark");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Empty(error);
+        Assert.StartsWith(
+            "created den.yaml\ncreated universes/the-long-dark/universe.md\n\n" +
+            $"Created a den at '{folder}'.\n",
+            output,
+            StringComparison.Ordinal);
+
+        var universe = MarkdownFile.Parse(File.ReadAllBytes(Path.Combine(folder, "universes", "the-long-dark", "universe.md")), requireFrontmatter: true);
+        Assert.True(Keys.IsId(((YamlScalar)universe.GetFrontmatterValue("id")!).Text));
+        Assert.Equal("The Long Dark", ((YamlScalar)universe.GetFrontmatterValue("name")!).Text);
+
+        Assert.Equal((CliApp.ExitOk, "No errors or warnings. Checked 0 entities; spoiler checks are off.\n", ""), Cli.Run("check", folder));
+        Assert.Equal((CliApp.ExitOk, "Canon of universe 'the-long-dark' at the end of the story: 0 entities.\n", ""), Cli.Run("query", "--den", folder));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-1")]
+    public void ANewDenWithoutAUniverseIsJustDenYaml()
+    {
+        using var folder = TempDen.Empty();
+
+        var (exitCode, _, _) = Cli.Run("init", folder.Root);
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Equal(["den.yaml"], Directory.EnumerateFileSystemEntries(folder.Root).Select(Path.GetFileName));
+        Assert.Equal(
+            """
+            # Wolfden den settings. The format is described in Wolfden's docs/format.md, section 5.2.
+            format: 1
+            # name: My Notes           # display name; defaults to the folder's name
+            # spoiler_checks: true     # flag links to things the reader hasn't met yet (F-DEN-7)
+
+            """.ReplaceLineEndings("\n"),
+            folder.Read("den.yaml"));
+        Assert.Equal(CliApp.ExitOk, Cli.Run("check", folder.Root).ExitCode);
+    }
+
+    [Fact]
+    public void ANameIsWrittenSoItStaysAString()
+    {
+        using var folder = TempDen.Empty();
+
+        Cli.Run("init", folder.Root, "--name", "True");
+
+        var yaml = YamlFile.Parse(File.ReadAllBytes(Path.Combine(folder.Root, "den.yaml")));
+        var name = (YamlScalar)yaml.GetValue("name")!;
+        Assert.Equal("True", name.Text);
+        Assert.NotEqual(YamlScalarStyle.Plain, name.Style);
+        Assert.Equal("No errors or warnings. Checked 0 entities; spoiler checks are off.\n", Cli.Run("check", folder.Root).Output);
+    }
+
+    [Fact]
+    public void OtherFilesInTheFolderAreLeftAlone()
+    {
+        using var folder = TempDen.FromFiles(new Dictionary<string, string> { ["README.md"] = "# My notes\n" });
+
+        var (exitCode, _, _) = Cli.Run("init", folder.Root, "--universe", "vael");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Equal("# My notes\n", folder.Read("README.md"));
+    }
+
+    [Fact]
+    public void JsonListsTheFilesCreated()
+    {
+        using var folder = TempDen.Empty();
+
+        var (_, output, _) = Cli.Run("init", folder.Root, "--universe", "vael", "--json");
+
+        using var json = JsonDocument.Parse(output);
+        Assert.Equal(["version", "den", "created"], json.RootElement.EnumerateObject().Select(p => p.Name));
+        Assert.Equal(Path.GetFullPath(folder.Root), json.RootElement.GetProperty("den").GetString());
+        Assert.Equal(["den.yaml", "universes/vael/universe.md"], json.RootElement.GetProperty("created").EnumerateArray().Select(e => e.GetString()));
+    }
+
+    [Fact]
+    public void AnExistingDenIsNeverOverwritten()
+    {
+        using var den = TempDen.FromFiles(new Dictionary<string, string> { ["den.yaml"] = "format: 1\nname: Mine\n" });
+
+        var (exitCode, output, error) = Cli.Run("init", den.Root, "--universe", "vael");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Empty(output);
+        Assert.Equal($"wolfden init: '{den.Root}' is already a den: it has a den.yaml. Nothing was changed.\n", error);
+        Assert.Equal("format: 1\nname: Mine\n", den.Read("den.yaml"));
+        Assert.False(den.Exists("universes/vael/universe.md"));
+    }
+
+    [Fact]
+    public void AFailurePartWayRemovesWhatThisRunCreated()
+    {
+        // universe.md is already there, so writing it fails after den.yaml was written.
+        using var folder = TempDen.FromFiles(new Dictionary<string, string> { ["universes/vael/universe.md"] = "---\nname: Mine\n---\n" });
+
+        var (exitCode, output, error) = Cli.Run("init", folder.Root, "--universe", "vael");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Empty(output);
+        Assert.StartsWith($"wolfden init: couldn't create the den at '{folder.Root}': ", error, StringComparison.Ordinal);
+        Assert.EndsWith(" Nothing was left behind.\n", error, StringComparison.Ordinal);
+        Assert.False(folder.Exists("den.yaml"));
+        Assert.Equal("---\nname: Mine\n---\n", folder.Read("universes/vael/universe.md"));
+    }
+
+    [Fact]
+    public void ADenInsideADenIsRefused()
+    {
+        using var den = TempDen.FromFiles(new Dictionary<string, string> { ["den.yaml"] = "format: 1\n" });
+        var inner = Path.Combine(den.Root, "archive", "old");
+
+        var (exitCode, _, error) = Cli.Run("init", inner);
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Equal($"wolfden init: '{inner}' is inside the den at '{den.Root}', and dens don't nest (F-LAY-1). Choose a folder outside it.\n", error);
+        Assert.False(Directory.Exists(inner));
+    }
+
+    [Theory]
+    [InlineData("The Long Dark")]
+    [InlineData("7th-fleet")]
+    [InlineData("long--dark")]
+    public void AnInvalidUniverseKeyIsRefused(string key)
+    {
+        using var folder = TempDen.Empty();
+
+        var (exitCode, _, error) = Cli.Run("init", folder.Root, "--universe", key);
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.StartsWith($"wolfden init: '{key}' isn't a valid universe key", error, StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(folder.Root));
+    }
+
+    [Fact]
+    public void AnEmptyNameIsRefused()
+    {
+        using var folder = TempDen.Empty();
+
+        var (exitCode, _, error) = Cli.Run("init", folder.Root, "--name", " ");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Equal("wolfden init: the name can't be empty.\n", error);
+    }
+}
+
+[Collection(nameof(CurrentFolder))]
+public class InitCommandCurrentFolderTests
+{
+    [Fact]
+    public void WithoutAFolderItMakesTheCurrentFolderADen()
+    {
+        using var folder = TempDen.Empty();
+
+        var (exitCode, _, _) = Cli.RunIn(folder.Root, "init");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.True(folder.Exists("den.yaml"));
+    }
+}

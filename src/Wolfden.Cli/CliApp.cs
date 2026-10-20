@@ -7,9 +7,13 @@ namespace Wolfden.Cli;
 /// tests can call it with their own writers.
 /// </summary>
 /// <remarks>
-/// The argument handling is deliberately minimal: a command name, then that
-/// command's own arguments. The full command set and a real argument parser
-/// come with #17.
+/// <para>
+/// Every command shares one surface: <c>--help</c> on any command, the
+/// den found from the current folder unless <c>--den</c> names one
+/// (<see cref="DenLocation"/>), <c>--json</c> for one JSON document with a
+/// <c>version</c> (<see cref="CliJson"/>), and these exit codes. Results go
+/// to standard output; usage mistakes and failures go to standard error.
+/// </para>
 /// </remarks>
 internal static class CliApp
 {
@@ -19,14 +23,14 @@ internal static class CliApp
     /// <summary>For <c>check</c>: the den has at least one error (F-GEN-1).</summary>
     internal const int ExitErrors = 1;
 
-    /// <summary>The command line is wrong, or the den couldn't be read or loaded at all.</summary>
+    /// <summary>The command couldn't do its job: a wrong command line, no den, a <c>den.yaml</c> that doesn't load, or a failure.</summary>
     internal const int ExitUsage = 2;
 
-    /// <summary>Commands that work.</summary>
-    internal static readonly string[] Commands = ["check"];
+    /// <summary>Commands that work, in the order the usage lists them.</summary>
+    internal static readonly string[] Commands = ["init", "check", "index", "query", "new-id"];
 
-    /// <summary>Commands planned for v0 that aren't implemented yet (#17).</summary>
-    internal static readonly string[] PlannedCommands = ["init", "index", "query", "serve", "mcp"];
+    /// <summary>Commands planned for v0 that aren't implemented yet.</summary>
+    internal static readonly string[] PlannedCommands = ["serve", "mcp"];
 
     internal static string Version =>
         typeof(CliApp).Assembly
@@ -39,8 +43,16 @@ internal static class CliApp
         usage: wolfden [--version] <command> [<args>]
 
         commands:
-          check [<den>] [--json]   check a den for errors and continuity problems
-                                   (<den> defaults to the current folder)
+          init [<folder>]          create a new den
+          check [<den>]            check a den for errors and continuity problems
+                                   (--fix adds missing ids)
+          index [<den>]            rebuild the den's index from its files
+          query [<universe>]       show canon as of a story position (--at book:chapter)
+          new-id [<count>]         print new ids for files made by hand
+
+        Run 'wolfden <command> --help' for a command's options. Commands find the
+        den from the current folder, or take '--den <folder>', and '--json'
+        prints one JSON document instead of text.
 
         planned, not yet implemented: {string.Join(", ", PlannedCommands)}
         """;
@@ -63,8 +75,18 @@ internal static class CliApp
             case [] or ["--help"] or ["-h"] or ["help"]:
                 output.WriteLine(Usage);
                 return ExitOk;
+            case ["help", var command] when Commands.Contains(command):
+                return Run([command, "--help"], output, error);
+            case ["init", .. var rest]:
+                return InitCommand.Run(rest, output, error);
             case ["check", .. var rest]:
                 return CheckCommand.Run(rest, output, error);
+            case ["index", .. var rest]:
+                return IndexCommand.Run(rest, output, error);
+            case ["query", .. var rest]:
+                return QueryCommand.Run(rest, output, error);
+            case ["new-id", .. var rest]:
+                return NewIdCommand.Run(rest, output, error);
             case [var command, ..] when PlannedCommands.Contains(command):
                 error.WriteLine($"wolfden: '{command}' isn't implemented yet.");
                 error.WriteLine(Usage);

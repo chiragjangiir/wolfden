@@ -369,22 +369,50 @@ every writer tracks that, so the check that helps them is off unless
 not prose, so summary prose that runs ahead of the story is the writer's
 to place (format.md §9.5).
 
-**v0 behaviour, not a recorded decision:** the CLI surface belongs to #17,
-which may revise any of this. Today, `wolfden check [<den>] [--json]`
-reads the files directly, not the index, and never writes. It prints one
-line per diagnostic, `path:line: severity rule: message`, with paths
-relative to the den root, and then a summary. `--json` prints one JSON
-document instead, with a `version` for its shape, the counts, and each
-diagnostic's `path`, `line` (or null), `severity`, `rule`, and `message`.
-Within a `version`, fields may be added, but renaming or removing a
-field, or changing what one means, needs a new `version`. It exits 0
-when the den has no errors (warnings alone pass, format.md F-GEN-1), 1
-when it has at least one, and 2 when it couldn't check the den: a wrong
-command line, a folder that doesn't exist, a `den.yaml` that doesn't
-load, or an unexpected failure.
-
 Later rules: a character appearing after their death, travel times that
 don't fit the timeline, and open threads at a frozen book's end.
+
+### The command line (v0)
+
+**v0 behaviour, not a recorded decision** (#17). The CLI has five
+commands, and `wolfden <command> --help` describes each one:
+
+| Command | What it does |
+|---|---|
+| `wolfden init [<folder>] [--name <name>] [--universe <key>]` | Creates a den: a `den.yaml`, and with `--universe` a first universe with an id. It never overwrites anything, and refuses a folder inside another den (format.md F-LAY-1). The new den passes `check` with no warnings. |
+| `wolfden check [<den>] [--fix]` | The continuity lint above. It reads the files directly, not the index. Without `--fix` it never writes. `--fix` first gives every container and entity file that loads without an `id` a new one (format.md F-ID-2, F-ID-6), skipping files in a final book (F-BOOK-1), and then checks the den as it is after the fix. |
+| `wolfden index [<den>]` | Rebuilds `.wolfden/index.db` from the files and says what it holds. |
+| `wolfden query [<universe>] [--at <position>]` | Canon as of a position (format.md F-VIEW-1), from the index. The universe can be left out when the den has only one. `--series` or `--book` narrows the view, `--type` (any type an enabled pack defines) and `--entity` (matched as a link is, F-LINK-6) pick entities out of it, `--pinned` gives pinned canon (F-VIEW-2), and `--brief` lists one line per entity. |
+| `wolfden new-id [<count>]` | Prints new ids for files made by hand (format.md F-ID-5). |
+
+They share one surface:
+
+- **Which den.** `--den <folder>` names it (`check` and `index` also take
+  it as a plain argument). Otherwise it's the current folder, or the
+  nearest folder above it that holds a `den.yaml`, as git finds its
+  repository.
+- **Output.** Text by default. `check` prints one line per diagnostic,
+  `path:line: severity rule: message`, with paths relative to the den
+  root, then a summary. `query` prints each entity as a heading, its
+  fields as a list, then its lead and sections, each marked with any
+  `from`, `until`, `pinned`, or `draft`. `--json` prints one JSON
+  document instead, with a `version` for its shape. Within a `version`,
+  fields may be added, but renaming or removing a field, or changing what
+  one means, needs a new `version`. Results go to standard output, and
+  mistakes and failures to standard error.
+- **Exit codes.** 0 when the command did its job; for `check`, when the
+  den has no errors (warnings alone pass, format.md F-GEN-1). 1 only from
+  `check`, when the den has at least one error. 2 when the command
+  couldn't do its job: a wrong command line, no den, a `den.yaml` that
+  doesn't load, a universe, position, filter, type, or entity that doesn't
+  exist (for `query`, a den with no universes yet, or with several and
+  none named), or an unexpected failure. A `query` whose view is empty,
+  such as one for a character the reader hasn't met yet, exits 0.
+- **A fresh index.** `query` reads the index, but first compares a hash
+  of the den's markdown and YAML files with the one recorded when the
+  index was built, and rebuilds it if they differ, so an answer never
+  lags behind an edit. The file watcher (#14) will do this for the
+  long-running `serve` and `mcp`.
 
 ## 8. AI integration (MCP)
 
@@ -420,7 +448,7 @@ src/
   Wolfden.Git/      # history, checkpoints, tags (LibGit2Sharp or git CLI)
   Wolfden.Api/      # ASP.NET Core minimal API (.NET 10)
   Wolfden.Mcp/      # MCP server
-  Wolfden.Cli/      # `wolfden init | index | check | serve | mcp`
+  Wolfden.Cli/      # `wolfden init | check | index | query | new-id | serve | mcp`
 web/                # React + TypeScript + Vite + TanStack Query
 samples/            # sample dens (CC-BY-4.0)
 docs/

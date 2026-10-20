@@ -42,6 +42,7 @@ of Book 3 (format.md §8).
 | CANON | What a canon-as-of view shows at a point in the story |
 | CHECK | What `wolfden check` reports, and how it exits |
 | RT | What saving a note keeps, and what an edit changes |
+| CLI | Using the other `wolfden` commands: init, index, query, check --fix, new-id |
 
 ## CANON: what's canon at a point in the story
 
@@ -179,7 +180,8 @@ in a den, one per line with its file, line, and rule id, or as JSON with
 (F-GEN-1), 1 when there's at least one error, and 2 when it couldn't
 check the den at all: a wrong command line, a missing folder, or a
 `den.yaml` that doesn't load. It reads the files as they are now, never
-the index, and never changes them.
+the index, and never changes them unless asked to with `--fix`
+(SC-CLI-4).
 
 ### SC-CHECK-1. I renamed a character and old links broke
 
@@ -422,3 +424,105 @@ Spec: F-RT-2. Covered by: not yet. Wolfden can't add or remove a single
 list item yet. A path that treats a list as a mapping is refused and
 leaves the file unchanged
 (`SampleEditTests.TreatingAListAsAMappingIsRefusedAndChangesNothing`).
+
+## CLI: working with a den from the command line
+
+Background: besides `check`, the CLI has `init`, `index`, `query`, and
+`new-id` (design.md §7). Every command finds the den from the current
+folder unless `--den` names one, prints one JSON document with `--json`,
+and exits 2 when it couldn't do its job.
+
+### SC-CLI-1. I start a new den
+
+The writer runs `wolfden init` in an empty folder, with
+`--universe the-long-dark`.
+
+- The folder gets a `den.yaml` and `universes/the-long-dark/universe.md`
+  with an id and the name "The Long Dark". `wolfden check` then reports
+  no errors or warnings, and `wolfden query` shows an empty view. Running
+  `init` again, or inside another den, changes nothing and exits 2.
+
+Spec: F-DEN-1, F-ID-6, F-LAY-1. Covered by:
+`InitCommandTests.ANewDenWithAUniversePassesCheckAndCanBeQueried`,
+`InitCommandTests.ANewDenWithoutAUniverseIsJustDenYaml`.
+
+### SC-CLI-2. I delete the index, or it gets corrupted
+
+The writer deletes `.wolfden/` (or a sync conflict garbles it) and runs
+`wolfden index`.
+
+- The index is rebuilt from the files with the same content, the command
+  says how many universes, entities, links, and files it holds, and no
+  file outside `.wolfden/` changes.
+
+Spec: F-LAY-2, F-ID-6, design.md §7. Covered by:
+`IndexCommandTests.ItRebuildsTheIndexAndSaysWhatItHolds`,
+`IndexCommandTests.ADeletedIndexIsRebuiltWithTheSameContent`.
+
+### SC-CLI-3. What does the reader know at Book 2, chapter 14?
+
+Before drafting `a2:15`, the writer runs `wolfden query --at a2:14` to
+see canon so far, or adds `--entity "Mara Voss"` to see one character.
+
+- Each field shows the value in effect at `a2:14`, marked with its
+  `from`. A character the reader meets later isn't listed, and nor are
+  sections that start later. `--pinned` shows only the pinned facts, and
+  `--brief` one line per entity.
+
+Spec: F-VIEW-1, F-VIEW-2, F-VIEW-3, F-TMP-5. Covered by:
+`QueryCommandTests.AFieldShowsTheValueInEffectAtThePosition`,
+`QueryCommandTests.ACharacterIsLeftOutBeforeTheReaderMeetsThem`,
+`QueryCommandTests.PinnedShowsOnlyPinnedFacts`.
+
+### SC-CLI-4. Notes I wrote by hand have no ids
+
+The writer made a few notes in a text editor without ids, and `wolfden
+check` warns about each one. They run `wolfden check --fix`.
+
+- Each container and entity file without an id gets one as its first
+  frontmatter key, after any opening comment lines, and nothing else in
+  it changes, line endings included. Each change is listed, then the
+  check runs on the fixed files. Files in a final book and files with
+  errors are left alone, and the final book's files are listed as not
+  fixed.
+
+Spec: F-ID-2, F-ID-6, F-BOOK-1, F-RT-2. Covered by:
+`CheckCommandTests.FixAddsMissingIdsAndReportsEachFile`,
+`IdTests.TheIdGoesFirstAfterOpeningCommentLines`.
+
+### SC-CLI-5. I run a command from deep inside the den
+
+The writer is in `universes/vael/series/a/books/a1/entities/characters/`
+and runs `wolfden check` or `wolfden query`.
+
+- The command uses the den whose `den.yaml` is in the nearest folder
+  above. Outside any den, `query` and `index` say there's no den and exit
+  2.
+
+Spec: F-LAY-1. Covered by:
+`CheckCommandCurrentFolderTests.FromAFolderInsideADenItFindsTheDenAbove`,
+`QueryCommandCurrentFolderTests.FromAFolderInsideADenItFindsTheDenAbove`.
+
+### SC-CLI-6. I edit a note, then query again
+
+The writer runs a query, edits a character's field in a text editor, adds
+a new location file, and runs the query again.
+
+- The second query shows the edit and the new location. The index is
+  rebuilt only when the files have changed since it was built.
+
+Spec: design.md §7. Covered by:
+`QueryCommandTests.AQueryAfterAnEditSeesTheEdit`,
+`QueryCommandTests.AQueryAfterANewNoteSeesTheNote`,
+`FreshnessTests.EnsureUpToDateRebuildsAStaleIndexAndThenItIsCurrent`.
+
+### SC-CLI-7. I need an id for a note I'm writing by hand
+
+The writer runs `wolfden new-id` and pastes the result into a new file's
+frontmatter.
+
+- It prints one valid id, a ULID in canonical form, or as many as asked
+  for, all different.
+
+Spec: F-ID-1, F-ID-5. Covered by:
+`NewIdCommandTests.ItPrintsOneValidId`.
