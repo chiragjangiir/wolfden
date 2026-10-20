@@ -41,6 +41,13 @@ public sealed partial class EntityCatalog
     private readonly Dictionary<string, CatalogEntity> _byPath = new(StringComparer.Ordinal);
     private readonly List<ExcludedEntity> _excluded = [];
 
+    /// <summary>
+    /// The entities whose id another file shares (F-ID-3). It's held here,
+    /// not on the entities, because <see cref="Update"/> shares entity
+    /// objects between catalogs, and each catalog has its own answer.
+    /// </summary>
+    private readonly HashSet<CatalogEntity> _duplicateIds = new(ReferenceEqualityComparer.Instance);
+
     /// <summary>What reading each entity file gave, by path, so <see cref="Update"/> can keep the files that didn't change.</summary>
     private readonly Dictionary<string, FileResult> _files = new(StringComparer.Ordinal);
 
@@ -85,6 +92,13 @@ public sealed partial class EntityCatalog
     /// <summary>The entity whose file is at <paramref name="path"/>, or null.</summary>
     public CatalogEntity? FindByPath(string path) => _byPath.GetValueOrDefault(path);
 
+    /// <summary>
+    /// True if another entity or container file in this catalog has the
+    /// same id as <paramref name="entity"/> (F-ID-3). The entity is still
+    /// listed, but links don't resolve to it.
+    /// </summary>
+    public bool HasDuplicateId(CatalogEntity entity) => _duplicateIds.Contains(entity);
+
     /// <summary>Entity files left out for errors, with the texts a link could have matched them by.</summary>
     internal IReadOnlyList<ExcludedEntity> ExcludedEntities => _excluded;
 
@@ -104,8 +118,8 @@ public sealed partial class EntityCatalog
     /// </param>
     /// <remarks>
     /// Entities of files that didn't change are the same objects in both
-    /// catalogs, and <see cref="CatalogEntity.HasDuplicateId"/> is worked out
-    /// again on them, so this catalog's entities belong to it from now on.
+    /// catalogs. Neither changes the other: what can differ between them,
+    /// such as <see cref="HasDuplicateId"/>, is held by each catalog.
     /// </remarks>
     public EntityCatalog Update(IDenSource source, IEnumerable<string> changedPaths)
     {
@@ -208,7 +222,6 @@ public sealed partial class EntityCatalog
 
             if (result.Entity is { } entity)
             {
-                entity.HasDuplicateId = false;
                 _entities.Add(entity);
                 _byPath[path] = entity;
             }
@@ -267,7 +280,7 @@ public sealed partial class EntityCatalog
             {
                 if (owner.Entity is { } entity)
                 {
-                    entity.HasDuplicateId = true;
+                    _duplicateIds.Add(entity);
                 }
 
                 var line = owner.Entity?.File.Frontmatter?["id"]?.Line;

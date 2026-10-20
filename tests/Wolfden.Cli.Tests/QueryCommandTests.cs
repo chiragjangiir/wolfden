@@ -153,6 +153,24 @@ public sealed class QueryCommandTests : IDisposable
     }
 
     [Fact]
+    [Trait("Scenario", "SC-WATCH-6")]
+    public void AQueryWaitsBrieflyForAWatcherThenRebuildsIfItHasnt()
+    {
+        Query("--entity", "Jonathan Harker");
+        // A watcher holds the lock but doesn't apply the edit: the query
+        // waits about a second for it, then rebuilds the index itself.
+        using var watcher = new FileStream(Path.Combine(_den.Root, ".wolfden", "watch.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        _den.Write(Jonathan, _den.Read(Jonathan).Replace("heritage: English, of Exeter", "heritage: English, of Exeter and later Purfleet", StringComparison.Ordinal));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        var (exitCode, output, _) = Query("--entity", "Jonathan Harker");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.True(clock.Elapsed >= TimeSpan.FromSeconds(0.9), $"It returned after {clock.Elapsed}.");
+        Assert.Contains("\n- heritage: English, of Exeter and later Purfleet\n", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-CLI-6")]
     public void AQueryAfterANewNoteSeesTheNote()
     {

@@ -48,6 +48,74 @@ internal static class DenLocation
             || path.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>How many folder levels below a new den's folder <see cref="FindBelow"/> looks.</summary>
+    internal const int BelowDepth = 4;
+
+    /// <summary>The most folders <see cref="FindBelow"/> looks in, so it stays quick in a large folder such as a home folder.</summary>
+    internal const int BelowFolders = 2000;
+
+    /// <summary>
+    /// A folder below <paramref name="root"/> that holds a <c>den.yaml</c>, or
+    /// null. It's a bounded search, for <c>init</c>: it goes at most
+    /// <see cref="BelowDepth"/> folder levels down and looks in at most
+    /// <paramref name="maxFolders"/> folders (<see cref="BelowFolders"/>;
+    /// tests pass fewer), nearest levels first. It skips folders whose names
+    /// start with <c>.</c> (F-LAY-2) and folder links (symbolic links and
+    /// junctions), as the den walk does.
+    /// </summary>
+    public static string? FindBelow(string root, int maxFolders = BelowFolders)
+    {
+        var level = new List<string> { Path.GetFullPath(root) };
+        var visited = 0;
+        for (var depth = 1; depth <= BelowDepth && level.Count > 0; depth++)
+        {
+            var next = new List<string>();
+            foreach (var folder in level)
+            {
+                IEnumerable<DirectoryInfo> children;
+                try
+                {
+                    children = new DirectoryInfo(folder).EnumerateDirectories();
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    foreach (var child in children)
+                    {
+                        if (child.Name.StartsWith('.') || Core.Structure.FileSystemDenSource.IsFolderLink(child))
+                        {
+                            continue;
+                        }
+
+                        if (++visited > maxFolders)
+                        {
+                            return null;
+                        }
+
+                        if (File.Exists(Path.Combine(child.FullName, DenFile)))
+                        {
+                            return child.FullName;
+                        }
+
+                        next.Add(child.FullName);
+                    }
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+                {
+                    // A folder that can't be listed is skipped, as if it were empty.
+                }
+            }
+
+            level = next;
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// The den for a command that needs one to exist (<c>index</c>,
     /// <c>query</c>): <paramref name="given"/> if it's a folder with a

@@ -14,8 +14,10 @@ namespace Wolfden.Index;
 /// <remarks>
 /// <para>
 /// What's safe to do incrementally: an entity file or an <c>outline.md</c>
-/// that's added, changed, deleted, or renamed, and any file or folder the
-/// index doesn't read (only the files fingerprint changes). Those files are
+/// that's added, changed, deleted, or renamed, and a folder under an
+/// <c>entities/</c> folder. Files the index doesn't read
+/// (<see cref="DenFileTree.IsRead"/>) change nothing, not even the files
+/// fingerprint. The changed files are
 /// read again and the den-wide steps that depend on other files are
 /// redone: duplicate ids (F-ID-3), and resolving and checking every link.
 /// What isn't: <c>den.yaml</c>, a pack file, a container file, or a folder
@@ -107,6 +109,12 @@ internal sealed class IndexUpdater
         foreach (var path in batch.Paths)
         {
             files.Add(path);
+            if (!DenFileTree.Tracks(path))
+            {
+                // No file the index reads can be in it (a drafts/ folder at the den root, say).
+                continue;
+            }
+
             var wasFolder = tree.HasFolder(path);
             var isFolder = listing.IsFolder(path);
             if (!wasFolder && !isFolder || wasFolder && isFolder && !batch.Moved.Contains(path))
@@ -141,8 +149,9 @@ internal sealed class IndexUpdater
         var outlinePaths = state.Structure.Universes.SelectMany(u => u.Books).Select(b => $"{b.Path}/outline.md").ToHashSet(StringComparer.Ordinal);
         foreach (var path in files)
         {
-            if (!DenFileTree.Counts(path[(path.LastIndexOf('/') + 1)..]))
+            if (!DenFileTree.IsRead(path))
             {
+                // Not read by the index, so not in its tree either: nothing to do.
                 continue;
             }
 
@@ -209,9 +218,16 @@ internal sealed class IndexUpdater
         IndexState next;
         if (changed == 0)
         {
+            if (state.Rows.Meta.GetValueOrDefault(IndexSchema.FilesFingerprintKey) == tree.Fingerprint())
+            {
+                // Only a folder the fingerprint leaves out, such as a book's
+                // drafts/: keep following it, but there's nothing to write.
+                _state = WithRows(state, state.Rows, tree, state.WriteId);
+                return null;
+            }
+
             // Nothing the index holds changed, only the files fingerprint.
-            var rows = IndexRows.SameAs(state.Rows);
-            next = WithRows(state, rows, tree);
+            next = WithRows(state, IndexRows.SameAs(state.Rows), tree, Guid.NewGuid().ToString("N"));
         }
         else
         {
@@ -315,9 +331,8 @@ internal sealed class IndexUpdater
         };
     }
 
-    private static IndexState WithRows(IndexState state, IndexRows rows, DenFileTree tree)
+    private static IndexState WithRows(IndexState state, IndexRows rows, DenFileTree tree, string writeId)
     {
-        var writeId = Guid.NewGuid().ToString("N");
         rows.Meta[IndexSchema.FilesFingerprintKey] = tree.Fingerprint();
         rows.Meta[IndexSchema.WriteIdKey] = writeId;
         return new IndexState
@@ -367,9 +382,28 @@ internal sealed class IndexUpdater
                     }
                 }
 
-                using var db = new IndexDbContext(connection);
-                var written = after.Rows.ApplyChanges(before.Rows, db, connection, transaction);
+                int written;
+                using (var db = new IndexDbContext(connection))
+                {
+                    written = after.Rows.ApplyChanges(before.Rows, db, connection, transaction);
+                }
+
                 transaction.Commit();
+                transaction.Dispose();
+                connection.Dispose();
+
+                AfterCommit?.Invoke();
+
+                // On Linux, another process's rebuild can move its new index
+                // over this one while the transaction waits or runs (#106):
+                // the batch then went into the replaced file. Look again at
+                // the file that's there now, and if it isn't the one just
+                // written, the caller rebuilds.
+                if (ReadWriteId(path) != after.WriteId)
+                {
+                    throw new StaleIndexException("another command rebuilt the index meanwhile");
+                }
+
                 return written;
             }
             catch (SqliteException e)
@@ -377,6 +411,19 @@ internal sealed class IndexUpdater
                 throw new StaleIndexException($"the index couldn't be updated ({e.Message.TrimEnd('.')})", e);
             }
         }
+    }
+
+    /// <summary>Called after a batch is committed, before the index is looked at again. Tests use it to replace the index at that moment.</summary>
+    internal Action? AfterCommit { get; init; }
+
+    private static string? ReadWriteId(string path)
+    {
+        using var connection = new SqliteConnection(IndexBuilder.ConnectionString(path, SqliteOpenMode.ReadOnly));
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM meta WHERE key = $key";
+        command.Parameters.AddWithValue("$key", IndexSchema.WriteIdKey);
+        return command.ExecuteScalar() as string;
     }
 
     /// <summary>The index can't be updated in place, so it must be rebuilt.</summary>
@@ -398,12 +445,15 @@ internal sealed class IndexUpdater
         public IEnumerable<string> GetDirectories(string path) => inner.GetDirectories(path);
 
         public IEnumerable<string> GetFiles(string path) => inner.GetFiles(path);
+
+        public IEnumerable<string> GetFolderLinks(string path) => inner.GetFolderLinks(path);
     }
 
     /// <summary>
     /// Whether paths exist with every name in exactly that case, as the den
     /// loader matches them (<see cref="FileSystemDenSource"/>), listing
-    /// each folder once per batch.
+    /// each folder once per batch. Folder links aren't folders here, as the
+    /// loader skips them, so nothing under one is a file either.
     /// </summary>
     private sealed class ExactListing(string root)
     {
@@ -441,7 +491,7 @@ internal sealed class IndexUpdater
                 {
                     listing = (
                         Directory.EnumerateFiles(full).Select(f => Path.GetFileName(f)).ToHashSet(StringComparer.Ordinal),
-                        Directory.EnumerateDirectories(full).Select(d => Path.GetFileName(d)).ToHashSet(StringComparer.Ordinal));
+                        new DirectoryInfo(full).EnumerateDirectories().Where(d => !FileSystemDenSource.IsFolderLink(d)).Select(d => d.Name).ToHashSet(StringComparer.Ordinal));
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException)
                 {

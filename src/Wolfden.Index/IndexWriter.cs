@@ -288,7 +288,7 @@ internal sealed class IndexWriter
             // An entity whose file didn't change is the same object, and its
             // rows are the same unless its duplicate-id flag changed.
             if (_previous?.Entities.GetValueOrDefault(entity.Path) is { } kept
-                && kept.Entity == entity && kept.HasDuplicateId == entity.HasDuplicateId)
+                && kept.Entity == entity && kept.HasDuplicateId == catalog.HasDuplicateId(entity))
             {
                 foreach (var table in new[] { _ids.Entities, _ids.Aliases, _ids.FieldValues, _ids.Sections, _ids.Search })
                 {
@@ -297,7 +297,7 @@ internal sealed class IndexWriter
             }
             else
             {
-                kept = EntityRows(entity, bookkeeping);
+                kept = EntityRows(entity, catalog.HasDuplicateId(entity), bookkeeping);
             }
 
             _entityRows[entity.Path] = kept;
@@ -319,7 +319,7 @@ internal sealed class IndexWriter
         }
     }
 
-    private EntityRows EntityRows(CatalogEntity entity, Bookkeeping bookkeeping)
+    private EntityRows EntityRows(CatalogEntity entity, bool hasDuplicateId, Bookkeeping bookkeeping)
     {
         var path = entity.Path;
         var rows = new List<object>();
@@ -344,7 +344,7 @@ internal sealed class IndexWriter
             Status = entity.Status.ToKey(),
             FromText = entity.From?.ToString(),
             FromOrdinal = entity.EntersCanon?.Ordinal,
-            HasDuplicateId = entity.HasDuplicateId,
+            HasDuplicateId = hasDuplicateId,
             Title = entity.File.Title,
             Lead = lead,
             LeadLine = entity.File.LeadLine,
@@ -447,7 +447,7 @@ internal sealed class IndexWriter
         return new EntityRows
         {
             Entity = entity,
-            HasDuplicateId = entity.HasDuplicateId,
+            HasDuplicateId = hasDuplicateId,
             Id = id,
             Rows = rows,
             Search = search,

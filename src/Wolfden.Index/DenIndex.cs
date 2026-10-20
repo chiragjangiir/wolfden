@@ -32,7 +32,7 @@ public sealed record SearchHit(
 /// format (<see cref="IndexBuilder.EnsureCurrent"/>). It doesn't notice
 /// edits to the den's files since the last build: keeping the index up to
 /// date with the files is the job of <see cref="DenWatcher"/> (#14), or of
-/// <see cref="IndexBuilder.EnsureUpToDate"/> for a one-off command.
+/// <see cref="IndexBuilder.EnsureUpToDate(string)"/> for a one-off command.
 /// The connection is read-only, and it's open only while a query runs, so
 /// a rebuild can swap in a new index file between queries, even on Windows,
 /// where an open file can't be replaced. Later queries read the new file.

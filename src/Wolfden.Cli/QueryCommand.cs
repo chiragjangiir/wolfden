@@ -17,8 +17,9 @@ namespace Wolfden.Cli;
 /// <remarks>
 /// <para>
 /// It brings the index up to date first, rebuilding it if the files
-/// changed since it was built (<see cref="IndexBuilder.EnsureUpToDate"/>),
-/// so the answer always matches the files.
+/// changed since it was built (<see cref="IndexBuilder.EnsureUpToDate(string)"/>),
+/// so the answer always matches the files. While <c>wolfden index --watch</c>
+/// runs, it first waits up to about a second for the watcher to catch up.
 /// </para>
 /// <para>
 /// Exit codes: 0 when the view is shown, even if it's empty, and 2 when

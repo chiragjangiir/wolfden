@@ -344,6 +344,14 @@ from the files:
   unreadable (say, after a sync conflict), or from another schema version
   is rebuilt, not repaired. Wolfden puts a `.gitignore` inside `.wolfden/`
   so git skips the folder without changes to the den's own `.gitignore`.
+- **Folder links are skipped** (#102; v0 behaviour, not a recorded
+  decision). Every walk of a den (the loader, the files hash, the watcher,
+  and `init`'s search for dens below) skips symbolic links and junctions
+  to folders, as git does, so links can't loop and each note has one
+  path. `check` warns about each link where the den reads files
+  (format.md F-LAY-2), so linked notes aren't dropped silently.
+  Cloud-sync placeholders (OneDrive, Dropbox) aren't links and are read
+  as usual.
 - **Watched** (#14; v0 behaviour, not a recorded decision). The file
   watcher collects a burst of saves (an editor's temporary file and
   rename, a git checkout) into one batch, and ignores hidden paths such as
@@ -353,9 +361,19 @@ from the files:
   change to `den.yaml`, a pack, or a universe, series, or book file, a
   folder added, moved, or deleted where it can change the structure, lost
   events, or an index someone else rebuilt meanwhile gets a full rebuild
-  instead. Files the index doesn't read change only the files hash. Each
+  instead. Files the index doesn't read, such as a `README.md` at the den
+  root, change nothing, not even the files hash (#103). Each
   batch is written in one transaction, so a query sees the index before
-  the batch or after it. The index always ends up as a full rebuild of the
+  the batch or after it. After it commits, the watcher checks that the
+  index file it wrote is still the one in place, since on Linux another
+  process's rebuild can replace it mid-batch (#106), and rebuilds if it
+  isn't. A window remains, as known v0 behaviour: a rebuild in another
+  process that read the files before a save, but swaps its index in
+  after the watcher's check, leaves an index without that save. It
+  heals itself: the watcher's next batch finds the index isn't the one it
+  wrote and rebuilds, and a `query` meanwhile sees that the files hash
+  differs and rebuilds too. Closing the window would need a lock shared
+  across processes for the whole rebuild. The index always ends up as a full rebuild of the
   same files would make it, apart from the ids of rows that came from
   single files, which queries never order by.
 
@@ -393,7 +411,7 @@ commands, and `wolfden <command> --help` describes each one:
 
 | Command | What it does |
 |---|---|
-| `wolfden init [<folder>] [--name <name>] [--universe <key>]` | Creates a den: a `den.yaml`, and with `--universe` a first universe with an id. It never overwrites anything, and refuses a folder inside another den (format.md F-LAY-1). The new den passes `check` with no warnings. |
+| `wolfden init [<folder>] [--name <name>] [--universe <key>]` | Creates a den: a `den.yaml`, and with `--universe` a first universe with an id. It never overwrites anything, and refuses a folder inside another den or one that holds a den up to four folder levels below it (format.md F-LAY-1; the downward search skips hidden folders and folder links, and stops after 2,000 folders). The new den passes `check` with no warnings. |
 | `wolfden check [<den>] [--fix]` | The continuity lint above. It reads the files directly, not the index. Without `--fix` it never writes. `--fix` first gives every container and entity file that loads without an `id` a new one (format.md F-ID-2, F-ID-6), skipping files in a final book (F-BOOK-1), and then checks the den as it is after the fix. |
 | `wolfden index [<den>] [--watch]` | Rebuilds `.wolfden/index.db` from the files and says what it holds. `--watch` then keeps it up to date as files change (#14), printing one line for each batch of changes it applies (with `--json`, one JSON object per line), until Ctrl+C. Only one watcher runs per den; a second exits 2. |
 | `wolfden query [<universe>] [--at <position>]` | Canon as of a position (format.md F-VIEW-1), from the index. The universe can be left out when the den has only one. `--series` or `--book` narrows the view, `--type` (any type an enabled pack defines) and `--entity` (matched as a link is, F-LINK-6) pick entities out of it, `--pinned` gives pinned canon (F-VIEW-2), and `--brief` lists one line per entity. |
@@ -424,11 +442,13 @@ They share one surface:
   none named), or an unexpected failure. A `query` whose view is empty,
   such as one for a character the reader hasn't met yet, exits 0.
 - **A fresh index.** `query` reads the index, but first compares a hash
-  of the den's markdown and YAML files with the one recorded when the
-  index was built, and rebuilds it if they differ, so an answer never
+  of the files the index reads (`den.yaml`, packs, container files,
+  entity files, and outlines) with the one recorded when the index was
+  built, and rebuilds it if they differ, so an answer never
   lags behind an edit. `index --watch` keeps both the index and that hash
   up to date as files change, so while it runs a query rarely needs to
-  rebuild. The long-running `serve` and `mcp` will host the same watcher.
+  rebuild: when the hash differs and a watcher is running, `query` first
+  waits up to about a second for it to catch up (#108). The long-running `serve` and `mcp` will host the same watcher.
   `--watch` keeps going when `den.yaml` stops loading, so the writer can
   fix it, and reports a batch that fails on standard error, then rebuilds.
 

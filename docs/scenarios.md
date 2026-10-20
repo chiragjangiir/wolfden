@@ -228,10 +228,14 @@ To start a new character, the writer copied `orrin-fell.md` to
 `orrin-fell-copy.md` and changed the name, but not the `id`.
 
 - Both files get a duplicate-id warning. Until one gets a new id, links to
-  either are broken, and check still exits 0.
+  either are broken, and check still exits 0. That holds even for a link
+  by the shared id, or by a name both copies still have: the broken-link
+  warning names the copies and says to give each copy a new id, rather
+  than suggesting a link by slug or id that couldn't work.
 
 Spec: F-ID-3, F-LINK-8. Covered by:
-`ContinuityCheckTests.ACopiedFileWithTheSameIdIsCaughtOnBothCopies`.
+`ContinuityCheckTests.ACopiedFileWithTheSameIdIsCaughtOnBothCopies`,
+`LinkResolutionTests.TiedCopiesWithTheSameIdBreakTheLinkAndSayToGiveThemNewIds`.
 
 ### SC-CHECK-5. I cut chapters and a fact still points at one
 
@@ -549,6 +553,22 @@ Spec: F-ID-2, F-ID-6, F-BOOK-1 (#100). Covered by:
 `SpecWarningCheckTests.AContainerFileWithoutAnIdIsWarnedLikeAnEntity`,
 `CheckCommandTests.FixAddsMissingIdsAndReportsEachFile`.
 
+### SC-CHECK-33. I linked a shared folder of notes into my den
+
+To share locations between two dens, the writer made
+`universes/vael/entities/locations/shared` a symbolic link (or a
+junction on Windows) to a folder outside the den.
+
+- The notes in the linked folder aren't read, since Wolfden doesn't
+  follow folder links, and `check` warns about the link: it isn't
+  followed, so move the folder into the den or copy it there. A link
+  somewhere Wolfden doesn't read, such as a `drafts/` folder at the den
+  root, gets no warning.
+
+Spec: F-LAY-2 (#102). Covered by:
+`FolderLinkTests.ANoteReachedOnlyThroughALinkIsNotReadAndCheckSaysSo`,
+`FolderLinkTests.LinksThatLoopAreSkippedByTheLoaderAndTheIndex`.
+
 ## RT: saving a note keeps what the writer wrote
 
 Background: the files are the writer's, and Wolfden is only one of the
@@ -669,11 +689,16 @@ The writer runs `wolfden init` in an empty folder, with
 - The folder gets a `den.yaml` and `universes/the-long-dark/universe.md`
   with an id and the name "The Long Dark". `wolfden check` then reports
   no errors or warnings, and `wolfden query` shows an empty view. Running
-  `init` again, or inside another den, changes nothing and exits 2.
+  `init` again, inside another den, or in a folder that already holds a
+  den a few levels down (say `init` in `writing/` when
+  `writing/the-long-dark/` is a den), changes nothing, says which den is
+  in the way, and exits 2.
 
 Spec: F-DEN-1, F-ID-6, F-LAY-1. Covered by:
 `InitCommandTests.ANewDenWithAUniversePassesCheckAndCanBeQueried`,
-`InitCommandTests.ANewDenWithoutAUniverseIsJustDenYaml`.
+`InitCommandTests.ANewDenWithoutAUniverseIsJustDenYaml`,
+`InitCommandTests.ADenInsideADenIsRefused`,
+`InitCommandTests.ADenAroundADenIsRefused`.
 
 ### SC-CLI-2. I delete the index, or it gets corrupted
 
@@ -743,7 +768,8 @@ a new location file, and runs the query again.
 Spec: design.md §7. Covered by:
 `QueryCommandTests.AQueryAfterAnEditSeesTheEdit`,
 `QueryCommandTests.AQueryAfterANewNoteSeesTheNote`,
-`FreshnessTests.EnsureUpToDateRebuildsAStaleIndexAndThenItIsCurrent`.
+`FreshnessTests.EnsureUpToDateRebuildsAStaleIndexAndThenItIsCurrent`,
+`FingerprintTests.AnEditToAFileTheIndexDoesntReadDoesntMakeItStale`.
 
 ### SC-CLI-7. I need an id for a note I'm writing by hand
 
@@ -822,13 +848,16 @@ Spec: F-DEN-1, F-DEN-7, F-BOOK-3, design.md §7. Covered by:
 
 While the watcher runs, the editor writes swap files, git updates
 `.git/`, Obsidian saves its workspace, and the writer drops a map image
-into an `entities/` folder and keeps loose notes in `notes/`.
+into an `entities/` folder, keeps loose notes in `notes/`, edits the
+den's `README.md`, and drafts chapters in a book's `drafts/` folder.
 
 - None of it changes what the index holds, and the watcher prints
-  nothing for it. `wolfden query` still finds the index up to date.
+  nothing for it. `wolfden query` still finds the index up to date, and
+  doesn't rebuild it.
 
 Spec: F-LAY-2. Covered by:
-`IncrementalUpdateTests.FilesTheIndexDoesntReadChangeOnlyTheFingerprint`,
+`IncrementalUpdateTests.FilesTheIndexDoesntReadChangeNothing`,
+`FingerprintTests.FilesTheIndexDoesntReadDontChangeARebuild`,
 `ChangeBatcherTests.HiddenPathsAreIgnored`.
 
 ### SC-WATCH-5. Something else rebuilds the index while Wolfden watches
@@ -838,7 +867,8 @@ terminal, deletes `.wolfden/`, or starts a second `wolfden index --watch`
 on the same den.
 
 - The watcher notices that the index isn't the one it wrote and rebuilds
-  it at the next change, rather than patching rows it no longer knows. A
+  it at the next change, rather than patching rows it no longer knows,
+  and a change it was writing when the index was replaced isn't lost. A
   second watcher on the same den says another one is already watching and
   exits 2. If the operating system stops reporting changes, say because
   the den is on a drive that went away, the watcher says so, listens
@@ -847,6 +877,25 @@ on the same den.
 Spec: design.md §7. Covered by:
 `DenWatcherTests.WhenFileEventsStopItListensAgainRebuildsAndSaysSo`,
 `IncrementalUpdateTests.AnIndexRebuiltByAnotherCommandIsRebuiltNotPatched`,
+`IncrementalUpdateTests.AnIndexReplacedWhileABatchIsWrittenIsRebuilt`,
 `IncrementalUpdateTests.ADeletedIndexIsRebuilt`,
 `DenWatcherTests.OnlyOneWatcherRunsPerDen`,
 `IndexWatchTests.ASecondWatcherOnTheSameDenExits2`.
+
+### SC-WATCH-6. I query right after a save while Wolfden watches
+
+With the watcher running on a large den, the writer saves Mara Voss's
+note and runs `wolfden query --entity "Mara Voss"` at once, before the
+watcher has applied the save.
+
+- The query shows the saved note. It waits a moment (up to about a
+  second) for the watcher to apply the save, rather than rebuilding the
+  whole index itself, which on a large den takes several seconds and
+  makes the watcher rebuild too. If the watcher hasn't caught up by
+  then, the query rebuilds the index, so the answer still matches the
+  files.
+
+Spec: design.md §7. Covered by:
+`FreshnessTests.EnsureUpToDateWaitsForARunningWatcherInsteadOfRebuilding`,
+`FreshnessTests.EnsureUpToDateRebuildsWhenTheWatcherDoesntCatchUpInTime`,
+`QueryCommandTests.AQueryWaitsBrieflyForAWatcherThenRebuildsIfItHasnt`.

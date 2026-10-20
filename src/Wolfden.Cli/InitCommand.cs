@@ -13,8 +13,10 @@ namespace Wolfden.Cli;
 /// </summary>
 /// <remarks>
 /// It creates the folder if needed and never overwrites anything: a folder
-/// that already has a <c>den.yaml</c>, or that is inside a den (dens don't
-/// nest, F-LAY-1), is refused with exit code 2. Other files already in the
+/// that already has a <c>den.yaml</c>, that is inside a den, or that holds
+/// a den in a folder a few levels below it (dens don't nest, F-LAY-1, and
+/// <see cref="DenLocation.FindBelow"/> says how far it looks), is refused
+/// with exit code 2. Other files already in the
 /// folder, such as a README or a <c>.git</c> folder, are left alone.
 /// </remarks>
 internal static class InitCommand
@@ -35,7 +37,8 @@ internal static class InitCommand
                             with a letter
           --json            print one JSON document instead of text
 
-        It never overwrites anything, and won't create a den inside another den.
+        It never overwrites anything, and won't create a den inside another den
+        or around one in the folders a few levels below.
         Exits 0 when the den is created and 2 if it couldn't be.
         """,
         ["--json"],
@@ -81,21 +84,25 @@ internal static class InitCommand
             return Fail($"'{folder}' is inside the den at '{outer}', and dens don't nest (F-LAY-1). Choose a folder outside it.");
         }
 
+        if (Directory.Exists(root) && DenLocation.FindBelow(root) is { } inner)
+        {
+            return Fail($"'{folder}' already holds the den at '{inner}', and dens don't nest (F-LAY-1). Choose a folder that doesn't hold one, or first move that den's den.yaml out of the way, or into a hidden folder such as .old/, which Wolfden ignores.");
+        }
+
         var created = new List<string>();
         // Everything this run creates, folders included, so a failure part way can undo it.
         var made = new List<string>();
         try
         {
             CreateFolder(root, made);
-            WriteNew(root, DenLocation.DenFile, DenYaml(name));
-            made.Add(Path.Combine(root, DenLocation.DenFile));
+            WriteNew(root, DenLocation.DenFile, DenYaml(name), made);
             created.Add(DenLocation.DenFile);
             if (universe is not null)
             {
                 var path = $"universes/{universe}/universe.md";
                 CreateFolder(Path.Combine(root, "universes"), made);
                 CreateFolder(Path.Combine(root, "universes", universe), made);
-                WriteNew(root, path, UniverseFile(universe));
+                WriteNew(root, path, UniverseFile(universe), made);
                 created.Add(path);
             }
         }
@@ -202,11 +209,16 @@ internal static class InitCommand
         return left;
     }
 
-    /// <summary>Writes a new file, failing if one is already there.</summary>
-    private static void WriteNew(string root, string path, byte[] bytes)
+    /// <summary>
+    /// Writes a new file, failing if one is already there. The file goes into
+    /// <paramref name="made"/> as soon as it exists, so a write that fails part
+    /// way (a full disk, say) still leaves it to be undone.
+    /// </summary>
+    private static void WriteNew(string root, string path, byte[] bytes, List<string> made)
     {
         var full = Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar));
         using var stream = new FileStream(full, FileMode.CreateNew, FileAccess.Write);
+        made.Add(full);
         stream.Write(bytes);
     }
 

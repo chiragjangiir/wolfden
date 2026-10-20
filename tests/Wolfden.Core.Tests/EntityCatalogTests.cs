@@ -109,7 +109,7 @@ public class EntityCatalogTests
         var catalog = EntityCatalog.Load(source);
 
         Assert.Equal(2, catalog.Entities.Count);
-        Assert.All(catalog.Entities, e => Assert.True(e.HasDuplicateId));
+        Assert.All(catalog.Entities, e => Assert.True(catalog.HasDuplicateId(e)));
         Assert.Equal(
             [($"{Moon}/book.md", "F-ID-3", DiagnosticSeverity.Warning),
              ($"{Starfall}/entities/characters/mara-voss.md", "F-ID-3", DiagnosticSeverity.Warning),

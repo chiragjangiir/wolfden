@@ -87,12 +87,6 @@ public sealed class CatalogEntity
     /// <summary>Describes <see cref="EntersCanon"/> for messages: the <c>from</c> as written, or the start it defaults to.</summary>
     public string EntersCanonDescription => From?.ToString() ?? Scope.StartDescription;
 
-    /// <summary>
-    /// True if another entity or container file has the same id (F-ID-3).
-    /// The entity is still listed, but links don't resolve to it.
-    /// </summary>
-    public bool HasDuplicateId { get; internal set; }
-
     /// <summary>What the index stores for a link to this entity: its id, or its path while it has none (F-LINK-10).</summary>
     public string Key => Id ?? Path;
 

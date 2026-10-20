@@ -1,19 +1,32 @@
 using System.Security.Cryptography;
 using System.Text;
+using Wolfden.Core.Structure;
 
 namespace Wolfden.Index;
 
 /// <summary>
 /// The den's tree as the files fingerprint sees it (<see cref="IndexBuilder.FilesFingerprint"/>):
-/// every folder, and every <c>.md</c>, <c>.yaml</c>, and <c>.yml</c> file
-/// with the SHA-256 of its bytes, leaving out names that start with
-/// <c>.</c> at any depth (F-LAY-2). A file watcher (#14) keeps one up to
-/// date as files change, so it can record the fingerprint of the files an
-/// update read without hashing the whole den again.
+/// the files the index can read (<see cref="IsRead"/>), each with the
+/// SHA-256 of its bytes, and the folders under <c>packs/</c> and
+/// <c>universes/</c> (<see cref="Tracks"/>). It leaves out names that start
+/// with <c>.</c> at any depth (F-LAY-2) and folder links, which the den
+/// loader skips too (<see cref="FileSystemDenSource.IsFolderLink"/>). A
+/// file watcher (#14) keeps one up to date as files change, so it can
+/// record the fingerprint of the files an update read without hashing the
+/// whole den again.
 /// </summary>
+/// <remarks>
+/// The tree must hold every file and folder whose change can change what
+/// a full rebuild writes; anything more only costs needless rebuilds. A new
+/// rule that makes the index read another file, or report on one (a
+/// layout warning for a stray file, say), must widen <see cref="IsRead"/>
+/// or <see cref="Tracks"/> to match. <c>FingerprintTests</c> checks that
+/// every file a rebuild reads is in the tree and that files left out don't
+/// change a rebuild.
+/// </remarks>
 internal sealed class DenFileTree
 {
-    /// <summary>Folder links can loop; no real den is this deep.</summary>
+    /// <summary>No real den is this deep; a last guard, as folder links are skipped.</summary>
     private const int MaxDepth = 64;
 
     private readonly Dictionary<string, string> _files;
@@ -40,12 +53,66 @@ internal sealed class DenFileTree
     public DenFileTree Clone() => new(new Dictionary<string, string>(_files, StringComparer.Ordinal), new HashSet<string>(_folders, StringComparer.Ordinal));
 
     /// <summary>True if a file with this name counts: not hidden, and <c>.md</c>, <c>.yaml</c>, or <c>.yml</c>, in any case.</summary>
-    public static bool Counts(string name)
+    private static bool Counts(string name)
     {
         var extension = Path.GetExtension(name);
         return !name.StartsWith('.') && (extension.Equals(".md", StringComparison.OrdinalIgnoreCase)
             || extension.Equals(".yaml", StringComparison.OrdinalIgnoreCase)
             || extension.Equals(".yml", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// True for a folder the tree holds: <c>packs/</c>, <c>universes/</c>,
+    /// and the folders in them. Every file the index reads apart from
+    /// <c>den.yaml</c> is in one of them.
+    /// </summary>
+    public static bool Tracks(string folder) =>
+        folder is "packs" or "universes"
+        || folder.StartsWith("packs/", StringComparison.Ordinal)
+        || folder.StartsWith("universes/", StringComparison.Ordinal);
+
+    /// <summary>
+    /// True for a file the index can read, by its path alone: <c>den.yaml</c>,
+    /// any file under <c>packs/</c>, a container file, a <c>.md</c> file under
+    /// an <c>entities/</c> folder where a container's would be (format.md
+    /// F-LAY-5), and a book's <c>outline.md</c>, with no hidden name on the
+    /// way (F-LAY-2). It's a little wider than what a load reads, since it
+    /// doesn't know which containers loaded, and that's safe. Other files,
+    /// such as a <c>README.md</c> at the den root, a book's <c>drafts/</c>,
+    /// or an image, never change the index.
+    /// </summary>
+    public static bool IsRead(string path)
+    {
+        var names = path.Split('/');
+        if (!Counts(names[^1]) || names.Any(n => n.Length == 0 || n.StartsWith('.')))
+        {
+            return false;
+        }
+
+        if (path == "den.yaml" || names[0] == "packs" && names.Length > 1)
+        {
+            return true;
+        }
+
+        if (names[0] != "universes" || names.Length < 3)
+        {
+            return false;
+        }
+
+        if (IndexUpdater.IsStructureFile(path))
+        {
+            return true;
+        }
+
+        var series = names[2] == "series";
+        var inWork = series || names[2] == "books";
+        var entity = names[^1].EndsWith(".md", StringComparison.OrdinalIgnoreCase) && (
+            names.Length >= 4 && names[2] == "entities"
+            || names.Length >= 6 && inWork && names[4] == "entities"
+            || names.Length >= 8 && series && names[4] == "books" && names[6] == "entities");
+        var outline = names.Length == 5 && names[2] == "books" && names[4] == "outline.md"
+            || names.Length == 7 && series && names[4] == "books" && names[6] == "outline.md";
+        return entity || outline;
     }
 
     /// <summary>The hash of the file at <paramref name="path"/>, or null if the tree has no such file.</summary>
@@ -91,7 +158,7 @@ internal sealed class DenFileTree
     {
         var files = new List<string>();
         var depth = path.Split('/').Length;
-        if (depth <= MaxDepth + 1)
+        if (depth <= MaxDepth + 1 && Tracks(path))
         {
             _folders.Add(path);
             Walk(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)), path + "/", depth, files);
@@ -100,12 +167,19 @@ internal sealed class DenFileTree
         return files;
     }
 
-    /// <summary>The fingerprint of the tree: the same as <see cref="IndexBuilder.FilesFingerprint"/> of the files it was read from.</summary>
+    /// <summary>
+    /// The fingerprint of the tree: the same as <see cref="IndexBuilder.FilesFingerprint"/>
+    /// of the files it was read from. Of the folders, only those whose
+    /// arrival or removal can change the structure count
+    /// (<see cref="IndexUpdater.ChangesStructure"/>), such as an empty
+    /// container folder, which is an error (F-LAY-4); the others hold files
+    /// and matter only through them.
+    /// </summary>
     public string Fingerprint()
     {
         var entries = new List<string>(_files.Count + _folders.Count);
         entries.AddRange(_files.Select(f => $"f {f.Key} {f.Value}"));
-        entries.AddRange(_folders.Select(d => $"d {d}"));
+        entries.AddRange(_folders.Where(IndexUpdater.ChangesStructure).Select(d => $"d {d}"));
         entries.Sort(StringComparer.Ordinal);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', entries))));
     }
@@ -123,29 +197,29 @@ internal sealed class DenFileTree
 
         foreach (var file in Directory.EnumerateFiles(folder))
         {
-            var name = Path.GetFileName(file);
-            if (!Counts(name))
+            var path = $"{relative}{Path.GetFileName(file)}";
+            if (!IsRead(path))
             {
                 continue;
             }
 
             if (collect is null)
             {
-                _files[$"{relative}{name}"] = HashOf(File.ReadAllBytes(file));
+                _files[path] = HashOf(File.ReadAllBytes(file));
             }
             else
             {
-                collect.Add($"{relative}{name}");
+                collect.Add(path);
             }
         }
 
-        foreach (var sub in Directory.EnumerateDirectories(folder))
+        foreach (var sub in new DirectoryInfo(folder).EnumerateDirectories())
         {
-            var name = Path.GetFileName(sub);
-            if (!name.StartsWith('.'))
+            var name = sub.Name;
+            if (!name.StartsWith('.') && Tracks($"{relative}{name}") && !FileSystemDenSource.IsFolderLink(sub))
             {
                 _folders.Add($"{relative}{name}");
-                Walk(sub, $"{relative}{name}/", depth + 1, collect);
+                Walk(sub.FullName, $"{relative}{name}/", depth + 1, collect);
             }
         }
     }

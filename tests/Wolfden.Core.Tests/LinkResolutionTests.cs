@@ -325,6 +325,50 @@ public class LinkResolutionTests
         Assert.Contains("(F-ID-3)", Assert.Single(index.Diagnostics).Diagnostic.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [Trait("Scenario", "SC-CHECK-4")]
+    [InlineData("[[Alpha]]", "name")]
+    [InlineData("[[01JA7Q8M4XK3V9R2D5W8HN6TQB]]", "id")]
+    public void TiedCopiesWithTheSameIdBreakTheLinkAndSayToGiveThemNewIds(string text, string matchedBy)
+    {
+        // Both copies are at the same scope with the same name and id, so they
+        // tie. Linking by slug or id can't pick one (F-ID-3), so the link is
+        // broken, and the warning says what fixes it (#82).
+        const string id = "01JA7Q8M4XK3V9R2D5W8HN6TQB";
+        var source = Den()
+            .Entity(Starfall, "first", Character("Alpha", $"id: {id}"))
+            .Entity(Starfall, "second", Character("Alpha", $"id: {id}"))
+            .Entity(Starfall, "note", Character("Note"), text + "\n");
+        var index = LinkIndex.Load(source);
+
+        var link = index.Link($"{Starfall}/entities/characters/note.md", text);
+        Assert.Equal(LinkOutcome.Broken, link.Outcome);
+        Assert.Null(link.Target);
+        var warning = Assert.Single(index.Diagnostics).Diagnostic;
+        Assert.Equal("F-LINK-8", warning.RuleId);
+        Assert.Equal(
+            $"{text}: '{text[2..^2]}' would match 2 entities by {matchedBy} ('Alpha' (universes/starfall/entities/characters/first.md); 'Alpha' (universes/starfall/entities/characters/second.md)), " +
+            "but each of their ids is used by more than one file (F-ID-3), so links don't reach them until the ids are unique. Give each copy a new id.",
+            warning.Message);
+    }
+
+    [Fact]
+    public void ATieWithOneUniqueIdIsStillAmbiguous()
+    {
+        // Both Alphas tie by name. first.md's id is duplicated (by b.md), but c.md has
+        // no id, so it can't clash, and linking to c by its slug does pick it.
+        const string id = "01JA7Q8M4XK3V9R2D5W8HN6TQB";
+        var source = Den()
+            .Entity(Starfall, "first", Character("Alpha", $"id: {id}"))
+            .Entity(Starfall, "b", Character("Beta", $"id: {id}"))
+            .Entity(Starfall, "c", Character("Alpha"))
+            .Entity(Starfall, "note", Character("Note"), "[[Alpha]]\n");
+        var index = LinkIndex.Load(source);
+
+        Assert.Equal(LinkOutcome.Ambiguous, index.Link($"{Starfall}/entities/characters/note.md", "[[Alpha]]").Outcome);
+        Assert.EndsWith("Link by slug or id to pick one.", Assert.Single(index.Diagnostics).Diagnostic.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AmbiguousMessagesListAtMostFiveMatches()
     {
