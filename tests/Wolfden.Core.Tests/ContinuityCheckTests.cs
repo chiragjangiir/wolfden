@@ -264,13 +264,40 @@ public class ContinuityCheckTests
     }
 
     [Fact]
-    public void ATypeNoPackDefinesStillAsksToEnableThePack()
+    public void ATypeNoPackDefinesAsksToCheckTheSpellingAndThePack()
     {
         // A broken pack that has no file for the type doesn't explain it.
         var source = ShipDen().With("packs/fleet/pack.yaml", "name: [Fleet\n");
         Note(source, A1, "gadget", "type: gadget\nname: Gadget\nstatus: canon", folder: "gadgets");
 
-        Assert.Contains("enable the pack that defines it", Only(DenCheck.Run(source), "F-ENT-2").Message, StringComparison.Ordinal);
+        var message = Only(DenCheck.Run(source), "F-ENT-2").Message;
+        Assert.Contains("no enabled type has that key", message, StringComparison.Ordinal);
+        Assert.Contains("Check the spelling. If a pack defines it, check that den.yaml enables the pack and that the pack loads without errors.", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ATypeDroppedForAPluralClashNamesTheFileInsteadOfAskingToEnableThePack()
+    {
+        // types.md F-TYPE-5: the den's own 'person' takes core's plural 'characters', so core's character is ignored.
+        var source = Vael(denYaml: "packs: [people]\n")
+            .With("packs/people/pack.yaml", "name: People\n")
+            .With("packs/people/types/person.yaml", "name: Person\nplural: characters\n");
+        Note(source, A1, "orrin-fell", Character("Orrin Fell"));
+
+        var message = Only(DenCheck.Run(source), "F-ENT-2").Message;
+        Assert.StartsWith("unknown type 'character': packs/people/types/person.yaml defines it, but that definition is ignored", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("enable", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACoreTypeMissingBecauseADenLocalCoreDoesntLoadSaysSo()
+    {
+        // types.md F-PACK-10: packs/core shadows the built-in core even with an error in its pack.yaml.
+        var source = Vael().With("packs/core/pack.yaml", "name: [Core\n");
+        Note(source, A1, "orrin-fell", Character("Orrin Fell"));
+
+        var message = Only(DenCheck.Run(source), "F-ENT-2").Message;
+        Assert.StartsWith("unknown type 'character': packs/core/pack.yaml has an error, so the type didn't load", message, StringComparison.Ordinal);
     }
 
     [Fact]

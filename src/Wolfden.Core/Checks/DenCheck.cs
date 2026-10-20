@@ -10,7 +10,9 @@ namespace Wolfden.Core.Checks;
 /// den. It loads the den the way the index does, so it reports the same
 /// errors and warnings, from <see cref="DenStructure"/>,
 /// <see cref="EntityCatalog"/>, and <see cref="LinkIndex"/>, and adds the
-/// continuity checks that only <c>check</c> runs. It reads the files
+/// checks that only <c>check</c> runs: continuity and types
+/// (<see cref="ContinuityChecks"/>, <see cref="FieldChecks"/>), outlines
+/// (<see cref="OutlineChecks"/>), and layout (<see cref="LayoutChecks"/>). It reads the files
 /// directly, never the index, and never writes (F-ID-6).
 /// </summary>
 public sealed class DenCheck
@@ -58,10 +60,13 @@ public sealed class DenCheck
         var structure = DenStructure.Load(source);
         var catalog = EntityCatalog.Load(structure, source);
         var links = LinkIndex.Build(catalog, source);
+        var outlines = OutlineChecks.Run(structure, source, out var rows);
         var diagnostics = structure.Diagnostics
             .Concat(catalog.Diagnostics)
             .Concat(links.Diagnostics)
-            .Concat(ContinuityChecks.Run(catalog, source))
+            .Concat(outlines)
+            .Concat(structure.IsLoaded ? LayoutChecks.Run(catalog, source) : [])
+            .Concat(ContinuityChecks.Run(catalog, source, rows))
             .OrderBy(d => d.Path, StringComparer.Ordinal)
             .ThenBy(d => d.Diagnostic.Line ?? 0)
             .ThenBy(d => d.Diagnostic.RuleId, StringComparer.Ordinal)
