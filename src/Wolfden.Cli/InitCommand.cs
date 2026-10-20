@@ -13,8 +13,10 @@ namespace Wolfden.Cli;
 /// </summary>
 /// <remarks>
 /// It creates the folder if needed and never overwrites anything: a folder
-/// that already has a <c>den.yaml</c>, or that is inside a den (dens don't
-/// nest, F-LAY-1), is refused with exit code 2. Other files already in the
+/// that already has a <c>den.yaml</c>, that is inside a den, or that holds
+/// a den in a folder a few levels below it (dens don't nest, F-LAY-1, and
+/// <see cref="DenLocation.FindBelow"/> says how far it looks), is refused
+/// with exit code 2. Other files already in the
 /// folder, such as a README or a <c>.git</c> folder, are left alone.
 /// </remarks>
 internal static class InitCommand
@@ -35,7 +37,8 @@ internal static class InitCommand
                             with a letter
           --json            print one JSON document instead of text
 
-        It never overwrites anything, and won't create a den inside another den.
+        It never overwrites anything, and won't create a den inside another den
+        or around one in the folders a few levels below.
         Exits 0 when the den is created and 2 if it couldn't be.
         """,
         ["--json"],
@@ -79,6 +82,11 @@ internal static class InitCommand
         if (parent is not null && DenLocation.FindAbove(parent.FullName) is { } outer)
         {
             return Fail($"'{folder}' is inside the den at '{outer}', and dens don't nest (F-LAY-1). Choose a folder outside it.");
+        }
+
+        if (Directory.Exists(root) && DenLocation.FindBelow(root) is { } inner)
+        {
+            return Fail($"'{folder}' already holds the den at '{inner}', and dens don't nest (F-LAY-1). Choose a folder that doesn't hold one.");
         }
 
         var created = new List<string>();

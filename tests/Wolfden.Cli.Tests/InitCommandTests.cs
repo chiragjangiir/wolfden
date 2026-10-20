@@ -137,6 +137,38 @@ public class InitCommandTests
     }
 
     [Theory]
+    [Trait("Scenario", "SC-CLI-1")]
+    [InlineData("the-long-dark")]
+    [InlineData("books/drafts/2026/the-long-dark")]
+    public void ADenAroundADenIsRefused(string below)
+    {
+        using var folder = TempDen.FromFiles(new Dictionary<string, string> { [$"{below}/den.yaml"] = "format: 1\n" });
+        var inner = Path.Combine(folder.Root, below.Replace('/', Path.DirectorySeparatorChar));
+
+        var (exitCode, output, error) = Cli.Run("init", folder.Root, "--universe", "vael");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Empty(output);
+        Assert.Equal($"wolfden init: '{folder.Root}' already holds the den at '{inner}', and dens don't nest (F-LAY-1). Choose a folder that doesn't hold one.\n", error);
+        Assert.False(folder.Exists("den.yaml"));
+        Assert.False(Directory.Exists(Path.Combine(folder.Root, "universes")));
+    }
+
+    [Theory]
+    [InlineData(".backup/old/den.yaml")]
+    [InlineData("a/b/c/d/e/den.yaml")]
+    public void ADenHiddenOrDeeperThanTheSearchDoesNotStopInit(string path)
+    {
+        using var folder = TempDen.FromFiles(new Dictionary<string, string> { [path] = "format: 1\n" });
+
+        var (exitCode, _, error) = Cli.Run("init", folder.Root);
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Empty(error);
+        Assert.True(folder.Exists("den.yaml"));
+    }
+
+    [Theory]
     [InlineData("The Long Dark")]
     [InlineData("7th-fleet")]
     [InlineData("long--dark")]

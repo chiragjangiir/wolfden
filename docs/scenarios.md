@@ -669,11 +669,16 @@ The writer runs `wolfden init` in an empty folder, with
 - The folder gets a `den.yaml` and `universes/the-long-dark/universe.md`
   with an id and the name "The Long Dark". `wolfden check` then reports
   no errors or warnings, and `wolfden query` shows an empty view. Running
-  `init` again, or inside another den, changes nothing and exits 2.
+  `init` again, inside another den, or in a folder that already holds a
+  den a few levels down (say `init` in `writing/` when
+  `writing/the-long-dark/` is a den), changes nothing, says which den is
+  in the way, and exits 2.
 
 Spec: F-DEN-1, F-ID-6, F-LAY-1. Covered by:
 `InitCommandTests.ANewDenWithAUniversePassesCheckAndCanBeQueried`,
-`InitCommandTests.ANewDenWithoutAUniverseIsJustDenYaml`.
+`InitCommandTests.ANewDenWithoutAUniverseIsJustDenYaml`,
+`InitCommandTests.ADenInsideADenIsRefused`,
+`InitCommandTests.ADenAroundADenIsRefused`.
 
 ### SC-CLI-2. I delete the index, or it gets corrupted
 
