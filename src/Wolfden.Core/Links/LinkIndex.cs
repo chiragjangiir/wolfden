@@ -160,7 +160,7 @@ public sealed class LinkIndex
                     scan = null;
                     if (source.FileExists(path))
                     {
-                        var outline = MarkdownFile.Parse(source.ReadFile(path));
+                        var outline = MarkdownFile.ParseOutline(source.ReadFile(path));
                         if (!Outlines.OutlineReader.IsExcluded(outline))
                         {
                             scan = ScanWith(s => s.ScanOutline(book, path, outline));

@@ -12,6 +12,7 @@ namespace Wolfden.Core.Documents;
 public sealed partial class MarkdownFile : DenFile
 {
     private readonly bool _requireFrontmatter;
+    private readonly bool _isOutline;
     private readonly YamlBlock? _frontmatter;
     private readonly int _frontmatterEnd;
     private readonly int _bodyStart;
@@ -19,10 +20,11 @@ public sealed partial class MarkdownFile : DenFile
     private readonly IReadOnlyList<Section> _sections = [];
     private readonly Diagnostic? _missingFrontmatter;
 
-    private MarkdownFile(byte[] bytes, bool requireFrontmatter)
+    private MarkdownFile(byte[] bytes, bool requireFrontmatter, bool isOutline = false)
         : base(bytes)
     {
         _requireFrontmatter = requireFrontmatter;
+        _isOutline = isOutline;
         if (Source is null)
         {
             return;
@@ -63,7 +65,7 @@ public sealed partial class MarkdownFile : DenFile
             diagnostics.Add(_missingFrontmatter);
         }
 
-        var body = BodyParser.Parse(this, Source, _bodyStart, diagnostics);
+        var body = BodyParser.Parse(this, Source, _bodyStart, diagnostics, isOutline);
         _sections = body.Sections;
         _leadEnd = body.LeadEnd;
         Title = body.Title;
@@ -77,6 +79,13 @@ public sealed partial class MarkdownFile : DenFile
 
     /// <summary>True if the file starts with closed frontmatter (format.md F-FM-1).</summary>
     public bool HasFrontmatter { get; }
+
+    /// <summary>
+    /// True if the file was parsed as a book's <c>outline.md</c>
+    /// (<see cref="ParseOutline"/>), where wolfden comments do nothing
+    /// (format.md F-SEC-10), so its sections never have a comment.
+    /// </summary>
+    public bool IsOutline => _isOutline;
 
     /// <summary>
     /// The frontmatter's top-level mapping, or null if there's no
@@ -118,6 +127,17 @@ public sealed partial class MarkdownFile : DenFile
     /// missing frontmatter is an F-FM-1 error.</param>
     public static MarkdownFile Parse(ReadOnlySpan<byte> bytes, bool requireFrontmatter = false) =>
         new(bytes.ToArray(), requireFrontmatter);
+
+    /// <summary>
+    /// Parses a book's <c>outline.md</c> (format.md §11). Its frontmatter is
+    /// optional (F-OUT-1), and wolfden comments do nothing in it (F-SEC-10):
+    /// each one, well-formed or not, is a warning and never an error, so a
+    /// bad <c>from=</c> or <c>status=</c> in one doesn't exclude the outline
+    /// (F-GEN-2, #80). Its headings still split it into sections, but no
+    /// section has a comment, and a level-1 heading anywhere is fine (F-OUT-3).
+    /// </summary>
+    public static MarkdownFile ParseOutline(ReadOnlySpan<byte> bytes) =>
+        new(bytes.ToArray(), requireFrontmatter: false, isOutline: true);
 
     /// <summary>The frontmatter value at <paramref name="path"/>, or null.</summary>
     public YamlNode? GetFrontmatterValue(params IReadOnlyList<string> path) => Find(Frontmatter, path);
@@ -399,7 +419,7 @@ public sealed partial class MarkdownFile : DenFile
         return result;
     }
 
-    private MarkdownFile Reparse(IEnumerable<TextEdit> edits) => new(ApplyEdits(edits), _requireFrontmatter);
+    private MarkdownFile Reparse(IEnumerable<TextEdit> edits) => new(ApplyEdits(edits), _requireFrontmatter, _isOutline);
 
     /// <summary>True if <paramref name="other"/> has this file's title,
     /// headings, and section comments, plus <paramref name="extra"/> more sections.</summary>
