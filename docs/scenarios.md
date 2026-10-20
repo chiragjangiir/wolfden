@@ -850,7 +850,8 @@ terminal, deletes `.wolfden/`, or starts a second `wolfden index --watch`
 on the same den.
 
 - The watcher notices that the index isn't the one it wrote and rebuilds
-  it at the next change, rather than patching rows it no longer knows. A
+  it at the next change, rather than patching rows it no longer knows,
+  and a change it was writing when the index was replaced isn't lost. A
   second watcher on the same den says another one is already watching and
   exits 2. If the operating system stops reporting changes, say because
   the den is on a drive that went away, the watcher says so, listens
@@ -859,6 +860,7 @@ on the same den.
 Spec: design.md §7. Covered by:
 `DenWatcherTests.WhenFileEventsStopItListensAgainRebuildsAndSaysSo`,
 `IncrementalUpdateTests.AnIndexRebuiltByAnotherCommandIsRebuiltNotPatched`,
+`IncrementalUpdateTests.AnIndexReplacedWhileABatchIsWrittenIsRebuilt`,
 `IncrementalUpdateTests.ADeletedIndexIsRebuilt`,
 `DenWatcherTests.OnlyOneWatcherRunsPerDen`,
 `IndexWatchTests.ASecondWatcherOnTheSameDenExits2`.

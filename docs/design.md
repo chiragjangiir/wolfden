@@ -362,7 +362,10 @@ from the files:
   instead. Files the index doesn't read, such as a `README.md` at the den
   root, change nothing, not even the files hash (#103). Each
   batch is written in one transaction, so a query sees the index before
-  the batch or after it. The index always ends up as a full rebuild of the
+  the batch or after it. After it commits, the watcher checks that the
+  index file it wrote is still the one in place, since on Linux another
+  process's rebuild can replace it mid-batch (#106), and rebuilds if it
+  isn't. The index always ends up as a full rebuild of the
   same files would make it, apart from the ids of rows that came from
   single files, which queries never order by.
 

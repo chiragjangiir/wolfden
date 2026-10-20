@@ -382,9 +382,28 @@ internal sealed class IndexUpdater
                     }
                 }
 
-                using var db = new IndexDbContext(connection);
-                var written = after.Rows.ApplyChanges(before.Rows, db, connection, transaction);
+                int written;
+                using (var db = new IndexDbContext(connection))
+                {
+                    written = after.Rows.ApplyChanges(before.Rows, db, connection, transaction);
+                }
+
                 transaction.Commit();
+                transaction.Dispose();
+                connection.Dispose();
+
+                AfterCommit?.Invoke();
+
+                // On Linux, another process's rebuild can move its new index
+                // over this one while the transaction waits or runs (#106):
+                // the batch then went into the replaced file. Look again at
+                // the file that's there now, and if it isn't the one just
+                // written, the caller rebuilds.
+                if (ReadWriteId(path) != after.WriteId)
+                {
+                    throw new StaleIndexException("another command rebuilt the index meanwhile");
+                }
+
                 return written;
             }
             catch (SqliteException e)
@@ -392,6 +411,19 @@ internal sealed class IndexUpdater
                 throw new StaleIndexException($"the index couldn't be updated ({e.Message.TrimEnd('.')})", e);
             }
         }
+    }
+
+    /// <summary>Called after a batch is committed, before the index is looked at again. Tests use it to replace the index at that moment.</summary>
+    internal Action? AfterCommit { get; init; }
+
+    private static string? ReadWriteId(string path)
+    {
+        using var connection = new SqliteConnection(IndexBuilder.ConnectionString(path, SqliteOpenMode.ReadOnly));
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM meta WHERE key = $key";
+        command.Parameters.AddWithValue("$key", IndexSchema.WriteIdKey);
+        return command.ExecuteScalar() as string;
     }
 
     /// <summary>The index can't be updated in place, so it must be rebuilt.</summary>

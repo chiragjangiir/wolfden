@@ -165,6 +165,30 @@ public sealed class IncrementalUpdateTests
 
     [Fact]
     [Trait("Scenario", "SC-WATCH-5")]
+    public void AnIndexReplacedWhileABatchIsWrittenIsRebuilt()
+    {
+        // On Linux, another process's rebuild can move its index over this
+        // one while the batch's transaction runs, so the batch lands in the
+        // replaced file (#106). Replace the index right after the commit with
+        // one built before the edit, as that rebuild would have.
+        using var den = TempDen.Starfall();
+        var other = Path.Combine(den.Root, IndexBuilder.StateFolder, "other.db");
+        var updater = new IndexUpdater(den.Root) { AfterCommit = () => File.Move(other, den.IndexPath, overwrite: true) };
+        updater.Rebuild("start");
+        IndexBuilder.BuildInto(den.Root, other);
+        const string mara = "universes/starfall/series/long-dark/entities/characters/mara-voss.md";
+        File.AppendAllText(Path.Combine(den.Root, mara), "\nA new line.\n");
+
+        var update = updater.Apply(Batch(den, (WatcherChangeTypes.Changed, mara, null)), out _);
+
+        Assert.Equal(IndexUpdateKind.Rebuilt, update!.Kind);
+        Assert.Equal("another command rebuilt the index meanwhile", update.Reason);
+        Assert.Equal(IndexStatus.Current, IndexBuilder.CheckFiles(den.Root));
+        AssertSameAsFullRebuild(den, "after the index was replaced");
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WATCH-5")]
     public void ADeletedIndexIsRebuilt()
     {
         using var den = TempDen.Starfall();
