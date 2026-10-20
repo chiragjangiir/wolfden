@@ -33,4 +33,6 @@ internal sealed class HashingDenSource(IDenSource inner) : IDenSource
     public IEnumerable<string> GetDirectories(string path) => inner.GetDirectories(path);
 
     public IEnumerable<string> GetFiles(string path) => inner.GetFiles(path);
+
+    public IEnumerable<string> GetFolderLinks(string path) => inner.GetFolderLinks(path);
 }

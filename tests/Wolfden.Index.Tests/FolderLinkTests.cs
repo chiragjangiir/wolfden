@@ -28,10 +28,12 @@ public sealed class FolderLinkTests
         Assert.Equal(fingerprint, IndexBuilder.FilesFingerprint(den.Root));
         IndexBuilder.Rebuild(den.Root);
         Assert.Equal(IndexStatus.Current, IndexBuilder.CheckFiles(den.Root));
+        Assert.Equal([$"{Locations}/loop-a", $"{Locations}/loop-b"], LinkWarnings(den));
     }
 
     [Fact]
-    public void ANoteReachedOnlyThroughALinkIsNotRead()
+    [Trait("Scenario", "SC-CHECK-33")]
+    public void ANoteReachedOnlyThroughALinkIsNotReadAndCheckSaysSo()
     {
         using var den = TempDen.Starfall();
         using var elsewhere = TempDen.FromFiles(new Dictionary<string, string>
@@ -46,7 +48,34 @@ public sealed class FolderLinkTests
         Assert.False(new FileSystemDenSource(den.Root).FileExists($"{Locations}/shared/the-drowned-gate.md"));
         Assert.True(FileSystemDenSource.IsFolderLink(new DirectoryInfo(link)));
         Assert.Equal(fingerprint, IndexBuilder.FilesFingerprint(den.Root));
+
+        var warning = Assert.Single(Core.Checks.DenCheck.Run(den.Root).Diagnostics, d => d.Diagnostic.RuleId == "F-LAY-2");
+        Assert.Equal($"{Locations}/shared", warning.Path);
+        Assert.Equal(Core.Documents.DiagnosticSeverity.Warning, warning.Diagnostic.Severity);
+        Assert.Equal(
+            "This folder is a link to another folder (a symbolic link or junction). Folder links aren't followed, so nothing in it is read. Move the folder into the den, or copy it here.",
+            warning.Diagnostic.Message);
     }
+
+    [Theory]
+    [InlineData("drafts/shared", false)]
+    [InlineData("universes/starfall/drafts/shared", false)]
+    [InlineData("universes/starfall/series/long-dark/books/ash/drafts/shared", false)]
+    [InlineData("universes/shared", true)]
+    [InlineData("universes/starfall/series/long-dark/books/ash/entities/shared", true)]
+    [InlineData("packs/shared", true)]
+    public void CheckWarnsOnlyAboutLinksWhereTheDenReadsFiles(string path, bool warned)
+    {
+        using var den = TempDen.Starfall();
+        using var elsewhere = TempDen.FromFiles(new Dictionary<string, string> { ["shared/notes.md"] = "Anything.\n" });
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(den.Root, Full(path)))!);
+        using var linked = LinkFolder(Path.Combine(den.Root, Full(path)), Path.Combine(elsewhere.Root, "shared"));
+
+        Assert.Equal(warned ? [path] : [], LinkWarnings(den));
+    }
+
+    private static List<string> LinkWarnings(TempDen den) =>
+        Core.Checks.DenCheck.Run(den.Root).Diagnostics.Where(d => d.Diagnostic.RuleId == "F-LAY-2").Select(d => d.Path).ToList();
 
     [Fact]
     public void AnOrdinaryFolderIsNotALink()

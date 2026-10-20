@@ -348,8 +348,10 @@ from the files:
   decision). Every walk of a den (the loader, the files hash, the watcher,
   and `init`'s search for dens below) skips symbolic links and junctions
   to folders, as git does, so links can't loop and each note has one
-  path. Cloud-sync placeholders (OneDrive, Dropbox) aren't links and are
-  read as usual.
+  path. `check` warns about each link where the den reads files
+  (format.md F-LAY-2), so linked notes aren't dropped silently.
+  Cloud-sync placeholders (OneDrive, Dropbox) aren't links and are read
+  as usual.
 - **Watched** (#14; v0 behaviour, not a recorded decision). The file
   watcher collects a burst of saves (an editor's temporary file and
   rename, a git checkout) into one batch, and ignores hidden paths such as
@@ -365,7 +367,13 @@ from the files:
   the batch or after it. After it commits, the watcher checks that the
   index file it wrote is still the one in place, since on Linux another
   process's rebuild can replace it mid-batch (#106), and rebuilds if it
-  isn't. The index always ends up as a full rebuild of the
+  isn't. A window remains, as known v0 behaviour: a rebuild in another
+  process that read the files before a save, but swaps its index in
+  after the watcher's check, leaves an index without that save. It
+  heals itself: the watcher's next batch finds the index isn't the one it
+  wrote and rebuilds, and a `query` meanwhile sees that the files hash
+  differs and rebuilds too. Closing the window would need a lock shared
+  across processes for the whole rebuild. The index always ends up as a full rebuild of the
   same files would make it, apart from the ids of rows that came from
   single files, which queries never order by.
 

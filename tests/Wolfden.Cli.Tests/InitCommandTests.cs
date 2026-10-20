@@ -124,6 +124,7 @@ public class InitCommandTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-CLI-1")]
     public void ADenInsideADenIsRefused()
     {
         using var den = TempDen.FromFiles(new Dictionary<string, string> { ["den.yaml"] = "format: 1\n" });
@@ -149,9 +150,76 @@ public class InitCommandTests
 
         Assert.Equal(CliApp.ExitUsage, exitCode);
         Assert.Empty(output);
-        Assert.Equal($"wolfden init: '{folder.Root}' already holds the den at '{inner}', and dens don't nest (F-LAY-1). Choose a folder that doesn't hold one.\n", error);
+        Assert.Equal($"wolfden init: '{folder.Root}' already holds the den at '{inner}', and dens don't nest (F-LAY-1). Choose a folder that doesn't hold one, or first move that den's den.yaml out of the way, or into a hidden folder such as .old/, which Wolfden ignores.\n", error);
         Assert.False(folder.Exists("den.yaml"));
         Assert.False(Directory.Exists(Path.Combine(folder.Root, "universes")));
+    }
+
+    [Fact]
+    public void TheSearchBelowStopsAfterItsFolderLimit()
+    {
+        // Six folders on the first level, then the den one level further
+        // down: a limit of five stops before it, a larger one finds it.
+        var files = new Dictionary<string, string> { ["z/the-long-dark/den.yaml"] = "format: 1\n" };
+        foreach (var name in new[] { "a", "b", "c", "d", "e" })
+        {
+            files[$"{name}/readme.txt"] = "x\n";
+        }
+
+        using var folder = TempDen.FromFiles(files);
+
+        Assert.Null(DenLocation.FindBelow(folder.Root, maxFolders: 5));
+        Assert.Equal(Path.Combine(folder.Root, "z", "the-long-dark"), DenLocation.FindBelow(folder.Root, maxFolders: 7));
+    }
+
+    [Fact]
+    public void TheSearchBelowSkipsFolderLinks()
+    {
+        using var folder = TempDen.Empty();
+        using var elsewhere = TempDen.FromFiles(new Dictionary<string, string> { ["the-long-dark/den.yaml"] = "format: 1\n" });
+        var link = Path.Combine(folder.Root, "linked");
+        if (!TryLinkFolder(link, Path.Combine(elsewhere.Root, "the-long-dark")))
+        {
+            Assert.Skip("This system doesn't allow folder links to be created.");
+        }
+
+        try
+        {
+            Assert.Null(DenLocation.FindBelow(folder.Root));
+            Assert.Equal(CliApp.ExitOk, Cli.Run("init", folder.Root).ExitCode);
+        }
+        finally
+        {
+            Directory.Delete(link);
+        }
+    }
+
+    /// <summary>A symbolic link where the OS allows it, else a junction on Windows.</summary>
+    private static bool TryLinkFolder(string link, string target)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(link, target);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            // Windows without developer mode; try a junction, which needs no rights.
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        using var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", ["/c", "mklink", "/J", link, target])
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        })!;
+        mklink.WaitForExit();
+        return mklink.ExitCode == 0 && Directory.Exists(link);
     }
 
     [Theory]

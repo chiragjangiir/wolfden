@@ -58,11 +58,12 @@ internal static class DenLocation
     /// A folder below <paramref name="root"/> that holds a <c>den.yaml</c>, or
     /// null. It's a bounded search, for <c>init</c>: it goes at most
     /// <see cref="BelowDepth"/> folder levels down and looks in at most
-    /// <see cref="BelowFolders"/> folders, nearest levels first. It skips
-    /// folders whose names start with <c>.</c> (F-LAY-2) and folder links
-    /// (symbolic links and junctions), as the den walk does.
+    /// <paramref name="maxFolders"/> folders (<see cref="BelowFolders"/>;
+    /// tests pass fewer), nearest levels first. It skips folders whose names
+    /// start with <c>.</c> (F-LAY-2) and folder links (symbolic links and
+    /// junctions), as the den walk does.
     /// </summary>
-    public static string? FindBelow(string root)
+    public static string? FindBelow(string root, int maxFolders = BelowFolders)
     {
         var level = new List<string> { Path.GetFullPath(root) };
         var visited = 0;
@@ -90,7 +91,7 @@ internal static class DenLocation
                             continue;
                         }
 
-                        if (++visited > BelowFolders)
+                        if (++visited > maxFolders)
                         {
                             return null;
                         }

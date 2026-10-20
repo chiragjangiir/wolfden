@@ -9,7 +9,10 @@ namespace Wolfden.Core.Checks;
 /// <c>den.yaml</c> below the den root (F-LAY-1), the reserved
 /// <c>notes/</c> and <c>authors/</c> folders (F-LAY-3), an entity outside
 /// its type's folder (F-LAY-6), and a stray <c>.md</c> file in a container
-/// folder (F-LAY-7). Hidden files and folders are never looked at (F-LAY-2).
+/// folder (F-LAY-7). Hidden files and folders are never looked at, and a
+/// folder link where the den reads files is reported, since it isn't
+/// followed (F-LAY-2). Like the other layout warnings, it's reported by
+/// <c>check</c> only, not stored in the index.
 /// </summary>
 internal static class LayoutChecks
 {
@@ -23,6 +26,12 @@ internal static class LayoutChecks
         {
             diagnostics.Add(new DenDiagnostic(path, new Diagnostic("F-LAY-1", DiagnosticSeverity.Warning, null,
                 "Dens don't nest, so this den.yaml is ignored: its folder is part of the den around it. Move the folder out of this den to make it a den of its own.")));
+        }
+
+        foreach (var path in FolderLinks(source, "", 0))
+        {
+            diagnostics.Add(new DenDiagnostic(path, new Diagnostic("F-LAY-2", DiagnosticSeverity.Warning, null,
+                "This folder is a link to another folder (a symbolic link or junction). Folder links aren't followed, so nothing in it is read. Move the folder into the den, or copy it here.")));
         }
 
         foreach (var folder in source.GetDirectories("").Where(n => n is "notes" or "authors"))
@@ -70,6 +79,85 @@ internal static class LayoutChecks
                 yield return path;
             }
         }
+    }
+
+    /// <summary>
+    /// F-LAY-2: every folder link (<see cref="IDenSource.GetFolderLinks"/>)
+    /// where the den reads files (<see cref="IsReadLocation"/>), so notes in
+    /// a linked folder aren't dropped without a word. Links elsewhere, such as
+    /// in a <c>drafts/</c> folder at the den root, hide nothing Wolfden reads.
+    /// </summary>
+    private static IEnumerable<string> FolderLinks(IDenSource source, string folder, int depth)
+    {
+        foreach (var name in source.GetFolderLinks(folder).Where(n => !n.StartsWith('.')))
+        {
+            var path = folder.Length == 0 ? name : $"{folder}/{name}";
+            if (IsReadLocation(path))
+            {
+                yield return path;
+            }
+        }
+
+        if (depth >= MaxDepth)
+        {
+            yield break;
+        }
+
+        foreach (var name in source.GetDirectories(folder).Where(n => !n.StartsWith('.')))
+        {
+            var path = folder.Length == 0 ? name : $"{folder}/{name}";
+            if (path is "packs" or "universes" || path.StartsWith("packs/", StringComparison.Ordinal) || path.StartsWith("universes/", StringComparison.Ordinal))
+            {
+                foreach (var link in FolderLinks(source, path, depth + 1))
+                {
+                    yield return link;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// True for a folder whose files the den loader can read: <c>packs/</c>
+    /// and anything in it; <c>universes/</c>, a universe, its <c>series/</c>
+    /// and <c>books/</c> and the containers in them, a series' <c>books/</c>
+    /// and its books; and a container's <c>entities/</c> folder and anything
+    /// in it (format.md F-LAY-4, F-LAY-5).
+    /// </summary>
+    internal static bool IsReadLocation(string folder)
+    {
+        var names = folder.Split('/');
+        if (names[0] == "packs")
+        {
+            return true;
+        }
+
+        if (names[0] != "universes")
+        {
+            return false;
+        }
+
+        if (names.Length <= 2)
+        {
+            return true;
+        }
+
+        if (names[2] == "entities")
+        {
+            return true;
+        }
+
+        var series = names[2] == "series";
+        if (!series && names[2] != "books")
+        {
+            return false;
+        }
+
+        return names.Length switch
+        {
+            3 or 4 => true,
+            5 => names[4] == "entities" || series && names[4] == "books",
+            _ => names[4] == "entities" || series && names[4] == "books" && (names.Length == 6 || names[6] == "entities"),
+        };
     }
 
     /// <summary>F-LAY-7: a <c>.md</c> file directly in a container folder, other than its container file and a book's <c>outline.md</c>.</summary>

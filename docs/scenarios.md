@@ -553,6 +553,22 @@ Spec: F-ID-2, F-ID-6, F-BOOK-1 (#100). Covered by:
 `SpecWarningCheckTests.AContainerFileWithoutAnIdIsWarnedLikeAnEntity`,
 `CheckCommandTests.FixAddsMissingIdsAndReportsEachFile`.
 
+### SC-CHECK-33. I linked a shared folder of notes into my den
+
+To share locations between two dens, the writer made
+`universes/vael/entities/locations/shared` a symbolic link (or a
+junction on Windows) to a folder outside the den.
+
+- The notes in the linked folder aren't read, since Wolfden doesn't
+  follow folder links, and `check` warns about the link: it isn't
+  followed, so move the folder into the den or copy it there. A link
+  somewhere Wolfden doesn't read, such as a `drafts/` folder at the den
+  root, gets no warning.
+
+Spec: F-LAY-2 (#102). Covered by:
+`FolderLinkTests.ANoteReachedOnlyThroughALinkIsNotReadAndCheckSaysSo`,
+`FolderLinkTests.LinksThatLoopAreSkippedByTheLoaderAndTheIndex`.
+
 ## RT: saving a note keeps what the writer wrote
 
 Background: the files are the writer's, and Wolfden is only one of the
@@ -752,7 +768,8 @@ a new location file, and runs the query again.
 Spec: design.md §7. Covered by:
 `QueryCommandTests.AQueryAfterAnEditSeesTheEdit`,
 `QueryCommandTests.AQueryAfterANewNoteSeesTheNote`,
-`FreshnessTests.EnsureUpToDateRebuildsAStaleIndexAndThenItIsCurrent`.
+`FreshnessTests.EnsureUpToDateRebuildsAStaleIndexAndThenItIsCurrent`,
+`FingerprintTests.AnEditToAFileTheIndexDoesntReadDoesntMakeItStale`.
 
 ### SC-CLI-7. I need an id for a note I'm writing by hand
 

@@ -238,34 +238,47 @@ public static class IndexBuilder
     /// rebuild, so a one-off command such as <c>wolfden query</c> can use it
     /// where no file watcher (#14) keeps the index up to date.
     /// </summary>
-    public static IndexStatus CheckFiles(string denRoot)
+    public static IndexStatus CheckFiles(string denRoot) => CheckFiles(denRoot, out _);
+
+    /// <summary><see cref="CheckFiles(string)"/>, also giving the files fingerprint it worked out, or null if it didn't get that far.</summary>
+    private static IndexStatus CheckFiles(string denRoot, out string? fingerprint)
     {
+        fingerprint = null;
         var status = Check(denRoot);
         if (status != IndexStatus.Current)
         {
             return status;
         }
 
-        string? recorded;
-        try
-        {
-            using var connection = new SqliteConnection(ConnectionString(IndexPath(denRoot), SqliteOpenMode.ReadOnly));
-            connection.Open();
-            recorded = ReadMeta(connection).GetValueOrDefault(IndexSchema.FilesFingerprintKey);
-        }
-        catch (Exception ex) when (ex is SqliteException or InvalidOperationException or InvalidCastException)
+        if (RecordedFingerprint(denRoot) is not { } recorded)
         {
             return IndexStatus.Corrupt;
         }
 
-        return recorded == FilesFingerprint(Path.GetFullPath(denRoot)) ? IndexStatus.Current : IndexStatus.FilesChanged;
+        fingerprint = FilesFingerprint(Path.GetFullPath(denRoot));
+        return recorded == fingerprint ? IndexStatus.Current : IndexStatus.FilesChanged;
+    }
+
+    /// <summary>The files fingerprint the index records, "" if it records none, or null if the index can't be read.</summary>
+    private static string? RecordedFingerprint(string denRoot)
+    {
+        try
+        {
+            using var connection = new SqliteConnection(ConnectionString(IndexPath(denRoot), SqliteOpenMode.ReadOnly));
+            connection.Open();
+            return ReadMeta(connection).GetValueOrDefault(IndexSchema.FilesFingerprintKey) ?? "";
+        }
+        catch (Exception ex) when (ex is SqliteException or InvalidOperationException or InvalidCastException)
+        {
+            return null;
+        }
     }
 
     /// <summary>The longest <see cref="EnsureUpToDate(string)"/> waits for a running watcher to catch up before it rebuilds the index itself.</summary>
     public static readonly TimeSpan WatcherWait = TimeSpan.FromSeconds(1);
 
     /// <summary>How often <see cref="EnsureUpToDate(string, TimeSpan)"/> looks again while it waits for a watcher.</summary>
-    private static readonly TimeSpan WatcherPoll = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan WatcherPoll = TimeSpan.FromMilliseconds(50);
 
     /// <summary>
     /// Rebuilds the index unless <see cref="CheckFiles"/> says it's
@@ -283,16 +296,25 @@ public static class IndexBuilder
     /// <returns>The status before any rebuild or wait.</returns>
     public static IndexStatus EnsureUpToDate(string denRoot, TimeSpan watcherWait)
     {
-        var status = CheckFiles(denRoot);
+        var status = CheckFiles(denRoot, out var current);
         if (status == IndexStatus.FilesChanged && watcherWait > TimeSpan.Zero && DenWatcher.IsWatching(denRoot))
         {
+            // Hashing the den again on every poll would cost more than the
+            // wait saves, so poll only the fingerprint the index records,
+            // until the watcher has written the one the files have now. Then
+            // look at the files once more, in case they changed meanwhile.
             var waited = System.Diagnostics.Stopwatch.StartNew();
             for (var left = watcherWait; left > TimeSpan.Zero; left = watcherWait - waited.Elapsed)
             {
                 Thread.Sleep(left < WatcherPoll ? left : WatcherPoll);
-                if (CheckFiles(denRoot) == IndexStatus.Current)
+                if (RecordedFingerprint(denRoot) == current)
                 {
-                    return status;
+                    if (CheckFiles(denRoot) == IndexStatus.Current)
+                    {
+                        return status;
+                    }
+
+                    break;
                 }
             }
         }

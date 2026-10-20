@@ -86,7 +86,7 @@ internal static class InitCommand
 
         if (Directory.Exists(root) && DenLocation.FindBelow(root) is { } inner)
         {
-            return Fail($"'{folder}' already holds the den at '{inner}', and dens don't nest (F-LAY-1). Choose a folder that doesn't hold one.");
+            return Fail($"'{folder}' already holds the den at '{inner}', and dens don't nest (F-LAY-1). Choose a folder that doesn't hold one, or first move that den's den.yaml out of the way, or into a hidden folder such as .old/, which Wolfden ignores.");
         }
 
         var created = new List<string>();
