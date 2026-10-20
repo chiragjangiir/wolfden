@@ -34,14 +34,26 @@ public class SpecWarningCheckTests
     private static string Character(string name, params string[] extra) =>
         string.Join("\n", new[] { "type: character", $"name: {name}", "status: canon" }.Concat(extra));
 
-    private static (string Path, string Rule, int? Line)[] Found(DenCheck check) =>
-        check.Diagnostics.Select(d => (d.Path, d.Diagnostic.RuleId, d.Diagnostic.Line)).ToArray();
+    /// <summary>The rules these tests expect as errors. Every other diagnostic must be a warning.</summary>
+    private static readonly HashSet<string> Errors = new(StringComparer.Ordinal) { "F-YAML-1", "F-DEN-3", "F-KEY-1" };
+
+    /// <summary>The diagnostics as (path, rule, line), after asserting each one's severity: an error only for <see cref="Errors"/>.</summary>
+    private static (string Path, string Rule, int? Line)[] Found(DenCheck check)
+    {
+        Assert.All(check.Diagnostics, d => Assert.Equal(
+            Errors.Contains(d.Diagnostic.RuleId) ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning, d.Diagnostic.Severity));
+        return check.Diagnostics.Select(d => (d.Path, d.Diagnostic.RuleId, d.Diagnostic.Line)).ToArray();
+    }
 
     private static (string Path, string Rule, int? Line)[] Found(DenCheck check, string rule) =>
         Found(check).Where(d => d.Rule == rule).ToArray();
 
-    private static string Message(DenCheck check, string rule) =>
-        Assert.Single(check.Diagnostics, d => d.Diagnostic.RuleId == rule).Diagnostic.Message;
+    private static string Message(DenCheck check, string rule)
+    {
+        var diagnostic = Assert.Single(check.Diagnostics, d => d.Diagnostic.RuleId == rule).Diagnostic;
+        Assert.Equal(Errors.Contains(rule) ? DiagnosticSeverity.Error : DiagnosticSeverity.Warning, diagnostic.Severity);
+        return diagnostic.Message;
+    }
 
     /// <summary>An outline: a header and one line per row, each "row | chapter | beat".</summary>
     private static string Outline(params string[] rows) =>
@@ -151,6 +163,7 @@ public class SpecWarningCheckTests
 
         // One warning that says what went wrong, not a second one about the field type.
         var found = check.Diagnostics.Where(d => d.Diagnostic.RuleId != "F-FLD-2").ToList();
+        Assert.Equal(0, check.ErrorCount);
         var d = Assert.Single(found);
         Assert.Equal("F-FLD-6", d.Diagnostic.RuleId);
         Assert.EndsWith($"without quotes, YAML reads {link} as a list inside a list, not a link. Write \"{link}\".", d.Diagnostic.Message, StringComparison.Ordinal);
@@ -457,13 +470,14 @@ public class SpecWarningCheckTests
 
         var check = DenCheck.Run(source);
 
-        // Row 1's unescaped | splits its pov cell, which shifts "Wakes." into the status column.
+        // Row 1's unescaped | splits its pov cell and shifts "Wakes." into the status column. F-OUT-12 says so,
+        // and the shifted status and chapter aren't checked as well.
         const string path = A1 + "/outline.md";
         Assert.Equal(
             [
                 (path, "F-OUT-11", 3), (path, "F-OUT-11", 3),
                 (path, "F-OUT-12", 5), (path, "F-OUT-12", 5),
-                (path, "F-OUT-9", 5), (path, "F-OUT-9", 6), (path, "F-OUT-9", 7), (path, "F-OUT-9", 8),
+                (path, "F-OUT-9", 6), (path, "F-OUT-9", 7), (path, "F-OUT-9", 8),
                 (path, "F-OUT-3", 10),
                 (path, "F-OUT-2", 16),
             ],
@@ -510,6 +524,68 @@ public class SpecWarningCheckTests
         var check = DenCheck.Run(source);
 
         Assert.Equal([(A1 + "/entities/events/departure.md", "F-FLD-7", 7), (A1 + "/outline.md", "F-YAML-1", 3)], Found(check));
+        Assert.Equal(
+            "row: row 1 isn't in the outlines that load, and the outline of book 'a1' has errors, so its rows aren't read. Until that's fixed, this entity isn't tied to row 1.",
+            Message(check, "F-FLD-7"));
+    }
+
+    [Fact]
+    public void ARowEntryWithUntilIsOnlyARowWarning()
+    {
+        // F-FLD-7 covers a row entry's until, so it doesn't get F-TMP-8 as well.
+        var source = Den().With($"{A1}/outline.md", Outline("7 | 1 | Departure."));
+        Note(source, A1, "departure", "type: event\nname: Departure\nstatus: canon\nfields:\n  row: { value: 7, until: \"a1:3\" }", folder: "events");
+
+        var check = DenCheck.Run(source);
+
+        Assert.Equal([(A1 + "/entities/events/departure.md", "F-FLD-7", 7)], Found(check));
+    }
+
+    [Fact]
+    public void ABookWhoseLowestRowEqualsThePreviousBooksHighestIsWarned()
+    {
+        var source = Den()
+            .With($"{A1}/outline.md", Outline("1 | 1 | Departure.", "2 | 2 | The storm."))
+            .With($"{A2}/outline.md", Outline("2 | 1 | Landfall.", "3 | 2 | The wreck."));
+
+        var check = DenCheck.Run(source);
+
+        Assert.Equal([(A2 + "/outline.md", "F-OUT-6", 5)], Found(check, "F-OUT-6"));
+    }
+
+    [Fact]
+    public void LinksInCodeSpansAndShiftedRowsDontAddOutlineWarnings()
+    {
+        var source = Den().With($"{A1}/outline.md", """
+            # Outline
+
+            | row | chapter | beat | status |
+            |---|---|---|---|
+            | 1 | 1 | Type `[[` to start a link, or ``a ` [[ b``. | canon |
+            | 2 | [[x|y]] | 2 | Shifted. | |
+            """);
+
+        var check = DenCheck.Run(source);
+
+        // Row 2's stray | gives its extra-cell and unclosed-link warnings, not a chapter or status one.
+        const string path = A1 + "/outline.md";
+        Assert.Equal([(path, "F-OUT-12", 6), (path, "F-OUT-12", 6)], Found(check));
+    }
+
+    [Fact]
+    public void AFieldWhoseDefinitionIsBrokenSaysSo()
+    {
+        // types.md F-FT-2: a broken definition is ignored, so the field is undefined until it's fixed.
+        var source = Den("packs: [fleet]\n")
+            .With("packs/fleet/pack.yaml", "name: Fleet\n")
+            .With("packs/fleet/extensions/character.yaml", "fields:\n  rank: { type: rnak }\n");
+        Note(source, A1, "orrin-fell", Character("Orrin Fell", "fields:\n  rank: Captain"));
+
+        var check = DenCheck.Run(source);
+
+        Assert.Equal(
+            "Type 'character' doesn't define the field 'rank': its definition in packs/fleet/extensions/character.yaml is broken, so it's ignored (see the warning there). Until that's fixed, the value is kept and indexed as written.",
+            Message(check, "F-FLD-2"));
     }
 
     [Fact]

@@ -46,8 +46,9 @@ internal static class FieldChecks
             var isUniversal = TypeDefinition.IsUniversalField(name);
             if (type is not null && definition is null && !isUniversal)
             {
-                found.Add(new Diagnostic("F-FLD-2", DiagnosticSeverity.Warning, field.Key.Line,
-                    $"Type '{type.Key}' doesn't define the field '{name}', so its value is kept and indexed as written. Check the spelling, or define the field in a pack."));
+                found.Add(new Diagnostic("F-FLD-2", DiagnosticSeverity.Warning, field.Key.Line, DroppedBy(entity, type, name) is { } path
+                    ? $"Type '{type.Key}' doesn't define the field '{name}': its definition in {path} is broken, so it's ignored (see the warning there). Until that's fixed, the value is kept and indexed as written."
+                    : $"Type '{type.Key}' doesn't define the field '{name}', so its value is kept and indexed as written. Check the spelling, or define the field in a pack."));
             }
 
             // F-TMP-8: entries on a field that isn't temporal. The universal fields aren't temporal (types.md §5.5).
@@ -99,6 +100,21 @@ internal static class FieldChecks
     /// <summary>True if an entry has a <c>from</c> or <c>until</c> that counts: one that isn't null or empty (F-TMP-2).</summary>
     private static bool HasBound(YamlMapping entry, string key) =>
         entry[key] is { } node && node is not YamlScalar { IsNull: true } && node is not YamlScalar { Text: "" };
+
+    /// <summary>
+    /// The type or extension file whose definition of field <paramref name="name"/>
+    /// was dropped as broken (types.md F-FT-1, F-FT-2, F-FT-8), so the field
+    /// is undefined, or null. The pack loader's warning names the field.
+    /// </summary>
+    private static string? DroppedBy(CatalogEntity entity, TypeDefinition type, string name) =>
+        entity.Universe.Den.Types.Diagnostics
+            .Where(d => (d.Path == type.Path || d.Path.EndsWith($"/extensions/{type.Key}.yaml", StringComparison.Ordinal))
+                && d.Diagnostic.RuleId is "F-FT-1" or "F-FT-2" or "F-FT-8"
+                && (d.Diagnostic.Message.StartsWith($"The definition of '{name}' is ignored", StringComparison.Ordinal)
+                    || (d.Diagnostic.Message.StartsWith($"'{name}' ", StringComparison.Ordinal) && d.Diagnostic.Message.EndsWith("The definition is ignored.", StringComparison.Ordinal))))
+            .Select(d => d.Path)
+            .Order(StringComparer.Ordinal)
+            .FirstOrDefault();
 
     /// <summary>The entries of a field's value (F-TMP-1): a single entry, a temporal list, or none for a plain value.</summary>
     private static List<YamlMapping> Entries(YamlNode value) => value switch
@@ -199,7 +215,14 @@ internal static class FieldChecks
                 .Select(g => (Group: g, Places: rows.Group(g).GetValueOrDefault(rowId) ?? []))
                 .Where(m => m.Places.Count > 0)
                 .ToList();
-            if (matches.Count == 0)
+            var unread = RowIndex.GroupsFor(entity.Scope).SelectMany(rows.Excluded).Select(b => $"'{b.Key}'").ToList();
+            if (matches.Count == 0 && unread.Count > 0)
+            {
+                // The row may well be in an outline that has errors: say that, not that it's missing.
+                found.Add(new Diagnostic("F-FLD-7", DiagnosticSeverity.Warning, item.Line,
+                    $"row: row {rowId} isn't in the outlines that load, and the outline of {(unread.Count == 1 ? "book" : "books")} {string.Join(", ", unread)} has errors, so its rows aren't read. Until that's fixed, this entity isn't tied to row {rowId}."));
+            }
+            else if (matches.Count == 0)
             {
                 found.Add(new Diagnostic("F-FLD-7", DiagnosticSeverity.Warning, item.Line,
                     $"row: there's no row {rowId} in {where}, so this entity isn't tied to a row."));

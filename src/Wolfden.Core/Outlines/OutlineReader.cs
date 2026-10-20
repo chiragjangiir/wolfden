@@ -28,6 +28,14 @@ public sealed record OutlineRow(
     string? Pov, FactStatus Status, string? Notes, IReadOnlyDictionary<string, string> Cells)
 {
     /// <summary>
+    /// True if the row has more cells than its table's header, so an
+    /// unescaped <c>|</c> has shifted its columns (F-OUT-12). Its cells are
+    /// still read as they fall, but checks of its status and chapter are
+    /// skipped, since those cells may hold another column's text.
+    /// </summary>
+    public bool IsShifted { get; init; }
+
+    /// <summary>
     /// Compares two row ids in row order (F-OUT-4): by number, then by
     /// letter suffix as an ASCII string, with no suffix first, so
     /// <c>69 &lt; 69a &lt; 69aa &lt; 69b &lt; 70</c>. Numbers of any length compare
@@ -171,7 +179,8 @@ public static partial class OutlineReader
             for (var line = first + 2; line <= last; line++)
             {
                 var cells = BodyLinkScanner.SplitCells(text, source.Lines[line].Start, source.Lines[line].End);
-                if (cells.Count > header.Count)
+                var shifted = cells.Count > header.Count;
+                if (shifted)
                 {
                     Warn("F-OUT-12", line + 1, $"This row has {cells.Count} cells, but the header has {header.Count}. An unescaped | splits a cell and shifts the columns after it: write \\| for a | inside a cell, as in [[mara-voss\\|Voss]].");
                 }
@@ -212,8 +221,9 @@ public static partial class OutlineReader
                     {
                         status = parsed;
                     }
-                    else
+                    else if (!shifted)
                     {
+                        // In a shifted row, the status cell holds some other column's text, and F-OUT-12 has already said why.
                         Warn("F-OUT-9", line + 1, $"Row {rowId}: '{written}' isn't a status, so the row is read as draft. Use idea, undecided, candidate, draft, canon, or retconned.");
                     }
                 }
@@ -231,7 +241,10 @@ public static partial class OutlineReader
                     values.GetValueOrDefault("pov"),
                     status,
                     values.GetValueOrDefault("notes"),
-                    values);
+                    values)
+                {
+                    IsShifted = shifted,
+                };
 
                 // F-OUT-4: each row comes after the one before it. A repeat is F-OUT-5's.
                 if (previous is not null && OutlineRow.CompareIds(rowId, previous.RowId) < 0)
@@ -250,10 +263,10 @@ public static partial class OutlineReader
     /// <summary>GFM removes the backslash from <c>\|</c> in a cell before reading it (F-OUT-12).</summary>
     private static string Unescape(string cell) => cell.Replace("\\|", "|", StringComparison.Ordinal);
 
-    /// <summary>F-OUT-12: a <c>[[</c>, not escaped, with no <c>]]</c> after it in the same cell.</summary>
+    /// <summary>F-OUT-12: a <c>[[</c>, not escaped and not in a code span, with no <c>]]</c> after it in the same cell.</summary>
     private static bool HasUnclosedLink(string text, int start, int end)
     {
-        var cell = text[start..end];
+        var cell = WithoutCodeSpans(text[start..end]);
         var i = cell.IndexOf("[[", StringComparison.Ordinal);
         while (i >= 0)
         {
@@ -273,6 +286,67 @@ public static partial class OutlineReader
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The cell with each CommonMark code span's content blanked out: a run
+    /// of backticks up to the next run of the same length (links aren't
+    /// recognized in code spans, F-LINK-1). A run with no match is literal.
+    /// </summary>
+    private static string WithoutCodeSpans(string cell)
+    {
+        var chars = cell.ToCharArray();
+        var i = 0;
+        while (i < chars.Length)
+        {
+            if (chars[i] != '`')
+            {
+                i++;
+                continue;
+            }
+
+            var open = i;
+            while (i < chars.Length && chars[i] == '`')
+            {
+                i++;
+            }
+
+            var length = i - open;
+            var close = -1;
+            for (var j = i; j < chars.Length; j++)
+            {
+                if (chars[j] != '`')
+                {
+                    continue;
+                }
+
+                var run = j;
+                while (j < chars.Length && chars[j] == '`')
+                {
+                    j++;
+                }
+
+                if (j - run == length)
+                {
+                    close = run;
+                    break;
+                }
+            }
+
+            if (close < 0)
+            {
+                continue;
+            }
+
+            for (var k = i; k < close; k++)
+            {
+                chars[k] = ' ';
+            }
+
+            i = close + length;
+        }
+
+        return new string(chars);
     }
 
     /// <summary>A heading's text without its <c>#</c> markers or closing sequence, trimmed.</summary>

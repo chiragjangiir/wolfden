@@ -16,6 +16,21 @@ internal sealed record RowPlace(string Path, int Line);
 internal sealed class RowIndex
 {
     private readonly Dictionary<Container, Dictionary<string, List<RowPlace>>> _groups = [];
+    private readonly Dictionary<Container, List<Book>> _excluded = [];
+
+    /// <summary>The books of a group whose outlines have errors, so their rows aren't read (F-GEN-2).</summary>
+    public IReadOnlyList<Book> Excluded(Container group) => _excluded.TryGetValue(group, out var books) ? books : [];
+
+    /// <summary>Records that <paramref name="book"/>'s outline has errors, so its rows aren't read.</summary>
+    public void Exclude(Container group, Book book)
+    {
+        if (!_excluded.TryGetValue(group, out var books))
+        {
+            _excluded[group] = books = [];
+        }
+
+        books.Add(book);
+    }
 
     /// <summary>The rows of a series' outlines, or of a standalone book's.</summary>
     public IReadOnlyDictionary<string, List<RowPlace>> Group(Container group) =>
@@ -79,6 +94,7 @@ internal static class OutlineChecks
                 diagnostics.AddRange(file.Diagnostics.Select(d => new DenDiagnostic(path, d)));
                 if (OutlineReader.IsExcluded(file))
                 {
+                    index.Exclude(RowIndex.GroupOf(book), book);
                     continue;
                 }
 
@@ -112,7 +128,7 @@ internal static class OutlineChecks
         (OutlineRow Row, Chapter Chapter)? latest = null;
         foreach (var row in rows)
         {
-            if (row.Chapter is not { } key)
+            if (row.Chapter is not { } key || row.IsShifted)
             {
                 continue;
             }
