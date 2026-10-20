@@ -587,6 +587,7 @@ The writer turns on `spoiler_checks` in `den.yaml`, or edits `book.md` of
 Spec: F-DEN-1, F-DEN-7, F-BOOK-3, design.md §7. Covered by:
 `IncrementalUpdateTests.AStructureChangeRebuilds`,
 `IncrementalUpdateTests.AContainerFileChangeRebuilds`,
+`IncrementalUpdateTests.AFolderThatCanBeAContainerRebuilds`,
 `IndexWatchTests.ItKeepsWatchingWhileDenYamlIsBrokenSoItCanBeFixed`.
 
 ### SC-WATCH-4. My tools write files that aren't notes
@@ -611,9 +612,12 @@ on the same den.
 - The watcher notices that the index isn't the one it wrote and rebuilds
   it at the next change, rather than patching rows it no longer knows. A
   second watcher on the same den says another one is already watching and
-  exits 2.
+  exits 2. If the operating system stops reporting changes, say because
+  the den is on a drive that went away, the watcher says so, listens
+  again, and rebuilds, and keeps saying so while it can't.
 
 Spec: design.md §7. Covered by:
+`DenWatcherTests.WhenFileEventsStopItListensAgainRebuildsAndSaysSo`,
 `IncrementalUpdateTests.AnIndexRebuiltByAnotherCommandIsRebuiltNotPatched`,
 `IncrementalUpdateTests.ADeletedIndexIsRebuilt`,
 `DenWatcherTests.OnlyOneWatcherRunsPerDen`,

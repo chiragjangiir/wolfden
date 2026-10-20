@@ -34,16 +34,23 @@ namespace Wolfden.Index;
 /// </remarks>
 internal sealed class IndexUpdater
 {
+    private readonly string _root;
+    private readonly Dictionary<string, int> _unreadable = new(StringComparer.Ordinal);
+    private IndexState? _state;
+
     /// <summary>A batch that changes more indexed files than this, and than <see cref="RebuildShare"/> of them, is rebuilt instead.</summary>
-    internal const int RebuildFiles = 200;
+    internal int RebuildFiles { get; init; } = 200;
 
     /// <summary>See <see cref="RebuildFiles"/>.</summary>
-    internal const double RebuildShare = 0.25;
+    internal double RebuildShare { get; init; } = 0.25;
 
-    private static readonly HashSet<string> ContainerFiles = new(["universe.md", "series.md", "book.md"], StringComparer.OrdinalIgnoreCase);
-
-    private readonly string _root;
-    private IndexState? _state;
+    /// <summary>
+    /// How many batches in a row a file may fail to read, as while an editor
+    /// writes it, before the batch rebuilds the index instead. A full load
+    /// reads every file, so it fails while that file stays unreadable, and
+    /// the watcher reports it rather than leaving the file out.
+    /// </summary>
+    internal int ReadAttempts { get; init; } = 10;
 
     /// <param name="denRoot">The den's folder.</param>
     public IndexUpdater(string denRoot)
@@ -60,6 +67,7 @@ internal sealed class IndexUpdater
     {
         var watch = Stopwatch.StartNew();
         _state = null;
+        _unreadable.Clear();
         var state = IndexBuilder.Rebuild(_root, beforeSwap: null);
         _state = state;
         return new IndexUpdate(IndexUpdateKind.Rebuilt, reason, [], state.Rows.Count, watch.Elapsed, Summary(state));
@@ -107,7 +115,7 @@ internal sealed class IndexUpdater
                 continue;
             }
 
-            if (ChangesStructure(state.Structure, path))
+            if (ChangesStructure(path))
             {
                 return Rebuild($"the folder {path} was added, moved, or deleted");
             }
@@ -147,11 +155,20 @@ internal sealed class IndexUpdater
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException)
                 {
-                    // Still being written, or gone again: look at it next time.
+                    // Still being written, or gone again: look at it next time,
+                    // a few times, and then let a rebuild report it.
+                    var attempts = _unreadable[path] = _unreadable.GetValueOrDefault(path) + 1;
+                    if (attempts > ReadAttempts)
+                    {
+                        return Rebuild($"{path} couldn't be read");
+                    }
+
                     unread.Add(path);
                     continue;
                 }
             }
+
+            _unreadable.Remove(path);
 
             var hash = bytes is null ? null : DenFileTree.HashOf(bytes);
             if (tree.Hash(path) == hash)
@@ -238,32 +255,65 @@ internal sealed class IndexUpdater
 
     /// <summary>
     /// True for a folder whose arrival, move, or removal can change the
-    /// den's structure: <c>universes/</c> and <c>packs/</c>, and anything
-    /// in them except inside the <c>entities/</c> folder of a container
-    /// that loaded.
+    /// den's structure: <c>packs/</c> and anything in it, and the folders
+    /// the den loader lists (format.md F-LAY-4): <c>universes/</c>, a
+    /// universe, its <c>series/</c> and <c>books/</c>, a series or book in
+    /// them, and a series' <c>books/</c> and the books in it. An empty one
+    /// of those still matters: a container folder without its container
+    /// file is an error. Other folders, such as <c>entities/</c> and those
+    /// in it, or a book's <c>drafts/</c>, only hold files, which are looked
+    /// at one by one.
     /// </summary>
-    internal static bool ChangesStructure(DenStructure structure, string folder)
+    internal static bool ChangesStructure(string folder)
     {
-        if (folder is "universes" or "packs" || folder.StartsWith("packs/", StringComparison.Ordinal))
+        var names = folder.Split('/');
+        if (names[0] == "packs")
         {
             return true;
         }
 
-        if (!folder.StartsWith("universes/", StringComparison.Ordinal))
+        if (names[0] != "universes")
         {
             return false;
         }
 
-        return !structure.Universes
-            .SelectMany(u => new Container[] { u }.Concat(u.Series).Concat(u.Books))
-            .Any(c => folder == $"{c.Path}/entities" || folder.StartsWith($"{c.Path}/entities/", StringComparison.Ordinal));
+        return names.Length switch
+        {
+            1 or 2 => true,
+            3 or 4 => names[2] is "series" or "books",
+            5 or 6 => names[2] == "series" && names[4] == "books",
+            _ => false,
+        };
     }
 
-    /// <summary>True for a file that's part of the den's structure: <c>den.yaml</c>, a pack file, or a container file.</summary>
-    internal static bool IsStructureFile(string path) =>
-        path == "den.yaml"
-        || path.StartsWith("packs/", StringComparison.Ordinal)
-        || path.StartsWith("universes/", StringComparison.Ordinal) && ContainerFiles.Contains(path[(path.LastIndexOf('/') + 1)..]);
+    /// <summary>
+    /// True for a file that's part of the den's structure: <c>den.yaml</c>,
+    /// a pack file, or a container file where the den loader reads one
+    /// (<c>universes/u/universe.md</c>, <c>…/series/s/series.md</c>,
+    /// <c>…/books/b/book.md</c>). An entity note that happens to be called
+    /// <c>book.md</c> isn't one.
+    /// </summary>
+    internal static bool IsStructureFile(string path)
+    {
+        if (path == "den.yaml" || path.StartsWith("packs/", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var names = path.Split('/');
+        if (names[0] != "universes")
+        {
+            return false;
+        }
+
+        return names.Length switch
+        {
+            3 => names[2] == "universe.md",
+            5 => names[2] == "series" && names[4] == "series.md" || names[2] == "books" && names[4] == "book.md",
+            7 => names[2] == "series" && names[4] == "books" && names[6] == "book.md",
+            _ => false,
+        };
+    }
 
     private static IndexState WithRows(IndexState state, IndexRows rows, DenFileTree tree)
     {

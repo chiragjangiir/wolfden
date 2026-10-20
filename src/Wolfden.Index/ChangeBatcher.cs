@@ -125,7 +125,12 @@ internal sealed class ChangeBatcher
     /// </summary>
     public static string? Relative(string root, string fullPath)
     {
-        var relative = Path.GetRelativePath(root, fullPath).Replace('\\', '/');
+        // Only the OS's separators: on Linux a '\' is part of a file name.
+        var relative = Path.GetRelativePath(root, fullPath).Replace(Path.DirectorySeparatorChar, '/');
+        if (Path.AltDirectorySeparatorChar != '/')
+        {
+            relative = relative.Replace(Path.AltDirectorySeparatorChar, '/');
+        }
         if (relative == "." || Path.IsPathRooted(relative))
         {
             return null;

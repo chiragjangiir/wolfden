@@ -17,9 +17,13 @@ namespace Wolfden.Index;
 /// watcher can run per den, across processes; a second one fails to start.
 /// </para>
 /// <para>
-/// Events and errors are raised on the watcher's own thread, one at a time.
-/// A failed batch (<see cref="Failed"/>) doesn't stop the watcher: the next
-/// batch rebuilds the index.
+/// Events are raised on the watcher's own thread, one at a time. Nothing
+/// stops the watcher but <see cref="Dispose"/>: a failed batch is retried
+/// as a rebuild, and if the operating system stops reporting file events
+/// (a drive that went away, access denied, too many folders to watch), the
+/// watcher starts listening again and rebuilds. Each of these is reported
+/// through <see cref="Failed"/>, and retried after a pause that grows while
+/// failures repeat.
 /// </para>
 /// </remarks>
 public sealed class DenWatcher : IDisposable
@@ -36,9 +40,6 @@ public sealed class DenWatcher : IDisposable
     /// <summary>How soon a file that couldn't be read, because it was still being written, is tried again.</summary>
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(500);
 
-    /// <summary>The longest pause before trying again after failures.</summary>
-    private static readonly TimeSpan MaxPause = TimeSpan.FromSeconds(30);
-
     private readonly string _root;
     private readonly object _gate = new();
     private readonly ChangeBatcher _batcher;
@@ -49,6 +50,10 @@ public sealed class DenWatcher : IDisposable
     private FileStream? _lock;
     private Thread? _thread;
     private int _disposed;
+
+    // Set when the OS stopped reporting events: why, and when to listen again.
+    private Exception? _broken;
+    private DateTime? _restartAt;
 
     /// <summary>A watcher for the den at <paramref name="denRoot"/>. Call <see cref="Start"/> to start it.</summary>
     /// <param name="denRoot">The den's folder.</param>
@@ -66,14 +71,31 @@ public sealed class DenWatcher : IDisposable
     public event EventHandler<IndexUpdate>? Updated;
 
     /// <summary>
-    /// Raised when a batch fails, such as when the index stays locked by a
-    /// long query in another process. The watcher tries again with a
-    /// rebuild, after a pause that grows while failures repeat.
+    /// Raised when something goes wrong that the watcher works around: a
+    /// batch that fails, such as when the index stays locked by a long
+    /// query in another process; file events that stopped, so the watcher
+    /// listens again; or an <see cref="Updated"/> handler that threw. The
+    /// message says what happened and what the watcher does next.
     /// </summary>
     public event EventHandler<Exception>? Failed;
 
     /// <summary>The den's folder, as a full path.</summary>
     public string DenRoot => _root;
+
+    /// <summary>The pause before the first retry after a failure. Tests shorten it.</summary>
+    internal TimeSpan FirstPause { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>The longest pause before trying again while failures repeat. Tests shorten it.</summary>
+    internal TimeSpan MaxPause { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Makes the file system watcher for a folder. Tests replace it to fail on purpose.</summary>
+    internal Func<string, FileSystemWatcher> CreateWatcher { get; init; } = root => new FileSystemWatcher(root);
+
+    /// <summary>Called before each batch is applied. Tests use it to make a batch fail.</summary>
+    internal Action<ChangeBatch>? BeforeApply { get; init; }
+
+    /// <summary>The updater, so tests can set its limits.</summary>
+    internal IndexUpdater Updater => _updater;
 
     /// <summary>
     /// Starts watching: takes the den's watch lock, starts listening for
@@ -101,19 +123,7 @@ public sealed class DenWatcher : IDisposable
             TakeLock();
 
             // Listen before the first build reads anything, so no edit is missed.
-            _watcher = new FileSystemWatcher(_root)
-            {
-                IncludeSubdirectories = true,
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
-                InternalBufferSize = 64 * 1024,
-            };
-            _watcher.Created += OnEvent;
-            _watcher.Changed += OnEvent;
-            _watcher.Deleted += OnEvent;
-            _watcher.Renamed += OnRenamed;
-            _watcher.Error += OnError;
-            _watcher.EnableRaisingEvents = true;
-
+            Listen();
             var first = _updater.Rebuild("the watcher started");
             _thread = new Thread(Run) { IsBackground = true, Name = "Wolfden index watcher" };
             _thread.Start();
@@ -139,36 +149,52 @@ public sealed class DenWatcher : IDisposable
         _stop.Dispose();
     }
 
+    /// <summary>
+    /// Reports an error from the file system watcher, as its
+    /// <see cref="FileSystemWatcher.Error"/> event does, so tests can fake one.
+    /// </summary>
+    internal void ReportWatcherError(Exception error)
+    {
+        if (error is InternalBufferOverflowException)
+        {
+            // Events were lost, but the watch goes on: rebuild.
+            Add(b => b.AddOverflow(DateTime.UtcNow));
+            return;
+        }
+
+        // The watch itself broke (on Windows it stops for good; on Linux new
+        // folders may go unwatched): listen again, on the watcher's thread.
+        lock (_gate)
+        {
+            _broken = error;
+            _restartAt ??= DateTime.UtcNow;
+        }
+
+        Wake();
+    }
+
+    /// <summary>The pause after <paramref name="pause"/> while failures repeat: twice as long, up to <paramref name="max"/>.</summary>
+    internal static TimeSpan NextPause(TimeSpan pause, TimeSpan max) => pause * 2 > max ? max : pause * 2;
+
     private void Stop()
     {
         _stop.Cancel();
-        if (_watcher is { } watcher)
-        {
-            watcher.EnableRaisingEvents = false;
-            watcher.Dispose();
-            _watcher = null;
-        }
-
-        _wake.Set();
+        Wake();
         if (_thread is { } thread && thread != Thread.CurrentThread)
         {
             thread.Join();
         }
 
         _thread = null;
-        if (_lock is { } held)
+        lock (_gate)
         {
-            held.Dispose();
-            _lock = null;
-            try
-            {
-                File.Delete(held.Name);
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                // Best effort: a leftover lock file is harmless, since only an open one locks.
-            }
+            DisposeWatcher();
         }
+
+        // The lock file stays: only an open one locks, and deleting it would
+        // let a second watcher open a new file at once on Linux.
+        _lock?.Dispose();
+        _lock = null;
     }
 
     private void TakeLock()
@@ -185,12 +211,55 @@ public sealed class DenWatcher : IDisposable
         }
     }
 
+    /// <summary>Starts a new file system watcher, replacing any old one.</summary>
+    private void Listen()
+    {
+        lock (_gate)
+        {
+            DisposeWatcher();
+            if (_stop.IsCancellationRequested)
+            {
+                return;
+            }
+
+            var watcher = CreateWatcher(_root);
+            try
+            {
+                watcher.IncludeSubdirectories = true;
+                watcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size;
+                watcher.InternalBufferSize = 64 * 1024;
+                watcher.Created += OnEvent;
+                watcher.Changed += OnEvent;
+                watcher.Deleted += OnEvent;
+                watcher.Renamed += OnRenamed;
+                watcher.Error += OnError;
+                watcher.EnableRaisingEvents = true;
+            }
+            catch
+            {
+                watcher.Dispose();
+                throw;
+            }
+
+            _watcher = watcher;
+        }
+    }
+
+    private void DisposeWatcher()
+    {
+        if (_watcher is { } watcher)
+        {
+            watcher.EnableRaisingEvents = false;
+            watcher.Dispose();
+            _watcher = null;
+        }
+    }
+
     private void OnEvent(object sender, FileSystemEventArgs e) => Add(b => b.Add(e.ChangeType, e.FullPath, null, DateTime.UtcNow));
 
     private void OnRenamed(object sender, RenamedEventArgs e) => Add(b => b.Add(WatcherChangeTypes.Renamed, e.FullPath, e.OldFullPath, DateTime.UtcNow));
 
-    // The buffer overflowed (InternalBufferOverflowException) or the watch broke: events were lost.
-    private void OnError(object sender, ErrorEventArgs e) => Add(b => b.AddOverflow(DateTime.UtcNow));
+    private void OnError(object sender, ErrorEventArgs e) => ReportWatcherError(e.GetException());
 
     private void Add(Action<ChangeBatcher> add)
     {
@@ -199,6 +268,11 @@ public sealed class DenWatcher : IDisposable
             add(_batcher);
         }
 
+        Wake();
+    }
+
+    private void Wake()
+    {
         try
         {
             _wake.Set();
@@ -212,26 +286,44 @@ public sealed class DenWatcher : IDisposable
     private void Run()
     {
         var token = _stop.Token;
-        var pause = TimeSpan.FromSeconds(1);
+        var pause = FirstPause;
+        var restartPause = FirstPause;
         while (!token.IsCancellationRequested)
         {
+            var now = DateTime.UtcNow;
+            DateTime? restartAt;
             TimeSpan? due;
             ChangeBatch? batch;
             lock (_gate)
             {
-                batch = _batcher.Take(DateTime.UtcNow);
-                due = _batcher.DueIn(DateTime.UtcNow);
+                restartAt = _restartAt;
+                batch = restartAt <= now ? null : _batcher.Take(now);
+                due = _batcher.DueIn(now);
+            }
+
+            if (restartAt <= now)
+            {
+                restartPause = Restart(restartPause);
+                continue;
             }
 
             if (batch is null)
             {
-                _wake.WaitOne(due ?? Timeout.InfiniteTimeSpan);
+                var wait = due ?? Timeout.InfiniteTimeSpan;
+                if (restartAt is { } at && (wait == Timeout.InfiniteTimeSpan || at - now < wait))
+                {
+                    wait = at - now;
+                }
+
+                _wake.WaitOne(wait);
                 continue;
             }
 
+            IndexUpdate? update;
             try
             {
-                var update = _updater.Apply(batch, out var retry);
+                BeforeApply?.Invoke(batch);
+                update = _updater.Apply(batch, out var retry);
                 if (retry.Count > 0)
                 {
                     lock (_gate)
@@ -240,11 +332,7 @@ public sealed class DenWatcher : IDisposable
                     }
                 }
 
-                pause = TimeSpan.FromSeconds(1);
-                if (update is not null && !token.IsCancellationRequested)
-                {
-                    Updated?.Invoke(this, update);
-                }
+                pause = FirstPause;
             }
             catch (Exception e)
             {
@@ -255,12 +343,80 @@ public sealed class DenWatcher : IDisposable
                     _batcher.AddOverflow(DateTime.UtcNow + pause - _batcher.Quiet);
                 }
 
-                pause = pause * 2 > MaxPause ? MaxPause : pause * 2;
-                if (!token.IsCancellationRequested)
+                Report(new IOException(
+                    $"couldn't update the index: {e.Message.TrimEnd('.')}. Trying again with a rebuild in {Seconds(pause)}.", e));
+                pause = NextPause(pause, MaxPause);
+                continue;
+            }
+
+            if (update is not null && !token.IsCancellationRequested)
+            {
+                try
                 {
-                    Failed?.Invoke(this, e);
+                    Updated?.Invoke(this, update);
+                }
+                catch (Exception e)
+                {
+                    // The host's handler failed, not the batch: the index is fine.
+                    Report(new InvalidOperationException($"a handler of the watcher's updates failed: {e.Message}", e));
                 }
             }
         }
     }
+
+    /// <summary>Listens for file events again after the watch broke, and rebuilds. Returns the pause before the next attempt if this one fails.</summary>
+    private TimeSpan Restart(TimeSpan pause)
+    {
+        Exception? why;
+        lock (_gate)
+        {
+            why = _broken;
+        }
+
+        try
+        {
+            Listen();
+        }
+        catch (Exception e)
+        {
+            lock (_gate)
+            {
+                _restartAt = DateTime.UtcNow + pause;
+            }
+
+            Report(new IOException(
+                $"file events stopped ({why?.Message.TrimEnd('.')}), and listening again failed: {e.Message.TrimEnd('.')}. Trying again in {Seconds(pause)}; until then the index may fall behind the files.", e));
+            return NextPause(pause, MaxPause);
+        }
+
+        lock (_gate)
+        {
+            _broken = null;
+            _restartAt = null;
+            _batcher.AddOverflow(DateTime.UtcNow - _batcher.Quiet);
+        }
+
+        Report(new IOException($"file events stopped ({why?.Message.TrimEnd('.')}). Listening again, and rebuilding the index in case changes were missed.", why));
+        return FirstPause;
+    }
+
+    private void Report(Exception e)
+    {
+        if (_stop.IsCancellationRequested)
+        {
+            return;
+        }
+
+        try
+        {
+            Failed?.Invoke(this, e);
+        }
+        catch (Exception)
+        {
+            // Nothing more to report it to; the watcher goes on.
+        }
+    }
+
+    private static string Seconds(TimeSpan pause) =>
+        pause.TotalSeconds >= 1 ? FormattableString.Invariant($"{pause.TotalSeconds:0.#} s") : FormattableString.Invariant($"{pause.TotalMilliseconds:0} ms");
 }

@@ -251,6 +251,56 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
                     return book.FilePath;
                 }
 
+                case < 96:
+                {
+                    // Structural folders: an empty would-be container (F-LAY-4), or a
+                    // book or series folder renamed or deleted, reported as Windows
+                    // does, by the folder's own event only.
+                    if (_structure.Universes.Count == 0)
+                    {
+                        return "nothing";
+                    }
+
+                    var universe = Pick(_structure.Universes);
+                    var works = universe.Series.Cast<Container>().Concat(universe.Books).ToList();
+                    string what;
+                    switch (_random.Next(3))
+                    {
+                        case 0:
+                        {
+                            var folder = $"{universe.Path}/{Pick(["books", "series"])}/{Key()}";
+                            EnsureFolder(folder);
+                            what = $"empty container folder {folder}";
+                            break;
+                        }
+
+                        case 1 when works.Count > 0:
+                        {
+                            var work = Pick(works);
+                            var to = $"{work.Path[..work.Path.LastIndexOf('/')]}/{Key()}";
+                            Directory.Move(Full(_root, work.Path), Full(_root, to));
+                            _events.Add((WatcherChangeTypes.Renamed, to, work.Path));
+                            what = $"rename container folder {work.Path} to {to}";
+                            break;
+                        }
+
+                        case 2 when works.Count > 1:
+                        {
+                            var work = Pick(works);
+                            Directory.Delete(Full(_root, work.Path), recursive: true);
+                            _events.Add((WatcherChangeTypes.Deleted, work.Path, null));
+                            what = $"delete container folder {work.Path}";
+                            break;
+                        }
+
+                        default:
+                            return "nothing";
+                    }
+
+                    _structure = DenStructure.Load(_root);
+                    return what;
+                }
+
                 default:
                 {
                     if (entities.Count == 0)

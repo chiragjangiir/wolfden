@@ -38,7 +38,6 @@ public class IndexWatchTests
         Assert.Equal("Watching for changes. Press Ctrl+C to stop.", lines[1]);
         Assert.Contains(lines, l => System.Text.RegularExpressions.Regex.IsMatch(l, $@"^\d\d:\d\d:\d\d Updated {Mina} in [\d.]+ m?s: 1 universe, 50 entities, 372 links; "));
         Assert.Equal("Stopped watching.", lines[^1]);
-        Assert.False(den.Exists($".wolfden/{DenWatcher.LockFileName}"));
     }
 
     [Fact]

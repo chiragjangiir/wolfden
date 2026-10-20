@@ -141,7 +141,7 @@ internal static class IndexCommand
         {
             lock (gate)
             {
-                error.WriteLine($"wolfden index: couldn't update the index: {e.Message} Trying again with a rebuild.");
+                error.WriteLine($"wolfden index: {e.Message}");
             }
         };
 

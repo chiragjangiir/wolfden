@@ -233,6 +233,189 @@ public sealed class IncrementalUpdateTests
         AssertSameAsFullRebuild(den, "after the retry");
     }
 
+    [Theory]
+    [Trait("Scenario", "SC-WATCH-3")]
+    [InlineData("create", "universes/starfall/books/ghost", null)]
+    [InlineData("create", "universes/starfall/series/ghost", null)]
+    [InlineData("create", "universes/starfall/series/long-dark/books/ghost", null)]
+    [InlineData("create", "universes/newverse", null)]
+    [InlineData("create", "packs/newpack", null)]
+    [InlineData("move", "universes/starfall/books/a-moon", "universes/starfall/books/a-quiet-moon")]
+    [InlineData("move", "universes/starfall/series/drift-peace", "universes/starfall/series/drift-war")]
+    [InlineData("move", "universes/starfall/series/long-dark/books/cinders", "universes/starfall/series/long-dark/books/ash")]
+    [InlineData("delete", "universes/drift/books/tide", null)]
+    [InlineData("delete", "universes/starfall/series/drift-war", null)]
+    [InlineData("delete", "universes/drift", null)]
+    public void AFolderThatCanBeAContainerRebuilds(string change, string path, string? from)
+    {
+        using var den = TempDen.Starfall();
+        var updater = new IndexUpdater(den.Root);
+        updater.Rebuild("start");
+        var full = Full(den.Root, path);
+        (WatcherChangeTypes, string, string?) e;
+        switch (change)
+        {
+            case "create":
+                // Empty: a container folder without its container file is an error (F-LAY-4).
+                Directory.CreateDirectory(full);
+                e = (WatcherChangeTypes.Created, path, null);
+                break;
+            case "move":
+                Directory.Move(Full(den.Root, from!), full);
+                e = (WatcherChangeTypes.Renamed, path, from);
+                break;
+            default:
+                Directory.Delete(full, recursive: true);
+                e = (WatcherChangeTypes.Deleted, path, null);
+                break;
+        }
+
+        // Only the folder's own event, as Windows reports a folder's rename or delete.
+        var update = updater.Apply(Batch(den, e), out _);
+
+        Assert.Equal(IndexUpdateKind.Rebuilt, update!.Kind);
+        Assert.StartsWith("the folder ", update.Reason, StringComparison.Ordinal);
+        AssertSameAsFullRebuild(den, $"after {change} {path}");
+    }
+
+    [Theory]
+    [InlineData("universes/starfall/series/long-dark/books/ash/drafts")]
+    [InlineData("universes/starfall/drafts")]
+    [InlineData("universes/starfall/series/long-dark/entities/crew")]
+    [InlineData("notes")]
+    public void OtherFoldersAreLookedIntoWithoutARebuild(string folder)
+    {
+        using var den = TempDen.Starfall();
+        var updater = new IndexUpdater(den.Root);
+        updater.Rebuild("start");
+        den.Write($"{folder}/wren-ashby.md", "---\ntype: character\nname: Wren Ashby\n---\n\nA pilot who knows [[Mara Voss]].\n");
+
+        var update = updater.Apply(Batch(den, (WatcherChangeTypes.Created, folder, null)), out _);
+
+        Assert.NotEqual(IndexUpdateKind.Rebuilt, update?.Kind);
+        AssertSameAsFullRebuild(den, $"after {folder}");
+    }
+
+    [Fact]
+    public void AnEntityNoteCalledBookIsJustANote()
+    {
+        using var den = TempDen.Starfall();
+        var updater = new IndexUpdater(den.Root);
+        updater.Rebuild("start");
+        const string note = "universes/starfall/series/long-dark/entities/ships/book.md";
+        den.Write(note, "---\ntype: item\nname: The Logbook\n---\n\nKept by [[Mara Voss]].\n");
+
+        var update = updater.Apply(Batch(den, (WatcherChangeTypes.Created, note, null)), out _);
+
+        Assert.Equal(IndexUpdateKind.Updated, update!.Kind);
+        Assert.Equal([note], update.Files);
+        AssertSameAsFullRebuild(den, "after the note");
+    }
+
+    [Theory]
+    [InlineData("den.yaml", true)]
+    [InlineData("packs/mine/pack.yaml", true)]
+    [InlineData("packs/mine/types/ship.yaml", true)]
+    [InlineData("universes/u/universe.md", true)]
+    [InlineData("universes/u/series/s/series.md", true)]
+    [InlineData("universes/u/books/b/book.md", true)]
+    [InlineData("universes/u/series/s/books/b/book.md", true)]
+    [InlineData("universes/u/entities/items/book.md", false)]
+    [InlineData("universes/u/series/s/entities/series.md", false)]
+    [InlineData("universes/u/books/b/drafts/book.md", false)]
+    [InlineData("universes/u/books/b/outline.md", false)]
+    [InlineData("universes/u/series/s/books/b/entities/characters/universe.md", false)]
+    [InlineData("notes/book.md", false)]
+    public void StructureFilesAreTheFilesTheDenLoaderReads(string path, bool expected)
+    {
+        Assert.Equal(expected, IndexUpdater.IsStructureFile(path));
+    }
+
+    [Theory]
+    [InlineData("universes", true)]
+    [InlineData("packs", true)]
+    [InlineData("packs/mine", true)]
+    [InlineData("packs/mine/types", true)]
+    [InlineData("universes/u", true)]
+    [InlineData("universes/u/series", true)]
+    [InlineData("universes/u/books", true)]
+    [InlineData("universes/u/series/s", true)]
+    [InlineData("universes/u/books/b", true)]
+    [InlineData("universes/u/series/s/books", true)]
+    [InlineData("universes/u/series/s/books/b", true)]
+    [InlineData("universes/u/entities", false)]
+    [InlineData("universes/u/entities/books", false)]
+    [InlineData("universes/u/drafts", false)]
+    [InlineData("universes/u/books/b/drafts", false)]
+    [InlineData("universes/u/books/b/entities", false)]
+    [InlineData("universes/u/series/s/entities", false)]
+    [InlineData("universes/u/series/s/books/b/entities/characters", false)]
+    [InlineData("notes", false)]
+    public void StructureFoldersAreTheFoldersTheDenLoaderLists(string folder, bool expected)
+    {
+        Assert.Equal(expected, IndexUpdater.ChangesStructure(folder));
+    }
+
+    [Theory]
+    [InlineData(2, false)]
+    [InlineData(3, true)]
+    public void ABatchThatChangesManyFilesRebuilds(int notes, bool rebuilds)
+    {
+        using var den = TempDen.Starfall();
+        // Lower limits than the defaults (200 files and 25%), so a small den shows them.
+        var updater = new IndexUpdater(den.Root) { RebuildFiles = 2, RebuildShare = 0.1 };
+        updater.Rebuild("start");
+        var events = new List<(WatcherChangeTypes, string, string?)>();
+        for (var i = 0; i < notes; i++)
+        {
+            var path = $"universes/starfall/entities/locations/extra-{i}.md";
+            den.Write(path, $"---\ntype: character\nname: Extra {i}\n---\n");
+            events.Add((WatcherChangeTypes.Created, path, null));
+        }
+
+        var update = updater.Apply(Batch(den, [.. events]), out _);
+
+        Assert.Equal(rebuilds ? IndexUpdateKind.Rebuilt : IndexUpdateKind.Updated, update!.Kind);
+        if (rebuilds)
+        {
+            Assert.Equal("3 files changed at once", update.Reason);
+        }
+
+        AssertSameAsFullRebuild(den, "after the batch");
+    }
+
+    [Fact]
+    public void AFileThatStaysUnreadableIsLeftToARebuildToReport()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            // Only Windows refuses to read a file another process holds open.
+            return;
+        }
+
+        using var den = TempDen.Starfall();
+        var updater = new IndexUpdater(den.Root) { ReadAttempts = 2 };
+        updater.Rebuild("start");
+        const string mara = "universes/starfall/series/long-dark/entities/characters/mara-voss.md";
+        var full = Path.Combine(den.Root, mara);
+        File.AppendAllText(full, "\nA new line.\n");
+
+        using (new FileStream(full, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            for (var i = 0; i < 2; i++)
+            {
+                Assert.Null(updater.Apply(Batch(den, (WatcherChangeTypes.Changed, mara, null)), out var retry));
+                Assert.Equal([mara], retry);
+            }
+
+            // Then a rebuild, which fails as any full load of the den would.
+            Assert.ThrowsAny<IOException>(() => updater.Apply(Batch(den, (WatcherChangeTypes.Changed, mara, null)), out _));
+        }
+
+        Assert.Equal(IndexUpdateKind.Rebuilt, updater.Apply(Batch(den, (WatcherChangeTypes.Changed, mara, null)), out _)!.Kind);
+        AssertSameAsFullRebuild(den, "once the file can be read");
+    }
+
     /// <summary>A batch of events, by den-relative path, as the watcher would collect them.</summary>
     private static ChangeBatch Batch(TempDen den, params (WatcherChangeTypes Kind, string Path, string? OldPath)[] events)
     {
