@@ -52,9 +52,17 @@ internal sealed class IndexWriter
     /// <paramref name="fingerprint"/> (<see cref="IndexBuilder.FilesFingerprint"/>)
     /// and <paramref name="tree"/> taken before anything was read.
     /// </summary>
-    public static IndexState Load(string root, DenFileTree tree, string fingerprint)
+    public static IndexState Load(string root, DenFileTree tree, string fingerprint) =>
+        Load(root, new FileSystemDenSource(root), tree, fingerprint);
+
+    /// <summary>
+    /// <see cref="Load(string, DenFileTree, string)"/>, reading the den
+    /// through <paramref name="den"/>, so tests can change the files at a
+    /// chosen moment of the load.
+    /// </summary>
+    internal static IndexState Load(string root, IDenSource den, DenFileTree tree, string fingerprint)
     {
-        var source = new HashingDenSource(new FileSystemDenSource(root));
+        var source = new HashingDenSource(den);
         var structure = DenStructure.Load(source);
         var catalog = EntityCatalog.Load(structure, source);
         var links = LinkIndex.Build(catalog, source);
@@ -106,8 +114,8 @@ internal sealed class IndexWriter
 
     /// <summary>
     /// Takes the files the load found missing or couldn't read (#112), and
-    /// the folders and files it didn't find when it listed their folders
-    /// (#116), out of <paramref name="tree"/> and <paramref name="hashes"/>,
+    /// the folders and files it didn't see (<see cref="HashingDenSource.DidntSeeFolder"/>,
+    /// #116), out of <paramref name="tree"/> and <paramref name="hashes"/>,
     /// so the files fingerprint says what the index was built from. A file
     /// or folder that was in the tree but that the load couldn't read or
     /// list, say because another program held the file open or the folder's
@@ -128,7 +136,7 @@ internal sealed class IndexWriter
             }
         }
 
-        foreach (var folder in tree.Folders.Where(source.ListedWithoutFolder).ToList())
+        foreach (var folder in tree.Folders.Where(source.DidntSeeFolder).ToList())
         {
             foreach (var path in tree.FilesUnder(folder))
             {
@@ -140,7 +148,7 @@ internal sealed class IndexWriter
             changed = true;
         }
 
-        foreach (var path in tree.Files.Where(source.ListedWithoutFile).ToList())
+        foreach (var path in tree.Files.Where(source.DidntSeeFile).ToList())
         {
             hashes.Remove(path);
             tree.SetFile(path, null);

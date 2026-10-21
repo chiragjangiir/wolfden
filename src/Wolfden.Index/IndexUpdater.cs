@@ -106,10 +106,26 @@ internal sealed class IndexUpdater
         var treeChanged = false;
 
         // Folders that were added, moved, or deleted: look at what's in them.
+        // The folders above each changed path are looked at too, parents
+        // first (in ordinal order a folder comes before what's in it): a
+        // folder can stop being one, or become one again, without an event
+        // of its own, as when its permissions change so it can't be listed
+        // (#116). Where the tree and the disk agree on them, as they almost
+        // always do, that costs only listings this batch makes anyway.
         var files = new SortedSet<string>(StringComparer.Ordinal);
+        var folders = new SortedSet<string>(StringComparer.Ordinal);
         foreach (var path in batch.Paths)
         {
             files.Add(path);
+            folders.Add(path);
+            for (var slash = path.LastIndexOf('/'); slash > 0; slash = path.LastIndexOf('/', slash - 1))
+            {
+                folders.Add(path[..slash]);
+            }
+        }
+
+        foreach (var path in folders)
+        {
             if (!DenFileTree.Tracks(path))
             {
                 // No file the index reads can be in it (a drafts/ folder at the den root, say).
@@ -455,6 +471,8 @@ internal sealed class IndexUpdater
         public IEnumerable<string> GetFiles(string path) => inner.GetFiles(path);
 
         public IEnumerable<string> GetFolderLinks(string path) => inner.GetFolderLinks(path);
+
+        public bool FolderExists(string path) => inner.FolderExists(path);
     }
 
     /// <summary>

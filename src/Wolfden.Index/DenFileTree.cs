@@ -166,6 +166,11 @@ internal sealed class DenFileTree
     {
         var files = new List<string>();
         var depth = path.Split('/').Length;
+
+        // Walk's result only matters in a race: the watcher adds a folder
+        // after its listing found it could be listed, so it's false only if
+        // the folder was deleted, or made unlistable, in between. Then it's
+        // left out, as a full scan would leave it out (#116).
         if (depth <= MaxDepth + 1 && Tracks(path) && Walk(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)), path + "/", depth, files))
         {
             _folders.Add(path);

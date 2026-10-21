@@ -37,8 +37,7 @@ public sealed class UnlistableFolderTests
         using (Unlistable(Full(den.Root, folder)))
         {
             var source = new FileSystemDenSource(den.Root);
-            var parent = folder[..folder.LastIndexOf('/')];
-            Assert.DoesNotContain(folder[(parent.Length + 1)..], source.GetDirectories(parent));
+            Assert.False(source.FolderExists(folder));
             Assert.Empty(source.GetDirectories(folder));
             Assert.Empty(source.GetFiles(folder));
             Assert.Empty(source.GetFolderLinks(folder));
@@ -64,6 +63,31 @@ public sealed class UnlistableFolderTests
     }
 
     [Theory]
+    [InlineData("packs/spare", "packs/spare/readme.md")]
+    [InlineData("packs/Spare", "packs/Spare/pack.yaml")]
+    [InlineData("notes", "notes/idea.md")]
+    [InlineData("universes/starfall/books/Odd", "universes/starfall/books/Odd/book.md")]
+    [Trait("Scenario", "SC-CLI-9")]
+    public void AFolderThatCantBeListedIsntWarnedAboutByName(string folder, string file)
+    {
+        // Folders the check reports by name alone: a pack folder without a
+        // pack.yaml or with an invalid key, the reserved notes/, and a
+        // container folder with an invalid key.
+        using var den = TempDen.Starfall();
+        using var deleted = TempDen.Starfall();
+        den.Write(file, "---\nname: Spare\n---\n");
+        var listable = Describe(DenCheck.Run(den.Root));
+        Assert.Contains(listable, d => d.StartsWith(folder + "|", StringComparison.Ordinal));
+        File.Delete(Full(den.Root, file));
+
+        using (Unlistable(Full(den.Root, folder)))
+        {
+            Assert.Equal(Describe(DenCheck.Run(deleted.Root)), Describe(DenCheck.Run(den.Root)));
+            Assert.Equal(IndexBuilder.FilesFingerprint(deleted.Root), IndexBuilder.FilesFingerprint(den.Root));
+        }
+    }
+
+    [Theory]
     [InlineData(Characters)]
     [InlineData(Ember)]
     [Trait("Scenario", "SC-CLI-9")]
@@ -78,7 +102,8 @@ public sealed class UnlistableFolderTests
         {
             var state = IndexWriter.Load(den.Root, tree, fingerprint);
 
-            Assert.False(state.Tree.HasFolder(folder));
+            // An entities folder stays in the tree, but entities folders aren't in the fingerprint.
+            Assert.Equal(folder == Characters, state.Tree.HasFolder(folder));
             Assert.Empty(state.Tree.FilesUnder(folder));
             Assert.DoesNotContain(state.FileHashes.Keys, p => p.StartsWith(folder + "/", StringComparison.Ordinal));
             var recorded = state.Rows.Meta[IndexSchema.FilesFingerprintKey];
@@ -165,6 +190,66 @@ public sealed class UnlistableFolderTests
         AssertSameAsFullRebuild(den, "once the book folder can be listed");
     }
 
+    [Theory]
+    [InlineData("universes/starfall/series", "long-dark")]
+    [InlineData("universes/starfall/books", "a-quiet-moon")]
+    [Trait("Scenario", "SC-CLI-9")]
+    public void AFolderDeletedAfterTheLoadReadItLeavesTheIndexStale(string parent, string name)
+    {
+        // The loader lists a universe's series/ and books/ twice: once to
+        // load them and once for the order. A folder deleted between the
+        // two was read, so the files fingerprint must still count it, and
+        // the index looks stale against the den without it.
+        using var den = TempDen.Starfall();
+        var tree = DenFileTree.Scan(den.Root);
+        var racing = new DeletingSource(new FileSystemDenSource(den.Root), parent, name, Full(den.Root, $"{parent}/{name}"));
+
+        var state = IndexWriter.Load(den.Root, racing, tree, tree.Fingerprint());
+
+        Assert.True(racing.Deleted);
+        Assert.Contains(state.Structure.Universes.SelectMany(u => u.Series.Concat<Container>(u.Books)), c => c.Path == $"{parent}/{name}");
+        Assert.True(state.Tree.HasFolder($"{parent}/{name}"));
+        Assert.NotEqual(DenFileTree.Scan(den.Root).Fingerprint(), state.Rows.Meta[IndexSchema.FilesFingerprintKey]);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WATCH-8")]
+    public void TheWatcherLeavesOutAFolderItCantListWhenAFileInItChanges()
+    {
+        // Saving a note in place, or adding one, gives the note an event but
+        // not its folder: the watcher must still drop the whole folder.
+        using var den = TempDen.Starfall();
+        const string ilya = $"{Characters}/ilya-brand.md";
+        const string added = $"{Characters}/zed-amar.md";
+        den.Write(ilya, "---\ntype: character\nname: Ilya Brand\n---\n\nSails with [[Mara Voss]].\n");
+        var updater = new IndexUpdater(den.Root);
+        updater.Rebuild("start");
+        Assert.Contains(updater.State!.Catalog.Entities, e => e.Path == ilya);
+
+        File.AppendAllText(Full(den.Root, Mara), "\nA line added in place.\n");
+        den.Write(added, "---\ntype: character\nname: Zed Amar\n---\n");
+        using (Unlistable(Full(den.Root, Characters)))
+        {
+            var update = updater.Apply(Batch(den, (WatcherChangeTypes.Changed, Mara, null)), out var retry);
+
+            Assert.Empty(retry);
+            Assert.Equal(IndexUpdateKind.Updated, update!.Kind);
+            Assert.DoesNotContain(updater.State!.Catalog.Entities, e => e.Path.StartsWith(Characters + "/", StringComparison.Ordinal));
+            AssertSameAsFullRebuild(den, "after a note in the unlistable folder changed");
+
+            Assert.Null(updater.Apply(Batch(den, (WatcherChangeTypes.Created, added, null)), out retry));
+            Assert.Empty(retry);
+            AssertSameAsFullRebuild(den, "after a note was added to the unlistable folder");
+        }
+
+        // Once it can be listed, the next event for a note in it brings back the whole folder.
+        var back = updater.Apply(Batch(den, (WatcherChangeTypes.Changed, added, null)), out _);
+        Assert.Equal(IndexUpdateKind.Updated, back!.Kind);
+        Assert.Contains(updater.State!.Catalog.Entities, e => e.Path == ilya);
+        Assert.Contains(updater.State.Catalog.Entities, e => e.Path == Mara);
+        AssertSameAsFullRebuild(den, "once the folder can be listed");
+    }
+
     private static List<string> Describe(DenCheck check) =>
         check.Diagnostics.Select(d => $"{d.Path}|{d.Diagnostic.RuleId}|{d.Diagnostic.Line}|{d.Diagnostic.Message}").ToList();
 
@@ -212,6 +297,41 @@ public sealed class UnlistableFolderTests
         var mode = File.GetUnixFileMode(full);
         File.SetUnixFileMode(full, UnixFileMode.None);
         return new Cleanup(() => File.SetUnixFileMode(full, mode));
+    }
+
+    /// <summary>
+    /// A den source that deletes the folder <paramref name="name"/> in
+    /// <paramref name="parent"/> on disk just before the second listing of
+    /// <paramref name="parent"/>, after the first listing let the load read it.
+    /// </summary>
+    private sealed class DeletingSource(IDenSource inner, string parent, string name, string full) : IDenSource
+    {
+        private int _listings;
+
+        public bool Deleted { get; private set; }
+
+        public bool FileExists(string path) => inner.FileExists(path);
+
+        public byte[] ReadFile(string path) => inner.ReadFile(path);
+
+        public IEnumerable<string> GetDirectories(string path)
+        {
+            if (path == parent && ++_listings == 2)
+            {
+                Directory.Delete(full, recursive: true);
+                Deleted = true;
+            }
+
+            var names = inner.GetDirectories(path).ToList();
+            Assert.True(path != parent || _listings != 1 || names.Contains(name));
+            return names;
+        }
+
+        public IEnumerable<string> GetFiles(string path) => inner.GetFiles(path);
+
+        public IEnumerable<string> GetFolderLinks(string path) => inner.GetFolderLinks(path);
+
+        public bool FolderExists(string path) => inner.FolderExists(path);
     }
 
     private sealed class Cleanup(Action dispose) : IDisposable
