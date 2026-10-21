@@ -53,14 +53,25 @@ public sealed class UnreadableFileTests
     [InlineData("packs/starfall/extensions/character.yaml")]
     [InlineData("packs/starfall/templates/ship.md")]
     [Trait("Scenario", "SC-CLI-8")]
-    public void APackFileThatCantBeReadDoesntStopTheCheck(string path)
+    public void APackFileThatCantBeReadIsCheckedAsIfItWerentThere(string path)
     {
         var unreadable = new UnreadableSource(MemoryDenSource.FromDirectory(MemoryDenSource.StarfallRoot), path, "deleted");
+        var without = MemoryDenSource.FromDirectory(MemoryDenSource.StarfallRoot).Without(path);
 
-        var check = DenCheck.Run(unreadable);
-
-        Assert.True(check.Structure.IsLoaded);
+        Assert.Equal(Describe(DenCheck.Run(without)), Describe(DenCheck.Run(unreadable)));
+        Assert.Equal(Entities(without), Entities(unreadable));
         Assert.True(unreadable.Attempts > 0);
+    }
+
+    [Fact]
+    public void AnUnreadablePackYamlGivesTheSameSingleErrorAsAMissingOne()
+    {
+        const string path = "packs/starfall/pack.yaml";
+        var unreadable = new UnreadableSource(MemoryDenSource.FromDirectory(MemoryDenSource.StarfallRoot), path, "locked");
+
+        var errors = DenCheck.Run(unreadable).Diagnostics.Where(d => d.Diagnostic.Severity == Documents.DiagnosticSeverity.Error).ToList();
+
+        Assert.Equal("F-DEN-4", Assert.Single(errors).Diagnostic.RuleId);
     }
 
     [Fact]

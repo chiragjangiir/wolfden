@@ -98,7 +98,9 @@ internal sealed class IndexWriter
             hashes[path] = hash;
         }
 
-        ForgetMissing(hashing, tree, hashes);
+        // No ForgetMissing here, unlike Load: an update reads only the changed
+        // files, from the bytes the watcher already read and set in the tree
+        // (null for one it found gone or broken), so tree and reads agree.
         return new IndexWriter(previous.Root, previous).Run(previous.Structure, catalog, links, outlines, hashes, source: null, tree, tree.Fingerprint());
     }
 

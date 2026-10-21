@@ -434,7 +434,7 @@ internal static class ContinuityChecks
             .ToList();
         return failed.FirstOrDefault(p => p.EndsWith($"/types/{typeKey}.yaml", StringComparison.Ordinal))
             ?? failed.FirstOrDefault(p => p.EndsWith("/pack.yaml", StringComparison.Ordinal)
-                && (source.FileExists($"{p[..^"pack.yaml".Length]}types/{typeKey}.yaml") || ShadowsBuiltInType(p, typeKey)));
+                && (source.TryReadFile($"{p[..^"pack.yaml".Length]}types/{typeKey}.yaml") is not null || ShadowsBuiltInType(p, typeKey)));
     }
 
     /// <summary>

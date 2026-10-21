@@ -107,7 +107,12 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
                 continue;
             }
 
-            var isLocal = Keys.IsKey(key) && source.FileExists($"packs/{key}/pack.yaml");
+            // Read, not only looked up, so a pack.yaml that can't be read is
+            // absent here as it is to the pack reader (#112). The pack reader
+            // reads it anyway, so this costs nothing in the index, which reads
+            // each file once. pack.yml below is only a hint about the file's
+            // name, so looking it up is enough.
+            var isLocal = Keys.IsKey(key) && source.TryReadFile($"packs/{key}/pack.yaml") is not null;
             if (!isLocal && !BuiltInPacks.Instance.Keys.Contains(key))
             {
                 var message = Keys.IsKey(key) && source.FileExists($"packs/{key}/pack.yml")
@@ -359,6 +364,9 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
             // The series and everything under it are left out (F-GEN-2), so its
             // books aren't read and get no diagnostics of their own. Their keys
             // still count, for F-KEY-5 and for the "has errors" F-POS-4 message.
+            // Looked up, not read (#112): reading them would make the index
+            // record files it doesn't load, and a book.md that exists but
+            // can't be read only names a key in those messages.
             var unread = Folders($"{path}/books")
                 .Where(k => Keys.IsContainerKey(k) && source.FileExists($"{path}/books/{k}/book.md"))
                 .Select(k => new WorkInfo(ContainerKind.Book, k, $"{path}/books/{k}", $"{path}/books/{k}/book.md", null, []))

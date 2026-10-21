@@ -120,31 +120,45 @@ internal sealed partial class PackReader
             ReadTemplate(name);
         }
 
+        // A chapter.yaml that's listed but can't be read leaves no chapter
+        // fields, as if it weren't there: ReadChapterFile returns early (#112).
         if (_source.FileExists(Source("chapter.yaml")))
         {
             ReadChapterFile();
         }
 
+        // A type or extension file that's gone or can't be read is left out
+        // entirely, as if it weren't listed, template use included (#112).
         var used = new HashSet<string>(StringComparer.Ordinal);
         foreach (var name in YamlFiles("types"))
         {
-            if (ReadType(name[..^5]) is { } type)
+            if (Yaml($"types/{name}", listed: true) is not { } file)
+            {
+                continue;
+            }
+
+            if (ReadType(name[..^5], file) is { } type)
             {
                 _content.Types.Add(type);
             }
 
             // F-TPL-2: a type uses its template by name, or templates/<key>.md.
-            used.Add(TemplateValue(name) ?? name[..^5] + ".md");
+            used.Add(TemplateValue(file) ?? name[..^5] + ".md");
         }
 
         foreach (var name in YamlFiles("extensions"))
         {
-            if (ReadExtension(name[..^5]) is { } extension)
+            if (Yaml($"extensions/{name}", listed: true) is not { } file)
+            {
+                continue;
+            }
+
+            if (ReadExtension(name[..^5], file) is { } extension)
             {
                 _content.Extensions.Add(extension);
             }
 
-            if (TemplateValue(name, "extensions") is { } template)
+            if (TemplateValue(file) is { } template)
             {
                 used.Add(template);
             }
@@ -164,6 +178,8 @@ internal sealed partial class PackReader
         const string name = "pack.yaml";
         if (Yaml(name) is not { } file)
         {
+            // Only if it went between the den reading it to call this a pack
+            // and now (#112): the next load sees the folder isn't a pack.
             return false;
         }
 
@@ -249,11 +265,10 @@ internal sealed partial class PackReader
     }
 
     /// <summary>F-TYPE-1 to F-TYPE-3. Returns null if the file has an error, which excludes it (F-PACK-2).</summary>
-    private TypeFile? ReadType(string key)
+    private TypeFile? ReadType(string key, YamlFile file)
     {
         var name = $"types/{key}.yaml";
-        var file = Yaml(name);
-        if (file is null || file.HasErrors)
+        if (file.HasErrors)
         {
             return null;
         }
@@ -332,11 +347,10 @@ internal sealed partial class PackReader
     }
 
     /// <summary>F-TYPE-6. Returns null if the file has an error, which excludes it (F-PACK-2).</summary>
-    private ExtensionFile? ReadExtension(string key)
+    private ExtensionFile? ReadExtension(string key, YamlFile file)
     {
         var name = $"extensions/{key}.yaml";
-        var file = Yaml(name);
-        if (file is null || file.HasErrors)
+        if (file.HasErrors)
         {
             return null;
         }
@@ -761,8 +775,8 @@ internal sealed partial class PackReader
     }
 
     /// <summary>The <c>template</c> value of a type or extension file as written, for F-TPL-2, or null.</summary>
-    private string? TemplateValue(string name, string folder = "types") =>
-        BuiltInOrRead<YamlFile>($"{folder}/{name}") is { HasErrors: false } file && file.Root?["template"] is YamlScalar { IsNull: false } t
+    private static string? TemplateValue(YamlFile file) =>
+        !file.HasErrors && file.Root?["template"] is YamlScalar { IsNull: false } t
             ? t.Text
             : null;
 
@@ -770,7 +784,7 @@ internal sealed partial class PackReader
     private void ReadTemplate(string fileName)
     {
         var name = $"templates/{fileName}";
-        if (BuiltInOrRead<MarkdownFile>(name) is not { } file)
+        if (BuiltInOrRead<MarkdownFile>(name, listed: true) is not { } file)
         {
             return;
         }
@@ -852,9 +866,9 @@ internal sealed partial class PackReader
     }
 
     /// <summary>Parses a pack's YAML file and adds its diagnostics, or returns null if it's gone or can't be read (#112).</summary>
-    private YamlFile? Yaml(string name)
+    private YamlFile? Yaml(string name, bool listed = false)
     {
-        var file = BuiltInOrRead<YamlFile>(name);
+        var file = BuiltInOrRead<YamlFile>(name, listed);
         foreach (var d in file?.Diagnostics ?? [])
         {
             Add(name, d);
@@ -866,9 +880,11 @@ internal sealed partial class PackReader
     /// <summary>
     /// Parses a pack file, once per process for a built-in pack. Null for a
     /// file of the den's own that was listed but is gone or can't be read
-    /// now, which is read as if it weren't there (#112).
+    /// now, which is read as if it weren't there (#112). <paramref name="listed"/>
+    /// says the name came from the folder's listing, so it isn't looked up again
+    /// (<see cref="IDenSource.TryReadListedFile"/>).
     /// </summary>
-    private T? BuiltInOrRead<T>(string name)
+    private T? BuiltInOrRead<T>(string name, bool listed = false)
         where T : DenFile
     {
         var path = Source(name);
@@ -877,7 +893,8 @@ internal sealed partial class PackReader
             return (T)builtIn.Parsed.GetOrAdd(path, p => Parse<T>(builtIn.ReadFile(p)));
         }
 
-        return _source.TryReadFile(path) is { } bytes ? Parse<T>(bytes) : null;
+        var bytes = listed ? _source.TryReadListedFile(path) : _source.TryReadFile(path);
+        return bytes is null ? null : Parse<T>(bytes);
     }
 
     private static T Parse<T>(byte[] bytes)

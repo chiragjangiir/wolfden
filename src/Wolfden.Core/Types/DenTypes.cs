@@ -127,8 +127,10 @@ public sealed class DenTypes
                     {
                         Warn(path, "F-PACK-5", null, $"'{folder}' isn't a valid pack key (lowercase letters and digits, with single hyphens between words), so the folder is ignored.");
                     }
-                    else if (!den.FileExists($"{path}/pack.yaml"))
+                    else if (den.TryReadFile($"{path}/pack.yaml") is null)
                     {
+                        // Read, not only looked up: a pack.yaml that can't be read is absent (#112).
+                        // pack.yml is only a hint about the name, so looking it up is enough.
                         Warn(path, "F-PACK-5", null, den.FileExists($"{path}/pack.yml")
                             ? $"packs/{folder} has pack.yml, which isn't read: rename it to pack.yaml to make the folder a pack."
                             : $"packs/{folder} has no pack.yaml, so it isn't a pack.");
