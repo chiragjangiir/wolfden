@@ -12,6 +12,16 @@ questions, and feedback on [`docs/design.md`](docs/design.md).
   maintainer will label it.
 - Search existing issues first. The backlog is organized by milestone.
 
+### Claiming an issue
+
+To work on an issue, comment on it to say so, and the maintainer will assign
+it to you. Once it's assigned, it's yours: nobody else, including the
+maintainer's AI agents, starts on it. Issues labeled `good first issue` or
+`help wanted` are set aside for contributors, so they're a good place to
+start. If a claimed issue goes quiet for about two weeks, the maintainer will
+ask on it before handing it to someone else. To give an issue back, just say
+so in a comment.
+
 ## Building
 
 You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0),
