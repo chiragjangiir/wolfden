@@ -62,6 +62,7 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
         private readonly List<string> _targets = ["nobody-at-all", "Nobody Known"];
         private readonly List<string> _ids = [];
         private readonly List<(WatcherChangeTypes Kind, string Path, string? OldPath)> _events = [];
+        private readonly List<string> _links = [];
         private DenStructure _structure;
         private int _keys;
 
@@ -109,12 +110,16 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
             var roll = _random.Next(100);
             switch (roll)
             {
-                case < 30 when entities.Count > 0:
+                case < 28 when entities.Count > 0:
                 {
                     var path = Pick(entities);
                     Write(path, Entity(path, keep: _random.Next(2) == 0 ? File.ReadAllText(Full(_root, path)) : null));
                     return $"edit {path}";
                 }
+
+                // Two rolls from the edits, the most common change, so the others keep their share.
+                case >= 28 and < 30:
+                    return BrokenLink(entities);
 
                 case < 45:
                 {
@@ -303,48 +308,67 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
                     return what;
                 }
 
-                case < 98:
-                {
-                    // A link to a note that's gone, new or in a note's place, as
-                    // when the note it pointed to moved away. It's absent (#112).
-                    // The random draws are the same where links can't be made.
-                    var replace = entities.Count > 0 && _random.Next(2) == 0;
-                    var path = replace ? Pick(entities) : NewEntityPath();
-                    var target = Path.Combine(_root, "nowhere", $"{Key()}.md");
-                    if (!CanLinkFiles.Value)
-                    {
-                        return "nothing";
-                    }
-
-                    if (replace)
-                    {
-                        File.Delete(Full(_root, path));
-                        _events.Add((WatcherChangeTypes.Deleted, path, null));
-                    }
-                    else
-                    {
-                        EnsureFolder(path[..path.LastIndexOf('/')]);
-                    }
-
-                    File.CreateSymbolicLink(Full(_root, path), target);
-                    _events.Add((WatcherChangeTypes.Created, path, null));
-                    return $"broken link {path}";
-                }
-
                 default:
-                {
-                    if (entities.Count == 0)
-                    {
-                        return "nothing";
-                    }
-
-                    // A small edit: a link or a section added at the end.
-                    var path = Pick(entities);
-                    var text = File.ReadAllText(Full(_root, path));
-                    Write(path, text + (_random.Next(2) == 0 ? $"\nMeets [[{Pick(_targets)}]].\n" : $"\n## {Pick(["Overview", "Want", "Odd bit"])}\nWith [[{Pick(_targets)}]].\n"));
-                    return $"append {path}";
-                }
+                    return Append(entities);
             }
+        }
+
+        /// <summary>A small edit: a link or a section added at the end of a note.</summary>
+        private string Append(List<string> entities)
+        {
+            if (entities.Count == 0)
+            {
+                return "nothing";
+            }
+
+            var path = Pick(entities);
+            var text = File.ReadAllText(Full(_root, path));
+            Write(path, text + (_random.Next(2) == 0 ? $"\nMeets [[{Pick(_targets)}]].\n" : $"\n## {Pick(["Overview", "Want", "Odd bit"])}\nWith [[{Pick(_targets)}]].\n"));
+            return $"append {path}";
+        }
+
+        /// <summary>
+        /// A link to a note that's gone, new or in a note's place, as when the
+        /// note it pointed to moved away; it's absent (#112). Now and then a
+        /// broken link is replaced by a note again. Where the OS can't make
+        /// file links, an <see cref="Append"/> instead.
+        /// </summary>
+        private string BrokenLink(List<string> entities)
+        {
+            if (!CanLinkFiles.Value)
+            {
+                return Append(entities);
+            }
+
+            var links = _links.Where(p => new FileInfo(Full(_root, p)).LinkTarget is not null).ToList();
+            _links.Clear();
+            _links.AddRange(links);
+            if (links.Count > 0 && _random.Next(3) == 0)
+            {
+                var healed = Pick(links);
+                _links.Remove(healed);
+                File.Delete(Full(_root, healed));
+                _events.Add((WatcherChangeTypes.Deleted, healed, null));
+                Write(healed, Entity(healed, keep: null));
+                return $"note in place of broken link {healed}";
+            }
+
+            var replace = entities.Count > 0 && _random.Next(2) == 0;
+            var path = replace ? Pick(entities) : NewEntityPath();
+            if (replace)
+            {
+                File.Delete(Full(_root, path));
+                _events.Add((WatcherChangeTypes.Deleted, path, null));
+            }
+            else
+            {
+                EnsureFolder(path[..path.LastIndexOf('/')]);
+            }
+
+            File.CreateSymbolicLink(Full(_root, path), Path.Combine(_root, "nowhere", $"{Key()}.md"));
+            _events.Add((WatcherChangeTypes.Created, path, null));
+            _links.Add(path);
+            return $"broken link {path}";
         }
 
         private List<Container> Containers() =>
