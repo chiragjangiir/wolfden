@@ -13,7 +13,7 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
 
     public void Load()
     {
-        if (!source.FileExists(DenFile))
+        if (source.TryReadFile(DenFile) is not { } bytes)
         {
             // §5.1: den.yaml is required, and without it there's no format (F-DEN-1).
             den.Add(DenFile, new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, null,
@@ -21,7 +21,7 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
             return;
         }
 
-        var file = YamlFile.Parse(source.ReadFile(DenFile));
+        var file = YamlFile.Parse(bytes);
         foreach (var d in file.Diagnostics)
         {
             den.Add(DenFile, d);
@@ -604,14 +604,14 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         }
 
         var filePath = $"{path}/{Container.FileName(kind)}";
-        if (!source.FileExists(filePath))
+        if (source.TryReadFile(filePath) is not { } bytes)
         {
             den.Add(path, new Diagnostic("F-LAY-4", DiagnosticSeverity.Error, null,
                 $"The {Kind(kind)} folder '{key}' has no {Container.FileName(kind)}, so it's skipped."));
             return null;
         }
 
-        var file = MarkdownFile.Parse(source.ReadFile(filePath), requireFrontmatter: true);
+        var file = MarkdownFile.Parse(bytes, requireFrontmatter: true);
         var read = new ContainerRead(den, filePath, file);
         foreach (var d in file.Diagnostics)
         {

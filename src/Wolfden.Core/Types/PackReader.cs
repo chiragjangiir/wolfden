@@ -162,7 +162,11 @@ internal sealed partial class PackReader
     private bool ReadManifest()
     {
         const string name = "pack.yaml";
-        var file = Yaml(name);
+        if (Yaml(name) is not { } file)
+        {
+            return false;
+        }
+
         var ok = !file.HasErrors;
         var root = file.Root;
         if (ok && root is null)
@@ -217,7 +221,7 @@ internal sealed partial class PackReader
     {
         const string name = "chapter.yaml";
         var file = Yaml(name);
-        if (file.HasErrors)
+        if (file is null || file.HasErrors)
         {
             return;
         }
@@ -249,7 +253,7 @@ internal sealed partial class PackReader
     {
         var name = $"types/{key}.yaml";
         var file = Yaml(name);
-        if (file.HasErrors)
+        if (file is null || file.HasErrors)
         {
             return null;
         }
@@ -332,7 +336,7 @@ internal sealed partial class PackReader
     {
         var name = $"extensions/{key}.yaml";
         var file = Yaml(name);
-        if (file.HasErrors)
+        if (file is null || file.HasErrors)
         {
             return null;
         }
@@ -766,7 +770,11 @@ internal sealed partial class PackReader
     private void ReadTemplate(string fileName)
     {
         var name = $"templates/{fileName}";
-        var file = BuiltInOrRead<MarkdownFile>(name);
+        if (BuiltInOrRead<MarkdownFile>(name) is not { } file)
+        {
+            return;
+        }
+
         var errors = 0;
         foreach (var d in file.Diagnostics)
         {
@@ -843,10 +851,11 @@ internal sealed partial class PackReader
         return result;
     }
 
-    private YamlFile Yaml(string name)
+    /// <summary>Parses a pack's YAML file and adds its diagnostics, or returns null if it's gone or can't be read (#112).</summary>
+    private YamlFile? Yaml(string name)
     {
         var file = BuiltInOrRead<YamlFile>(name);
-        foreach (var d in file.Diagnostics)
+        foreach (var d in file?.Diagnostics ?? [])
         {
             Add(name, d);
         }
@@ -854,8 +863,12 @@ internal sealed partial class PackReader
         return file;
     }
 
-    /// <summary>Parses a pack file, once per process for a built-in pack.</summary>
-    private T BuiltInOrRead<T>(string name)
+    /// <summary>
+    /// Parses a pack file, once per process for a built-in pack. Null for a
+    /// file of the den's own that was listed but is gone or can't be read
+    /// now, which is read as if it weren't there (#112).
+    /// </summary>
+    private T? BuiltInOrRead<T>(string name)
         where T : DenFile
     {
         var path = Source(name);
@@ -864,7 +877,7 @@ internal sealed partial class PackReader
             return (T)builtIn.Parsed.GetOrAdd(path, p => Parse<T>(builtIn.ReadFile(p)));
         }
 
-        return Parse<T>(_source.ReadFile(path));
+        return _source.TryReadFile(path) is { } bytes ? Parse<T>(bytes) : null;
     }
 
     private static T Parse<T>(byte[] bytes)

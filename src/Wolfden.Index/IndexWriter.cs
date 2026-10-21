@@ -60,6 +60,11 @@ internal sealed class IndexWriter
         var links = LinkIndex.Build(catalog, source);
         var outlines = ReadOutlines(structure, source, previous: null, changed: new HashSet<string>(StringComparer.Ordinal));
         var hashes = source.Files.ToDictionary(f => f.Path, f => f.Hash, StringComparer.Ordinal);
+        if (ForgetMissing(source, tree, hashes))
+        {
+            fingerprint = tree.Fingerprint();
+        }
+
         return new IndexWriter(root, null).Run(structure, catalog, links, outlines, hashes, source, tree, fingerprint);
     }
 
@@ -93,7 +98,33 @@ internal sealed class IndexWriter
             hashes[path] = hash;
         }
 
+        ForgetMissing(hashing, tree, hashes);
         return new IndexWriter(previous.Root, previous).Run(previous.Structure, catalog, links, outlines, hashes, source: null, tree, tree.Fingerprint());
+    }
+
+    /// <summary>
+    /// Takes the files the load found missing or couldn't read (#112) out of
+    /// <paramref name="tree"/> and <paramref name="hashes"/>, so the files
+    /// fingerprint says what the index was built from. A file that was
+    /// hashed for the tree but couldn't be read by the load, say because
+    /// another program held it open by then, then makes the index look
+    /// stale, so the next query rebuilds it, rather than current while it
+    /// lacks the file. Returns true if the tree changed.
+    /// </summary>
+    private static bool ForgetMissing(HashingDenSource source, DenFileTree tree, Dictionary<string, string> hashes)
+    {
+        var changed = false;
+        foreach (var path in source.Missing)
+        {
+            hashes.Remove(path);
+            if (tree.Hash(path) is not null)
+            {
+                tree.SetFile(path, null);
+                changed = true;
+            }
+        }
+
+        return changed;
     }
 
     private IndexState Run(
@@ -121,7 +152,7 @@ internal sealed class IndexWriter
         if (_previous is null)
         {
             _rows.Meta[IndexSchema.SchemaVersionKey] = IndexSchema.Version.ToString(CultureInfo.InvariantCulture);
-            _rows.Meta[IndexSchema.DenFormatKey] = IndexBuilder.DenFormatStamp(source!.FileExists("den.yaml") ? source.ReadFile("den.yaml") : null);
+            _rows.Meta[IndexSchema.DenFormatKey] = IndexBuilder.DenFormatStamp(source!.TryReadFile("den.yaml"));
             _rows.Meta[IndexSchema.SupportedFormatKey] = DenStructure.SupportedFormat.ToString(CultureInfo.InvariantCulture);
             _rows.Meta[IndexSchema.BuiltInPacksKey] = BuiltInPacks.Instance.Hash;
             _rows.Add(new DenRecord
@@ -560,9 +591,9 @@ internal sealed class IndexWriter
                 continue;
             }
 
-            if (source.FileExists(path))
+            if (source.TryReadFile(path) is { } bytes)
             {
-                var file = MarkdownFile.ParseOutline(source.ReadFile(path));
+                var file = MarkdownFile.ParseOutline(bytes);
                 result.Add(new OutlineFile(book, path, OutlineReader.IsExcluded(file) ? null : OutlineReader.ReadRows(file)));
             }
         }
@@ -665,8 +696,8 @@ internal sealed class IndexWriter
     /// <summary>F-DEN-2: <c>name</c> from <c>den.yaml</c>, or the den root's folder name.</summary>
     private string DenName(IDenSource source)
     {
-        if (source.FileExists("den.yaml")
-            && YamlFile.Parse(source.ReadFile("den.yaml")).Root?["name"] is YamlScalar { IsNull: false } name
+        if (source.TryReadFile("den.yaml") is { } bytes
+            && YamlFile.Parse(bytes).Root?["name"] is YamlScalar { IsNull: false } name
             && name.Text.Trim().Length > 0)
         {
             return name.Text;

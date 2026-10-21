@@ -9,7 +9,8 @@ namespace Wolfden.Index.Tests;
 /// <summary>
 /// The property test of the file watcher's incremental update (#14): random
 /// sequences of edits, new files, deletes, renames, folder moves, outline
-/// changes, and the odd structural change to generated dens, applied as
+/// changes, links to notes that are gone (where the OS allows file links,
+/// #112), and the odd structural change to generated dens, applied as
 /// synthetic batches. After every batch the index must have exactly the
 /// content of a full rebuild of the same files. Seeds are fixed, so failures
 /// reproduce.
@@ -24,6 +25,7 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
     [MemberData(nameof(Seeds))]
     [Trait("Scenario", "SC-WATCH-1")]
     [Trait("Scenario", "SC-WATCH-2")]
+    [Trait("Scenario", "SC-WATCH-7")]
     public void AnyChangeSequenceGivesTheSameIndexAsAFullRebuild(int seed)
     {
         var (files, _) = DenGenerator.Generate(seed);
@@ -301,6 +303,34 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
                     return what;
                 }
 
+                case < 98:
+                {
+                    // A link to a note that's gone, new or in a note's place, as
+                    // when the note it pointed to moved away. It's absent (#112).
+                    // The random draws are the same where links can't be made.
+                    var replace = entities.Count > 0 && _random.Next(2) == 0;
+                    var path = replace ? Pick(entities) : NewEntityPath();
+                    var target = Path.Combine(_root, "nowhere", $"{Key()}.md");
+                    if (!CanLinkFiles.Value)
+                    {
+                        return "nothing";
+                    }
+
+                    if (replace)
+                    {
+                        File.Delete(Full(_root, path));
+                        _events.Add((WatcherChangeTypes.Deleted, path, null));
+                    }
+                    else
+                    {
+                        EnsureFolder(path[..path.LastIndexOf('/')]);
+                    }
+
+                    File.CreateSymbolicLink(Full(_root, path), target);
+                    _events.Add((WatcherChangeTypes.Created, path, null));
+                    return $"broken link {path}";
+                }
+
                 default:
                 {
                     if (entities.Count == 0)
@@ -320,8 +350,26 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
         private List<Container> Containers() =>
             _structure.Universes.SelectMany(u => new Container[] { u }.Concat(u.Series).Concat(u.Books)).ToList();
 
+        /// <summary>True where the OS and user may make file links (not Windows without developer mode).</summary>
+        private static readonly Lazy<bool> CanLinkFiles = new(() =>
+        {
+            var link = Path.Combine(Path.GetTempPath(), $"wolfden-link-probe-{Guid.NewGuid():N}");
+            try
+            {
+                File.CreateSymbolicLink(link, link + "-target");
+                File.Delete(link);
+                return true;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+            {
+                return false;
+            }
+        });
+
+        /// <summary>The entity files, leaving out links, which only the broken-link change makes.</summary>
         private List<string> EntityFiles() =>
             Directory.EnumerateFiles(_root, "*.md", SearchOption.AllDirectories)
+                .Where(f => new FileInfo(f).LinkTarget is null)
                 .Select(f => Path.GetRelativePath(_root, f).Replace('\\', '/'))
                 .Where(f => Wolfden.Core.Entities.EntityCatalog.EntityFileScope(_structure, f) is not null)
                 .Order(StringComparer.Ordinal)

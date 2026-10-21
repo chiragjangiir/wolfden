@@ -476,11 +476,7 @@ public static class IndexBuilder
             ? format.Text
             : "";
 
-    private static string DenFormatStamp(string root)
-    {
-        var path = Path.Combine(root, "den.yaml");
-        return DenFormatStamp(File.Exists(path) ? File.ReadAllBytes(path) : null);
-    }
+    private static string DenFormatStamp(string root) => DenFormatStamp(((IDenSource)new FileSystemDenSource(root)).TryReadFile("den.yaml"));
 
     /// <summary>
     /// <c>.wolfden/</c> SHOULD be gitignored (F-LAY-2). A <c>.gitignore</c>

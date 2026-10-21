@@ -134,9 +134,9 @@ public sealed partial class EntityCatalog
         foreach (var path in changedPaths)
         {
             catalog._files.Remove(path);
-            if (EntityFileScope(Structure, path) is { } scope && source.FileExists(path))
+            if (EntityFileScope(Structure, path) is { } scope && ReadFile(path, source.TryReadFile(path), scope, catalog._containers.IndexOf(scope)) is { } result)
             {
-                catalog._files[path] = ReadFile(path, source, scope, catalog._containers.IndexOf(scope));
+                catalog._files[path] = result;
             }
         }
 
@@ -183,18 +183,27 @@ public sealed partial class EntityCatalog
             var container = _containers[i];
             foreach (var path in EntityFiles(source, $"{container.Path}/entities"))
             {
-                _files[path] = ReadFile(path, source, container, i);
+                if (ReadFile(path, source.TryReadListedFile(path), container, i) is { } result)
+                {
+                    _files[path] = result;
+                }
             }
         }
 
         Assemble();
     }
 
-    private static FileResult ReadFile(string path, IDenSource source, Container scope, int containerOrder)
+    /// <summary>Reads one entity file from its <paramref name="bytes"/>, or returns null without them: a file that's gone or can't be read is left out as if it weren't there (#112).</summary>
+    private static FileResult? ReadFile(string path, byte[]? bytes, Container scope, int containerOrder)
     {
+        if (bytes is null)
+        {
+            return null;
+        }
+
         var diagnostics = new List<Diagnostic>();
         var excluded = new List<ExcludedEntity>();
-        var entity = Read(path, source.ReadFile(path), scope, diagnostics, excluded);
+        var entity = Read(path, bytes, scope, diagnostics, excluded);
         return new FileResult(containerOrder, entity, diagnostics, excluded.Count > 0 ? excluded[0] : null);
     }
 

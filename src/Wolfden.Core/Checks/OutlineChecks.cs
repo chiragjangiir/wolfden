@@ -85,12 +85,12 @@ internal static class OutlineChecks
             foreach (var book in universe.Books)
             {
                 var path = $"{book.Path}/outline.md";
-                if (!source.FileExists(path))
+                if (source.TryReadFile(path) is not { } bytes)
                 {
                     continue;
                 }
 
-                var file = MarkdownFile.ParseOutline(source.ReadFile(path));
+                var file = MarkdownFile.ParseOutline(bytes);
                 diagnostics.AddRange(file.Diagnostics.Select(d => new DenDiagnostic(path, d)));
                 if (OutlineReader.IsExcluded(file))
                 {

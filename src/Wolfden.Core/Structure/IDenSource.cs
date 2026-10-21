@@ -12,6 +12,44 @@ public interface IDenSource
     /// <summary>The bytes of the file at <paramref name="path"/>.</summary>
     byte[] ReadFile(string path);
 
+    /// <summary>
+    /// The bytes of the file at <paramref name="path"/>, or null if there's
+    /// no file there or it can't be read: deleted since it was listed, a
+    /// link to a file that's gone or that loops, held open by another
+    /// program, or one the user may not read. The den treats such a file as
+    /// absent (#112), so one bad file never stops a load. The den's walks
+    /// read files with this or <see cref="TryReadListedFile"/>, never with
+    /// <see cref="ReadFile"/> alone.
+    /// </summary>
+    byte[]? TryReadFile(string path)
+    {
+        if (!FileExists(path))
+        {
+            return null;
+        }
+
+        return TryReadListedFile(path);
+    }
+
+    /// <summary>
+    /// <see cref="TryReadFile"/> for a path that came from <see cref="GetFiles"/>,
+    /// so it needn't be looked up again: the read itself says whether the
+    /// file is gone since or can't be read. On disk, looking a path up
+    /// lists its folder, so reading a folder's files this way stays linear.
+    /// </summary>
+    byte[]? TryReadListedFile(string path)
+    {
+        try
+        {
+            return ReadFile(path);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // FileNotFoundException and DirectoryNotFoundException are IOExceptions too.
+            return null;
+        }
+    }
+
     /// <summary>The names of the folders directly in <paramref name="path"/>, or none if it isn't a folder.</summary>
     IEnumerable<string> GetDirectories(string path);
 
@@ -45,7 +83,8 @@ public sealed class FileSystemDenSource : IDenSource
     /// True if a file exists at <paramref name="path"/>, with every name on
     /// the path in exactly that case. Names are matched as on Linux even on a
     /// case-insensitive file system (Windows, macOS): <c>Universe.md</c> isn't
-    /// <c>universe.md</c>, so a den loads the same everywhere.
+    /// <c>universe.md</c>, so a den loads the same everywhere. A broken link
+    /// (<see cref="IsBrokenLink"/>) isn't a file.
     /// </summary>
     public bool FileExists(string path) => ExactPathExists(path, file: true);
 
@@ -106,13 +145,59 @@ public sealed class FileSystemDenSource : IDenSource
     }
 
     /// <summary>
+    /// True for a file that's a symbolic link whose target is missing, isn't
+    /// a file, or loops back on itself. The den's walks leave such a link
+    /// out, as if it weren't there (#112): there's nothing to read through
+    /// it. A link to a file that's there is read as that file.
+    /// </summary>
+    /// <remarks>
+    /// As for <see cref="IsFolderLink"/>, a cloud-sync placeholder is a
+    /// reparse point without a link target, so it isn't a link here and is
+    /// read as usual.
+    /// </remarks>
+    public static bool IsBrokenLink(FileSystemInfo file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        try
+        {
+            // ReparsePoint first: it comes with the folder listing, so ordinary files cost nothing more.
+            if (!file.Attributes.HasFlag(FileAttributes.ReparsePoint) || file.LinkTarget is null)
+            {
+                return false;
+            }
+
+            return file.ResolveLinkTarget(returnFinalTarget: true) is not FileInfo { Exists: true };
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // A link that loops can't be resolved; one that's gone has nothing to read either.
+            return true;
+        }
+    }
+
+    /// <summary>
     /// The files directly in <paramref name="path"/>, by their names on
-    /// disk. The path itself must match in exact case, as for <see cref="FileExists"/>.
+    /// disk, leaving out broken links (<see cref="IsBrokenLink"/>). The path
+    /// itself must match in exact case, as for <see cref="FileExists"/>.
     /// </summary>
     public IEnumerable<string> GetFiles(string path) =>
         ExactPathExists(path, file: false)
-            ? Directory.EnumerateFiles(Full(path)).Select(f => Path.GetFileName(f)!).Order(StringComparer.Ordinal).ToList()
+            ? Files(Full(path)).Select(f => f.Name).Order(StringComparer.Ordinal).ToList()
             : [];
+
+    /// <summary>The files directly in the folder <paramref name="full"/>, leaving out broken links, or none if it's gone.</summary>
+    private static List<FileInfo> Files(string full)
+    {
+        try
+        {
+            return new DirectoryInfo(full).EnumerateFiles().Where(f => !IsBrokenLink(f)).ToList();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Deleted or made unreadable since it was looked at: as if it were empty.
+            return [];
+        }
+    }
 
     private bool ExactPathExists(string path, bool file)
     {
@@ -127,7 +212,7 @@ public sealed class FileSystemDenSource : IDenSource
             }
 
             var found = last && file
-                ? Directory.EnumerateFiles(current).Any(e => string.Equals(Path.GetFileName(e), segments[i], StringComparison.Ordinal))
+                ? Files(current).Any(f => string.Equals(f.Name, segments[i], StringComparison.Ordinal))
                 : new DirectoryInfo(current).EnumerateDirectories().Any(d => string.Equals(d.Name, segments[i], StringComparison.Ordinal) && !IsFolderLink(d));
             if (!found)
             {

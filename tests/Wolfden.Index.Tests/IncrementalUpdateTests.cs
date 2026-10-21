@@ -416,7 +416,8 @@ public sealed class IncrementalUpdateTests
     }
 
     [Fact]
-    public void AFileThatStaysUnreadableIsLeftToARebuildToReport()
+    [Trait("Scenario", "SC-WATCH-7")]
+    public void AFileThatStaysUnreadableIsLeftOutByARebuildUntilItCanBeRead()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -439,11 +440,17 @@ public sealed class IncrementalUpdateTests
                 Assert.Equal([mara], retry);
             }
 
-            // Then a rebuild, which fails as any full load of the den would.
-            Assert.ThrowsAny<IOException>(() => updater.Apply(Batch(den, (WatcherChangeTypes.Changed, mara, null)), out _));
+            // Then a rebuild, which leaves the file out, as any full load of the den would (#112).
+            var rebuilt = updater.Apply(Batch(den, (WatcherChangeTypes.Changed, mara, null)), out _)!;
+            Assert.Equal(IndexUpdateKind.Rebuilt, rebuilt.Kind);
+            Assert.Equal($"{mara} couldn't be read", rebuilt.Reason);
+            Assert.DoesNotContain(updater.State!.Catalog.Entities, e => e.Path == mara);
+            AssertSameAsFullRebuild(den, "while the file can't be read");
         }
 
-        Assert.Equal(IndexUpdateKind.Rebuilt, updater.Apply(Batch(den, (WatcherChangeTypes.Changed, mara, null)), out _)!.Kind);
+        // Once it can be read, its next event brings it in.
+        Assert.Equal(IndexUpdateKind.Updated, updater.Apply(Batch(den, (WatcherChangeTypes.Changed, mara, null)), out _)!.Kind);
+        Assert.Contains(updater.State!.Catalog.Entities, e => e.Path == mara);
         AssertSameAsFullRebuild(den, "once the file can be read");
     }
 
