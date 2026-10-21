@@ -168,9 +168,10 @@ word       = 1*(lower / DIGIT)
 **F-KEY-1.** A key MUST match `key` and be 1 to 64 characters long:
 lowercase ASCII letters and digits, with single hyphens between words.
 No uppercase, spaces, underscores, `:`, or `.`. A key that breaks this rule
-is an [error] where it names a container, chapter, author, pack, or type.
-A den-local pack folder with an invalid name is a [warning] instead, and
-is ignored (types.md F-PACK-5). For entity slugs, see F-KEY-4.
+is an [error] where it names a container, chapter, pack, or type. An
+invalid author key is a [warning] instead, and that author is skipped
+(F-DEN-3). A den-local pack folder with an invalid name is a [warning]
+too, and is ignored (types.md F-PACK-5). For entity slugs, see F-KEY-4.
 
 **F-KEY-2.** Universe, series, and book keys MUST start with a letter.
 [error] Chapter keys and entity slugs MAY start with a digit, so `14` is a
@@ -352,7 +353,11 @@ root's folder name.
 
 **F-DEN-3.** `authors` is an optional mapping from author key (F-KEY-1) to
 an Author Identity. Each identity is a mapping with a REQUIRED non-empty
-`name`. Any other shape is an [error]. Other keys in an identity are kept.
+`name`. Other keys in an identity are kept. Any other shape is a
+[warning], and the den still loads: an `authors` that isn't a mapping is
+ignored, and an identity with an invalid key, or one that isn't a mapping
+with a name, is skipped. A container that names a skipped author gets the
+F-CTR-2 warning.
 
 **F-DEN-4.** `packs` is an optional list of pack keys to enable. The `core`
 pack is always enabled, and listing it is allowed. An entry that names

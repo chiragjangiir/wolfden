@@ -35,7 +35,7 @@ public class SpecWarningCheckTests
         string.Join("\n", new[] { "type: character", $"name: {name}", "status: canon" }.Concat(extra));
 
     /// <summary>The rules these tests expect as errors. Every other diagnostic must be a warning.</summary>
-    private static readonly HashSet<string> Errors = new(StringComparer.Ordinal) { "F-YAML-1", "F-DEN-3", "F-KEY-1" };
+    private static readonly HashSet<string> Errors = new(StringComparer.Ordinal) { "F-YAML-1" };
 
     /// <summary>The diagnostics as (path, rule, line), after asserting each one's severity: an error only for <see cref="Errors"/>.</summary>
     private static (string Path, string Rule, int? Line)[] Found(DenCheck check)
@@ -614,13 +614,46 @@ public class SpecWarningCheckTests
     [InlineData("authors:\n  wren-calder: { pen: true }", "F-DEN-3", 3)]
     [InlineData("authors:\n  wren-calder: { name: \"  \" }", "F-DEN-3", 3)]
     [InlineData("authors:\n  Wren Calder: { name: Wren Calder }", "F-KEY-1", 3)]
-    public void AnAuthorsThatIsntAMappingOfNamedIdentitiesKeepsTheDenFromLoading(string authors, string rule, int line)
+    public void AnAuthorsThatIsntAMappingOfNamedIdentitiesIsWarnedAndTheDenStillLoads(string authors, string rule, int line)
     {
         var check = DenCheck.Run(MemoryDenSource.Den().With("den.yaml", $"format: 1\n{authors}\n"));
 
-        Assert.False(check.IsLoaded);
+        Assert.True(check.IsLoaded);
+        Assert.Equal(1, check.Structure.Format);
+        Assert.Empty(check.Structure.Authors);
         Assert.Equal([("den.yaml", rule, line)], Found(check));
-        Assert.Equal(DiagnosticSeverity.Error, check.Diagnostics[0].Diagnostic.Severity);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CHECK-30")]
+    public void ASkippedAuthorIsUnknownToTheContainersThatNameIt()
+    {
+        var source = Den("authors:\n  wren-calder: Wren Calder\n  ash-morrow: { name: Ash Morrow }\n")
+            .Series("vael", "a", "books: [a1, a2, a3, a4, a5]", "authors: [wren-calder, ash-morrow]");
+
+        var check = DenCheck.Run(source);
+
+        Assert.True(check.IsLoaded);
+        Assert.Equal(["ash-morrow"], check.Structure.Authors);
+        Assert.Equal([("den.yaml", "F-DEN-3", 4), (A + "/series.md", "F-CTR-2", 4)], Found(check));
+        Assert.Equal("Author 'wren-calder' must be a mapping with a name, such as '{ name: Wren Calder }', so it's skipped.", Message(check, "F-DEN-3"));
+        Assert.Equal("'wren-calder' isn't an author in den.yaml (den.yaml's authors are ash-morrow).", Message(check, "F-CTR-2"));
+    }
+
+    [Theory]
+    [InlineData("packs: [nope]", "F-DEN-4")]
+    [InlineData("packs: nope", "F-DEN-4")]
+    [InlineData("bookkeeping_sections: 7", "F-DEN-6")]
+    public void ADenYamlThatDoesntLoadStillHasTheFormatItParsed(string line, string rule)
+    {
+        var check = DenCheck.Run(MemoryDenSource.Den().With("den.yaml", $"format: 1\nauthors: [wren-calder]\n{line}\n"));
+
+        Assert.False(check.IsLoaded);
+        Assert.Equal(1, check.Structure.Format);
+
+        // Every key is still read, so the authors warning is reported too (F-GEN-3).
+        Assert.Equal([("F-DEN-3", DiagnosticSeverity.Warning), (rule, DiagnosticSeverity.Error)],
+            check.Diagnostics.Select(d => (d.Diagnostic.RuleId, d.Diagnostic.Severity)));
     }
 
     [Fact]

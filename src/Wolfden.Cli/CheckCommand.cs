@@ -223,7 +223,7 @@ internal sealed record CheckReport(
 {
     /// <summary>What was checked.</summary>
     /// <param name="Loaded">True if <c>den.yaml</c> loaded. If false, only den.yaml was checked.</param>
-    /// <param name="Format">The den's format number, or null if it didn't load.</param>
+    /// <param name="Format">The den's format number, or null if <c>format</c> didn't parse. It's set even when another key keeps the den from loading.</param>
     /// <param name="SpoilerChecks">True if the den turns on spoiler checks (F-DEN-7), or null if den.yaml didn't load.</param>
     /// <param name="Entities">The number of entities that loaded and were checked.</param>
     internal sealed record DenInfo(bool Loaded, int? Format, bool? SpoilerChecks, int Entities);

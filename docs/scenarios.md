@@ -525,11 +525,15 @@ Spec: F-SEC-10, F-GEN-2 (#80). Covered by:
 `den.yaml` says `authors: { wren-calder: Wren Calder }` instead of giving
 the author a `name`.
 
-- It's an error in `den.yaml`, so the den doesn't load and check exits
-  2. So is an author key that isn't a key, such as `Wren Calder`.
+- It's a warning in `den.yaml`. That author is skipped, and the den
+  still loads. So is an author key that isn't a key, such as
+  `Wren Calder`.
+- A series that names the skipped author gets the unknown-author warning
+  (SC-CHECK-31).
 
-Spec: F-DEN-3, F-KEY-1, F-GEN-2. Covered by:
-`SpecWarningCheckTests.AnAuthorsThatIsntAMappingOfNamedIdentitiesKeepsTheDenFromLoading`.
+Spec: F-DEN-3, F-KEY-1, F-CTR-2. Covered by:
+`SpecWarningCheckTests.AnAuthorsThatIsntAMappingOfNamedIdentitiesIsWarnedAndTheDenStillLoads`,
+`SpecWarningCheckTests.ASkippedAuthorIsUnknownToTheContainersThatNameIt`.
 
 ### SC-CHECK-31. A series names an author `den.yaml` doesn't have
 
