@@ -359,7 +359,10 @@ from the files:
   and the index, as if it weren't there, rather than stopping the
   command. Nothing warns about it yet. A file the index left out isn't in
   its files hash, so once the file can be read the index is stale and is
-  rebuilt.
+  rebuilt. A folder that can't be listed (the user may not list it, or
+  it's deleted while it's read) is absent in the same way (#116): it isn't
+  even a folder to the den, so a book folder that can't be listed isn't
+  reported as one without its `book.md`.
 - **Watched** (#14; v0 behaviour, not a recorded decision). The file
   watcher collects a burst of saves (an editor's temporary file and
   rename, a git checkout) into one batch, and ignores hidden paths such as
