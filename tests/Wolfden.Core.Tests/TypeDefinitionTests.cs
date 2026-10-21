@@ -351,7 +351,7 @@ public class TypeDefinitionTests
         [
             "", "~", "- a\n- b\n", "[unclosed", "name: &a x\nplural: *a\n", "\t\tname: x\n", "name: x\r\nplural: y\n\n\r",
             "name:\n  - [ { a: [ { } ] } ]\n", "fields:\n  a: { type: { nested: true } }\nsections: [ { name: [x] } ]\n",
-            "---\n---\n---\n", "﻿name: Ship\nplural: ships\n", "name: Ship\nplural: ships\ntemplate: [a]\nfields: { x: { type: enum, values: { a: b } } }\n",
+            "---\n---\n---\n", (char)0xFEFF + "name: Ship\nplural: ships\n", "name: Ship\nplural: ships\ntemplate: [a]\nfields: { x: { type: enum, values: { a: b } } }\n",
         ];
 
         foreach (var text in junk)
