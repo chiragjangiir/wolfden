@@ -64,6 +64,22 @@ public sealed class UnreadableFileTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-CLI-8")]
+    public void AnUnlistedPackFolderWhosePackYamlCantBeReadIsWarnedAsNotAPack()
+    {
+        const string path = "packs/spare/pack.yaml";
+        MemoryDenSource Den() => MemoryDenSource.FromDirectory(MemoryDenSource.StarfallRoot)
+            .With(path, "name: Spare\n")
+            .With("packs/spare/types/crate.yaml", "name: Crate\nplural: crates\n");
+        var unreadable = new UnreadableSource(Den(), path, "locked");
+        var without = Den().Without(path);
+
+        var expected = Describe(DenCheck.Run(without));
+        Assert.Contains(expected, d => d.StartsWith("packs/spare|F-PACK-5|", StringComparison.Ordinal));
+        Assert.Equal(expected, Describe(DenCheck.Run(unreadable)));
+    }
+
+    [Fact]
     public void AnUnreadablePackYamlGivesTheSameSingleErrorAsAMissingOne()
     {
         const string path = "packs/starfall/pack.yaml";
