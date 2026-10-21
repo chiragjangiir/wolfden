@@ -572,7 +572,8 @@ junction on Windows) to a folder outside the den.
 
 Spec: F-LAY-2 (#102). Covered by:
 `FolderLinkTests.ANoteReachedOnlyThroughALinkIsNotReadAndCheckSaysSo`,
-`FolderLinkTests.LinksThatLoopAreSkippedByTheLoaderAndTheIndex`.
+`FolderLinkTests.LinksThatLoopAreSkippedByTheLoaderAndTheIndex`,
+`FolderLinkTests.ALinkedFolderWhoseTargetWasDeletedIsWarnedAboutAndSkipped`.
 
 ### SC-CHECK-34. A canon section in a character who is still an idea
 
@@ -877,7 +878,8 @@ its permissions don't let the writer read it.
 
 Spec: design.md §7 (#112). Covered by:
 `UnreadableFileTests.AFileThatCantBeReadIsCheckedAsIfItWerentThere` (Core),
-`UnreadableFileTests.APackFileThatCantBeReadDoesntStopTheCheck` (Core),
+`UnreadableFileTests.APackFileThatCantBeReadIsCheckedAsIfItWerentThere` (Core),
+`FolderLinkTests.ALinkedFolderWhoseTargetWasDeletedIsWarnedAboutAndSkipped`,
 `UnreadableFileTests.BrokenAndLoopingFileLinksAreAbsentToCheckAndTheIndex`,
 `UnreadableFileTests.ANoteReplacedByABrokenLinkIsCheckedAndIndexedAsIfItWereDeleted`,
 `UnreadableFileTests.ANoteThatCantBeReadIsLeftOutAndTheIndexIsStaleOnceItCanBe`,
@@ -1011,7 +1013,10 @@ open just after the writer saves it.
   note that's held open is tried again a few times; if it still can't be
   read, the watcher rebuilds the index without it, as `wolfden index`
   would, and its next save brings it back. Either way the index matches a
-  full rebuild of the same files.
+  full rebuild of the same files. If the link starts working again
+  because its target comes back, often outside the den, the link itself
+  gets no file event, so the watcher doesn't see it; the next query sees
+  that the files changed and rebuilds the index with the note.
 
 Spec: design.md §7 (#112). Covered by:
 `UnreadableFileTests.TheWatcherTreatsABrokenLinkAsAbsentAtOnce`,
