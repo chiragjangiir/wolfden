@@ -573,6 +573,80 @@ Spec: F-LAY-2 (#102). Covered by:
 `FolderLinkTests.ANoteReachedOnlyThroughALinkIsNotReadAndCheckSaysSo`,
 `FolderLinkTests.LinksThatLoopAreSkippedByTheLoaderAndTheIndex`.
 
+### SC-CHECK-34. A canon section in a character who is still an idea
+
+Wren is `status: idea`, but her `## Backstory` says `status=canon`, and
+so does an entry in her `role`.
+
+- Each is a warning that says it's read as `idea`, since a fact can't be
+  more canon than what holds it. A subsection that only takes the status
+  from its parent gets no warning of its own.
+
+Spec: F-STAT-3, F-STAT-2. Covered by:
+`SpecWarningCheckTests.ACanonFactInsideAnIdeaIsWarned`.
+
+### SC-CHECK-35. I pinned a question that's still undecided
+
+Orrin's `## Shoulder injury` says `status=undecided pin=true`, and a
+`candidate` entry in `died` has `pin: true`.
+
+- Each is a warning: pinned canon leaves them out until they're in
+  canon. A pinned `draft` is fine, and a candidate subsection pinned only
+  through its parent gets no warning of its own.
+
+Spec: F-PIN-3, F-PIN-2. Covered by:
+`SpecWarningCheckTests.APinnedFactThatsOutOfCanonIsWarned`,
+`SpecWarningCheckTests.APinnedSectionInAnIdeaIsWarnedOnceForItsStatus`.
+
+### SC-CHECK-36. I pinned the change log
+
+The writer put `pin=true` on a character's `## Change log`, and on the
+`## Changelog 2026` of `universe.md`.
+
+- Each is a warning: bookkeeping is never pinned canon, so the pin does
+  nothing. A section that matches a bookkeeping pattern but has
+  `canon=true` can be pinned.
+
+Spec: F-SEC-12. Covered by:
+`SpecWarningCheckTests.PinningABookkeepingSectionIsWarned`.
+
+### SC-CHECK-37. A story note filed inside my session notes
+
+Under `## Session notes`, the writer added `### The reef` with
+`canon=true` to keep it in the story.
+
+- It's a warning: a subsection of a bookkeeping section is bookkeeping,
+  so `canon=true` does nothing there, and the message says to move it
+  out.
+
+Spec: F-SEC-7, F-SEC-12. Covered by:
+`SpecWarningCheckTests.CanonTrueUnderABookkeepingSectionIsWarned`.
+
+### SC-CHECK-38. A thread paid off before it's planted
+
+A thread says `planted: ["a1:5", "a1:3"]` and `paid_off: "a1:2"`.
+
+- It's a warning on `paid_off` that names the earliest planted position.
+  A `candidate` entry for the payoff, a temporal list, or a position that
+  doesn't resolve isn't compared.
+
+Spec: types.md F-CORE-2. Covered by:
+`SpecWarningCheckTests.AThreadPaidOffBeforeItsPlantedIsWarned`,
+`SpecWarningCheckTests.APaidOffIsComparedOnlyWithPlantedPositionsThatAreSet`.
+
+### SC-CHECK-39. An event that ends before it starts
+
+The storm says `when: "2291-05-14"` and ends "the spring before", with
+`sort: [2291, 4]`.
+
+- It's a warning on `ends`. Dates are compared only over the numbers
+  both have, so `ends: "2291-05"` with `when: "2291-05-14"` is fine, and
+  a date without a sort key is skipped.
+
+Spec: types.md F-CORE-3. Covered by:
+`SpecWarningCheckTests.AnEventThatEndsBeforeItStartsIsWarned`,
+`SpecWarningCheckTests.AnEventsDatesAreComparedOnlyOverTheNumbersBothHave`.
+
 ## RT: saving a note keeps what the writer wrote
 
 Background: the files are the writer's, and Wolfden is only one of the

@@ -8,8 +8,10 @@ namespace Wolfden.Core.Tests;
 /// rules (#93, #100, #80): field values and undefined fields (F-FLD-2,
 /// F-FLD-3, F-FT-*), F-FLD-6, F-FLD-7, F-TMP-2, F-TMP-8, F-ENT-6, F-SEC-9,
 /// the layout (F-LAY-*), outlines (F-OUT-*), <c>den.yaml</c>'s
-/// <c>authors</c> (F-DEN-3, F-CTR-2), and container files without an id
-/// (F-ID-2). The den is the scenarios' example world (docs/scenarios.md),
+/// <c>authors</c> (F-DEN-3, F-CTR-2), container files without an id
+/// (F-ID-2), statuses and pins (F-STAT-3, F-PIN-3), bookkeeping sections
+/// (F-SEC-7, F-SEC-12), and the core pack's threads and events (types.md
+/// F-CORE-2, F-CORE-3). The den is the scenarios' example world (docs/scenarios.md),
 /// from <see cref="ContinuityCheckTests.Vael"/>.
 /// </summary>
 public class SpecWarningCheckTests
@@ -698,5 +700,229 @@ public class SpecWarningCheckTests
         Assert.Equal(
             "no id, and book 'a2' is final (frozen), so `wolfden check --fix` won't add one until the book is unfrozen. Until then, the index knows this book by its path.",
             check.Diagnostics[0].Diagnostic.Message);
+    }
+
+    // ----- Statuses and pins: F-STAT-3, F-PIN-3 -----
+
+    [Fact]
+    [Trait("Scenario", "SC-CHECK-34")]
+    public void ACanonFactInsideAnIdeaIsWarned()
+    {
+        var source = Den();
+        Note(source, A1, "wren", "type: character\nname: Wren\nstatus: idea\nfields:\n  role: { value: deckhand, status: canon }", """
+
+            ## Backstory
+            <!-- wolfden: status=canon -->
+            Born on Vael.
+
+            ### Childhood
+            Grew up on the docks.
+
+            ## Voice
+            <!-- wolfden: status=candidate -->
+            Clipped.
+            """);
+        Note(source, A1, "orrin-fell", Character("Orrin Fell"), """
+
+            ## Rumors
+            <!-- wolfden: status=idea -->
+
+            ### The wreck
+            <!-- wolfden: status=draft -->
+            He sank the Kestrel himself.
+            """);
+
+        var check = DenCheck.Run(source);
+
+        const string wren = A1 + "/entities/characters/wren.md";
+        Assert.Equal([(Orrin, "F-STAT-3", 12), (wren, "F-STAT-3", 7), (wren, "F-STAT-3", 11)], Found(check));
+        var messages = check.Diagnostics.Select(d => d.Diagnostic.Message).ToList();
+        Assert.Equal("'The wreck' is marked draft, but its parent 'Rumors' is idea, so it's read as idea: a fact can't be more canon than what holds it.", messages[0]);
+        Assert.Equal("role: this entry is marked canon, but the entity is idea, so it's read as idea: a fact can't be more canon than what holds it.", messages[1]);
+        Assert.Equal("'Backstory' is marked canon, but the entity is idea, so it's read as idea: a fact can't be more canon than what holds it.", messages[2]);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CHECK-35")]
+    public void APinnedFactThatsOutOfCanonIsWarned()
+    {
+        var source = Den();
+        Note(source, A1, "orrin-fell", Character("Orrin Fell", "fields:\n  died: { value: \"2301\", status: candidate, pin: true }"), """
+
+            ## Shoulder injury
+            <!-- wolfden: status=undecided pin=true -->
+
+            ### Hit at the reef
+            <!-- wolfden: status=candidate -->
+            He fell on the rocks.
+
+            ## Scar
+            <!-- wolfden: status=draft pin=true -->
+            A scar on his cheek.
+            """);
+
+        var check = DenCheck.Run(source);
+
+        // The candidate subsection is pinned through its parent (F-PIN-2), but the warning goes where pin=true is written.
+        Assert.Equal([(Orrin, "F-PIN-3", 7), (Orrin, "F-PIN-3", 11)], Found(check));
+        var messages = check.Diagnostics.Select(d => d.Diagnostic.Message).ToList();
+        Assert.Equal("died: this entry is pinned, but it's candidate, which is out of canon, so pinned canon leaves it out.", messages[0]);
+        Assert.Equal("'Shoulder injury' is pinned, but it's undecided, which is out of canon, so pinned canon leaves it out.", messages[1]);
+    }
+
+    [Fact]
+    public void APinnedSectionInAnIdeaIsWarnedOnceForItsStatus()
+    {
+        // The section takes idea from its entity, so it's out of canon. With status=canon written, F-STAT-3 says so instead.
+        var source = Den();
+        Note(source, A1, "wren", "type: character\nname: Wren\nstatus: idea", """
+
+            ## Backstory
+            <!-- wolfden: pin=true -->
+            Born on Vael.
+
+            ## Voice
+            <!-- wolfden: status=canon pin=true -->
+            Clipped.
+            """);
+
+        var check = DenCheck.Run(source);
+
+        const string wren = A1 + "/entities/characters/wren.md";
+        Assert.Equal([(wren, "F-PIN-3", 9), (wren, "F-STAT-3", 13)], Found(check));
+    }
+
+    // ----- Bookkeeping: F-SEC-12, F-SEC-7 -----
+
+    [Fact]
+    [Trait("Scenario", "SC-CHECK-36")]
+    public void PinningABookkeepingSectionIsWarned()
+    {
+        var source = Den("bookkeeping_sections: [\"Scratch\"]\n");
+        Note(source, A1, "orrin-fell", Character("Orrin Fell"), """
+
+            ## Change log
+            <!-- wolfden: pin=true -->
+            - Moved the wreck to the reef.
+
+            ### Old notes
+            <!-- wolfden: pin=true -->
+            Kept for reference.
+
+            ## Scratch
+            <!-- wolfden: canon=true pin=true -->
+            He hates the cold.
+            """);
+        const string universe = Vael + "/universe.md";
+        source.With(universe, System.Text.Encoding.UTF8.GetString(source.ReadFile(universe)) + "\n## Changelog 2026\n<!-- wolfden: pin=true -->\n");
+
+        var check = DenCheck.Run(source);
+
+        Assert.Equal([(Orrin, "F-SEC-12", 9), (Orrin, "F-SEC-12", 13), (universe, "F-SEC-12", 8)], Found(check));
+        Assert.Equal("'Change log' is a bookkeeping section, so pin=true does nothing: pinned canon leaves bookkeeping out.", check.Diagnostics[0].Diagnostic.Message);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CHECK-37")]
+    public void CanonTrueUnderABookkeepingSectionIsWarned()
+    {
+        var source = Den();
+        Note(source, A1, "orrin-fell", Character("Orrin Fell"), """
+
+            ## Session notes
+            Worked on the reef chapter.
+
+            ### The reef
+            <!-- wolfden: canon=true -->
+            Orrin was hit at the reef.
+
+            ## Changelog 2026
+            <!-- wolfden: canon=true -->
+            Kept as story.
+
+            ## Sources
+            <!-- wolfden: canon=false -->
+
+            ### Reading list
+            <!-- wolfden: canon=true -->
+            """);
+
+        var check = DenCheck.Run(source);
+
+        Assert.Equal([(Orrin, "F-SEC-7", 12), (Orrin, "F-SEC-7", 23)], Found(check));
+        Assert.Equal(
+            "'The reef': canon=true does nothing here, since its parent 'Session notes' is bookkeeping, and so are its subsections. To keep it in the story, move it out of 'Session notes'.",
+            check.Diagnostics[0].Diagnostic.Message);
+    }
+
+    // ----- The core pack: F-CORE-2, F-CORE-3 -----
+
+    private const string Manifest = A1 + "/entities/threads/the-manifest.md";
+
+    private static MemoryDenSource Thread(string fields) =>
+        Note(Den(), A1, "the-manifest", $"type: thread\nname: The manifest\nstatus: canon\nfields:\n{fields}", folder: "threads");
+
+    [Fact]
+    [Trait("Scenario", "SC-CHECK-38")]
+    public void AThreadPaidOffBeforeItsPlantedIsWarned()
+    {
+        var check = DenCheck.Run(Thread("  planted: [\"a1:5\", \"a1:3\"]\n  paid_off: \"a1:2\""));
+
+        Assert.Equal([(Manifest, "F-CORE-2", 8)], Found(check));
+        Assert.Equal("paid_off a1:2 comes before the thread is first planted, at a1:3, in story order. Check the positions.", Message(check, "F-CORE-2"));
+    }
+
+    [Theory]
+    [InlineData("  planted: \"a1:5\"\n  paid_off: { value: \"a1:2\", status: canon }", true)]
+    [InlineData("  planted: [\"a1:3\"]\n  paid_off: \"a1:3\"", false)]
+    [InlineData("  planted: [\"a1:3\"]\n  paid_off: \"a2:1\"", false)]
+    [InlineData("  planted: [\"a1:5\"]\n  paid_off: { value: \"a1:2\", status: candidate }", false)]
+    [InlineData("  planted:\n    - { value: [\"a1:5\"] }\n    - { value: [\"a1:6\"], from: \"a1:4\" }\n  paid_off: \"a1:2\"", false)]
+    [InlineData("  paid_off: \"a1:2\"", false)]
+    public void APaidOffIsComparedOnlyWithPlantedPositionsThatAreSet(string fields, bool warned)
+    {
+        var check = DenCheck.Run(Thread(fields));
+
+        Assert.Equal(warned, check.Diagnostics.Any(d => d.Diagnostic.RuleId == "F-CORE-2"));
+    }
+
+    private static MemoryDenSource Event(string fields) =>
+        Note(Den(), A1, "the-storm", $"type: event\nname: The storm\nstatus: canon\nfields:\n{fields}", folder: "events");
+
+    [Fact]
+    [Trait("Scenario", "SC-CHECK-39")]
+    public void AnEventThatEndsBeforeItStartsIsWarned()
+    {
+        var check = DenCheck.Run(Event("  when: \"2291-05-14\"\n  ends: { text: the spring before, sort: [2291, 4] }"));
+
+        Assert.Equal([(A1 + "/entities/events/the-storm.md", "F-CORE-3", 8)], Found(check));
+        Assert.Equal("ends the spring before is earlier than when 2291-05-14, so the event ends before it starts. Check the dates.", Message(check, "F-CORE-3"));
+    }
+
+    [Theory]
+    [InlineData("  when: \"2291-05-14\"\n  ends: \"2291-05-02\"", true)]
+    [InlineData("  when: \"-450\"\n  ends: \"-452\"", true)]
+    [InlineData("  when: \"2291-05-14 06:40\"\n  ends: \"2291-05-14\"", false)]
+    [InlineData("  when: \"2291-05\"\n  ends: \"2291\"", false)]
+    [InlineData("  when: \"2291-05-14\"\n  ends: \"2291-05-14 23:00\"", false)]
+    [InlineData("  when: \"2291-05-14\"\n  ends: the next spring", false)]
+    [InlineData("  when: { sort: [2291, 5] }\n  ends: { sort: 2290 }", true)]
+    public void AnEventsDatesAreComparedOnlyOverTheNumbersBothHave(string fields, bool warned)
+    {
+        var check = DenCheck.Run(Event(fields));
+
+        Assert.Equal(warned, check.Diagnostics.Any(d => d.Diagnostic.RuleId == "F-CORE-3"));
+    }
+
+    [Fact]
+    public void ADenLocalThreadOrEventIsNotCheckedByTheCoreRules()
+    {
+        // Like F-CORE-4, the core rules cover only the core pack's thread and event.
+        var source = Den("packs: [saga]\n")
+            .With("packs/saga/pack.yaml", "name: Saga\n")
+            .With("packs/saga/types/arc.yaml", "name: Arc\nplural: arcs\nfields:\n  planted: { type: position, list: true }\n  paid_off: position\n");
+        Note(source, A1, "the-manifest", "type: arc\nname: The manifest\nstatus: canon\nfields:\n  planted: [\"a1:5\"]\n  paid_off: \"a1:2\"", folder: "arcs");
+
+        Assert.Empty(Found(DenCheck.Run(source)));
     }
 }

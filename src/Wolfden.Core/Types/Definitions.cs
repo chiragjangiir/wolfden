@@ -290,6 +290,12 @@ public sealed class TypeDefinition
     /// </summary>
     public bool IsCoreThread => Key == "thread" && Pack.IsBuiltIn && Pack.Key == "core";
 
+    /// <summary>
+    /// True if this is the built-in core pack's <c>event</c>, extended or
+    /// not, whose <c>ends</c> is checked against its <c>when</c> (F-CORE-3).
+    /// </summary>
+    public bool IsCoreEvent => Key == "event" && Pack.IsBuiltIn && Pack.Key == "core";
+
     /// <summary>The field named <paramref name="name"/>, or null if the type doesn't define it.</summary>
     public FieldDefinition? FindField(string name)
     {
