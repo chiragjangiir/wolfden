@@ -614,6 +614,12 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         var filePath = $"{path}/{Container.FileName(kind)}";
         if (source.TryReadFile(filePath) is not { } bytes)
         {
+            if (!StillListed(path))
+            {
+                // Deleted, or made unlistable, since its parent was listed: absent, not broken (#116).
+                return null;
+            }
+
             den.Add(path, new Diagnostic("F-LAY-4", DiagnosticSeverity.Error, null,
                 $"The {Kind(kind)} folder '{key}' has no {Container.FileName(kind)}, so it's skipped."));
             return null;
@@ -649,6 +655,19 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         }
 
         return read;
+    }
+
+    /// <summary>
+    /// True if the folder at <paramref name="path"/> is still in its
+    /// parent's listing. A folder deleted, or made unlistable, after its
+    /// parent was listed has no container file to read either; looking again
+    /// tells it apart from a container folder that really lacks one. It's
+    /// only asked on that error path, so a den without errors pays nothing.
+    /// </summary>
+    private bool StillListed(string path)
+    {
+        var slash = path.LastIndexOf('/');
+        return source.GetDirectories(path[..slash]).Contains(path[(slash + 1)..], StringComparer.Ordinal);
     }
 
     /// <summary>The names of the folders in <paramref name="path"/>, without hidden ones (F-LAY-2), in ASCII order.</summary>

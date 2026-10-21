@@ -50,10 +50,18 @@ public interface IDenSource
         }
     }
 
-    /// <summary>The names of the folders directly in <paramref name="path"/>, or none if it isn't a folder.</summary>
+    /// <summary>
+    /// The names of the folders directly in <paramref name="path"/>, or none
+    /// if it isn't a folder. A folder that can't be listed, because the user
+    /// may not list it or it was deleted meanwhile, is left out, as if it
+    /// weren't there (#116), and the listing methods give none for it
+    /// rather than throwing. A source can still list a folder that's
+    /// deleted just after; the den loader looks again before it reports a
+    /// container folder as broken (<c>F-LAY-4</c>).
+    /// </summary>
     IEnumerable<string> GetDirectories(string path);
 
-    /// <summary>The names of the files directly in <paramref name="path"/>, or none if it isn't a folder.</summary>
+    /// <summary>The names of the files directly in <paramref name="path"/>, or none if it isn't a folder or can't be listed (#116).</summary>
     IEnumerable<string> GetFiles(string path);
 
     /// <summary>
@@ -93,19 +101,44 @@ public sealed class FileSystemDenSource : IDenSource
 
     /// <summary>
     /// The folders directly in <paramref name="path"/>, by their names on
-    /// disk, leaving out folder links (<see cref="IsFolderLink"/>). The path
+    /// disk, leaving out folder links (<see cref="IsFolderLink"/>) and
+    /// folders that can't be listed (<see cref="CanList"/>, #116). The path
     /// itself must match in exact case, as for <see cref="FileExists"/>.
     /// </summary>
     public IEnumerable<string> GetDirectories(string path) =>
         ExactPathExists(path, file: false)
-            ? new DirectoryInfo(Full(path)).EnumerateDirectories().Where(d => !IsFolderLink(d)).Select(d => d.Name).Order(StringComparer.Ordinal).ToList()
+            ? Folders(Full(path)).Where(d => !IsFolderLink(d) && CanList(d.FullName)).Select(d => d.Name).Order(StringComparer.Ordinal).ToList()
             : [];
 
     /// <inheritdoc />
     public IEnumerable<string> GetFolderLinks(string path) =>
         ExactPathExists(path, file: false)
-            ? new DirectoryInfo(Full(path)).EnumerateDirectories().Where(IsFolderLink).Select(d => d.Name).Order(StringComparer.Ordinal).ToList()
+            ? Folders(Full(path)).Where(IsFolderLink).Select(d => d.Name).Order(StringComparer.Ordinal).ToList()
             : [];
+
+    /// <summary>
+    /// True if the folder at the full path <paramref name="full"/> can be
+    /// listed now. One that can't, because the user may not list it or it
+    /// was deleted, is absent to the den's walks, as a file that can't be
+    /// read is (#112, #116): nothing in it can be found, so the walks don't
+    /// count it as a folder either. That keeps an empty container folder,
+    /// which is an error (F-LAY-4), apart from one that can't be looked in.
+    /// </summary>
+    public static bool CanList(string full)
+    {
+        ArgumentNullException.ThrowIfNull(full);
+        try
+        {
+            using var entries = Directory.EnumerateFileSystemEntries(full).GetEnumerator();
+            entries.MoveNext();
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // DirectoryNotFoundException is an IOException too.
+            return false;
+        }
+    }
 
     /// <summary>
     /// True for a folder that's a link to another folder: a symbolic link,
@@ -185,7 +218,21 @@ public sealed class FileSystemDenSource : IDenSource
             ? Files(Full(path)).Select(f => f.Name).Order(StringComparer.Ordinal).ToList()
             : [];
 
-    /// <summary>The files directly in the folder <paramref name="full"/>, leaving out broken links, or none if it's gone.</summary>
+    /// <summary>The folders directly in the folder <paramref name="full"/>, links included, or none if it's gone or can't be listed.</summary>
+    private static List<DirectoryInfo> Folders(string full)
+    {
+        try
+        {
+            return new DirectoryInfo(full).EnumerateDirectories().ToList();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Deleted or made unreadable since it was looked at: as if it were empty (#116).
+            return [];
+        }
+    }
+
+    /// <summary>The files directly in the folder <paramref name="full"/>, leaving out broken links, or none if it's gone or can't be listed.</summary>
     private static List<FileInfo> Files(string full)
     {
         try
@@ -213,7 +260,7 @@ public sealed class FileSystemDenSource : IDenSource
 
             var found = last && file
                 ? Files(current).Any(f => string.Equals(f.Name, segments[i], StringComparison.Ordinal))
-                : new DirectoryInfo(current).EnumerateDirectories().Any(d => string.Equals(d.Name, segments[i], StringComparison.Ordinal) && !IsFolderLink(d));
+                : Folders(current).Any(d => string.Equals(d.Name, segments[i], StringComparison.Ordinal) && !IsFolderLink(d));
             if (!found)
             {
                 return false;
