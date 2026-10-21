@@ -49,8 +49,12 @@ public sealed class DenStructure
     /// </summary>
     public bool IsLoaded { get; private set; }
 
-    /// <summary>The den's format number from <c>den.yaml</c>, or null if it didn't load.</summary>
-    public int? Format { get; private set; }
+    /// <summary>
+    /// The den's format number from <c>den.yaml</c> (F-DEN-1), or null if
+    /// <c>format</c> didn't parse. It's set even when another key keeps the
+    /// den from loading.
+    /// </summary>
+    public int? Format { get; internal set; }
 
     /// <summary>
     /// True if <c>den.yaml</c> turns on the spoiler checks with
@@ -70,6 +74,12 @@ public sealed class DenStructure
     /// file order. Containers' <c>authors</c> name them (F-CTR-2).
     /// </summary>
     public IReadOnlyList<string> Authors { get; internal set; } = [];
+
+    /// <summary>
+    /// The author keys <c>den.yaml</c> lists whose identity is invalid, so
+    /// they were skipped (F-DEN-3). F-CTR-2's message names them.
+    /// </summary>
+    internal List<string> SkippedAuthors { get; } = [];
 
     /// <summary>
     /// The den's enabled packs and types (types.md F-PACK-9). Until
@@ -174,9 +184,5 @@ public sealed class DenStructure
 
     internal void AddUniverse(Universe universe) => _universes.Add(universe);
 
-    internal void SetLoaded(int format)
-    {
-        IsLoaded = true;
-        Format = format;
-    }
+    internal void SetLoaded() => IsLoaded = true;
 }

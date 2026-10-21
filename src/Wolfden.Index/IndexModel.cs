@@ -45,7 +45,7 @@ public sealed class DenRecord
     /// <summary>The display name (F-DEN-2).</summary>
     public string Name { get; set; } = "";
 
-    /// <summary>The den's <c>format</c>, or null if <c>den.yaml</c> didn't load.</summary>
+    /// <summary>The den's <c>format</c>, or null if it didn't parse. It's set even when another key keeps the den from loading.</summary>
     public int? Format { get; set; }
 
     /// <summary>True if <c>den.yaml</c> loaded (F-DEN-1).</summary>

@@ -168,9 +168,10 @@ word       = 1*(lower / DIGIT)
 **F-KEY-1.** A key MUST match `key` and be 1 to 64 characters long:
 lowercase ASCII letters and digits, with single hyphens between words.
 No uppercase, spaces, underscores, `:`, or `.`. A key that breaks this rule
-is an [error] where it names a container, chapter, author, pack, or type.
-A den-local pack folder with an invalid name is a [warning] instead, and
-is ignored (types.md F-PACK-5). For entity slugs, see F-KEY-4.
+is an [error] where it names a container, chapter, pack, or type. An
+invalid author key is a [warning] instead, and that author is skipped
+(F-DEN-3). A den-local pack folder with an invalid name is a [warning]
+too, and is ignored (types.md F-PACK-5). For entity slugs, see F-KEY-4.
 
 **F-KEY-2.** Universe, series, and book keys MUST start with a letter.
 [error] Chapter keys and entity slugs MAY start with a digit, so `14` is a
@@ -313,7 +314,9 @@ container folder. The entity's scope is that container.
 the entity's type, as the type defines it (types.md F-TYPE-3): characters
 go in `entities/characters/`. The file's `type` decides its type, not the
 folder. A file in another type's folder, or directly in `entities/`, is a
-[warning]. Folders below the type folder are free for the writer to use
+[warning]. A first-level folder under `entities/` that is no enabled
+type's plural (`entities/crew/`) gets no diagnostic. Folders below the
+type folder are free for the writer to use
 (`entities/characters/crew/mara-voss.md`) and mean nothing to Wolfden.
 
 **F-LAY-7.** Other files and folders in a container folder (images, a
@@ -352,7 +355,11 @@ root's folder name.
 
 **F-DEN-3.** `authors` is an optional mapping from author key (F-KEY-1) to
 an Author Identity. Each identity is a mapping with a REQUIRED non-empty
-`name`. Any other shape is an [error]. Other keys in an identity are kept.
+`name`. Other keys in an identity are kept. Any other shape is a
+[warning], and the den still loads: an `authors` that isn't a mapping is
+ignored, and an identity with an invalid key, or one that isn't a mapping
+with a name, is skipped. A container that names a skipped author gets the
+F-CTR-2 warning.
 
 **F-DEN-4.** `packs` is an optional list of pack keys to enable. The `core`
 pack is always enabled, and listing it is allowed. An entry that names
@@ -388,7 +395,9 @@ empty `name`.
 
 **F-CTR-2.** `authors` is an optional list of author keys from `den.yaml`.
 A book without `authors` takes its series' list, and a series without one
-takes its universe's. An unknown author key is a [warning].
+takes its universe's. An unknown author key is a [warning]. So is an
+`authors` that isn't a list (`authors: wren-calder`), or an entry that
+isn't an author key, and either is ignored.
 
 **F-CTR-3.** The body is the container's overview prose. Its links resolve
 from the container's own scope (§10), and its sections follow §9.
@@ -1336,7 +1345,10 @@ in the same section is a [warning], and its rows are still read.
 
 **F-OUT-4.** Rows are ordered by number, then by letter suffix as an ASCII
 string, with no suffix first: `69 < 69a < 69aa < 69b < 70`. Rows that
-aren't in ascending order in the file are a [warning].
+aren't in ascending order in the file are a [warning]. Each row is
+compared with the row just before it, so one misplaced row gives one
+warning. A row with the same id as the one before it is a repeat
+(F-OUT-5), not an F-OUT-4 warning.
 
 **F-OUT-5.** Row ids SHOULD be unique across all outlines of a series, or
 within the outline of a standalone book. A repeated row id is a [warning]
@@ -1345,8 +1357,9 @@ field naming that id is ambiguous (F-FLD-7).
 
 **F-OUT-6.** Row ids keep counting across a series: every row of a book
 SHOULD come after every row of the book before it in series order. A book
-whose first row isn't after the previous book's last row is a [warning].
-Gaps between books are allowed.
+whose lowest row id isn't after the highest row id of the nearest earlier
+book in the series that has rows is a [warning]. Books with no rows are
+skipped, and gaps between books are allowed.
 
 **F-OUT-7.** To split a row, add letter suffixes (`69` becomes `69a` and
 `69b`, or `69` stays and `69a` follows it). Writers MUST NOT renumber

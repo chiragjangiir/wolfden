@@ -259,6 +259,21 @@ public class CheckCommandTests
         Assert.Equal("F-DEN-1", json.RootElement.GetProperty("diagnostics")[0].GetProperty("rule").GetString());
     }
 
+    [Theory]
+    [InlineData("authors: [wren-calder]\npacks: [nope]\n")]
+    [InlineData("packs: nope\n")]
+    public void ADenYamlThatDoesntLoadStillReportsTheFormatItParsedInJson(string rest)
+    {
+        using var den = TempDen.FromFiles(new Dictionary<string, string> { ["den.yaml"] = "format: 1\n" + rest });
+
+        var (exitCode, output, _) = Check(den.Root, "--json");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        using var json = JsonDocument.Parse(output);
+        Assert.False(json.RootElement.GetProperty("den").GetProperty("loaded").GetBoolean());
+        Assert.Equal(1, json.RootElement.GetProperty("den").GetProperty("format").GetInt32());
+    }
+
     [Fact]
     public void AMissingFolderExitsTwo()
     {

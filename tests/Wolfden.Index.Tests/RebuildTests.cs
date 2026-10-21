@@ -288,7 +288,7 @@ public sealed class RebuildTests
         {
             var row = index.Context.Dens.Single();
             Assert.False(row.IsLoaded);
-            Assert.Null(row.Format);
+            Assert.Equal(1, row.Format); // format parsed, so it's kept though the den didn't load
             Assert.Contains(index.Context.Diagnostics, d => d.Path == "den.yaml" && d.Severity == "error");
         }
 

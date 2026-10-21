@@ -18,7 +18,10 @@ namespace Wolfden.Core.Checks;
 /// resolve (F-POS-4), a book-scope entity's <c>from</c> outside its book
 /// (F-ENT-6), empty ranges (F-TMP-3, F-SEC-8), overlapping values and
 /// sections (F-TMP-5, F-SEC-4), subsections outside their parents (F-SEC-9),
-/// and for container files, a missing id (F-ID-2) and unknown authors (F-CTR-2).
+/// statuses and pins (F-STAT-3, F-PIN-3), section comments under or on
+/// bookkeeping sections (F-SEC-7, F-SEC-12), a thread paid off before it's
+/// planted (F-CORE-2), an event that ends before it starts (F-CORE-3), and
+/// for container files, a missing id (F-ID-2) and unknown authors (F-CTR-2).
 /// </summary>
 internal static class ContinuityChecks
 {
@@ -37,6 +40,10 @@ internal static class ContinuityChecks
             CheckEntries(facts, found);
             CheckSections(facts, found);
             CheckSubsections(facts, found);
+            CheckStatuses(facts, found);
+            CheckBookkeeping(entity.File.Sections, s => facts[s].IsBookkeeping, found);
+            CheckThread(facts, found);
+            CheckEvent(facts, found);
             diagnostics.AddRange(found.Select(d => new DenDiagnostic(entity.Path, d)));
         }
 
@@ -46,7 +53,8 @@ internal static class ContinuityChecks
             {
                 var found = new List<Diagnostic>();
                 CheckId(container, found);
-                CheckAuthors(container, catalog.Structure.Authors, found);
+                CheckAuthors(container, catalog.Structure, found);
+                CheckBookkeeping(container.File.Sections, bookkeeping.IsBookkeeping, found);
                 CheckPositions(universe, PositionScanner.ScanContainer(container.File), found);
                 diagnostics.AddRange(found.Select(d => new DenDiagnostic(container.FilePath, d)));
             }
@@ -79,8 +87,9 @@ internal static class ContinuityChecks
     /// other shape: the spec gives it no severity, and an error would leave
     /// the container and everything under it out (F-GEN-2).
     /// </summary>
-    private static void CheckAuthors(Container container, IReadOnlyList<string> authors, List<Diagnostic> found)
+    private static void CheckAuthors(Container container, DenStructure den, List<Diagnostic> found)
     {
+        var authors = den.Authors;
         var node = container.File.Frontmatter?["authors"];
         if (node is null or YamlScalar { IsNull: true })
         {
@@ -99,6 +108,11 @@ internal static class ContinuityChecks
             if (item is not YamlScalar { IsNull: false } key)
             {
                 found.Add(new Diagnostic("F-CTR-2", DiagnosticSeverity.Warning, item.Line, "Each entry in authors must be an author key from den.yaml. This one is ignored."));
+            }
+            else if (den.SkippedAuthors.Contains(key.Text, StringComparer.Ordinal))
+            {
+                found.Add(new Diagnostic("F-CTR-2", DiagnosticSeverity.Warning, item.Line,
+                    $"'{key.Text}' is in den.yaml, but its identity there isn't valid, so the author is skipped (see the warning in den.yaml)."));
             }
             else if (!authors.Contains(key.Text, StringComparer.Ordinal))
             {
@@ -168,6 +182,191 @@ internal static class ContinuityChecks
             }
         }
     }
+
+    /// <summary>
+    /// F-STAT-3: a fact whose written status is <c>draft</c> or <c>canon</c>
+    /// inside an out-of-canon holder. Only a status written on the fact
+    /// itself counts, so one misplaced status gives one warning, not one per
+    /// subsection that takes it (F-STAT-2). F-PIN-3: a fact with
+    /// <c>pin=true</c> or <c>pin: true</c> written on it whose effective
+    /// status is out of canon. It's skipped where F-STAT-3 already says why
+    /// the fact is out of canon, and for a bookkeeping section, which is
+    /// F-SEC-12's.
+    /// </summary>
+    private static void CheckStatuses(EntityFacts facts, List<Diagnostic> found)
+    {
+        var entity = facts.Entity;
+        foreach (var fact in facts.Sections)
+        {
+            var section = fact.Section;
+            if (section.Comment is not { } comment)
+            {
+                continue;
+            }
+
+            var holder = section.Parent is { } parent ? facts[parent].Status : entity.Status;
+            var holderName = section.Parent is { } p ? $"its parent '{p.Name}'" : "the entity";
+            var raised = comment["status"] is { } written && FactStatuses.Parse(written) is { } own && own.IsInCanon() && !holder.IsInCanon();
+            if (raised)
+            {
+                found.Add(new Diagnostic("F-STAT-3", DiagnosticSeverity.Warning, comment.Line,
+                    $"'{section.Name}' is marked {comment["status"]}, but {holderName} is {holder.ToKey()}, so it's read as {holder.ToKey()}: a fact can't be more canon than what holds it."));
+            }
+
+            if (!raised && comment["pin"] == "true" && !fact.IsBookkeeping && !fact.Status.IsInCanon())
+            {
+                found.Add(new Diagnostic("F-PIN-3", DiagnosticSeverity.Warning, comment.Line,
+                    $"'{section.Name}' is pinned, but it's {fact.Status.ToKey()}, which is out of canon, so pinned canon leaves it out."));
+            }
+        }
+
+        foreach (var field in facts.Fields)
+        {
+            foreach (var entry in field.Entries)
+            {
+                var raised = entry.Node["status"] is YamlScalar { IsNull: false } written && FactStatuses.Parse(written.Text) is { } own
+                    && own.IsInCanon() && !entity.Status.IsInCanon();
+                if (raised)
+                {
+                    found.Add(new Diagnostic("F-STAT-3", DiagnosticSeverity.Warning, entry.Node["status"]!.Line,
+                        $"{field.Name}: this entry is marked {entry.OwnStatus.ToKey()}, but the entity is {entity.Status.ToKey()}, so it's read as {entity.Status.ToKey()}: a fact can't be more canon than what holds it."));
+                }
+
+                if (!raised && entry.Pinned && !entry.Status.IsInCanon())
+                {
+                    found.Add(new Diagnostic("F-PIN-3", DiagnosticSeverity.Warning, entry.Node["pin"]!.Line,
+                        $"{field.Name}: this entry is pinned, but it's {entry.Status.ToKey()}, which is out of canon, so pinned canon leaves it out."));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// F-SEC-7: <c>canon=true</c> on a subsection whose parent is
+    /// bookkeeping does nothing. F-SEC-12: <c>pin=true</c> on a bookkeeping
+    /// section, which pinned canon leaves out. Both are warnings on the
+    /// section comment where they're written.
+    /// </summary>
+    private static void CheckBookkeeping(IEnumerable<Section> sections, Func<Section, bool> isBookkeeping, List<Diagnostic> found)
+    {
+        foreach (var section in sections)
+        {
+            if (section.Comment is not { } comment)
+            {
+                continue;
+            }
+
+            if (comment["canon"] == "true" && section.Parent is { } parent && isBookkeeping(parent))
+            {
+                found.Add(new Diagnostic("F-SEC-7", DiagnosticSeverity.Warning, comment.Line,
+                    $"'{section.Name}': canon=true does nothing here, since its parent '{parent.Name}' is bookkeeping, and so are its subsections. To keep it in the story, move it out of '{parent.Name}'."));
+            }
+
+            if (comment["pin"] == "true" && isBookkeeping(section))
+            {
+                found.Add(new Diagnostic("F-SEC-12", DiagnosticSeverity.Warning, comment.Line,
+                    $"'{section.Name}' is a bookkeeping section, so pin=true does nothing: pinned canon leaves bookkeeping out."));
+            }
+        }
+    }
+
+    /// <summary>
+    /// types.md F-CORE-2: a thread whose <c>paid_off</c> comes before its
+    /// earliest <c>planted</c> position. Both are read as for F-CORE-4 (a
+    /// plain value, or a single in-canon entry), and positions that don't
+    /// resolve are skipped. Only the built-in core pack's thread, extended
+    /// or not, as for F-CORE-4. When either side is a bare book position
+    /// (F-POS-7), only the books are compared, since the chapter isn't known.
+    /// </summary>
+    private static void CheckThread(EntityFacts facts, List<Diagnostic> found)
+    {
+        var universe = facts.Entity.Universe;
+        if (facts.Entity.Definition?.IsCoreThread != true
+            || CoreValue(facts, "paid_off") is not YamlScalar { IsNull: false } paid || ResolvePosition(universe, paid.Text) is not { } paidOff)
+        {
+            return;
+        }
+
+        IReadOnlyList<YamlNode> planted = CoreValue(facts, "planted") switch
+        {
+            YamlSequence list => list.Items,
+            { } one => [one],
+            null => [],
+        };
+        var earliest = planted
+            .OfType<YamlScalar>()
+            .Where(s => !s.IsNull)
+            .Select(s => (s.Text, Resolved: ResolvePosition(universe, s.Text)))
+            .Where(p => p.Resolved is not null)
+            .OrderBy(p => p.Resolved!.Point)
+            .FirstOrDefault();
+        if (earliest.Resolved is { } first && IsBefore(universe, paidOff, first))
+        {
+            found.Add(new Diagnostic("F-CORE-2", DiagnosticSeverity.Warning, paid.Line,
+                $"paid_off {paid.Text} comes before the thread is first planted, at {earliest.Text}, in story order. Check the positions."));
+        }
+    }
+
+    /// <summary>
+    /// types.md F-CORE-3: an event whose <c>ends</c> is earlier than its
+    /// <c>when</c>, comparing the sort keys only over the numbers both have.
+    /// Dates without sort keys are skipped. Both are read as for F-CORE-2,
+    /// and only for the built-in core pack's event, extended or not.
+    /// </summary>
+    private static void CheckEvent(EntityFacts facts, List<Diagnostic> found)
+    {
+        if (facts.Entity.Definition?.IsCoreEvent != true
+            || CoreValue(facts, "when") is not { } whenNode || FieldValues.ReadDate(whenNode) is not { SortKey: { } when } whenDate
+            || CoreValue(facts, "ends") is not { } endsNode || FieldValues.ReadDate(endsNode) is not { SortKey: { } ends } endsDate)
+        {
+            return;
+        }
+
+        var shared = Math.Min(when.Count, ends.Count);
+        var order = when.Take(shared).Zip(ends.Take(shared), (w, e) => e.CompareTo(w)).FirstOrDefault(c => c != 0);
+        if (order < 0)
+        {
+            found.Add(new Diagnostic("F-CORE-3", DiagnosticSeverity.Warning, endsNode.Line,
+                $"ends {DateLabel(endsDate)} is earlier than when {DateLabel(whenDate)}, so the event ends before it starts. Check the dates."));
+        }
+    }
+
+    /// <summary>
+    /// True if <paramref name="later"/> comes before <paramref name="earlier"/>
+    /// in story order. If either is a bare book position (F-POS-7), only
+    /// their books are compared: a book that is strictly earlier.
+    /// </summary>
+    private static bool IsBefore(Universe universe, ResolvedPosition later, ResolvedPosition earlier)
+    {
+        if (!later.Position.IsBookStart && !earlier.Position.IsBookStart)
+        {
+            return later.Point < earlier.Point;
+        }
+
+        return BookStart(universe, later.Book) is { } laterBook && BookStart(universe, earlier.Book) is { } earlierBook && laterBook < earlierBook;
+    }
+
+    private static StoryPoint? BookStart(Universe universe, Book book) =>
+        universe.Resolve(StoryPosition.Create(book.Key)).Resolved?.Point;
+
+    private static ResolvedPosition? ResolvePosition(Universe universe, string text) =>
+        StoryPosition.TryParse(text, out var position, out _) ? universe.Resolve(position).Resolved : null;
+
+    private static string DateLabel(InWorldDate date) => date.Text ?? $"sort [{string.Join(", ", date.SortKey!)}]";
+
+    /// <summary>
+    /// A field's value as types.md §9.1 reads <c>planted</c> and
+    /// <c>paid_off</c>: a plain value, or the <c>value</c> of a single entry
+    /// that is in canon (F-STAT-3). Anything else, such as a temporal list,
+    /// counts as unset, and gives null.
+    /// </summary>
+    private static YamlNode? CoreValue(EntityFacts facts, string name) =>
+        facts.Fields.FirstOrDefault(f => f.Name == name) switch
+        {
+            { Kind: FieldValueKind.Plain, Value: var value } => value is YamlScalar { IsNull: true } ? null : value,
+            { Kind: FieldValueKind.Entry, Entries: [{ } entry] } when entry.Status.IsInCanon() => entry.Value is YamlScalar { IsNull: true } ? null : entry.Value,
+            _ => null,
+        };
 
     private static StoryPoint? Resolve(Universe universe, string text) =>
         StoryPosition.TryParse(text, out var position, out _) && universe.Resolve(position).Resolved is { } resolved ? resolved.Point : null;
