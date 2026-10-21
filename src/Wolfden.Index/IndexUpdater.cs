@@ -49,8 +49,9 @@ internal sealed class IndexUpdater
     /// <summary>
     /// How many batches in a row a file may fail to read, as while an editor
     /// writes it, before the batch rebuilds the index instead. A full load
-    /// reads every file, so it fails while that file stays unreadable, and
-    /// the watcher reports it rather than leaving the file out.
+    /// leaves out a file it can't read (#112), so the index then matches a
+    /// full rebuild again; a later event brings the file in once it can be
+    /// read. A file that's gone, or a broken link, is absent at once.
     /// </summary>
     internal int ReadAttempts { get; init; } = 10;
 
@@ -158,14 +159,21 @@ internal sealed class IndexUpdater
             byte[]? bytes = null;
             if (listing.IsFile(path))
             {
+                var full = Path.Combine(_root, path.Replace('/', Path.DirectorySeparatorChar));
                 try
                 {
-                    bytes = File.ReadAllBytes(Path.Combine(_root, path.Replace('/', Path.DirectorySeparatorChar)));
+                    bytes = File.ReadAllBytes(full);
+                }
+                catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException || e is IOException && FileSystemDenSource.IsBrokenLink(new FileInfo(full)))
+                {
+                    // Deleted since it was listed, or a link to a file that's
+                    // gone or loops: absent now, as a full load would find it (#112).
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException)
                 {
-                    // Still being written, or gone again: look at it next time,
-                    // a few times, and then let a rebuild report it.
+                    // Still being written, say: look at it next time, a few
+                    // times, and then rebuild, which leaves it out if it
+                    // still can't be read.
                     var attempts = _unreadable[path] = _unreadable.GetValueOrDefault(path) + 1;
                     if (attempts > ReadAttempts)
                     {

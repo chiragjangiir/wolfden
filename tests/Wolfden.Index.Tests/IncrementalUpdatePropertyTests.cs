@@ -9,7 +9,8 @@ namespace Wolfden.Index.Tests;
 /// <summary>
 /// The property test of the file watcher's incremental update (#14): random
 /// sequences of edits, new files, deletes, renames, folder moves, outline
-/// changes, and the odd structural change to generated dens, applied as
+/// changes, links to notes that are gone (where the OS allows file links,
+/// #112), and the odd structural change to generated dens, applied as
 /// synthetic batches. After every batch the index must have exactly the
 /// content of a full rebuild of the same files. Seeds are fixed, so failures
 /// reproduce.
@@ -24,6 +25,7 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
     [MemberData(nameof(Seeds))]
     [Trait("Scenario", "SC-WATCH-1")]
     [Trait("Scenario", "SC-WATCH-2")]
+    [Trait("Scenario", "SC-WATCH-7")]
     public void AnyChangeSequenceGivesTheSameIndexAsAFullRebuild(int seed)
     {
         var (files, _) = DenGenerator.Generate(seed);
@@ -60,6 +62,7 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
         private readonly List<string> _targets = ["nobody-at-all", "Nobody Known"];
         private readonly List<string> _ids = [];
         private readonly List<(WatcherChangeTypes Kind, string Path, string? OldPath)> _events = [];
+        private readonly List<string> _links = [];
         private DenStructure _structure;
         private int _keys;
 
@@ -107,12 +110,16 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
             var roll = _random.Next(100);
             switch (roll)
             {
-                case < 30 when entities.Count > 0:
+                case < 28 when entities.Count > 0:
                 {
                     var path = Pick(entities);
                     Write(path, Entity(path, keep: _random.Next(2) == 0 ? File.ReadAllText(Full(_root, path)) : null));
                     return $"edit {path}";
                 }
+
+                // Two rolls from the edits, the most common change, so the others keep their share.
+                case >= 28 and < 30:
+                    return BrokenLink(entities);
 
                 case < 45:
                 {
@@ -302,26 +309,91 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
                 }
 
                 default:
-                {
-                    if (entities.Count == 0)
-                    {
-                        return "nothing";
-                    }
-
-                    // A small edit: a link or a section added at the end.
-                    var path = Pick(entities);
-                    var text = File.ReadAllText(Full(_root, path));
-                    Write(path, text + (_random.Next(2) == 0 ? $"\nMeets [[{Pick(_targets)}]].\n" : $"\n## {Pick(["Overview", "Want", "Odd bit"])}\nWith [[{Pick(_targets)}]].\n"));
-                    return $"append {path}";
-                }
+                    return Append(entities);
             }
+        }
+
+        /// <summary>A small edit: a link or a section added at the end of a note.</summary>
+        private string Append(List<string> entities)
+        {
+            if (entities.Count == 0)
+            {
+                return "nothing";
+            }
+
+            var path = Pick(entities);
+            var text = File.ReadAllText(Full(_root, path));
+            Write(path, text + (_random.Next(2) == 0 ? $"\nMeets [[{Pick(_targets)}]].\n" : $"\n## {Pick(["Overview", "Want", "Odd bit"])}\nWith [[{Pick(_targets)}]].\n"));
+            return $"append {path}";
+        }
+
+        /// <summary>
+        /// A link to a note that's gone, new or in a note's place, as when the
+        /// note it pointed to moved away; it's absent (#112). Now and then a
+        /// broken link is replaced by a note again. Where the OS can't make
+        /// file links, an <see cref="Append"/> instead.
+        /// </summary>
+        private string BrokenLink(List<string> entities)
+        {
+            if (!CanLinkFiles.Value)
+            {
+                return Append(entities);
+            }
+
+            var links = _links.Where(p => new FileInfo(Full(_root, p)).LinkTarget is not null).ToList();
+            _links.Clear();
+            _links.AddRange(links);
+            if (links.Count > 0 && _random.Next(3) == 0)
+            {
+                var healed = Pick(links);
+                _links.Remove(healed);
+                File.Delete(Full(_root, healed));
+                _events.Add((WatcherChangeTypes.Deleted, healed, null));
+                Write(healed, Entity(healed, keep: null));
+                return $"note in place of broken link {healed}";
+            }
+
+            var replace = entities.Count > 0 && _random.Next(2) == 0;
+            var path = replace ? Pick(entities) : NewEntityPath();
+            if (replace)
+            {
+                File.Delete(Full(_root, path));
+                _events.Add((WatcherChangeTypes.Deleted, path, null));
+            }
+            else
+            {
+                EnsureFolder(path[..path.LastIndexOf('/')]);
+            }
+
+            File.CreateSymbolicLink(Full(_root, path), Path.Combine(_root, "nowhere", $"{Key()}.md"));
+            _events.Add((WatcherChangeTypes.Created, path, null));
+            _links.Add(path);
+            return $"broken link {path}";
         }
 
         private List<Container> Containers() =>
             _structure.Universes.SelectMany(u => new Container[] { u }.Concat(u.Series).Concat(u.Books)).ToList();
 
+        /// <summary>True where the OS and user may make file links (not Windows without developer mode).</summary>
+        private static readonly Lazy<bool> CanLinkFiles = new(() =>
+        {
+            var link = Path.Combine(Path.GetTempPath(), $"wolfden-link-probe-{Guid.NewGuid():N}");
+            try
+            {
+                File.CreateSymbolicLink(link, link + "-target");
+                File.Delete(link);
+                return true;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+            {
+                return false;
+            }
+        });
+
+        /// <summary>The entity files, leaving out links, which only the broken-link change makes.</summary>
         private List<string> EntityFiles() =>
             Directory.EnumerateFiles(_root, "*.md", SearchOption.AllDirectories)
+                .Where(f => new FileInfo(f).LinkTarget is null)
                 .Select(f => Path.GetRelativePath(_root, f).Replace('\\', '/'))
                 .Where(f => Wolfden.Core.Entities.EntityCatalog.EntityFileScope(_structure, f) is not null)
                 .Order(StringComparer.Ordinal)

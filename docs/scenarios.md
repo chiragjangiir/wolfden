@@ -572,7 +572,8 @@ junction on Windows) to a folder outside the den.
 
 Spec: F-LAY-2 (#102). Covered by:
 `FolderLinkTests.ANoteReachedOnlyThroughALinkIsNotReadAndCheckSaysSo`,
-`FolderLinkTests.LinksThatLoopAreSkippedByTheLoaderAndTheIndex`.
+`FolderLinkTests.LinksThatLoopAreSkippedByTheLoaderAndTheIndex`,
+`FolderLinkTests.ALinkedFolderWhoseTargetWasDeletedIsWarnedAboutAndSkipped`.
 
 ### SC-CHECK-34. A canon section in a character who is still an idea
 
@@ -863,6 +864,27 @@ frontmatter.
 Spec: F-ID-1, F-ID-5. Covered by:
 `NewIdCommandTests.ItPrintsOneValidId`.
 
+### SC-CLI-8. A note Wolfden can't read
+
+The writer keeps a symbolic link to a note that has since moved, so the
+link points nowhere. Another time, a sync tool deletes a note just as
+`wolfden check` reads the den, or another program holds the note open, or
+its permissions don't let the writer read it.
+
+- `check`, `index`, and `query` still work. They read the den as if that
+  note weren't there, so links to it are reported as they would be if it
+  were deleted. Once the note can be read again, the next query sees that
+  the files changed and rebuilds the index with it.
+
+Spec: design.md §7 (#112). Covered by:
+`UnreadableFileTests.AFileThatCantBeReadIsCheckedAsIfItWerentThere` (Core),
+`UnreadableFileTests.APackFileThatCantBeReadIsCheckedAsIfItWerentThere` (Core),
+`FolderLinkTests.ALinkedFolderWhoseTargetWasDeletedIsWarnedAboutAndSkipped`,
+`UnreadableFileTests.BrokenAndLoopingFileLinksAreAbsentToCheckAndTheIndex`,
+`UnreadableFileTests.ANoteReplacedByABrokenLinkIsCheckedAndIndexedAsIfItWereDeleted`,
+`UnreadableFileTests.ANoteThatCantBeReadIsLeftOutAndTheIndexIsStaleOnceItCanBe`,
+`UnreadableFileTests.ANoteThatCantBeReadIsLeftOutAndTheCommandsStillWork` (CLI).
+
 ## WATCH: keeping the index up to date while notes change
 
 Background: `wolfden index --watch` (design.md §7, #14) keeps the index up
@@ -980,3 +1002,23 @@ Spec: design.md §7. Covered by:
 `FreshnessTests.EnsureUpToDateWaitsForARunningWatcherInsteadOfRebuilding`,
 `FreshnessTests.EnsureUpToDateRebuildsWhenTheWatcherDoesntCatchUpInTime`,
 `QueryCommandTests.AQueryWaitsBrieflyForAWatcherThenRebuildsIfItHasnt`.
+
+### SC-WATCH-7. A note can't be read while Wolfden watches
+
+With the watcher running, the writer replaces a note with a link to a
+file that has moved away. Later, another program holds Mara Voss's note
+open just after the writer saves it.
+
+- The broken link is left out at once, as if the note were deleted. The
+  note that's held open is tried again a few times; if it still can't be
+  read, the watcher rebuilds the index without it, as `wolfden index`
+  would, and its next save brings it back. Either way the index matches a
+  full rebuild of the same files. If the link starts working again
+  because its target comes back, often outside the den, the link itself
+  gets no file event, so the watcher doesn't see it; the next query sees
+  that the files changed and rebuilds the index with the note.
+
+Spec: design.md §7 (#112). Covered by:
+`UnreadableFileTests.TheWatcherTreatsABrokenLinkAsAbsentAtOnce`,
+`IncrementalUpdateTests.AFileThatStaysUnreadableIsLeftOutByARebuildUntilItCanBeRead`,
+`IncrementalUpdatePropertyTests.AnyChangeSequenceGivesTheSameIndexAsAFullRebuild`.

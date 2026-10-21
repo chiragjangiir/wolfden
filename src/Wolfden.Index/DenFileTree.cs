@@ -10,7 +10,8 @@ namespace Wolfden.Index;
 /// SHA-256 of its bytes, and the folders under <c>packs/</c> and
 /// <c>universes/</c> (<see cref="Tracks"/>). It leaves out names that start
 /// with <c>.</c> at any depth (F-LAY-2) and folder links, which the den
-/// loader skips too (<see cref="FileSystemDenSource.IsFolderLink"/>). A
+/// loader skips too (<see cref="FileSystemDenSource.IsFolderLink"/>), and
+/// files that can't be read, which the loader leaves out too (#112). A
 /// file watcher (#14) keeps one up to date as files change, so it can
 /// record the fingerprint of the files an update read without hashing the
 /// whole den again.
@@ -187,6 +188,25 @@ internal sealed class DenFileTree
     /// <summary>The SHA-256 of <paramref name="bytes"/>, in lowercase hex, as the tree and the index record it.</summary>
     public static string HashOf(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
+    /// <summary>
+    /// The bytes of the file at the full path <paramref name="file"/>, or
+    /// null if it can't be read: deleted since it was listed, a link to a
+    /// file that's gone or that loops, held open by another program, or one
+    /// the user may not read. The tree, like the den loader
+    /// (<see cref="IDenSource.TryReadFile"/>), leaves such a file out (#112).
+    /// </summary>
+    private static byte[]? TryRead(string file)
+    {
+        try
+        {
+            return File.ReadAllBytes(file);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Adds what's in <paramref name="folder"/>: files hashed, or with <paramref name="collect"/>, their paths collected instead.</summary>
     private void Walk(string folder, string relative, int depth, List<string>? collect)
     {
@@ -195,7 +215,20 @@ internal sealed class DenFileTree
             return;
         }
 
-        foreach (var file in Directory.EnumerateFiles(folder))
+        List<string> files;
+        List<DirectoryInfo> subs;
+        try
+        {
+            files = Directory.EnumerateFiles(folder).ToList();
+            subs = new DirectoryInfo(folder).EnumerateDirectories().ToList();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Deleted or made unreadable since its parent was listed: as if it were empty.
+            return;
+        }
+
+        foreach (var file in files)
         {
             var path = $"{relative}{Path.GetFileName(file)}";
             if (!IsRead(path))
@@ -205,7 +238,11 @@ internal sealed class DenFileTree
 
             if (collect is null)
             {
-                _files[path] = HashOf(File.ReadAllBytes(file));
+                // A file that can't be read is absent, as it is to the den loader (#112).
+                if (TryRead(file) is { } bytes)
+                {
+                    _files[path] = HashOf(bytes);
+                }
             }
             else
             {
@@ -213,7 +250,7 @@ internal sealed class DenFileTree
             }
         }
 
-        foreach (var sub in new DirectoryInfo(folder).EnumerateDirectories())
+        foreach (var sub in subs)
         {
             var name = sub.Name;
             if (!name.StartsWith('.') && Tracks($"{relative}{name}") && !FileSystemDenSource.IsFolderLink(sub))

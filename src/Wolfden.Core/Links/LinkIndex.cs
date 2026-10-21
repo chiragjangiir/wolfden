@@ -158,9 +158,9 @@ public sealed class LinkIndex
                 if (previous is null || changedOutlines.Contains(path) || !previous._outlineScans.TryGetValue(path, out var scan))
                 {
                     scan = null;
-                    if (source.FileExists(path))
+                    if (source.TryReadFile(path) is { } bytes)
                     {
-                        var outline = MarkdownFile.ParseOutline(source.ReadFile(path));
+                        var outline = MarkdownFile.ParseOutline(bytes);
                         if (!Outlines.OutlineReader.IsExcluded(outline))
                         {
                             scan = ScanWith(s => s.ScanOutline(book, path, outline));

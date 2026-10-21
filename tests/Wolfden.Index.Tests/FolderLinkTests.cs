@@ -106,6 +106,39 @@ public sealed class FolderLinkTests
         IncrementalUpdateTests.AssertSameAsFullRebuild(den, "after the link");
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-CHECK-33")]
+    [Trait("Scenario", "SC-CLI-8")]
+    public void ALinkedFolderWhoseTargetWasDeletedIsWarnedAboutAndSkipped()
+    {
+        // Elsewhere a link to a deleted folder is a broken file link, which UnreadableFileTests covers.
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows lists a link to a deleted folder as a folder.");
+        using var den = TempDen.Starfall();
+        using var unlinked = TempDen.Starfall();
+        using var elsewhere = TempDen.FromFiles(new Dictionary<string, string>
+        {
+            ["shared/the-drowned-gate.md"] = "---\nid: 01JA7Q8M4XK3V9R2D5W8HN6TQZ\ntype: location\nname: The Drowned Gate\n---\n",
+        });
+        var updater = new IndexUpdater(den.Root);
+        updater.Rebuild("start");
+        var link = Path.Combine(den.Root, Full(Locations), "shared");
+        using var linked = LinkFolder(link, Path.Combine(elsewhere.Root, "shared"));
+        Directory.Delete(Path.Combine(elsewhere.Root, "shared"), recursive: true);
+
+        Assert.True(FileSystemDenSource.IsFolderLink(new DirectoryInfo(link)));
+        Assert.Equal([$"{Locations}/shared"], LinkWarnings(den));
+        Assert.Equal(EntityCatalog.Load(unlinked.Root).Entities.Select(e => e.Path), EntityCatalog.Load(den.Root).Entities.Select(e => e.Path));
+        Assert.Equal(IndexBuilder.FilesFingerprint(unlinked.Root), IndexBuilder.FilesFingerprint(den.Root));
+
+        // The watcher, then a full rebuild.
+        var update = updater.Apply(IncrementalUpdateTests.Batch(den, (WatcherChangeTypes.Created, $"{Locations}/shared", null)), out var retry);
+        Assert.Null(update);
+        Assert.Empty(retry);
+        IncrementalUpdateTests.AssertSameAsFullRebuild(den, "after the link's target was deleted");
+        IndexBuilder.Rebuild(den.Root);
+        Assert.Equal(IndexStatus.Current, IndexBuilder.CheckFiles(den.Root));
+    }
+
     private static string Full(string path) => path.Replace('/', Path.DirectorySeparatorChar);
 
     /// <summary>

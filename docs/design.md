@@ -352,6 +352,14 @@ from the files:
   (format.md F-LAY-2), so linked notes aren't dropped silently.
   Cloud-sync placeholders (OneDrive, Dropbox) aren't links and are read
   as usual.
+- **A file that can't be read is absent** (#112; v0 behaviour, not a
+  recorded decision). A link to a file that's gone or that loops, a file
+  deleted between listing and reading, one another program holds open,
+  or one the user may not read is left out of `check`, the files hash,
+  and the index, as if it weren't there, rather than stopping the
+  command. Nothing warns about it yet. A file the index left out isn't in
+  its files hash, so once the file can be read the index is stale and is
+  rebuilt.
 - **Watched** (#14; v0 behaviour, not a recorded decision). The file
   watcher collects a burst of saves (an editor's temporary file and
   rename, a git checkout) into one batch, and ignores hidden paths such as
