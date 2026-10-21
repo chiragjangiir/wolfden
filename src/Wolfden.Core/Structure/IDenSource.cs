@@ -52,17 +52,33 @@ public interface IDenSource
 
     /// <summary>
     /// The names of the folders directly in <paramref name="path"/>, or none
-    /// if it isn't a folder. A folder that can't be listed, because the user
-    /// may not list it or it was deleted meanwhile, is left out, as if it
-    /// weren't there (#116), and the listing methods give none for it
-    /// rather than throwing. A source can still list a folder that's
-    /// deleted just after; the den loader looks again before it reports a
-    /// container folder as broken (<c>F-LAY-4</c>).
+    /// if it isn't a folder or can't be listed. A folder that can't be
+    /// listed, because the user may not list it or it was deleted meanwhile,
+    /// is absent to the den (#116): the listing methods give none for it
+    /// rather than throwing, so nothing in it is found. Its name can still
+    /// be in its parent's listing, so wherever a folder's name alone would
+    /// be reported, as a container folder with no container file
+    /// (<c>F-LAY-4</c>), the den asks <see cref="FolderExists"/> first.
     /// </summary>
     IEnumerable<string> GetDirectories(string path);
 
     /// <summary>The names of the files directly in <paramref name="path"/>, or none if it isn't a folder or can't be listed (#116).</summary>
     IEnumerable<string> GetFiles(string path);
+
+    /// <summary>
+    /// True if <paramref name="path"/> is a folder that can be listed now:
+    /// it's in its parent's listing (<see cref="GetDirectories"/>), and, on
+    /// disk, the user may list it and it wasn't deleted since (#116). The
+    /// den asks only before it reports on a folder by its name, so a
+    /// folder it can't look in is absent rather than broken.
+    /// </summary>
+    bool FolderExists(string path)
+    {
+        var slash = path.LastIndexOf('/');
+        return slash < 0
+            ? GetDirectories("").Contains(path, StringComparer.Ordinal)
+            : GetDirectories(path[..slash]).Contains(path[(slash + 1)..], StringComparer.Ordinal);
+    }
 
     /// <summary>
     /// The names of the folder links (symbolic links and junctions) directly
@@ -101,14 +117,22 @@ public sealed class FileSystemDenSource : IDenSource
 
     /// <summary>
     /// The folders directly in <paramref name="path"/>, by their names on
-    /// disk, leaving out folder links (<see cref="IsFolderLink"/>) and
-    /// folders that can't be listed (<see cref="CanList"/>, #116). The path
+    /// disk, leaving out folder links (<see cref="IsFolderLink"/>). The path
     /// itself must match in exact case, as for <see cref="FileExists"/>.
+    /// A folder that can't be listed is in the listing, since finding out
+    /// costs a look into each one, but listing it gives none; see
+    /// <see cref="FolderExists"/>.
     /// </summary>
     public IEnumerable<string> GetDirectories(string path) =>
         ExactPathExists(path, file: false)
-            ? Folders(Full(path)).Where(d => !IsFolderLink(d) && CanList(d.FullName)).Select(d => d.Name).Order(StringComparer.Ordinal).ToList()
+            ? Folders(Full(path)).Where(d => !IsFolderLink(d)).Select(d => d.Name).Order(StringComparer.Ordinal).ToList()
             : [];
+
+    /// <summary>
+    /// True if <paramref name="path"/> is a folder, with every name in exact
+    /// case, that isn't a folder link and can be listed now (<see cref="CanList"/>, #116).
+    /// </summary>
+    public bool FolderExists(string path) => path.Length > 0 && ExactPathExists(path, file: false) && CanList(Full(path));
 
     /// <inheritdoc />
     public IEnumerable<string> GetFolderLinks(string path) =>
@@ -119,10 +143,9 @@ public sealed class FileSystemDenSource : IDenSource
     /// <summary>
     /// True if the folder at the full path <paramref name="full"/> can be
     /// listed now. One that can't, because the user may not list it or it
-    /// was deleted, is absent to the den's walks, as a file that can't be
-    /// read is (#112, #116): nothing in it can be found, so the walks don't
-    /// count it as a folder either. That keeps an empty container folder,
-    /// which is an error (F-LAY-4), apart from one that can't be looked in.
+    /// was deleted, is absent to the den, as a file that can't be read is
+    /// (#112, #116). That keeps an empty container folder, which is an
+    /// error (F-LAY-4), apart from one that can't be looked in.
     /// </summary>
     public static bool CanList(string full)
     {
