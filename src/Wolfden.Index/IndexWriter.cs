@@ -105,13 +105,15 @@ internal sealed class IndexWriter
     }
 
     /// <summary>
-    /// Takes the files the load found missing or couldn't read (#112) out of
-    /// <paramref name="tree"/> and <paramref name="hashes"/>, so the files
-    /// fingerprint says what the index was built from. A file that was
-    /// hashed for the tree but couldn't be read by the load, say because
-    /// another program held it open by then, then makes the index look
-    /// stale, so the next query rebuilds it, rather than current while it
-    /// lacks the file. Returns true if the tree changed.
+    /// Takes the files the load found missing or couldn't read (#112), and
+    /// the folders and files it didn't find when it listed their folders
+    /// (#116), out of <paramref name="tree"/> and <paramref name="hashes"/>,
+    /// so the files fingerprint says what the index was built from. A file
+    /// or folder that was in the tree but that the load couldn't read or
+    /// list, say because another program held the file open or the folder's
+    /// permissions changed by then, then makes the index look stale once it
+    /// can be read again, so the next query rebuilds it, rather than current
+    /// while it lacks them. Returns true if the tree changed.
     /// </summary>
     private static bool ForgetMissing(HashingDenSource source, DenFileTree tree, Dictionary<string, string> hashes)
     {
@@ -124,6 +126,25 @@ internal sealed class IndexWriter
                 tree.SetFile(path, null);
                 changed = true;
             }
+        }
+
+        foreach (var folder in tree.Folders.Where(source.ListedWithoutFolder).ToList())
+        {
+            foreach (var path in tree.FilesUnder(folder))
+            {
+                hashes.Remove(path);
+                tree.SetFile(path, null);
+            }
+
+            tree.RemoveFolder(folder);
+            changed = true;
+        }
+
+        foreach (var path in tree.Files.Where(source.ListedWithoutFile).ToList())
+        {
+            hashes.Remove(path);
+            tree.SetFile(path, null);
+            changed = true;
         }
 
         return changed;
