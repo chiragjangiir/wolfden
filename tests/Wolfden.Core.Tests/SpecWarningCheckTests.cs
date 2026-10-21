@@ -639,7 +639,8 @@ public class SpecWarningCheckTests
         Assert.Equal(["ash-morrow"], check.Structure.Authors);
         Assert.Equal([("den.yaml", "F-DEN-3", 4), (A + "/series.md", "F-CTR-2", 4)], Found(check));
         Assert.Equal("Author 'wren-calder' must be a mapping with a name, such as '{ name: Wren Calder }', so it's skipped.", Message(check, "F-DEN-3"));
-        Assert.Equal("'wren-calder' isn't an author in den.yaml (den.yaml's authors are ash-morrow).", Message(check, "F-CTR-2"));
+        Assert.Equal("'wren-calder' is in den.yaml, but its identity there isn't valid, so the author is skipped (see the warning in den.yaml).",
+            Message(check, "F-CTR-2"));
     }
 
     [Theory]
@@ -743,6 +744,21 @@ public class SpecWarningCheckTests
     }
 
     [Fact]
+    public void AnOutOfCanonFactInsideAnIdeaIsQuiet()
+    {
+        // F-STAT-3 is only for draft or canon written inside an out-of-canon holder.
+        var source = Den();
+        Note(source, A1, "wren", "type: character\nname: Wren\nstatus: idea\nfields:\n  role: { value: deckhand, status: candidate }", """
+
+            ## Backstory
+            <!-- wolfden: status=retconned -->
+            Born on Vael.
+            """);
+
+        Assert.Empty(Found(DenCheck.Run(source)));
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-CHECK-35")]
     public void APinnedFactThatsOutOfCanonIsWarned()
     {
@@ -812,13 +828,17 @@ public class SpecWarningCheckTests
             ## Scratch
             <!-- wolfden: canon=true pin=true -->
             He hates the cold.
+
+            ## Session notes
+            <!-- wolfden: status=idea pin=true -->
+            Out of canon and bookkeeping: only the bookkeeping warning.
             """);
         const string universe = Vael + "/universe.md";
         source.With(universe, System.Text.Encoding.UTF8.GetString(source.ReadFile(universe)) + "\n## Changelog 2026\n<!-- wolfden: pin=true -->\n");
 
         var check = DenCheck.Run(source);
 
-        Assert.Equal([(Orrin, "F-SEC-12", 9), (Orrin, "F-SEC-12", 13), (universe, "F-SEC-12", 8)], Found(check));
+        Assert.Equal([(Orrin, "F-SEC-12", 9), (Orrin, "F-SEC-12", 13), (Orrin, "F-SEC-12", 21), (universe, "F-SEC-12", 8)], Found(check));
         Assert.Equal("'Change log' is a bookkeeping section, so pin=true does nothing: pinned canon leaves bookkeeping out.", check.Diagnostics[0].Diagnostic.Message);
     }
 
@@ -845,6 +865,12 @@ public class SpecWarningCheckTests
 
             ### Reading list
             <!-- wolfden: canon=true -->
+
+            ## Appearance
+
+            ### Scar
+            <!-- wolfden: canon=true -->
+            Its parent isn't bookkeeping, so this is quiet.
             """);
 
         var check = DenCheck.Run(source);
@@ -879,6 +905,12 @@ public class SpecWarningCheckTests
     [InlineData("  planted: [\"a1:5\"]\n  paid_off: { value: \"a1:2\", status: candidate }", false)]
     [InlineData("  planted:\n    - { value: [\"a1:5\"] }\n    - { value: [\"a1:6\"], from: \"a1:4\" }\n  paid_off: \"a1:2\"", false)]
     [InlineData("  paid_off: \"a1:2\"", false)]
+    [InlineData("  planted: [\"a1:3\"]\n  paid_off: \"a1\"", false)]
+    [InlineData("  planted: [\"a1\"]\n  paid_off: \"a1:2\"", false)]
+    [InlineData("  planted: [\"a2\"]\n  paid_off: \"a2\"", false)]
+    [InlineData("  planted: [\"a2:3\"]\n  paid_off: \"a1\"", true)]
+    [InlineData("  planted: [\"a2\"]\n  paid_off: \"a1:20\"", true)]
+    [InlineData("  planted: [\"a1:5\", \"a1\"]\n  paid_off: \"a1:2\"", false)]
     public void APaidOffIsComparedOnlyWithPlantedPositionsThatAreSet(string fields, bool warned)
     {
         var check = DenCheck.Run(Thread(fields));
@@ -906,6 +938,8 @@ public class SpecWarningCheckTests
     [InlineData("  when: \"2291-05\"\n  ends: \"2291\"", false)]
     [InlineData("  when: \"2291-05-14\"\n  ends: \"2291-05-14 23:00\"", false)]
     [InlineData("  when: \"2291-05-14\"\n  ends: the next spring", false)]
+    [InlineData("  when: \"2291-05-14\"\n  ends: \"2291\"", false)]
+    [InlineData("  when: \"2291-05-14\"\n  ends: \"2290\"", true)]
     [InlineData("  when: { sort: [2291, 5] }\n  ends: { sort: 2290 }", true)]
     public void AnEventsDatesAreComparedOnlyOverTheNumbersBothHave(string fields, bool warned)
     {
@@ -922,6 +956,8 @@ public class SpecWarningCheckTests
             .With("packs/saga/pack.yaml", "name: Saga\n")
             .With("packs/saga/types/arc.yaml", "name: Arc\nplural: arcs\nfields:\n  planted: { type: position, list: true }\n  paid_off: position\n");
         Note(source, A1, "the-manifest", "type: arc\nname: The manifest\nstatus: canon\nfields:\n  planted: [\"a1:5\"]\n  paid_off: \"a1:2\"", folder: "arcs");
+        source.With("packs/saga/types/battle.yaml", "name: Battle\nplural: battles\nfields:\n  when: date\n  ends: date\n");
+        Note(source, A1, "the-reef", "type: battle\nname: The reef\nstatus: canon\nfields:\n  when: \"2291-05-14\"\n  ends: \"2290\"", folder: "battles");
 
         Assert.Empty(Found(DenCheck.Run(source)));
     }

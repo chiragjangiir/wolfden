@@ -53,7 +53,7 @@ internal static class ContinuityChecks
             {
                 var found = new List<Diagnostic>();
                 CheckId(container, found);
-                CheckAuthors(container, catalog.Structure.Authors, found);
+                CheckAuthors(container, catalog.Structure, found);
                 CheckBookkeeping(container.File.Sections, bookkeeping.IsBookkeeping, found);
                 CheckPositions(universe, PositionScanner.ScanContainer(container.File), found);
                 diagnostics.AddRange(found.Select(d => new DenDiagnostic(container.FilePath, d)));
@@ -87,8 +87,9 @@ internal static class ContinuityChecks
     /// other shape: the spec gives it no severity, and an error would leave
     /// the container and everything under it out (F-GEN-2).
     /// </summary>
-    private static void CheckAuthors(Container container, IReadOnlyList<string> authors, List<Diagnostic> found)
+    private static void CheckAuthors(Container container, DenStructure den, List<Diagnostic> found)
     {
+        var authors = den.Authors;
         var node = container.File.Frontmatter?["authors"];
         if (node is null or YamlScalar { IsNull: true })
         {
@@ -107,6 +108,11 @@ internal static class ContinuityChecks
             if (item is not YamlScalar { IsNull: false } key)
             {
                 found.Add(new Diagnostic("F-CTR-2", DiagnosticSeverity.Warning, item.Line, "Each entry in authors must be an author key from den.yaml. This one is ignored."));
+            }
+            else if (den.SkippedAuthors.Contains(key.Text, StringComparer.Ordinal))
+            {
+                found.Add(new Diagnostic("F-CTR-2", DiagnosticSeverity.Warning, item.Line,
+                    $"'{key.Text}' is in den.yaml, but its identity there isn't valid, so the author is skipped (see the warning in den.yaml)."));
             }
             else if (!authors.Contains(key.Text, StringComparer.Ordinal))
             {
@@ -269,13 +275,14 @@ internal static class ContinuityChecks
     /// earliest <c>planted</c> position. Both are read as for F-CORE-4 (a
     /// plain value, or a single in-canon entry), and positions that don't
     /// resolve are skipped. Only the built-in core pack's thread, extended
-    /// or not, as for F-CORE-4.
+    /// or not, as for F-CORE-4. When either side is a bare book position
+    /// (F-POS-7), only the books are compared, since the chapter isn't known.
     /// </summary>
     private static void CheckThread(EntityFacts facts, List<Diagnostic> found)
     {
         var universe = facts.Entity.Universe;
         if (facts.Entity.Definition?.IsCoreThread != true
-            || CoreValue(facts, "paid_off") is not YamlScalar { IsNull: false } paid || Resolve(universe, paid.Text) is not { } paidOff)
+            || CoreValue(facts, "paid_off") is not YamlScalar { IsNull: false } paid || ResolvePosition(universe, paid.Text) is not { } paidOff)
         {
             return;
         }
@@ -289,11 +296,11 @@ internal static class ContinuityChecks
         var earliest = planted
             .OfType<YamlScalar>()
             .Where(s => !s.IsNull)
-            .Select(s => (s.Text, Point: Resolve(universe, s.Text)))
-            .Where(p => p.Point is not null)
-            .OrderBy(p => p.Point)
+            .Select(s => (s.Text, Resolved: ResolvePosition(universe, s.Text)))
+            .Where(p => p.Resolved is not null)
+            .OrderBy(p => p.Resolved!.Point)
             .FirstOrDefault();
-        if (earliest.Point is { } first && paidOff < first)
+        if (earliest.Resolved is { } first && IsBefore(universe, paidOff, first))
         {
             found.Add(new Diagnostic("F-CORE-2", DiagnosticSeverity.Warning, paid.Line,
                 $"paid_off {paid.Text} comes before the thread is first planted, at {earliest.Text}, in story order. Check the positions."));
@@ -323,6 +330,27 @@ internal static class ContinuityChecks
                 $"ends {DateLabel(endsDate)} is earlier than when {DateLabel(whenDate)}, so the event ends before it starts. Check the dates."));
         }
     }
+
+    /// <summary>
+    /// True if <paramref name="later"/> comes before <paramref name="earlier"/>
+    /// in story order. If either is a bare book position (F-POS-7), only
+    /// their books are compared: a book that is strictly earlier.
+    /// </summary>
+    private static bool IsBefore(Universe universe, ResolvedPosition later, ResolvedPosition earlier)
+    {
+        if (!later.Position.IsBookStart && !earlier.Position.IsBookStart)
+        {
+            return later.Point < earlier.Point;
+        }
+
+        return BookStart(universe, later.Book) is { } laterBook && BookStart(universe, earlier.Book) is { } earlierBook && laterBook < earlierBook;
+    }
+
+    private static StoryPoint? BookStart(Universe universe, Book book) =>
+        universe.Resolve(StoryPosition.Create(book.Key)).Resolved?.Point;
+
+    private static ResolvedPosition? ResolvePosition(Universe universe, string text) =>
+        StoryPosition.TryParse(text, out var position, out _) ? universe.Resolve(position).Resolved : null;
 
     private static string DateLabel(InWorldDate date) => date.Text ?? $"sort [{string.Join(", ", date.SortKey!)}]";
 

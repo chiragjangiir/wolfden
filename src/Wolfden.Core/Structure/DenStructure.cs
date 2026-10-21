@@ -76,6 +76,12 @@ public sealed class DenStructure
     public IReadOnlyList<string> Authors { get; internal set; } = [];
 
     /// <summary>
+    /// The author keys <c>den.yaml</c> lists whose identity is invalid, so
+    /// they were skipped (F-DEN-3). F-CTR-2's message names them.
+    /// </summary>
+    internal List<string> SkippedAuthors { get; } = [];
+
+    /// <summary>
     /// The den's enabled packs and types (types.md F-PACK-9). Until
     /// <c>den.yaml</c> loads, the built-in packs alone.
     /// </summary>

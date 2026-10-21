@@ -38,7 +38,8 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         }
 
         // The format parsed, so it's known even if a later key keeps the den
-        // from loading. Every key is read, so each problem is reported (F-GEN-3).
+        // from loading. From here on every key is read, so each problem is
+        // reported (F-GEN-3). A bad format stops the read above.
         den.Format = format;
         var settings = ReadSettings(file);
         den.Authors = ReadAuthors(file);
@@ -174,6 +175,10 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
             if (ok)
             {
                 keys.Add(key);
+            }
+            else
+            {
+                den.SkippedAuthors.Add(key);
             }
         }
 

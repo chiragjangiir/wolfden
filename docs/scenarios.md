@@ -528,8 +528,9 @@ the author a `name`.
 - It's a warning in `den.yaml`. That author is skipped, and the den
   still loads. So is an author key that isn't a key, such as
   `Wren Calder`.
-- A series that names the skipped author gets the unknown-author warning
-  (SC-CHECK-31).
+- A series that names the skipped author gets the F-CTR-2 warning
+  (SC-CHECK-31), which says the author's identity in `den.yaml` isn't
+  valid.
 
 Spec: F-DEN-3, F-KEY-1, F-CTR-2. Covered by:
 `SpecWarningCheckTests.AnAuthorsThatIsntAMappingOfNamedIdentitiesIsWarnedAndTheDenStillLoads`,
@@ -628,7 +629,9 @@ A thread says `planted: ["a1:5", "a1:3"]` and `paid_off: "a1:2"`.
 
 - It's a warning on `paid_off` that names the earliest planted position.
   A `candidate` entry for the payoff, a temporal list, or a position that
-  doesn't resolve isn't compared.
+  doesn't resolve isn't compared. If either side names only a book
+  (`paid_off: "a1"`), only the books are compared, so a payoff later in
+  the same book isn't warned.
 
 Spec: types.md F-CORE-2. Covered by:
 `SpecWarningCheckTests.AThreadPaidOffBeforeItsPlantedIsWarned`,
