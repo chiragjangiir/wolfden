@@ -902,7 +902,9 @@ it. Another time, a sync tool deletes a series folder just as
 Spec: design.md §7 (#116). Covered by:
 `UnlistableFolderTests.AFolderDeletedAfterItsParentWasListedIsCheckedAsIfItWerentThere` (Core),
 `UnlistableFolderTests.AFolderThatCantBeListedIsCheckedAndIndexedAsIfItWereDeleted`,
+`UnlistableFolderTests.AFolderThatCantBeListedIsntWarnedAboutByName`,
 `UnlistableFolderTests.AFolderTheLoadCantListAfterTheTreeWasTakenMakesTheIndexStale`,
+`UnlistableFolderTests.AFolderDeletedAfterTheLoadReadItLeavesTheIndexStale`,
 `UnlistableFolderTests.AFolderThatCantBeListedIsLeftOutAndTheCommandsStillWork` (CLI).
 
 ## WATCH: keeping the index up to date while notes change
@@ -1049,15 +1051,17 @@ With the watcher running, the writer takes away their own permission to
 list Mara Voss's `characters/` folder, and later that of the book folder
 `ember/`.
 
-- Whenever the watcher next looks at the folder, it leaves it out, as if
-  it were deleted: the notes in `characters/` drop out of the index, and
-  the book folder gets a full rebuild without it. Either way the index
-  matches a full rebuild of the same files. A change of permissions gets
-  no file event of its own, so the watcher only notices with the folder's
-  next event; until then, the next query sees that the files changed and
+- Whenever the watcher next gets an event for the folder or for anything
+  in it, such as a note saved in place, it leaves the whole folder out,
+  as if it were deleted: all the notes in `characters/` drop out of the
+  index, and the book folder gets a full rebuild without it. Either way
+  the index matches a full rebuild of the same files. A change of
+  permissions gets no file event of its own, so until such an event the
+  watcher doesn't notice; the next query sees that the files changed and
   rebuilds the index. The same happens when the folder can be listed
   again.
 
 Spec: design.md §7 (#116). Covered by:
 `UnlistableFolderTests.TheWatcherLeavesOutAnEntitiesFolderItCantList`,
-`UnlistableFolderTests.TheWatcherRebuildsWithoutAContainerFolderItCantList`.
+`UnlistableFolderTests.TheWatcherRebuildsWithoutAContainerFolderItCantList`,
+`UnlistableFolderTests.TheWatcherLeavesOutAFolderItCantListWhenAFileInItChanges`.
