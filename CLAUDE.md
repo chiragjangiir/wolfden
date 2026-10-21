@@ -55,6 +55,13 @@ brought in only when a change needs human judgment.
 
 - **Orchestrator:** picks the next Ready issue from the project board,
   moves its card, and assigns the work.
+
+**Issues set aside for contributors.** Agents never start an issue that is
+assigned to anyone other than `gavin-wolfe`, or one labeled
+`good first issue` or `help wanted`. When a contributor claims an issue in a
+comment, the Orchestrator assigns it to them (see "Claiming an issue" in
+`CONTRIBUTING.md`). If a claimed issue has been quiet for about two weeks,
+the Orchestrator asks the maintainer before anyone reclaims it.
 - **Developer:** implements the change on a branch (in its own git worktree
   when running alongside other agents) and opens the PR with `Closes #N`.
 - **Reviewer:** a separate agent with fresh context. It sees the issue, the
