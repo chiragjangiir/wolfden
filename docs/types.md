@@ -1030,7 +1030,11 @@ threads ("no coincidences in a payoff") are author notes, planned in #45.
 
 **F-CORE-2.** A thread whose `paid_off` comes before its earliest
 `planted` position, in story order, is a [warning]. Positions that don't
-resolve are skipped.
+resolve are skipped. If either one is a bare book position (format.md
+F-POS-7), only the books are compared, since the chapter isn't known: the
+warning needs `paid_off`'s book to come strictly before the planted
+position's book. So `planted: ["ember:3"]` with `paid_off: "ember"` gets
+no warning.
 
 **F-CORE-4.** A thread's `## Payoff` section takes the thread's `paid_off`
 as its `from` when its section comment has no `from` (format.md F-SEC-8),
@@ -1059,7 +1063,10 @@ edit that description.
 [warning]. The two sort keys are compared only over the numbers both
 have, so `when: "2291-05-14 06:40"` with `ends: "2291-05-14"`, or `when:
 "2291-05"` with `ends: "2291"`, gets no warning. Dates without sort keys
-are skipped.
+are skipped. Like `planted` and `paid_off` in F-CORE-2, `when` and `ends`
+are each read from a plain value, or from a single entry that is in
+canon, and the rule covers only the built-in core pack's `event`
+(extended or not), as F-CORE-4 covers only its `thread`.
 
 **Idea.** A raw idea that isn't yet a thing of any one type: a premise, a
 scene, a twist, a line of dialogue. That's the difference from `status:

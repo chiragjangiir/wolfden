@@ -314,10 +314,10 @@ container folder. The entity's scope is that container.
 the entity's type, as the type defines it (types.md F-TYPE-3): characters
 go in `entities/characters/`. The file's `type` decides its type, not the
 folder. A file in another type's folder, or directly in `entities/`, is a
-[warning]. A first folder that is no enabled type's plural
-(`entities/crew/`) gets no diagnostic. Folders below the type folder are
-free for the writer to use (`entities/characters/crew/mara-voss.md`) and
-mean nothing to Wolfden.
+[warning]. A first-level folder under `entities/` that is no enabled
+type's plural (`entities/crew/`) gets no diagnostic. Folders below the
+type folder are free for the writer to use
+(`entities/characters/crew/mara-voss.md`) and mean nothing to Wolfden.
 
 **F-LAY-7.** Other files and folders in a container folder (images, a
 `drafts/` folder) are ignored, with one exception: a `.md` file directly in
