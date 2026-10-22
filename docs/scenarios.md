@@ -651,6 +651,20 @@ Spec: types.md F-CORE-3. Covered by:
 `SpecWarningCheckTests.AnEventThatEndsBeforeItStartsIsWarned`,
 `SpecWarningCheckTests.AnEventsDatesAreComparedOnlyOverTheNumbersBothHave`.
 
+### SC-CHECK-40. A universe of thousands of standalone books
+
+The writer keeps a long-running anthology as one universe, with 2,000
+standalone books and no series, so every book's folder is in the same
+`books/` folder.
+
+- `check` and `index` take about as long per book as in a den of the
+  same size whose books are spread over series: seconds, not minutes.
+  Twice as many books take about twice as long.
+
+Spec: design.md §7 (#119). Covered by:
+`DenStructureTests.APathLookupListsEachFolderOnTheWayAboutOnce` (Core),
+`PerformanceTests.AUniverseOfManyStandaloneBooksIsCheckedAndRebuiltQuickly`.
+
 ## RT: saving a note keeps what the writer wrote
 
 Background: the files are the writer's, and Wolfden is only one of the

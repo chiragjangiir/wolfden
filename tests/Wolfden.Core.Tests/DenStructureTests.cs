@@ -1,3 +1,4 @@
+using Wolfden.Core.Checks;
 using Wolfden.Core.Documents;
 using Wolfden.Core.Positions;
 using Wolfden.Core.Structure;
@@ -569,6 +570,68 @@ public class DenStructureTests
             Assert.Empty(source.GetDirectories("universes/u/Books"));
             Assert.Equal(["ember"], source.GetDirectories("universes/u/books"));
             Assert.False(source.FileExists("universes/u/books"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CHECK-40")]
+    public void APathLookupListsEachFolderOnTheWayAboutOnce()
+    {
+        // Each path lookup checks every folder on the way in exact case. It
+        // used to list each one again, so every lookup in a book listed all
+        // of books/, and a check of thousands of standalone books took
+        // quadratic time (#119).
+        const int books = 300;
+        var root = Path.Combine(Path.GetTempPath(), "wolfden-books-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            File.WriteAllText(Path.Combine(Directory.CreateDirectory(root).FullName, "den.yaml"), "format: 1\n");
+            File.WriteAllText(Path.Combine(Directory.CreateDirectory(Path.Combine(root, "universes", "u")).FullName, "universe.md"), "---\nname: U\n---\n");
+            for (var i = 0; i < books; i++)
+            {
+                var book = Path.Combine(root, "universes", "u", "books", $"b{i}");
+                File.WriteAllText(Path.Combine(Directory.CreateDirectory(book).FullName, "book.md"), "---\nname: B\nchapters: [1]\n---\n");
+                File.WriteAllText(Path.Combine(Directory.CreateDirectory(Path.Combine(book, "entities", "characters")).FullName, $"c{i}.md"), "---\ntype: character\nname: C\n---\n");
+            }
+
+            var folders = Directory.GetDirectories(root, "*", SearchOption.AllDirectories).Length + 1;
+            var source = new FileSystemDenSource(root);
+            var check = DenCheck.Run(source);
+
+            Assert.Equal(books, check.Structure.Universes.Single().Books.Count);
+            Assert.Equal(books, check.Catalog.Entities.Count);
+            Assert.InRange(source.LookupListings, 1, folders * 2);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void APathLookupSeesFoldersMadeOrDeletedAfterItsParentWasListed()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "wolfden-later-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var books = Directory.CreateDirectory(Path.Combine(root, "universes", "u", "books")).FullName;
+            File.WriteAllText(Path.Combine(Directory.CreateDirectory(Path.Combine(books, "ember")).FullName, "book.md"), "---\nname: Ember\n---\n");
+            var source = new FileSystemDenSource(root);
+            Assert.True(source.FileExists("universes/u/books/ember/book.md"));
+            Assert.False(source.FileExists("universes/u/books/ash/book.md"));
+
+            File.WriteAllText(Path.Combine(Directory.CreateDirectory(Path.Combine(books, "ash")).FullName, "book.md"), "---\nname: Ash\n---\n");
+            Directory.Delete(Path.Combine(books, "ember"), recursive: true);
+
+            Assert.True(source.FileExists("universes/u/books/ash/book.md"));
+            Assert.Equal(["book.md"], source.GetFiles("universes/u/books/ash"));
+            Assert.False(source.FileExists("universes/u/books/ember/book.md"));
+            Assert.False(source.FolderExists("universes/u/books/ember"));
+            Assert.Empty(source.GetFiles("universes/u/books/ember"));
         }
         finally
         {

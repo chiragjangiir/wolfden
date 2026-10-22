@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace Wolfden.Core.Structure;
 
 /// <summary>
@@ -105,6 +107,14 @@ public sealed class FileSystemDenSource : IDenSource
 
     /// <summary>The den root's full path.</summary>
     public string Root { get; }
+
+    /// <summary>The names of the folders in each folder a path lookup has listed, by full path (<see cref="HasFolder"/>).</summary>
+    private readonly ConcurrentDictionary<string, HashSet<string>> _folderNames = new(StringComparer.Ordinal);
+
+    private int _lookupListings;
+
+    /// <summary>How many times a path lookup has listed a folder (<see cref="HasFolder"/>), so tests can check it's about once per folder (#119).</summary>
+    internal int LookupListings => _lookupListings;
 
     /// <summary>
     /// True if a file exists at <paramref name="path"/>, with every name on
@@ -261,19 +271,51 @@ public sealed class FileSystemDenSource : IDenSource
     /// <summary>
     /// True if the folder <paramref name="full"/> holds a folder named
     /// <paramref name="name"/> exactly that isn't a folder link, or false if
-    /// it's gone or can't be listed. It stops at the match, so a path lookup
-    /// doesn't list each folder on the way in full.
+    /// it's gone or can't be listed.
     /// </summary>
-    private static bool HasFolder(string full, string name)
+    /// <remarks>
+    /// <para>
+    /// Every path lookup checks each folder on the way, so the names found
+    /// in a folder are kept, by its full path, for the life of the source
+    /// (#119). Without that, each lookup inside one of a universe's
+    /// thousands of standalone books listed all of <c>books/</c> again, and
+    /// a check took quadratic time.
+    /// </para>
+    /// <para>
+    /// Only a name that was found is taken from what's kept. A name that
+    /// isn't there lists the folder again, so a folder made since is found
+    /// as before. A folder deleted since is still found to be gone:
+    /// <see cref="ExactPathExists"/> asks the disk whether each folder on the
+    /// way is there, and listing or reading in a folder that's gone gives
+    /// none. What's kept can only be out of date for a folder whose name
+    /// changed case, or that was swapped for a folder link, after it was
+    /// listed, and a source is made for one load.
+    /// </para>
+    /// </remarks>
+    private bool HasFolder(string full, string name)
+    {
+        if (_folderNames.TryGetValue(full, out var names) && names.Contains(name))
+        {
+            return true;
+        }
+
+        Interlocked.Increment(ref _lookupListings);
+        names = FolderNames(full);
+        _folderNames[full] = names;
+        return names.Contains(name);
+    }
+
+    /// <summary>The names of the folders directly in the folder <paramref name="full"/> that aren't folder links, or none if it's gone or can't be listed.</summary>
+    private static HashSet<string> FolderNames(string full)
     {
         try
         {
-            return new DirectoryInfo(full).EnumerateDirectories().Any(d => string.Equals(d.Name, name, StringComparison.Ordinal) && !IsFolderLink(d));
+            return new DirectoryInfo(full).EnumerateDirectories().Where(d => !IsFolderLink(d)).Select(d => d.Name).ToHashSet(StringComparer.Ordinal);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // Deleted or made unreadable since it was looked at (#116).
-            return false;
+            return [];
         }
     }
 
