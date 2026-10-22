@@ -13,6 +13,8 @@ public sealed class PerformanceTests(ITestOutputHelper output)
 {
     private const int Count = 4_000;
 
+    private const int Books = 2_000;
+
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(60);
 
     private static readonly TimeSpan UpdateBound = TimeSpan.FromSeconds(10);
@@ -76,6 +78,64 @@ public sealed class PerformanceTests(ITestOutputHelper output)
         using var index = DenIndex.Open(den.Root);
         Assert.Equal("Person Seven", index.FindEntity(path)!.Name);
         Assert.Equal(Count * 13 + 1, index.Context.Links.Count());
+    }
+
+    /// <summary>
+    /// A universe of thousands of standalone books, all in one
+    /// <c>books/</c> folder, is checked and rebuilt quickly (#119). Each path
+    /// lookup used to list every folder on the way again, so each lookup in
+    /// a book listed all of <c>books/</c>, and the check took quadratic
+    /// time. In development this check took about 30 seconds before the
+    /// fix and takes a few seconds now. As above, the bound only catches a
+    /// gross slowdown; <c>DenStructureTests.APathLookupListsEachFolderOnTheWayAboutOnce</c>
+    /// checks the cause itself.
+    /// </summary>
+    [Fact]
+    [Trait("Scenario", "SC-CHECK-40")]
+    public void AUniverseOfManyStandaloneBooksIsCheckedAndRebuiltQuickly()
+    {
+        using var den = TempDen.FromFiles(StandaloneBooks());
+        _ = Wolfden.Core.Links.LinkIndex.Load(den.Root);
+        var watch = Stopwatch.StartNew();
+        var check = Wolfden.Core.Checks.DenCheck.Run(den.Root);
+        var checking = watch.Elapsed;
+        watch.Restart();
+        IndexBuilder.Rebuild(den.Root);
+        var rebuild = watch.Elapsed;
+        output.WriteLine($"{Books} standalone books: check {checking.TotalSeconds:F1} s; rebuild {rebuild.TotalSeconds:F1} s.");
+
+        Assert.Equal(Books, check.Structure.Universes.Single().Books.Count);
+        Assert.Equal(Books * 2, check.Catalog.Entities.Count);
+        // No file has an id (F-ID-2), and nothing else is wrong.
+        Assert.Equal(Books * 3 + 1, check.Diagnostics.Count);
+        Assert.All(check.Diagnostics, d => Assert.Equal("F-ID-2", d.Diagnostic.RuleId));
+        using var index = DenIndex.Open(den.Root);
+        Assert.Equal(Books * 2, index.Context.Entities.Count());
+        Assert.True(checking < Bound, $"The check took {checking}.");
+        Assert.True(rebuild < Bound, $"The rebuild took {rebuild}.");
+    }
+
+    /// <summary>One universe of <see cref="Books"/> standalone books, each with three chapters and two characters who link to each other.</summary>
+    private static Dictionary<string, string> StandaloneBooks()
+    {
+        var order = string.Join(", ", Enumerable.Range(0, Books).Select(i => $"tale-{i}"));
+        var files = new Dictionary<string, string>
+        {
+            ["den.yaml"] = "format: 1\n",
+            ["universes/big/universe.md"] = $"---\nname: Big\norder: [{order}]\n---\n",
+        };
+        for (var i = 0; i < Books; i++)
+        {
+            var book = $"universes/big/books/tale-{i}";
+            files[$"{book}/book.md"] = $"---\nname: Tale {i}\nchapters: [1, 2, 3]\n---\n";
+            for (var c = 0; c < 2; c++)
+            {
+                files[$"{book}/entities/characters/tale-{i}-{c}.md"] =
+                    $"---\ntype: character\nname: Teller {i}-{c}\nfrom: \"tale-{i}:{c + 1}\"\n---\n\nKnows [[tale-{i}-{1 - c}]].\n";
+            }
+        }
+
+        return files;
     }
 
     /// <summary>4,000 entities, each with 12 sections, 8 links, and 3 field values.</summary>
