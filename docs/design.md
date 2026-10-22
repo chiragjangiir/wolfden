@@ -15,9 +15,9 @@ there's code that depends on it. Decisions already made are recorded in
    has an answer.
 3. **Plain files, no lock-in.** Notes are plain markdown files in a folder
    you own, stored wherever you like: on your own machine, in a synced
-   folder, or in a git repo with a private remote. You can read them, edit
-   them in any editor, and keep them forever. Git is the recommended way to
-   get history (§6).
+   folder, or in a git repo, local only or with a private remote. You can
+   read them, edit them in any editor, and keep them forever. Git is the
+   recommended way to get history (§6).
 4. **AI-native.** AI assistants are first-class users, connected through an
    MCP server and working from structured data instead of pasted documents.
 5. **Works with notes edited outside the app.** You can edit the files in
@@ -35,7 +35,7 @@ there's code that depends on it. Decisions already made are recorded in
 
 | Concept | What it is |
 |---|---|
-| **Den** | A Wolfden workspace: the folder that holds `den.yaml`, and the notes in it. It can hold one or many universes. A den can be a git repository of its own or a subfolder of a larger one (§6). A universe that needs its own private remote goes in a den of its own. |
+| **Den** | A Wolfden workspace: the folder that holds `den.yaml`, and the notes in it. It can hold one or many universes. A den can be a git repository of its own or a subfolder of a larger one (§6). A universe that needs its own private remote goes in a den that is its own git repository. |
 | **Author Identity** | Who a work is by: a real name, a pen name, or a collaboration. Metadata in v0, and the anchor for ownership in multi-user mode later. |
 | **Universe** | A shared setting for one or more related works. |
 | **Series** | An *ordered* sequence of books within a universe. |
@@ -321,7 +321,8 @@ replaces hand-made `_FINAL` copies.
 
 ## 6. History and versioning
 
-Wolfden doesn't keep its own audit trail. It keeps three things apart:
+Wolfden doesn't keep its own audit trail. It keeps the format apart from
+where a den is stored and how its history is kept:
 
 - **Format:** a den is plain files in a folder (format.md). Nothing in the
   format depends on where the folder is stored or how its history is kept.
