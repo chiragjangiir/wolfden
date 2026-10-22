@@ -46,7 +46,7 @@ technical to use it.
 - **Typed entities:** Character, Location, Faction, and so on, each with a
   consistent structure plus your own custom sections. Bundles of types for a
   genre come as **packs** (space opera, epic fantasy, and so on).
-- **Plain markdown in git:** your notes are markdown files with YAML
+- **Plain markdown files:** your notes are markdown files with YAML
   frontmatter in a folder you control. Keep it in a git repository, local or
   pushed to a private remote, and version history comes from git. Nothing
   locks you in.
