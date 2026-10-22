@@ -483,8 +483,9 @@ point at the same chapter.
 **F-BOOK-1.** `status` is optional: `draft` (the default) or `final`. Any
 other value is an [error]. `final` marks a frozen book (design.md §5).
 Writers MUST refuse edits within a final book's scope (its `book.md`,
-`outline.md`, and entities) until it's unfrozen. The git tag made on
-freezing (#31) isn't part of the format.
+`outline.md`, and entities) until it's unfrozen. `status: final` is the
+whole freeze. The git tag that freezing adds when the den has git history
+(design.md §6, #31) isn't part of the format.
 
 **F-BOOK-2.** `chapters` is an optional list. The list order is the chapter
 order. A missing or empty list means the book has no chapters yet, and

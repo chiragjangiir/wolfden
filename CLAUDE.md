@@ -17,9 +17,10 @@ fiction. See `README.md` for the pitch. Design docs live in `docs/`.
   v0. Multi-user, multi-tenant hosting (accounts, OAuth with GitHub and
   Google, roles) comes in a later phase. Don't build for it early, but don't
   design anything that rules it out.
-- **Source of truth:** markdown files with YAML frontmatter, in a git repo
-  the user controls (local only or with a private remote). Version history
-  and audit trail come from git, not from tables we build ourselves.
+- **Source of truth:** markdown files with YAML frontmatter, in a folder
+  the user controls. Version history and audit trail come from a history
+  backend (git by default, local only or with a private remote), not from
+  tables we build ourselves.
 - **Index:** SQLite via EF Core, rebuildable at any time from the files. It
   never holds data that exists only in the database.
 - **Domain model:** Author Identity → Universe → Series (ordered) → Book.
