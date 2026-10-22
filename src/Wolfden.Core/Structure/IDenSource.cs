@@ -71,6 +71,9 @@ public interface IDenSource
     /// disk, the user may list it and it wasn't deleted since (#116). The
     /// den asks only before it reports on a folder by its name, so a
     /// folder it can't look in is absent rather than broken.
+    /// <see cref="GetDirectories"/> lists folders that can't be listed too,
+    /// so this default can't tell; a source on disk, and a wrapper around
+    /// one, must answer it from the disk or forward it.
     /// </summary>
     bool FolderExists(string path)
     {
@@ -255,6 +258,25 @@ public sealed class FileSystemDenSource : IDenSource
         }
     }
 
+    /// <summary>
+    /// True if the folder <paramref name="full"/> holds a folder named
+    /// <paramref name="name"/> exactly that isn't a folder link, or false if
+    /// it's gone or can't be listed. It stops at the match, so a path lookup
+    /// doesn't list each folder on the way in full.
+    /// </summary>
+    private static bool HasFolder(string full, string name)
+    {
+        try
+        {
+            return new DirectoryInfo(full).EnumerateDirectories().Any(d => string.Equals(d.Name, name, StringComparison.Ordinal) && !IsFolderLink(d));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            // Deleted or made unreadable since it was looked at (#116).
+            return false;
+        }
+    }
+
     /// <summary>The files directly in the folder <paramref name="full"/>, leaving out broken links, or none if it's gone or can't be listed.</summary>
     private static List<FileInfo> Files(string full)
     {
@@ -283,7 +305,7 @@ public sealed class FileSystemDenSource : IDenSource
 
             var found = last && file
                 ? Files(current).Any(f => string.Equals(f.Name, segments[i], StringComparison.Ordinal))
-                : Folders(current).Any(d => string.Equals(d.Name, segments[i], StringComparison.Ordinal) && !IsFolderLink(d));
+                : HasFolder(current, segments[i]);
             if (!found)
             {
                 return false;
