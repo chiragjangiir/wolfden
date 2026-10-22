@@ -13,8 +13,11 @@ there's code that depends on it. Decisions already made are recorded in
 2. **Know when each fact becomes true.** Every fact can carry the story
    position where it enters canon, so "what's true as of Book 2, chapter 14?"
    has an answer.
-3. **Plain files, no lock-in.** Notes are markdown files in a git repo you
-   own. You can read them, edit them in any editor, and keep them forever.
+3. **Plain files, no lock-in.** Notes are plain markdown files in a folder
+   you own, stored wherever you like: on your own machine, in a synced
+   folder, or in a git repo with a private remote. You can read them, edit
+   them in any editor, and keep them forever. Git is the recommended way to
+   get history (§6).
 4. **AI-native.** AI assistants are first-class users, connected through an
    MCP server and working from structured data instead of pasted documents.
 5. **Works with notes edited outside the app.** You can edit the files in
@@ -32,7 +35,7 @@ there's code that depends on it. Decisions already made are recorded in
 
 | Concept | What it is |
 |---|---|
-| **Den** | A Wolfden workspace: one git repository of notes. It can hold one or many universes. To give a universe its own private remote, give it its own den. |
+| **Den** | A Wolfden workspace: the folder that holds `den.yaml`, and the notes in it. It can hold one or many universes. A den can be a git repository of its own or a subfolder of a larger one (§6). A universe that needs its own private remote goes in a den of its own. |
 | **Author Identity** | Who a work is by: a real name, a pen name, or a collaboration. Metadata in v0, and the anchor for ownership in multi-user mode later. |
 | **Universe** | A shared setting for one or more related works. |
 | **Series** | An *ordered* sequence of books within a universe. |
@@ -310,13 +313,39 @@ Timeline entries are `event` entities with two independent axes:
 
 ### Freezing a finished book
 
-When a book is done, **freezing** it adds a git tag (`book/ember/final`) and
-marks it `status: final`. After that, edits to that book's scope are refused
-unless explicitly unfrozen. This replaces hand-made `_FINAL` copies.
+When a book is done, **freezing** it marks it `status: final` (format.md
+F-BOOK-1). That is the freeze: after it, edits to that book's scope are
+refused unless explicitly unfrozen. When the den has git history (§6),
+freezing also adds a tag (`book/ember/final`) as an extra snapshot. This
+replaces hand-made `_FINAL` copies.
 
 ## 6. History and versioning
 
-Git is the history. Wolfden doesn't keep its own audit trail.
+Wolfden doesn't keep its own audit trail. It keeps three things apart:
+
+- **Format:** a den is plain files in a folder (format.md). Nothing in the
+  format depends on where the folder is stored or how its history is kept.
+- **History:** a capability that a backend provides. Git is the v0 backend
+  and the recommended default. Per-entity history, diffs, checkpoints, and
+  freeze tags all come from it.
+- **No backend:** a den without one still loads, validates, and indexes.
+  History features say that history isn't available, instead of erroring.
+
+The den store and the history provider are interfaces that arrive in M2
+(#121). `IDenSource`, which the core already reads dens through, is the
+read half of the den store.
+
+**A den inside a larger repository.** The den is the folder that holds
+`den.yaml`, and it can be a subfolder of a larger git repository. History
+is then scoped to the den's paths: log and diff cover only the den's
+files, and checkpoints commit only them.
+
+**Git or a synced folder, not both.** A git repository inside a synced
+folder (Dropbox, OneDrive, iCloud) can be corrupted when two machines
+sync while git is writing. Use git with a private remote, or a synced
+folder without git, but not both.
+
+With git as the backend:
 
 - **Per-entity history** is `git log` on the entity's file, with diffs, shown
   in the UI and exposed through MCP.
@@ -326,8 +355,9 @@ Git is the history. Wolfden doesn't keep its own audit trail.
   made by AI agents through MCP record the agent as `Co-Authored-By`.
 - **Remotes:** optional. Wolfden can push and pull a configured remote but
   never requires one.
-- **The index is never the only copy of anything.** Deleting it loses
-  nothing (§7).
+
+With or without a backend, **the index is never the only copy of
+anything.** Deleting it loses nothing (§7).
 
 ## 7. Index, queries, and continuity checks
 
@@ -491,7 +521,7 @@ the rest.
 src/
   Wolfden.Core/     # model, markdown and frontmatter parsing, positions, canon-as-of logic
   Wolfden.Index/    # EF Core + SQLite index, file watcher, FTS
-  Wolfden.Git/      # history, checkpoints, tags (LibGit2Sharp or git CLI)
+  Wolfden.Git/      # git history provider: log, diffs, checkpoints, tags (LibGit2Sharp or git CLI)
   Wolfden.Api/      # ASP.NET Core minimal API (.NET 10)
   Wolfden.Mcp/      # MCP server
   Wolfden.Cli/      # `wolfden init | check | index | query | new-id | serve | mcp`
@@ -500,6 +530,10 @@ samples/            # sample dens (CC-BY-4.0)
 docs/
 ```
 
+- **Storage and history are separate.** The core reads a den through the
+  den store (`IDenSource` today) and asks a history provider for log,
+  diffs, checkpoints, and tags (§6). `Wolfden.Git` is the v0 history
+  provider, so a different store or provider can replace either later.
 - **v0 runs locally as one process.** `wolfden serve` hosts the API and the
   built web UI on localhost and opens a browser. `wolfden mcp` runs the MCP
   server over stdio for AI clients.

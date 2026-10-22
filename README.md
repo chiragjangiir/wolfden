@@ -47,8 +47,9 @@ technical to use it.
   consistent structure plus your own custom sections. Bundles of types for a
   genre come as **packs** (space opera, epic fantasy, and so on).
 - **Plain markdown in git:** your notes are markdown files with YAML
-  frontmatter in a git repository you control, kept local or pushed to a
-  private remote. Version history comes from git, and nothing locks you in.
+  frontmatter in a folder you control. Keep it in a git repository, local or
+  pushed to a private remote, and version history comes from git. Nothing
+  locks you in.
   SQLite is used only as a rebuildable index for search, links, and queries.
 - **AI-native:** a built-in [MCP](https://modelcontextprotocol.io) server lets
   AI assistants query canon and update notes, working from structured data

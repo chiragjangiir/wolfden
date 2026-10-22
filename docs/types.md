@@ -1076,7 +1076,7 @@ already shaped like one. An `idea` entity is for material that hasn't
 found its type, and its template starts it at `status: idea`. `about`
 links it to whatever it's for. When an idea is adopted, change its `type`
 and move the file to that type's folder, or write the new entity and
-delete the idea (its history stays in the den's repository). `retconned`
+delete the idea (with git, its history stays in the den's log). `retconned`
 is for material that was canon, which an idea never was.
 
 **Note.** Free-form material that isn't a thing in the story: research,
