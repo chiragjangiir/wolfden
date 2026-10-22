@@ -11,6 +11,9 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
 {
     private const string DenFile = "den.yaml";
 
+    /// <summary>Container folders found absent (<see cref="Absent"/>), which <see cref="Folders"/> leaves out.</summary>
+    private readonly HashSet<string> _absent = new(StringComparer.Ordinal);
+
     public void Load()
     {
         if (source.TryReadFile(DenFile) is not { } bytes)
@@ -604,6 +607,11 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
     {
         if (!Keys.IsContainerKey(key))
         {
+            if (Absent(path))
+            {
+                return null;
+            }
+
             var (rule, message) = Keys.IsKey(key)
                 ? ("F-KEY-2", $"'{key}' isn't a valid {Kind(kind)} key: it must start with a letter.")
                 : ("F-KEY-1", $"'{key}' isn't a valid {Kind(kind)} key: use 1 to 64 lowercase letters and digits, with single hyphens between words.");
@@ -614,6 +622,11 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         var filePath = $"{path}/{Container.FileName(kind)}";
         if (source.TryReadFile(filePath) is not { } bytes)
         {
+            if (Absent(path))
+            {
+                return null;
+            }
+
             den.Add(path, new Diagnostic("F-LAY-4", DiagnosticSeverity.Error, null,
                 $"The {Kind(kind)} folder '{key}' has no {Container.FileName(kind)}, so it's skipped."));
             return null;
@@ -651,9 +664,32 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         return read;
     }
 
-    /// <summary>The names of the folders in <paramref name="path"/>, without hidden ones (F-LAY-2), in ASCII order.</summary>
+    /// <summary>
+    /// True if the container folder at <paramref name="path"/> isn't there
+    /// as a folder that can be listed (<see cref="IDenSource.FolderExists"/>):
+    /// the user may not list it, or it was deleted after its parent was
+    /// listed (#116). It's absent, not broken, so it gets no diagnostic, and
+    /// <see cref="Folders"/> leaves it out from then on. It's only asked on
+    /// the paths that report a folder by its name, so a den without errors
+    /// pays nothing for it.
+    /// </summary>
+    private bool Absent(string path)
+    {
+        if (source.FolderExists(path))
+        {
+            return false;
+        }
+
+        _absent.Add(path);
+        return true;
+    }
+
+    /// <summary>
+    /// The names of the folders in <paramref name="path"/>, without hidden
+    /// ones (F-LAY-2) or ones found absent (<see cref="Absent"/>), in ASCII order.
+    /// </summary>
     private IEnumerable<string> Folders(string path) =>
-        source.GetDirectories(path).Where(n => !n.StartsWith('.')).Order(StringComparer.Ordinal).ToList();
+        source.GetDirectories(path).Where(n => !n.StartsWith('.') && !_absent.Contains($"{path}/{n}")).Order(StringComparer.Ordinal).ToList();
 
     private static string Kind(ContainerKind kind) => kind.ToString().ToLowerInvariant();
 

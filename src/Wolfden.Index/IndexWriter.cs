@@ -52,9 +52,17 @@ internal sealed class IndexWriter
     /// <paramref name="fingerprint"/> (<see cref="IndexBuilder.FilesFingerprint"/>)
     /// and <paramref name="tree"/> taken before anything was read.
     /// </summary>
-    public static IndexState Load(string root, DenFileTree tree, string fingerprint)
+    public static IndexState Load(string root, DenFileTree tree, string fingerprint) =>
+        Load(root, new FileSystemDenSource(root), tree, fingerprint);
+
+    /// <summary>
+    /// <see cref="Load(string, DenFileTree, string)"/>, reading the den
+    /// through <paramref name="den"/>, so tests can change the files at a
+    /// chosen moment of the load.
+    /// </summary>
+    internal static IndexState Load(string root, IDenSource den, DenFileTree tree, string fingerprint)
     {
-        var source = new HashingDenSource(new FileSystemDenSource(root));
+        var source = new HashingDenSource(den);
         var structure = DenStructure.Load(source);
         var catalog = EntityCatalog.Load(structure, source);
         var links = LinkIndex.Build(catalog, source);
@@ -105,13 +113,15 @@ internal sealed class IndexWriter
     }
 
     /// <summary>
-    /// Takes the files the load found missing or couldn't read (#112) out of
-    /// <paramref name="tree"/> and <paramref name="hashes"/>, so the files
-    /// fingerprint says what the index was built from. A file that was
-    /// hashed for the tree but couldn't be read by the load, say because
-    /// another program held it open by then, then makes the index look
-    /// stale, so the next query rebuilds it, rather than current while it
-    /// lacks the file. Returns true if the tree changed.
+    /// Takes the files the load found missing or couldn't read (#112), and
+    /// the folders and files it didn't see (<see cref="HashingDenSource.DidntSeeFolder"/>,
+    /// #116), out of <paramref name="tree"/> and <paramref name="hashes"/>,
+    /// so the files fingerprint says what the index was built from. A file
+    /// or folder that was in the tree but that the load couldn't read or
+    /// list, say because another program held the file open or the folder's
+    /// permissions changed by then, then makes the index look stale once it
+    /// can be read again, so the next query rebuilds it, rather than current
+    /// while it lacks them. Returns true if the tree changed.
     /// </summary>
     private static bool ForgetMissing(HashingDenSource source, DenFileTree tree, Dictionary<string, string> hashes)
     {
@@ -124,6 +134,25 @@ internal sealed class IndexWriter
                 tree.SetFile(path, null);
                 changed = true;
             }
+        }
+
+        foreach (var folder in tree.Folders.Where(source.DidntSeeFolder).ToList())
+        {
+            foreach (var path in tree.FilesUnder(folder))
+            {
+                hashes.Remove(path);
+                tree.SetFile(path, null);
+            }
+
+            tree.RemoveFolder(folder);
+            changed = true;
+        }
+
+        foreach (var path in tree.Files.Where(source.DidntSeeFile).ToList())
+        {
+            hashes.Remove(path);
+            tree.SetFile(path, null);
+            changed = true;
         }
 
         return changed;

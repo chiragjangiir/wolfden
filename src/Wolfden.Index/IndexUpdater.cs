@@ -106,10 +106,26 @@ internal sealed class IndexUpdater
         var treeChanged = false;
 
         // Folders that were added, moved, or deleted: look at what's in them.
+        // The folders above each changed path are looked at too, parents
+        // first (in ordinal order a folder comes before what's in it): a
+        // folder can stop being one, or become one again, without an event
+        // of its own, as when its permissions change so it can't be listed
+        // (#116). Where the tree and the disk agree on them, as they almost
+        // always do, that costs only listings this batch makes anyway.
         var files = new SortedSet<string>(StringComparer.Ordinal);
+        var folders = new SortedSet<string>(StringComparer.Ordinal);
         foreach (var path in batch.Paths)
         {
             files.Add(path);
+            folders.Add(path);
+            for (var slash = path.LastIndexOf('/'); slash > 0; slash = path.LastIndexOf('/', slash - 1))
+            {
+                folders.Add(path[..slash]);
+            }
+        }
+
+        foreach (var path in folders)
+        {
             if (!DenFileTree.Tracks(path))
             {
                 // No file the index reads can be in it (a drafts/ folder at the den root, say).
@@ -455,13 +471,16 @@ internal sealed class IndexUpdater
         public IEnumerable<string> GetFiles(string path) => inner.GetFiles(path);
 
         public IEnumerable<string> GetFolderLinks(string path) => inner.GetFolderLinks(path);
+
+        public bool FolderExists(string path) => inner.FolderExists(path);
     }
 
     /// <summary>
     /// Whether paths exist with every name in exactly that case, as the den
     /// loader matches them (<see cref="FileSystemDenSource"/>), listing
     /// each folder once per batch. Folder links aren't folders here, as the
-    /// loader skips them, so nothing under one is a file either.
+    /// loader skips them, so nothing under one is a file either. Nor is a
+    /// folder that can't be listed, which the loader leaves out too (#116).
     /// </summary>
     private sealed class ExactListing(string root)
     {
@@ -473,17 +492,9 @@ internal sealed class IndexUpdater
             return List(parent)?.Files.Contains(name) == true;
         }
 
-        public bool IsFolder(string path)
-        {
-            if (path.Length == 0)
-            {
-                return true;
-            }
+        public bool IsFolder(string path) => List(path) is not null;
 
-            var (parent, name) = Split(path);
-            return List(parent)?.Folders.Contains(name) == true;
-        }
-
+        /// <summary>What's in <paramref name="folder"/>, or null if it isn't a folder in its parent's listing or can't be listed itself.</summary>
         private (HashSet<string> Files, HashSet<string> Folders)? List(string folder)
         {
             if (_folders.TryGetValue(folder, out var listing))
@@ -492,7 +503,8 @@ internal sealed class IndexUpdater
             }
 
             listing = null;
-            if (IsFolder(folder))
+            var (parent, name) = Split(folder);
+            if (folder.Length == 0 || List(parent)?.Folders.Contains(name) == true)
             {
                 var full = folder.Length == 0 ? root : Path.Combine(root, folder.Replace('/', Path.DirectorySeparatorChar));
                 try
@@ -503,7 +515,7 @@ internal sealed class IndexUpdater
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException)
                 {
-                    // Deleted while we looked: as if it weren't there.
+                    // Deleted while we looked, or one the user may not list: as if it weren't there (#116).
                 }
             }
 

@@ -34,7 +34,7 @@ internal static class LayoutChecks
                 "This folder is a link to another folder (a symbolic link or junction). Folder links aren't followed, so nothing in it is read. Move the folder into the den, or copy it here.")));
         }
 
-        foreach (var folder in source.GetDirectories("").Where(n => n is "notes" or "authors"))
+        foreach (var folder in source.GetDirectories("").Where(n => n is "notes" or "authors" && source.FolderExists(n)))
         {
             diagnostics.Add(new DenDiagnostic(folder, new Diagnostic("F-LAY-3", DiagnosticSeverity.Warning, null,
                 $"{folder}/ at the den root is reserved for {(folder == "notes" ? "den notes" : "author notes")}, which aren't supported yet (#45), so what's in it is ignored. Keep notes under a universe, series, or book, in entities/notes/.")));

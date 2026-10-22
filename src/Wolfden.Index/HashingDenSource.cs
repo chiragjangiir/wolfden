@@ -9,12 +9,17 @@ namespace Wolfden.Index;
 /// each file once and serves later reads from memory, so every part of a
 /// rebuild sees the same bytes even if a file changes mid-build. A file
 /// that wasn't there or couldn't be read stays absent for the rest of the
-/// build (#112).
+/// build (#112). It also remembers what each folder it listed held, so the
+/// index can leave out of its files fingerprint a folder the build couldn't
+/// list (#116).
 /// </summary>
 internal sealed class HashingDenSource(IDenSource inner) : IDenSource
 {
     private readonly Dictionary<string, (byte[] Bytes, string Hash)> _read = new(StringComparer.Ordinal);
     private readonly HashSet<string> _missing = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, HashSet<string>> _folders = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, HashSet<string>> _files = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _absentFolders = new(StringComparer.Ordinal);
 
     /// <summary>The files read so far, by path, with their hashes.</summary>
     public IEnumerable<(string Path, string Hash)> Files => _read.Select(kv => (kv.Key, kv.Value.Hash));
@@ -53,10 +58,64 @@ internal sealed class HashingDenSource(IDenSource inner) : IDenSource
         return (byte[])file.Bytes.Clone();
     }
 
-    public IEnumerable<string> GetDirectories(string path) => inner.GetDirectories(path);
+    /// <summary>
+    /// True if the build didn't see the folder at <paramref name="path"/>:
+    /// it asked about it and found it absent (<see cref="IDenSource.FolderExists"/>),
+    /// or it listed the folder that holds it and no listing had it, because
+    /// it was deleted or couldn't be listed by then (#116). False if any
+    /// listing had it, so a folder deleted between two listings, after the
+    /// build read it, still counts, and the index looks stale rather than
+    /// current; or if its folder was never listed.
+    /// </summary>
+    public bool DidntSeeFolder(string path) => _absentFolders.Contains(path) || ListedWithout(_folders, path);
 
-    public IEnumerable<string> GetFiles(string path) =>
-        inner.GetFiles(path).Where(name => !_missing.Contains(path.Length == 0 ? name : $"{path}/{name}"));
+    /// <summary>As <see cref="DidntSeeFolder"/>, for a file: no listing of its folder had it.</summary>
+    public bool DidntSeeFile(string path) => ListedWithout(_files, path);
+
+    private static bool ListedWithout(Dictionary<string, HashSet<string>> listings, string path)
+    {
+        var slash = path.LastIndexOf('/');
+        var (folder, name) = slash < 0 ? ("", path) : (path[..slash], path[(slash + 1)..]);
+        return listings.TryGetValue(folder, out var names) && !names.Contains(name);
+    }
+
+    public bool FolderExists(string path)
+    {
+        if (inner.FolderExists(path))
+        {
+            return true;
+        }
+
+        _absentFolders.Add(path);
+        return false;
+    }
+
+    public IEnumerable<string> GetDirectories(string path)
+    {
+        var names = inner.GetDirectories(path).ToList();
+        Remember(_folders, path, names);
+        return names;
+    }
+
+    public IEnumerable<string> GetFiles(string path)
+    {
+        var names = inner.GetFiles(path).ToList();
+        Remember(_files, path, names);
+        return names.Where(name => !_missing.Contains(path.Length == 0 ? name : $"{path}/{name}")).ToList();
+    }
+
+    /// <summary>Adds a listing to every earlier one of the same folder: a name counts as seen if any listing had it.</summary>
+    private static void Remember(Dictionary<string, HashSet<string>> listings, string path, List<string> names)
+    {
+        if (listings.TryGetValue(path, out var seen))
+        {
+            seen.UnionWith(names);
+        }
+        else
+        {
+            listings[path] = names.ToHashSet(StringComparer.Ordinal);
+        }
+    }
 
     public IEnumerable<string> GetFolderLinks(string path) => inner.GetFolderLinks(path);
 }

@@ -11,7 +11,8 @@ namespace Wolfden.Index;
 /// <c>universes/</c> (<see cref="Tracks"/>). It leaves out names that start
 /// with <c>.</c> at any depth (F-LAY-2) and folder links, which the den
 /// loader skips too (<see cref="FileSystemDenSource.IsFolderLink"/>), and
-/// files that can't be read, which the loader leaves out too (#112). A
+/// files that can't be read and folders that can't be listed, which the
+/// loader leaves out too (#112, #116). A
 /// file watcher (#14) keeps one up to date as files change, so it can
 /// record the fingerprint of the files an update read without hashing the
 /// whole den again.
@@ -119,6 +120,12 @@ internal sealed class DenFileTree
     /// <summary>The hash of the file at <paramref name="path"/>, or null if the tree has no such file.</summary>
     public string? Hash(string path) => _files.GetValueOrDefault(path);
 
+    /// <summary>The paths of the files.</summary>
+    public IEnumerable<string> Files => _files.Keys;
+
+    /// <summary>The paths of the folders.</summary>
+    public IEnumerable<string> Folders => _folders;
+
     /// <summary>True if the tree has a folder at <paramref name="path"/>.</summary>
     public bool HasFolder(string path) => _folders.Contains(path);
 
@@ -159,10 +166,14 @@ internal sealed class DenFileTree
     {
         var files = new List<string>();
         var depth = path.Split('/').Length;
-        if (depth <= MaxDepth + 1 && Tracks(path))
+
+        // Walk's result only matters in a race: the watcher adds a folder
+        // after its listing found it could be listed, so it's false only if
+        // the folder was deleted, or made unlistable, in between. Then it's
+        // left out, as a full scan would leave it out (#116).
+        if (depth <= MaxDepth + 1 && Tracks(path) && Walk(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)), path + "/", depth, files))
         {
             _folders.Add(path);
-            Walk(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)), path + "/", depth, files);
         }
 
         return files;
@@ -207,12 +218,17 @@ internal sealed class DenFileTree
         }
     }
 
-    /// <summary>Adds what's in <paramref name="folder"/>: files hashed, or with <paramref name="collect"/>, their paths collected instead.</summary>
-    private void Walk(string folder, string relative, int depth, List<string>? collect)
+    /// <summary>
+    /// Adds what's in <paramref name="folder"/>: files hashed, or with
+    /// <paramref name="collect"/>, their paths collected instead. Returns
+    /// false if the folder can't be listed, so the caller leaves it out, as
+    /// the den loader does (<see cref="FileSystemDenSource.CanList"/>, #116).
+    /// </summary>
+    private bool Walk(string folder, string relative, int depth, List<string>? collect)
     {
         if (depth > MaxDepth)
         {
-            return;
+            return true;
         }
 
         List<string> files;
@@ -224,8 +240,8 @@ internal sealed class DenFileTree
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            // Deleted or made unreadable since its parent was listed: as if it were empty.
-            return;
+            // Deleted or made unlistable since its parent was listed: as if it weren't there (#116).
+            return false;
         }
 
         foreach (var file in files)
@@ -253,11 +269,13 @@ internal sealed class DenFileTree
         foreach (var sub in subs)
         {
             var name = sub.Name;
-            if (!name.StartsWith('.') && Tracks($"{relative}{name}") && !FileSystemDenSource.IsFolderLink(sub))
+            if (!name.StartsWith('.') && Tracks($"{relative}{name}") && !FileSystemDenSource.IsFolderLink(sub)
+                && Walk(sub.FullName, $"{relative}{name}/", depth + 1, collect))
             {
                 _folders.Add($"{relative}{name}");
-                Walk(sub.FullName, $"{relative}{name}/", depth + 1, collect);
             }
         }
+
+        return true;
     }
 }
