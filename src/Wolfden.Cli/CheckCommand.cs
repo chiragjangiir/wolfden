@@ -1,5 +1,7 @@
+using System.Text.Json.Serialization;
 using Wolfden.Core.Checks;
 using Wolfden.Core.Documents;
+using Wolfden.Index;
 
 namespace Wolfden.Cli;
 
@@ -19,7 +21,10 @@ namespace Wolfden.Cli;
 /// <c>--fix</c> first gives every container and entity file that loads
 /// without an <c>id</c> a new one (F-ID-2, F-ID-6, <see cref="IdFix"/>),
 /// reports each file it changed or had to skip, and then checks the den as
-/// it is after the fix. Without <c>--fix</c>, check never writes.
+/// it is after the fix. Without <c>--fix</c>, check never writes the den's
+/// own files. <c>--universe</c> brings the index (<c>.wolfden/</c>, derived
+/// data) up to date first, to compare ids with the other universes' notes
+/// without reading them.
 /// </para>
 /// <para>
 /// Exit codes: 0 when the den has no errors (warnings alone don't fail it,
@@ -43,7 +48,10 @@ internal static class CheckCommand
           <den>, --den <den>  the den's folder; by default, the current folder or
                               the nearest folder above it with a den.yaml
           --universe <key>    check only this universe's files and the den-level
-                              ones (den.yaml and packs); '*' means the whole den
+                              ones (den.yaml and packs), with ids compared
+                              against the other universes' notes through the
+                              index, which it brings up to date first; '*'
+                              means the whole den
           --fix               first add a new id to every container and entity
                               file that has none (F-ID-2); nothing else changes.
                               Files in a final book and files with errors are
@@ -94,6 +102,7 @@ internal static class CheckCommand
 
         IReadOnlyList<IdFixResult> fixes = [];
         DenCheck check;
+        string? note = null;
         try
         {
             if (line.Has("--fix"))
@@ -101,7 +110,15 @@ internal static class CheckCommand
                 fixes = IdFix.Run(path);
             }
 
-            check = universe is null ? runCheck(path) : DenCheck.Run(path, universe);
+            if (universe is null)
+            {
+                check = runCheck(path);
+            }
+            else
+            {
+                // The other universes' ids come from the index, so a duplicate across universes is found (F-ID-3).
+                (check, note) = UniverseCheck.Run(path, universe, IndexBuilder.WatcherWait);
+            }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -127,11 +144,15 @@ internal static class CheckCommand
         {
             if (line.Has("--json"))
             {
-                CliJson.Write(output, CheckReport.From(check, fixes));
+                CliJson.Write(output, CheckReport.From(check, fixes, universe, note));
             }
             else
             {
                 WriteText(check, fixes, output);
+                if (note is not null)
+                {
+                    output.WriteLine($"Note: {note}");
+                }
             }
         }
         catch (IOException e)
@@ -239,8 +260,12 @@ internal static class CheckCommand
 /// <param name="Summary">The counts.</param>
 /// <param name="Diagnostics">Every diagnostic, sorted as <see cref="DenCheck.Diagnostics"/> is.</param>
 /// <param name="Fixes">What <c>--fix</c> did, file by file, in path order; empty without <c>--fix</c>.</param>
+/// <param name="Universe">With <c>--universe</c>, the universe checked (with the den-level files); left out for the whole den.</param>
+/// <param name="Note">With <c>--universe</c>, set when the comparison of ids with other universes (F-ID-3) was skipped, and why; otherwise left out.</param>
 internal sealed record CheckReport(
-    int Version, CheckReport.DenInfo Den, CheckReport.Counts Summary, IReadOnlyList<CheckReport.Item> Diagnostics, IReadOnlyList<CheckReport.Fix> Fixes)
+    int Version, CheckReport.DenInfo Den, CheckReport.Counts Summary, IReadOnlyList<CheckReport.Item> Diagnostics, IReadOnlyList<CheckReport.Fix> Fixes,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Universe = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Note = null)
 {
     /// <summary>What was checked.</summary>
     /// <param name="Loaded">True if <c>den.yaml</c> loaded. If false, only den.yaml was checked.</param>
@@ -271,7 +296,7 @@ internal sealed record CheckReport(
     /// <param name="Message">What happened, for the writer.</param>
     internal sealed record Fix(string Path, string Rule, string Outcome, string? Id, string Message);
 
-    public static CheckReport From(DenCheck check, IReadOnlyList<IdFixResult>? fixes = null) => new(
+    public static CheckReport From(DenCheck check, IReadOnlyList<IdFixResult>? fixes = null, string? universe = null, string? note = null) => new(
         1,
         new DenInfo(check.IsLoaded, check.Structure.Format, check.IsLoaded ? check.Structure.SpoilerChecks : null, check.Catalog.Entities.Count),
         new Counts(check.ErrorCount, check.WarningCount, check.Diagnostics.Select(d => d.Path).Distinct(StringComparer.Ordinal).Count()),
@@ -280,5 +305,7 @@ internal sealed record CheckReport(
             .ToList(),
         (fixes ?? [])
             .Select(f => new Fix(f.Path, "F-ID-2", f.Outcome == IdFixOutcome.Added ? "fixed" : "skipped", f.Id, CheckCommand.FixMessage(f)))
-            .ToList());
+            .ToList(),
+        universe,
+        note);
 }

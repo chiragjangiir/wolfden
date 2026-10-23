@@ -37,6 +37,36 @@ public sealed class CheckUniverseTests : IDisposable
 
     [Fact]
     [Trait("Scenario", "SC-CLI-11")]
+    public void AnIdSharedWithAnotherUniverseIsFound()
+    {
+        // A copied into Orn, id and all, and an Orn note that links to it.
+        _den.Write("universes/orn/entities/characters/a.md", "---\nid: 01JC5CK3000000000000000011\ntype: character\nname: A\n---\n\nA copy.\n");
+        _den.Write("universes/orn/entities/characters/c.md", "---\nid: 01JC5CK3000000000000000013\ntype: character\nname: C\n---\n\nKnows [[A]].\n");
+
+        var (_, whole, _) = Cli.Run("check", _den.Root, "--json");
+        var (_, orn, _) = Cli.Run("check", _den.Root, "--universe", "orn", "--json");
+
+        using var wholeJson = System.Text.Json.JsonDocument.Parse(whole);
+        using var ornJson = System.Text.Json.JsonDocument.Parse(orn);
+        string[] Findings(System.Text.Json.JsonDocument json) => json.RootElement.GetProperty("diagnostics").EnumerateArray()
+            .Where(d => d.GetProperty("path").GetString()!.StartsWith("universes/orn/", StringComparison.Ordinal))
+            .Where(d => d.GetProperty("rule").GetString() is "F-ID-3" or "F-LINK-8")
+            .Select(d => d.GetRawText())
+            .ToArray();
+
+        var ornFindings = Findings(ornJson);
+        Assert.Contains(ornFindings, f => f.Contains("\"F-ID-3\"", StringComparison.Ordinal)
+            && f.Contains("universes/vael/entities/characters/a.md", StringComparison.Ordinal));
+        Assert.Contains(ornFindings, f => f.Contains("\"F-LINK-8\"", StringComparison.Ordinal)
+            && f.Contains("universes/orn/entities/characters/c.md", StringComparison.Ordinal));
+        Assert.Equal(Findings(wholeJson), ornFindings);
+        Assert.Equal("orn", ornJson.RootElement.GetProperty("universe").GetString());
+        Assert.False(ornJson.RootElement.TryGetProperty("note", out _));
+        Assert.False(wholeJson.RootElement.TryGetProperty("universe", out _));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-11")]
     public void ABrokenDenYamlIsStillReported()
     {
         _den.Write("den.yaml", "format: 1\nname: [broken\n");
@@ -45,6 +75,9 @@ public sealed class CheckUniverseTests : IDisposable
 
         Assert.Equal(CliApp.ExitUsage, exitCode);
         Assert.Contains("den.yaml", output, StringComparison.Ordinal);
+
+        // The comparison of ids across universes needs the index, which can't be built: it says so.
+        Assert.Contains("Note: Ids shared with notes in other universes (F-ID-3) weren't checked: den.yaml doesn't load", output, StringComparison.Ordinal);
     }
 
     [Fact]

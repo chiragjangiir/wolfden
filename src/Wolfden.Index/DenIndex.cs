@@ -92,6 +92,25 @@ public sealed class DenIndex : IDisposable
     }
 
     /// <summary>
+    /// For each id used by an entity outside the universe with key
+    /// <paramref name="universeKey"/>, the paths of those entity files, in
+    /// one query: what a check of that universe needs to find ids shared
+    /// across universes (F-ID-3) without reading the other universes' notes.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> IdsOutside(string universeKey)
+    {
+        ArgumentNullException.ThrowIfNull(universeKey);
+        var rows = (
+            from e in Context.Entities
+            join u in Context.Containers on e.UniverseId equals u.Id
+            where e.Ulid != null && u.Key != universeKey
+            select new { e.Ulid, e.Path }).ToList();
+        return rows
+            .GroupBy(r => r.Ulid!, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(r => r.Path).Order(StringComparer.Ordinal).ToList(), StringComparer.Ordinal);
+    }
+
+    /// <summary>
     /// The entities of the universe with row id <paramref name="universeId"/>
     /// that <paramref name="name"/> names, matched as a link is
     /// (<see cref="LinkMatching"/>, F-LINK-4, F-LINK-6): every match in the

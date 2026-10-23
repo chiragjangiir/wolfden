@@ -57,7 +57,8 @@ public sealed class DenCheck
     /// Checks one universe of the den at <paramref name="root"/>, or the whole
     /// den when <paramref name="universeKey"/> is null. See <see cref="Run(IDenSource, string?)"/>.
     /// </summary>
-    public static DenCheck Run(string root, string? universeKey) => Run(new FileSystemDenSource(root), universeKey);
+    public static DenCheck Run(string root, string? universeKey, IReadOnlyDictionary<string, IReadOnlyList<string>>? idsElsewhere = null) =>
+        Run(new FileSystemDenSource(root), universeKey, idsElsewhere);
 
     /// <summary>
     /// Checks one universe of a den (maintainer decision, 2026-10-23): its
@@ -65,14 +66,17 @@ public sealed class DenCheck
     /// packs, authors, and the den's own layout). The other universes' notes
     /// and outlines aren't read; their container files are, so story order
     /// and positions resolve as in the whole den, but their findings are left
-    /// out. Checks that compare files across universes can't see the others'
-    /// notes: an id shared with a note in another universe (F-ID-3) isn't
-    /// found, and a broken link that only another universe's note matches is
-    /// reported without that hint. A null <paramref name="universeKey"/>
+    /// out. <paramref name="idsElsewhere"/> gives, for each id, the paths of
+    /// the other universes' entity files that use it (from the index, say):
+    /// with it, an id shared with a note in another universe is a duplicate
+    /// (F-ID-3), and links break, exactly as in a check of the whole den.
+    /// Without it, those duplicates aren't found. Either way, a broken link
+    /// that only another universe's note matches is reported without the
+    /// hint that names that note. A null <paramref name="universeKey"/>
     /// checks the whole den, as <see cref="Run(IDenSource)"/> does. The
     /// caller checks that the universe exists.
     /// </summary>
-    public static DenCheck Run(IDenSource source, string? universeKey)
+    public static DenCheck Run(IDenSource source, string? universeKey, IReadOnlyDictionary<string, IReadOnlyList<string>>? idsElsewhere = null)
     {
         if (universeKey is null)
         {
@@ -80,17 +84,19 @@ public sealed class DenCheck
         }
 
         var scoped = new UniverseScopedSource(source, universeKey);
-        var check = Run(scoped);
+        var check = Run(scoped, idsElsewhere);
         return new DenCheck(
             check.Structure, check.Catalog, check.Links, check.Diagnostics.Where(d => !scoped.IsInOtherUniverse(d.Path)).ToList());
     }
 
     /// <summary>Checks a den. Never throws for bad content: problems come back as <see cref="Diagnostics"/>.</summary>
-    public static DenCheck Run(IDenSource source)
+    public static DenCheck Run(IDenSource source) => Run(source, idsElsewhere: null);
+
+    private static DenCheck Run(IDenSource source, IReadOnlyDictionary<string, IReadOnlyList<string>>? idsElsewhere)
     {
         ArgumentNullException.ThrowIfNull(source);
         var structure = DenStructure.Load(source);
-        var catalog = EntityCatalog.Load(structure, source);
+        var catalog = EntityCatalog.Load(structure, source, idsElsewhere);
         var links = LinkIndex.Build(catalog, source);
         var outlines = OutlineChecks.Run(structure, source, out var rows);
         var diagnostics = structure.Diagnostics

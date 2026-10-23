@@ -77,14 +77,28 @@ public sealed partial class EntityCatalog
     public static EntityCatalog Load(IDenSource source) => Load(DenStructure.Load(source), source);
 
     /// <summary>Loads the entities of a den whose structure is already loaded.</summary>
-    public static EntityCatalog Load(DenStructure structure, IDenSource source)
+    public static EntityCatalog Load(DenStructure structure, IDenSource source) => Load(structure, source, null);
+
+    /// <summary>
+    /// Loads the entities of a den whose structure is already loaded, when
+    /// <paramref name="source"/> shows only part of it (a check of one
+    /// universe): <paramref name="idsElsewhere"/> gives, for each id, the
+    /// paths of the entity files outside that part that use it. They take
+    /// part in F-ID-3 as if they'd been read, so an id shared with a file
+    /// outside is a duplicate here too, with the same warning, and links
+    /// don't resolve to it, as in a load of the whole den.
+    /// </summary>
+    public static EntityCatalog Load(DenStructure structure, IDenSource source, IReadOnlyDictionary<string, IReadOnlyList<string>>? idsElsewhere)
     {
         ArgumentNullException.ThrowIfNull(structure);
         ArgumentNullException.ThrowIfNull(source);
-        var catalog = new EntityCatalog(structure);
+        var catalog = new EntityCatalog(structure) { _idsElsewhere = idsElsewhere ?? new Dictionary<string, IReadOnlyList<string>>() };
         catalog.LoadEntities(source);
         return catalog;
     }
+
+    /// <summary>For each id, the paths of entity files outside what this catalog read that use it (<see cref="Load(DenStructure, IDenSource, IReadOnlyDictionary{string, IReadOnlyList{string}}?)"/>).</summary>
+    private IReadOnlyDictionary<string, IReadOnlyList<string>> _idsElsewhere = new Dictionary<string, IReadOnlyList<string>>();
 
     /// <summary>The entities of <paramref name="universe"/>, at every scope.</summary>
     public IEnumerable<CatalogEntity> InUniverse(Universe universe) => _entities.Where(e => e.Universe == universe);
@@ -125,7 +139,7 @@ public sealed partial class EntityCatalog
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(changedPaths);
-        var catalog = new EntityCatalog(Structure);
+        var catalog = new EntityCatalog(Structure) { _idsElsewhere = _idsElsewhere };
         foreach (var (path, result) in _files)
         {
             catalog._files[path] = result;
@@ -281,7 +295,11 @@ public sealed partial class EntityCatalog
     private void FindDuplicateIds(List<Container> containers)
     {
         var owners = _entities.Where(e => e.Id is not null).Select(e => (Id: e.Id!, e.Path, Entity: (CatalogEntity?)e))
-            .Concat(containers.Where(c => c.Id is not null).Select(c => (Id: c.Id!, Path: c.FilePath, Entity: (CatalogEntity?)null)));
+            .Concat(containers.Where(c => c.Id is not null).Select(c => (Id: c.Id!, Path: c.FilePath, Entity: (CatalogEntity?)null)))
+            .ToList();
+        var loaded = owners.Select(o => o.Path).ToHashSet(StringComparer.Ordinal);
+        owners.AddRange(_idsElsewhere
+            .SelectMany(pair => pair.Value.Where(path => !loaded.Contains(path)).Select(path => (Id: pair.Key, Path: path, Entity: (CatalogEntity?)null))));
         foreach (var group in owners.GroupBy(o => o.Id, StringComparer.Ordinal).Where(g => g.Count() > 1))
         {
             var paths = group.Select(o => o.Path).Order(StringComparer.Ordinal).ToList();
