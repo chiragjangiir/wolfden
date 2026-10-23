@@ -481,12 +481,19 @@ They share one surface:
   (`den.yaml`, packs, authors, and the den's layout), and of the other
   universes only their container files, so positions resolve as in the
   whole den; their notes and outlines aren't read, and their findings
-  are left out. Two checks compare notes across universes and can't see
-  the others' notes in a scoped check: an id shared with a note in
-  another universe (F-ID-3) isn't found, and a broken link that only
-  another universe's note matches is still reported, without the hint
-  that names that note. A whole-den check reports both. `--fix` works on
-  the whole den, so it doesn't go with `--universe`.
+  are left out. Ids are still compared across universes (maintainer
+  decision, 2026-10-23): the ids the other universes' notes use come
+  from the index, in one query, after the index is brought up to date
+  (hashing the whole den, which costs more than the check of one
+  universe, but a stale index could miss a duplicate). An id shared with
+  a note in another universe is a duplicate in the scoped check as in
+  the whole den: the same F-ID-3 warning, naming the other copy, and the
+  same broken links. If the index can't be built, say because
+  `den.yaml` doesn't load, the rest of the check runs and a note says
+  the id comparison was skipped. The one remaining difference from a
+  whole-den check: a broken link that only another universe's note
+  matches is reported without the hint that names that note. `--fix`
+  works on the whole den, so it doesn't go with `--universe`.
 - **Output.** Text by default. `check` prints one line per diagnostic,
   `path:line: severity rule: message`, with paths relative to the den
   root, then a summary. `query` prints each entity as a heading, its
@@ -579,7 +586,9 @@ and `wolfden check` do:
   reads every universe, in `search` and `list_entities` only, never with
   a position or a series or book filter; elsewhere it's `bad_argument`.
   `check` checks the whole den unless given a universe, and `"*"` means
-  the whole den. `wolfden mcp --universe <key>` pins the session: every
+  the whole den; a scoped check compares ids across universes through
+  the index, as in §7, and its `note` says when it couldn't.
+  `wolfden mcp --universe <key>` pins the session (`*` can't be pinned): every
   call reads that universe (`check` checks it and the den-level files),
   a call that names another universe or `"*"` gets `bad_argument`, and
   the server instructions say so.

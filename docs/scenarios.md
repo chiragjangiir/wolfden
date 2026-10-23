@@ -947,13 +947,18 @@ The writer's den has two universes, and they're working in `vael`. They
 run `wolfden check --universe vael`.
 
 - It reports `vael`'s findings and the den-level ones (`den.yaml`, packs),
-  and nothing from `orn`, whose notes it doesn't read. A broken
-  `den.yaml` is still reported. Without `--universe`, or with
+  and nothing from `orn`, whose notes it doesn't read. A note copied
+  from `vael` into `orn` with its id is still a duplicate (F-ID-3, naming
+  the `vael` copy), and links to it break, as in a whole-den check: the
+  other universes' ids come from the index. A broken `den.yaml` is still
+  reported, with a note that ids weren't compared across universes,
+  since the index can't be built. Without `--universe`, or with
   `--universe '*'`, it checks the whole den. A universe the den doesn't
   have, or `--fix` with `--universe`, exits 2.
 
-Spec: F-DEN-1, design.md §7 (maintainer decision, 2026-10-23). Covered by:
+Spec: F-DEN-1, F-ID-3, design.md §7 (maintainer decision, 2026-10-23). Covered by:
 `CheckUniverseTests.WithAUniverseOnlyItsFindingsAreReported`,
+`CheckUniverseTests.AnIdSharedWithAnotherUniverseIsFound`,
 `CheckUniverseTests.ABrokenDenYamlIsStillReported`,
 `CheckUniverseTests.AnUnknownUniverseOrFixWithAUniverseExitsTwo`.
 
@@ -1330,12 +1335,18 @@ Spec: design.md §7, §8 (maintainer decision, 2026-10-23). Covered by:
 The assistant calls `check` with `universe: "drift"`.
 
 - It gets `drift`'s findings and the den-level ones, and none from
-  `starfall`, whose notes aren't read. A broken pack or `den.yaml` is
-  still reported. Without a universe, or with `"*"`, it checks the whole
-  den, whose findings are those of each universe plus the den-level
-  ones. `path` still narrows the list.
+  `starfall`, whose notes aren't read. Mara Voss copied from `starfall`
+  into `drift`, id and all, is still a duplicate (F-ID-3) and links to
+  her still break, as in the whole den; only the hint on a broken link
+  that names a match in another universe is missing. A broken pack or
+  `den.yaml` is still reported, and `note` says when ids couldn't be
+  compared across universes. Without a universe, or with `"*"`, it
+  checks the whole den, whose findings are those of each universe plus
+  the den-level ones, each once. `path` still narrows the list.
 
-Spec: F-DEN-1, design.md §7, §8 (maintainer decision, 2026-10-23). Covered by:
+Spec: F-DEN-1, F-ID-3, design.md §7, §8 (maintainer decision, 2026-10-23). Covered by:
 `UniverseChoiceTests.CheckOfAUniverseLeavesOutTheOthers`,
 `UniverseChoiceTests.TheWholeDenIsTheUnionOfItsUniversesAndTheDenLevel`,
+`UniverseChoiceTests.ACheckOfOneUniverseFindsAnIdSharedWithAnotherUniverse`,
+`UniverseChoiceTests.WhenTheIndexCantBeBuiltTheScopedCheckSaysTheIdComparisonWasSkipped`,
 `UniverseChoiceTests.ABrokenPackOrDenYamlIsReportedWhenAUniverseIsGiven`.
