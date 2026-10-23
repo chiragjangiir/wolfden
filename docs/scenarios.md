@@ -1408,17 +1408,27 @@ Series `long-dark` has `mara-voss.md`. Wolfden is asked to save
 - The save is refused on every OS, naming the file or folder that's
   already there. On Windows and macOS the two names are one file, so the
   save would overwrite Mara's note; on Linux the den would no longer
-  clone onto those systems. A Windows short name such as `CHARAC~1`, a
-  name that differs only in Unicode form (`café` typed two ways), and a
-  name with an invisible character such as a zero-width space are
-  refused the same way.
+  clone onto those systems. A Windows short name such as `CHARAC~1`, and
+  a name that differs only in Unicode form (`café` typed two ways), are
+  refused the same way. So is a new name that an invisible character
+  disguises: a zero-width space, a byte order mark, or a text-direction
+  control anywhere in it, an invisible character at its start or end, or
+  one that looks empty or hidden without them. Emoji (a red heart with
+  its variation selector, a family joined with zero-width joiners) and
+  the zero-width non-joiner of Persian and Indic spelling are fine, and a
+  file already named with any of these, made outside Wolfden, can still
+  be saved, moved, and deleted.
 
 Spec: design.md §6. Covered by:
 `DenStoreTests.ANameThatDiffersOnlyInCaseIsRefusedOnEveryOs`,
 `DenStoreTests.AWindowsShortNameIsAnotherNameAndIsRefused`,
 `DenStoreTests.ANameInAnotherUnicodeFormIsRefused`,
 `DenStoreTests.ACaseOnlyRenameOntoAnotherFileWithThatNameIsRefused`,
-`DenPathTests.ANameWithAnInvisibleCharacterIsRefused`.
+`DenPathTests.ANewNameThatInvisibleCharactersDisguiseIsRefused`,
+`DenPathTests.EmojiAndScriptsThatNeedJoinersAreFine`,
+`DenStoreTests.ANewNameDisguisedByAnInvisibleCharacterIsRefused`,
+`DenStoreTests.ANoteNamedWithEmojiOrAJoinerCanBeMadeMovedAndDeleted`,
+`DenStoreTests.AFileAlreadyNamedWithAnInvisibleCharacterCanStillBeSavedMovedAndDeleted`.
 
 ### SC-STORE-4. Wolfden is asked to change a built-in pack
 

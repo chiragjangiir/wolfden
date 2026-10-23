@@ -106,7 +106,7 @@ public sealed class FileSystemDenStore : IDenStore, IDenChangeFeed
     {
         ArgumentNullException.ThrowIfNull(bytes);
         DenPaths.CheckWritable(path);
-        switch (Lookup(path))
+        switch (Lookup(path, out var missingFrom))
         {
             case Entry.Folder or Entry.FolderLink:
                 throw new DenStoreException(DenStoreError.NotAFile, path, $"'{path}' can't be written: it's a folder.");
@@ -114,6 +114,9 @@ public sealed class FileSystemDenStore : IDenStore, IDenChangeFeed
                 throw AlreadyExists(path);
             case Entry.Missing when mode == DenWriteMode.Replace:
                 throw NotFound(path, "file");
+            case Entry.Missing:
+                CheckNewNames(path, missingFrom);
+                break;
         }
 
         var full = Full(path);
@@ -348,9 +351,18 @@ public sealed class FileSystemDenStore : IDenStore, IDenChangeFeed
     /// except, as the last name, <paramref name="renaming"/>: the name of
     /// the file or folder being renamed to it.
     /// </summary>
-    private Entry Lookup(string path, string? renaming = null)
+    private Entry Lookup(string path, string? renaming = null) => Lookup(path, out _, renaming);
+
+    /// <summary>
+    /// <see cref="Lookup(string, string?)"/>, also giving in
+    /// <paramref name="missingFrom"/> the index of the first name on the
+    /// path that isn't there, so would be made: the number of names if
+    /// they're all there.
+    /// </summary>
+    private Entry Lookup(string path, out int missingFrom, string? renaming = null)
     {
         var names = path.Split('/');
+        missingFrom = names.Length;
         var current = Root;
         var walked = "";
         for (var i = 0; i < names.Length; i++)
@@ -378,6 +390,7 @@ public sealed class FileSystemDenStore : IDenStore, IDenChangeFeed
                         $"'{path}' can't be written: '{walked}' is another name for a file or folder that's there under a different name.");
                 }
 
+                missingFrom = i;
                 return Entry.Missing;
             }
 
@@ -414,9 +427,27 @@ public sealed class FileSystemDenStore : IDenStore, IDenChangeFeed
     private void CheckMoveTarget(string from, string to)
     {
         var renaming = IsCaseOnlyRename(from, to) ? DenPaths.Name(from) : null;
-        if (Lookup(to, renaming) is not Entry.Missing)
+        if (Lookup(to, out var missingFrom, renaming) is not Entry.Missing)
         {
             throw AlreadyExists(to);
+        }
+
+        CheckNewNames(to, missingFrom);
+    }
+
+    /// <summary>
+    /// Checks the names of <paramref name="path"/> from index
+    /// <paramref name="from"/> on, the ones a write would make, for
+    /// invisible characters (<see cref="DenPaths.CheckNewName"/>). Names
+    /// that are there already pass, so a file named so outside Wolfden can
+    /// still be saved, moved, and deleted.
+    /// </summary>
+    private static void CheckNewNames(string path, int from)
+    {
+        var names = path.Split('/');
+        for (var i = from; i < names.Length; i++)
+        {
+            DenPaths.CheckNewName(path, names[i]);
         }
     }
 
@@ -458,8 +489,14 @@ public sealed class FileSystemDenStore : IDenStore, IDenChangeFeed
             }
             catch (Exception back) when (back is IOException or UnauthorizedAccessException)
             {
-                throw new DenStoreException(DenStoreError.InUse, from,
-                    $"'{from}' couldn't be renamed ({e.Message.TrimEnd('.')}), nor put back: it's now the hidden folder '{Path.GetFileName(step)}' beside it. Rename that folder back to '{Path.GetFileName(source)}'.", back);
+                var message = $"'{from}' couldn't be renamed ({e.Message.TrimEnd('.')}), nor put back ({back.Message.TrimEnd('.')}): "
+                    + $"it's now the folder '{Path.GetFileName(step)}' beside it, which is hidden, so the den doesn't show it. Rename that folder back to '{Path.GetFileName(source)}'.";
+                if (back is DenStoreException stuck)
+                {
+                    throw new DenStoreException(stuck.Error, from, message, back);
+                }
+
+                throw new IOException(message, back);
             }
 
             throw;
@@ -553,13 +590,45 @@ public sealed class FileSystemDenStore : IDenStore, IDenChangeFeed
             }
             catch (UnauthorizedAccessException e)
             {
-                var why = IsReadOnlyFile(full) ? "the file is read-only" : "access is denied, or another program has it open";
+                // Windows denies replacing a file another program has open: ask the file which it is.
+                if (!IsReadOnlyFile(full) && IsHeldOpen(full))
+                {
+                    throw InUse(path, what, e);
+                }
+
+                var why = IsReadOnlyFile(full) ? "the file is read-only" : "access is denied";
                 throw new DenStoreException(DenStoreError.AccessDenied, path, $"'{path}' can't be {what}: {why}.", e);
             }
             catch (IOException e) when (e is not DenStoreException && IsSharingViolation(e))
             {
-                throw new DenStoreException(DenStoreError.InUse, path, $"'{path}' can't be {what}: another program has it open. Close it there and try again.", e);
+                throw InUse(path, what, e);
             }
+        }
+    }
+
+    private static DenStoreException InUse(string path, string what, Exception inner) =>
+        new(DenStoreError.InUse, path, $"'{path}' can't be {what}: another program has it open. Close it there and try again.", inner);
+
+    /// <summary>True if another program has the file at <paramref name="full"/> open, so it can't be opened for this process alone.</summary>
+    private static bool IsHeldOpen(string full)
+    {
+        try
+        {
+            if (!File.Exists(full))
+            {
+                return false;
+            }
+
+            using var probe = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.None);
+            return false;
+        }
+        catch (IOException e) when (IsSharingViolation(e))
+        {
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 

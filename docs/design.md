@@ -343,9 +343,13 @@ The den store and the history provider are interfaces in `Wolfden.Core`
   `..`, nothing hidden (so never `.git/` or `.wolfden/`), never through a
   folder link, and only names that are the same file on every OS (no
   `\`, `:`, or other characters Windows doesn't allow, no trailing space
-  or dot, no device names like `CON`, no invisible characters). A name
-  that differs only in case or Unicode form from one that's there is
-  refused too, except in a rename of that very file or folder. Refusals
+  or dot, no device names like `CON`). A name being made mustn't be
+  disguised by invisible characters (a zero-width space, a byte order
+  mark, a direction control, or one at either end), though emoji and
+  the joiners some scripts need are fine; existing names aren't checked
+  for these. A name that differs only in case or Unicode form from one
+  that's there is refused too, except in a rename of that very file or
+  folder. Refusals
   are a `DenStoreException` with a reason code for the API and MCP tools
   to map, including a read-only file and one another program has open.
   The check and the write aren't one step, so another program can change

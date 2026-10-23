@@ -29,12 +29,12 @@ public static class DenPaths
     /// <item>isn't empty, <c>.</c>, or <c>..</c>, so the path can't leave the den;</item>
     /// <item>doesn't start with <c>.</c>: hidden files aren't part of the den (F-LAY-2), and <c>.git/</c> and <c>.wolfden/</c> are never written through the store;</item>
     /// <item>has no <c>\</c>, which is a separator on Windows but a letter on Linux, and none of <c>&lt; &gt; : " | ? *</c> or control characters, which Windows doesn't allow (a <c>:</c> would also name a drive or an NTFS stream);</item>
-    /// <item>is valid text with no invisible characters (Unicode default-ignorable code points such as a zero-width space or a byte order mark), so names that look alike are never different files;</item>
     /// <item>doesn't end with a space or <c>.</c>, which Windows drops, so <c>mara.md.</c> would be <c>mara.md</c>;</item>
     /// <item>isn't a Windows device name such as <c>CON</c> or <c>nul.md</c>.</item>
     /// </list>
     /// These rules hold on every OS, so a den stays the same files wherever
-    /// it's cloned or synced.
+    /// it's cloned or synced. A name that's being made is also checked for
+    /// invisible characters (<see cref="NewNameProblem"/>).
     /// </summary>
     public static string? Problem(string? path)
     {
@@ -71,6 +71,71 @@ public static class DenPaths
         if (Problem(path) is { } problem)
         {
             throw new DenStoreException(DenStoreError.InvalidPath, path, $"'{path}' can't be written: {problem}.");
+        }
+    }
+
+    /// <summary>
+    /// Why <paramref name="name"/> can't be the name of a new file or
+    /// folder, or null if it can. On top of <see cref="Problem"/>, a new
+    /// name must be valid text, and invisible characters (Unicode
+    /// default-ignorable code points) mustn't hide what it is:
+    /// <list type="bullet">
+    /// <item>without them it isn't empty and doesn't start with <c>.</c>, so it doesn't look hidden when it isn't, or the other way round;</item>
+    /// <item>it has no byte order mark, zero-width space, or text-direction control, which only disguise a name;</item>
+    /// <item>it doesn't start with one, or end with one other than a variation selector or an emoji tag.</item>
+    /// </list>
+    /// Others are kept, as git keeps them: the zero-width joiner of an emoji
+    /// sequence (a family emoji, U+200D), the zero-width non-joiner that
+    /// Persian and Indic spelling needs (U+200C), and the variation selector of a red heart (U+FE0F).
+    /// Only names being made are checked, so a file already named so, made
+    /// outside Wolfden, can still be saved, moved, and deleted.
+    /// </summary>
+    public static string? NewNameProblem(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        var runes = new List<int>();
+        for (var i = 0; i < name.Length; i++)
+        {
+            if (Rune.DecodeFromUtf16(name.AsSpan(i), out var rune, out var used) != OperationStatus.Done)
+            {
+                return $"'{Printable(name)}' isn't valid text (a lone surrogate)";
+            }
+
+            runes.Add(rune.Value);
+            i += used - 1;
+        }
+
+        var visible = runes.Where(r => !IsDefaultIgnorable(r)).ToList();
+        if (visible.Count == 0 || visible[0] == '.')
+        {
+            return $"'{Printable(name)}' looks {(visible.Count == 0 ? "empty" : "hidden")} once its invisible characters are left out";
+        }
+
+        if (runes.FirstOrDefault(IsDisguise) is var disguise and not 0)
+        {
+            return $"'{Printable(name)}' has an invisible character (U+{disguise:X4}) that only disguises a name";
+        }
+
+        if (IsDefaultIgnorable(runes[0]) || (IsDefaultIgnorable(runes[^1]) && !IsEmojiPart(runes[^1])))
+        {
+            var edge = IsDefaultIgnorable(runes[0]) ? runes[0] : runes[^1];
+            return $"'{Printable(name)}' starts or ends with an invisible character (U+{edge:X4})";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Throws a <see cref="DenStoreException"/> (<see cref="DenStoreError.InvalidPath"/>)
+    /// if <paramref name="name"/>, a name in <paramref name="path"/> that's
+    /// being made, can't be (<see cref="NewNameProblem"/>).
+    /// </summary>
+    public static void CheckNewName(string path, string name)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        if (NewNameProblem(name) is { } problem)
+        {
+            throw new DenStoreException(DenStoreError.InvalidPath, path, $"'{Printable(path)}' can't be written: {problem}.");
         }
     }
 
@@ -128,21 +193,6 @@ public static class DenPaths
             }
         }
 
-        for (var i = 0; i < name.Length; i++)
-        {
-            if (Rune.DecodeFromUtf16(name.AsSpan(i), out var rune, out var used) != OperationStatus.Done)
-            {
-                return $"'{Printable(name)}' isn't valid text (a lone surrogate)";
-            }
-
-            if (IsDefaultIgnorable(rune.Value))
-            {
-                return $"'{Printable(name)}' has an invisible character (U+{rune.Value:X4}), so two names that look the same would be different files";
-            }
-
-            i += used - 1;
-        }
-
         if (name.EndsWith(' ') || name.EndsWith('.'))
         {
             return $"'{name}' ends with a space or '.', which Windows drops from a name";
@@ -159,6 +209,18 @@ public static class DenPaths
 
     private static string Printable(string name) =>
         string.Concat(name.Select(c => c < ' ' || c == '\u007f' || char.IsSurrogate(c) || IsDefaultIgnorable(c) ? $"\\u{(int)c:x4}" : c.ToString()));
+
+    /// <summary>A byte order mark, a zero-width space, or a text-direction control: invisible characters with no use in a name but to disguise it.</summary>
+    private static bool IsDisguise(int c) =>
+        c is 0xFEFF or 0x200B or 0x200E or 0x200F or 0x061C
+        || c is >= 0x202A and <= 0x202E
+        || c is >= 0x2066 and <= 0x2069;
+
+    /// <summary>A variation selector or an emoji tag character, which end emoji such as a red heart or a flag.</summary>
+    private static bool IsEmojiPart(int c) =>
+        c is >= 0xFE00 and <= 0xFE0F
+        || c is >= 0xE0020 and <= 0xE007F
+        || c is >= 0xE0100 and <= 0xE01EF;
 
     /// <summary>
     /// True for a Unicode default-ignorable code point (DerivedCoreProperties,

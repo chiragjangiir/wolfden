@@ -473,6 +473,102 @@ public sealed class DenStoreTests : IDisposable
     }
 
     [Fact]
+    public void WhenARenameCantBePutBackTheErrorSaysWhereTheHiddenFolderIs()
+    {
+        const string books = "universes/starfall/series/long-dark/books";
+        var moves = 0;
+        var store = new FileSystemDenStore(_root)
+        {
+            OneNameForAllCases = true,
+            DirectoryMove = (from, to) =>
+            {
+                switch (++moves)
+                {
+                    case 1:
+                        throw new IOException("Source and destination path must be different.");
+                    case 2:
+                        Directory.Move(from, to);
+                        break;
+                    case 3:
+                        throw new IOException("The disk is full.");
+                    default:
+                        throw new UnauthorizedAccessException("Access to the path is denied.");
+                }
+            },
+        };
+
+        var e = Assert.Throws<DenStoreException>(() => store.MoveFolder($"{books}/ember", $"{books}/Ember"));
+
+        // The code is the rollback's own, not a made-up one.
+        Assert.Equal(DenStoreError.AccessDenied, e.Error);
+        var hidden = Assert.Single(Directory.EnumerateDirectories(Full(books)).Select(Path.GetFileName), n => n!.StartsWith(FileSystemDenStore.TempPrefix, StringComparison.Ordinal));
+        Assert.Contains($"it's now the folder '{hidden}' beside it, which is hidden, so the den doesn't show it", e.Message, StringComparison.Ordinal);
+        Assert.Contains("Rename that folder back to 'ember'", e.Message, StringComparison.Ordinal);
+    }
+
+    // ----- names with invisible characters -----
+
+    public static TheoryData<string> RealNames() => new()
+    {
+        "\u2764\uFE0F-notes.md",
+        "family-\U0001F468\u200D\U0001F469\u200D\U0001F467.md",
+        "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645.md",
+    };
+
+    [Theory]
+    [MemberData(nameof(RealNames))]
+    [Trait("Scenario", "SC-STORE-3")]
+    public void ANoteNamedWithEmojiOrAJoinerCanBeMadeMovedAndDeleted(string name)
+    {
+        var store = Store();
+        var path = $"{Characters}/{name}";
+        var folder = $"universes/starfall/entities/{name.Replace(".md", "", StringComparison.Ordinal)}";
+
+        store.WriteFile(path, Bytes("---\nname: x\n---\n"), DenWriteMode.Create);
+        store.MoveFile(path, $"{folder}/{name}");
+        store.MoveFolder(folder, $"{folder}-2");
+        store.DeleteFile($"{folder}-2/{name}");
+
+        Assert.False(store.FileExists($"{folder}-2/{name}"));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-STORE-3")]
+    public void ANewNameDisguisedByAnInvisibleCharacterIsRefused()
+    {
+        var store = Store();
+        const string disguised = $"{Characters}/mara\u200B-voss.md";
+
+        var create = Assert.Throws<DenStoreException>(() => store.WriteFile(disguised, Bytes("x")));
+        var move = Assert.Throws<DenStoreException>(() => store.MoveFile(Mara, disguised));
+        var folder = Assert.Throws<DenStoreException>(() => store.WriteFile("universes/starfall/entities/\u202Eships/x.md", Bytes("x")));
+
+        Assert.All([create, move, folder], e => Assert.Equal(DenStoreError.InvalidPath, e.Error));
+        Assert.Contains("U+200B", create.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(Full(disguised)));
+        Assert.True(File.Exists(Full(Mara)));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-STORE-3")]
+    public void AFileAlreadyNamedWithAnInvisibleCharacterCanStillBeSavedMovedAndDeleted()
+    {
+        // Made outside Wolfden: Wolfden won't make such a name, but doesn't strand one.
+        const string odd = $"{Characters}/mara\u200B-voss-copy.md";
+        File.WriteAllText(Full(odd), "---\nname: Copy\n---\n");
+        var store = Store();
+
+        store.WriteFile(odd, Bytes("---\nname: Saved\n---\n"), DenWriteMode.Replace);
+        Assert.Equal("---\nname: Saved\n---\n", File.ReadAllText(Full(odd)));
+        store.MoveFile(odd, $"{Characters}/mara-voss-copy.md");
+        File.WriteAllText(Full(odd), "again");
+        store.DeleteFile(odd);
+
+        Assert.False(File.Exists(Full(odd)));
+        Assert.True(store.FileExists($"{Characters}/mara-voss-copy.md"));
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-STORE-5")]
     public void ACaseOnlyFolderRenameGoesThroughAHiddenNameWhenThePlainMoveIsRefused()
     {
@@ -520,12 +616,12 @@ public sealed class DenStoreTests : IDisposable
     public void ANameInAnotherUnicodeFormIsRefused()
     {
         // "Café" with é as one character (NFC), and with e and a combining accent (NFD).
-        var nfc = "café.md";
-        var nfd = "café.md";
+        var nfc = "caf\u00E9.md";
+        var nfd = "cafe\u0301.md";
         var store = Store();
-        store.WriteFile($"{Characters}/{nfc}", Bytes("---\nname: Café\n---\n"), DenWriteMode.Create);
+        store.WriteFile($"{Characters}/{nfc}", Bytes("---\nname: Caf\u00E9\n---\n"), DenWriteMode.Create);
 
-        var e = Assert.Throws<DenStoreException>(() => store.WriteFile($"{Characters}/{nfd}", Bytes("another café")));
+        var e = Assert.Throws<DenStoreException>(() => store.WriteFile($"{Characters}/{nfd}", Bytes("another caf\u00E9")));
 
         Assert.Equal(DenStoreError.CaseConflict, e.Error);
         Assert.Contains("Unicode form", e.Message, StringComparison.Ordinal);
@@ -568,10 +664,13 @@ public sealed class DenStoreTests : IDisposable
         var store = Store();
         using var held = new FileStream(Full(Mara), FileMode.Open, FileAccess.Read, FileShare.None);
 
-        var e = Assert.Throws<DenStoreException>(() => store.WriteFile(Mara, Bytes("x"), DenWriteMode.Replace));
+        var write = Assert.Throws<DenStoreException>(() => store.WriteFile(Mara, Bytes("x"), DenWriteMode.Replace));
+        var delete = Assert.Throws<DenStoreException>(() => store.DeleteFile(Mara));
+        var move = Assert.Throws<DenStoreException>(() => store.MoveFile(Mara, $"{Characters}/mara.md"));
 
-        Assert.True(e.Error is DenStoreError.InUse or DenStoreError.AccessDenied, e.Error.ToString());
-        Assert.NotNull(e.InnerException);
+        Assert.All([write, delete, move], e => Assert.Equal(DenStoreError.InUse, e.Error));
+        Assert.Equal($"'{Mara}' can't be written: another program has it open. Close it there and try again.", write.Message);
+        Assert.IsType<UnauthorizedAccessException>(write.InnerException);
     }
 
     [Theory]
