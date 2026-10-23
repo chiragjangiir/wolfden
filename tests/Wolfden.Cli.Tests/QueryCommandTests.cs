@@ -258,6 +258,21 @@ public sealed class QueryCommandTests : IDisposable
     }
 
     [Fact]
+    public void TypeNarrowsTheEntitiesThatEntityMatchesAmong()
+    {
+        // A place named "Mina" outranks Mina Harker's alias as a link target,
+        // but asked for a character, the place can't take the match.
+        _den.Write(
+            "universes/dracula/entities/locations/mina.md",
+            "---\ntype: location\nname: Mina\nstatus: canon\n---\n\nA village.\n");
+
+        var (exitCode, output, _) = Query("--entity", "Mina", "--type", "character", "--brief");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.StartsWith("Canon of universe 'dracula' at the end of the story: 1 entity.\n- Mina Harker (character", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AMixedCaseSlugMatchesAsItsLinkDoes()
     {
         // [[Count-Dracula]] resolves, so --entity Count-Dracula must too.

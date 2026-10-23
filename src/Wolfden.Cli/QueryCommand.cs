@@ -177,8 +177,9 @@ internal static partial class QueryCommand
             return null;
         }
 
-        // The whole view, before it's narrowed: --entity matches among what the reader has met.
-        var met = view.Entities.Select(e => e.Path).ToHashSet(StringComparer.Ordinal);
+        // The view before --pinned narrows it: --entity matches among what the
+        // reader has met (of the --type asked for, below).
+        var met = view.Entities.ToList();
         if (line.Has("--pinned"))
         {
             view = view.Pinned();
@@ -200,15 +201,18 @@ internal static partial class QueryCommand
             }
 
             view = view with { Entities = view.Entities.Where(e => types.Contains(e.Type)).ToList() };
+            met = met.Where(e => types.Contains(e.Type)).ToList();
         }
 
         if (line.Value("--entity") is { } name)
         {
-            // Matched among the entities in the view, so one the reader meets
-            // later can't shadow or tie with one they've met. Only if none
-            // matches is the whole universe asked, to tell "not met yet"
-            // (an empty view) from "no such entity" (an error).
-            var paths = index.MatchEntities(universeId, name, met).Select(e => e.Path).ToHashSet(StringComparer.Ordinal);
+            // Matched among the entities in the view, of the types asked for,
+            // so one the reader meets later, or one of another type, can't
+            // shadow or tie with the one wanted. Only if none matches is the
+            // whole universe asked, to tell "not met yet" (an empty view) from
+            // "no such entity" (an error).
+            var among = met.Select(e => e.Path).ToHashSet(StringComparer.Ordinal);
+            var paths = index.MatchEntities(universeId, name, among).Select(e => e.Path).ToHashSet(StringComparer.Ordinal);
             if (paths.Count == 0 && index.MatchEntities(universeId, name).Count == 0)
             {
                 problem = $"universe '{universe}' has no entity '{name}' (matched as a link is: by id, file name, name, or alias).";
