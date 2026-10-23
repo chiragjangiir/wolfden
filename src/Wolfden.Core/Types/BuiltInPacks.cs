@@ -10,9 +10,11 @@ namespace Wolfden.Core.Types;
 /// The built-in packs (types.md F-PACK-4), embedded in this assembly at
 /// build time from the repository's <c>packs/</c> folder, which stays the
 /// single source of truth. Paths are relative to <c>packs/</c>, such as
-/// <c>core/types/thread.yaml</c>.
+/// <c>core/types/thread.yaml</c>. They're a read-only den store: every
+/// write is refused with <see cref="DenStoreError.ReadOnly"/>, since they
+/// ship with Wolfden, and a den changes their types only from its own packs.
 /// </summary>
-public sealed class BuiltInPacks : IDenSource
+public sealed class BuiltInPacks : IDenStore
 {
     /// <summary>The prefix of the embedded resources' logical names (see Wolfden.Core.csproj).</summary>
     internal const string ResourcePrefix = "Wolfden/packs/";
@@ -81,6 +83,27 @@ public sealed class BuiltInPacks : IDenSource
             .Order(StringComparer.Ordinal)
             .ToList();
     }
+
+    /// <inheritdoc />
+    public bool IsReadOnly => true;
+
+    /// <inheritdoc />
+    public void WriteFile(string path, byte[] bytes, DenWriteMode mode = DenWriteMode.CreateOrReplace) => throw Refused(path);
+
+    /// <inheritdoc />
+    public void DeleteFile(string path) => throw Refused(path);
+
+    /// <inheritdoc />
+    public void MoveFile(string from, string to) => throw Refused(from);
+
+    /// <inheritdoc />
+    public void MoveFolder(string from, string to) => throw Refused(from);
+
+    /// <inheritdoc />
+    public void DeleteFolder(string path) => throw Refused(path);
+
+    private static DenStoreException Refused(string path) =>
+        DenStoreException.ReadOnly(path, "the built-in packs ship with Wolfden and can't be changed. To change a built-in type, extend it from a pack in the den's packs/ folder (types.md)");
 
     /// <summary>Built-in packs made of the given files, for tests of packs that don't ship yet.</summary>
     internal static BuiltInPacks FromFiles(IReadOnlyDictionary<string, string> files) =>

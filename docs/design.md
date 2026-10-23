@@ -332,9 +332,53 @@ where a den is stored and how its history is kept:
 - **No backend:** a den without one still loads, validates, and indexes.
   History features say that history isn't available, instead of erroring.
 
-The den store and the history provider are interfaces that arrive in M2
-(#121). `IDenSource`, which the core already reads dens through, is the
-read half of the den store.
+The den store and the history provider are interfaces in `Wolfden.Core`
+(#121; v0 behaviour, not a recorded decision):
+
+- **Den store.** `IDenSource` is the read half, and everything that only
+  reads a den takes it. `IDenStore` adds the write half: write a file
+  (create, replace, or either), delete a file, move or rename a file or
+  folder, and delete an empty folder. Paths are den-relative with `/`.
+  Every write checks its paths first (`DenPaths`): nothing absolute, no
+  `..`, nothing hidden (so never `.git/` or `.wolfden/`), never through a
+  folder link, and only names that are the same file on every OS (no
+  `\`, `:`, or other characters Windows doesn't allow, no trailing space
+  or dot, no device names like `CON`). A name being made mustn't be
+  disguised by invisible characters (a zero-width space, a byte order
+  mark, a direction control, or one at either end), though emoji and
+  the joiners some scripts need are fine; existing names aren't checked
+  for these. A name that differs only in case or Unicode form from one
+  that's there is refused too, except in a rename of that very file or
+  folder. Refusals
+  are a `DenStoreException` with a reason code for the API and MCP tools
+  to map, including a read-only file and one another program has open.
+  The check and the write aren't one step, so another program can change
+  the den in between; the store still never writes outside the den, and
+  never overwrites a file made in between. A store that can't be written says so
+  (`IsReadOnly`) and refuses every write: the built-in packs are one.
+  `IDenChangeFeed` is the watch half: it reports changes with den-relative
+  paths, lost events, and a broken watch, and the index's watcher listens
+  through it.
+- **On disk,** `FileSystemDenStore` is all three. A write goes to a hidden
+  temporary file in the same folder, then replaces the file in one move,
+  so a reader or a crash sees the old file or the new one, and the bytes
+  are exactly those given. The temporary file is hidden, so the den and
+  the watcher ignore it (F-LAY-2). A store lives as long as its host, so
+  each read looks at the disk afresh; a whole-den load reads through a
+  `Snapshot()`, which keeps what it lists for that load (#119).
+- **History provider.** `IHistoryProvider` gives log, diff, checkpoint,
+  and tag (and lists tags), scoped to the den's paths, with
+  `HistoryCapabilities` flags for what the backend can do. An operation
+  the backend can't do returns a result that says why, for the writer,
+  instead of throwing; a backend that fails while doing one throws a
+  `HistoryException`. Hidden paths are never recorded or reported, and a
+  checkpoint commits only den files, leaving anything else the user has
+  staged as it was. Tags belong to the whole repository, not the den.
+  The log pages with a limit and a `before` revision, a diff without a
+  `from` starts at the latest checkpoint, and every operation can be
+  cancelled. `NoHistory` is the provider of a den without a backend.
+  Freezing adds its tag only when the provider has the `Tag` capability.
+  `Wolfden.Git` implements the interface (#19).
 
 **A den inside a larger repository.** The den is the folder that holds
 `den.yaml`, and it can be a subfolder of a larger git repository. History
@@ -623,9 +667,9 @@ samples/            # sample dens (CC-BY-4.0)
 docs/
 ```
 
-- **Storage and history are separate.** The core reads a den through the
-  den store (`IDenSource` today) and asks a history provider for log,
-  diffs, checkpoints, and tags (§6). `Wolfden.Git` is the v0 history
+- **Storage and history are separate.** The core reads and writes a den
+  through the den store (`IDenSource`, `IDenStore`) and asks a history
+  provider for log, diffs, checkpoints, and tags (§6). `Wolfden.Git` is the v0 history
   provider, so a different store or provider can replace either later.
 - **v0 runs locally as one process.** `wolfden serve` hosts the API and the
   built web UI on localhost and opens a browser. `wolfden mcp` runs the MCP
