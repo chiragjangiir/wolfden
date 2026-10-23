@@ -73,6 +73,27 @@ public class McpCommandTests
     }
 
     [Fact]
+    public void AWatcherThatFailsToStartIsExitThree()
+    {
+        using var den = TempDen.DraculaCopy();
+        McpCommand.TransportFactory = () => new SilentTransport();
+        McpCommand.WatcherFactory = (_, _) => throw new FormatException("the watcher broke");
+        try
+        {
+            var (exitCode, output, error) = Cli.Run("mcp", den.Root);
+
+            Assert.Equal(CliApp.ExitStoppedByFailure, exitCode);
+            Assert.Equal("", output);
+            Assert.Contains("wolfden mcp: the server stopped: the watcher broke", error, StringComparison.Ordinal);
+        }
+        finally
+        {
+            McpCommand.TransportFactory = null;
+            McpCommand.WatcherFactory = null;
+        }
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-MCP-10")]
     public async Task OverRawPipesStdoutHoldsOnlyJsonRpcAndStdinEofEndsTheServer()
     {
@@ -145,8 +166,18 @@ public class McpCommandTests
         });
         var cancel = TestContext.Current.CancellationToken;
 
-        await using (var client = await McpClient.CreateAsync(transport, cancellationToken: cancel))
+        // The SDK's client gives the server 5 seconds by default to answer
+        // server/discover, from before the process has even started. On a
+        // busy CI machine, starting .NET alone can take longer. The client
+        // then falls back to initialize, which the server can refuse once it
+        // has answered the probe after all (#135). The server answers at once
+        // (McpHandshakeTests), so this test waits longer, and checks that the
+        // client didn't fall back.
+        var options = new McpClientOptions { DiscoverProbeTimeout = TimeSpan.FromSeconds(30) };
+        await using (var client = await McpClient.CreateAsync(transport, options, cancellationToken: cancel))
         {
+            Assert.Equal("2026-07-28", client.NegotiatedProtocolVersion);
+
             var tools = await client.ListToolsAsync(cancellationToken: cancel);
             Assert.Equal(["canon_as_of", "check", "get_entity", "list_entities", "search"], tools.Select(t => t.Name).Order(StringComparer.Ordinal));
 
@@ -186,5 +217,23 @@ public class McpCommandTests
         public Task SendMessageAsync(JsonRpcMessage message, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    /// <summary>A transport whose client never says anything and never leaves.</summary>
+    private sealed class SilentTransport : ITransport
+    {
+        private readonly System.Threading.Channels.Channel<JsonRpcMessage> _channel = System.Threading.Channels.Channel.CreateUnbounded<JsonRpcMessage>();
+
+        public string? SessionId => null;
+
+        public System.Threading.Channels.ChannelReader<JsonRpcMessage> MessageReader => _channel.Reader;
+
+        public Task SendMessageAsync(JsonRpcMessage message, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public ValueTask DisposeAsync()
+        {
+            _channel.Writer.TryComplete();
+            return ValueTask.CompletedTask;
+        }
     }
 }
