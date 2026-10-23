@@ -335,6 +335,84 @@ public class CollectionEditTests
         Assert.Throws<InvalidOperationException>(() => file.WithoutFrontmatterValue(["name", "x"]));
     }
 
+    // ---- A chapter list field emptied is `[]`, "none here" (F-CHAP-5, F-RT-6) ----
+
+    private const string Chapters = """
+        chapter_defaults: { pov: "[[mara-voss]]" }
+        chapters:
+          - key: prologue
+            fields:
+              pov:   # nobody narrates
+                - "[[ship-log]]"
+              x-tags: [ log ]
+          - key: "1"
+            fields: { pov: ["[[wren-calder]]"] }
+
+        """;
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-15")]
+    public void RemovingTheLastItemOfABlockChapterListLeavesAnEmptyList()
+    {
+        var edited = Md(Chapters).WithoutChapterFieldItem("prologue", "pov", 0);
+
+        Assert.Equal(Chapters.Replace("      pov:   # nobody narrates\n        - \"[[ship-log]]\"\n", "      pov: []   # nobody narrates\n", StringComparison.Ordinal), Fm(edited));
+        Assert.True(edited.GetFrontmatterValue("chapters", "0", "fields", "pov") is YamlSequence { IsFlow: true, Items.Count: 0 });
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-15")]
+    public void RemovingTheLastItemOfAFlowChapterListLeavesAnEmptyList()
+    {
+        var edited = Md(Chapters).WithoutChapterFieldItem("1", "pov", 0).WithoutChapterFieldItem("prologue", "x-tags", 0);
+
+        var expected = Chapters
+            .Replace("{ pov: [\"[[wren-calder]]\"] }", "{ pov: [] }", StringComparison.Ordinal)
+            .Replace("x-tags: [ log ]", "x-tags: []", StringComparison.Ordinal);
+        Assert.Equal(expected, Fm(edited));
+    }
+
+    [Fact]
+    public void RemovingAnItemThatIsNotTheLastOfAChapterListIsAnOrdinaryRemoval()
+    {
+        var text = "chapters:\n  - key: a\n    fields:\n      pov:\n        - x\n        - y\n";
+
+        Assert.Equal("chapters:\n  - key: a\n    fields:\n      pov:\n        - y\n", Fm(Md(text).WithoutChapterFieldItem("a", "pov", 0)));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-15")]
+    public void AnEmptiedChapterListKeepsCrlf()
+    {
+        var file = MarkdownFile.Parse(TestFiles.Utf8("---\r\n" + Chapters.Replace("\n", "\r\n", StringComparison.Ordinal) + "---\r\nBody."));
+
+        var edited = file.WithoutChapterFieldItem("prologue", "pov", 0);
+
+        Assert.Equal(file.Text.Replace("      pov:   # nobody narrates\r\n        - \"[[ship-log]]\"\r\n", "      pov: []   # nobody narrates\r\n", StringComparison.Ordinal), edited.Text);
+        Assert.Equal(Text.LineEndingKind.CrLf, edited.LineEndings);
+        Assert.False(edited.EndsWithNewline);
+    }
+
+    [Fact]
+    public void OtherFieldsStillEndAsNullAndEmptyListCanBeAskedFor()
+    {
+        var text = "aliases:\n  - Voss\nname: x\n";
+
+        Assert.Equal("aliases:\nname: x\n", Fm(Md(text).WithoutFrontmatterValue(["aliases", "0"])));
+        Assert.Equal("aliases: []\nname: x\n", Fm(Md(text).WithoutFrontmatterValue(["aliases", "0"], EmptiedList.EmptyList)));
+        Assert.Equal("tags: []", YamlFile.Parse(TestFiles.Utf8("tags:\n  - a")).WithoutValue(["tags", "0"], EmptiedList.EmptyList).Text);
+    }
+
+    [Fact]
+    public void RemovingFromAChapterThatIsNotThereIsRefused()
+    {
+        var file = Md(Chapters);
+
+        Assert.Throws<InvalidOperationException>(() => file.WithoutChapterFieldItem("epilogue", "pov", 0));
+        Assert.Throws<InvalidOperationException>(() => file.WithoutChapterFieldItem("prologue", "pov", 3));
+        Assert.Throws<InvalidOperationException>(() => file.WithoutChapterFieldItem("prologue", "narration", 0));
+    }
+
     // ---- Review round 1: comment placement in block lists (M2) ----
 
     [Fact]

@@ -77,7 +77,9 @@ public sealed class YamlFile : DenFile
 
     /// <summary>
     /// Removes the key or list item at <paramref name="path"/>. Nothing
-    /// changes if it isn't there. See <see cref="MarkdownFile.WithoutFrontmatterValue"/>.
+    /// changes if it isn't there. <paramref name="emptied"/> says what a block
+    /// list under a key becomes when its last item goes: <c>key:</c> with no
+    /// value (the default) or <c>key: []</c>. See <see cref="MarkdownFile.WithoutFrontmatterValue"/>.
     /// </summary>
     /// <exception cref="InvalidOperationException">The file can't be edited, or the path doesn't fit the file's shape:
     /// a segment that isn't an item number where the file holds a list, or a path into a scalar. A missing key
@@ -85,12 +87,12 @@ public sealed class YamlFile : DenFile
     /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it,
     /// or touches an explicit <c>? key</c>.</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
-    public YamlFile WithoutValue(IReadOnlyList<string> path)
+    public YamlFile WithoutValue(IReadOnlyList<string> path, EmptiedList emptied = EmptiedList.Null)
     {
         ArgumentNullException.ThrowIfNull(path);
         return Edit(
-            (source, block) => YamlEditor.Remove(source, block, path),
-            (before, after) => YamlTreeCheck.SameExcept(before, after, path.Take(path.Count - 1).ToList(), (b, a) => YamlTreeCheck.Removed(b, a, path[^1])),
+            (source, block) => YamlEditor.Remove(source, block, path, emptied),
+            (before, after) => YamlTreeCheck.SameExcept(before, after, path.Take(path.Count - 1).ToList(), (b, a) => YamlTreeCheck.Removed(b, a, path[^1], emptied)),
             $"Removing '{string.Join('.', path)}'");
     }
 

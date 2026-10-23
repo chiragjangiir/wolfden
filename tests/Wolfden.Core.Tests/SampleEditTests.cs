@@ -331,6 +331,28 @@ public class SampleEditTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-RT-15")]
+    public void EmptyingAChaptersPovListLeavesNoneHere()
+    {
+        var file = Md(BookFile);
+
+        // Chapter 1's pov is a flow list; chapter 27's is a block list of four.
+        var edited = file.WithoutChapterFieldItem("1", "pov", 0);
+        for (var i = 0; i < 4; i++)
+        {
+            edited = edited.WithoutChapterFieldItem("27", "pov", 0);
+        }
+
+        var expected = ReplaceOnce(file,
+            "    title: Jonathan Harker's Journal\n    fields:\n      pov: [\"[[jonathan-harker]]\"]\n      when: { text: \"3–5 May\"",
+            "    title: Jonathan Harker's Journal\n    fields:\n      pov: []\n      when: { text: \"3–5 May\"");
+        expected = ReplaceOnce(expected, Newline(file),
+            "      pov:\n        - \"[[mina-harker]]\"\n        - \"[[abraham-van-helsing]]\"\n        - \"[[jonathan-harker]]\"\n        - \"[[john-seward]]\"\n      when: { text: \"1–6 November\"",
+            "      pov: []\n      when: { text: \"1–6 November\"");
+        Assert.Equal(expected, edited.Text);
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-RT-8")]
     public void RemovingAnAliasKeepsTheOthers()
     {

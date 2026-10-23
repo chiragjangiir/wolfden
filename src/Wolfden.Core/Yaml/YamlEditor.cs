@@ -99,8 +99,9 @@ internal static partial class YamlEditor
     /// with its lines: a comment on its last line, and comment lines right
     /// after it indented under it, go with it; comment lines above it stay.
     /// A block list or mapping that loses its last item is left as
-    /// <c>key:</c> with no value (format.md F-RT-6); a flow one becomes
-    /// <c>[]</c> or <c>{}</c>.
+    /// <c>key:</c> with no value (format.md F-RT-6), or for a block list
+    /// with <paramref name="emptied"/> set to <see cref="EmptiedList.EmptyList"/>,
+    /// as <c>key: []</c>; a flow one becomes <c>[]</c> or <c>{}</c>.
     /// </summary>
     /// <remarks>
     /// Nothing there means nothing to remove, so no edits: a missing key, an
@@ -112,10 +113,11 @@ internal static partial class YamlEditor
     /// <exception cref="InvalidOperationException">The path doesn't fit the file's shape.</exception>
     /// <exception cref="NotSupportedException">The removal would delete or move a comment that belongs to something else,
     /// or the key is written in a form that can't be removed in place.</exception>
-    public static List<TextEdit> Remove(SourceText source, YamlBlock block, IReadOnlyList<string> path)
+    public static List<TextEdit> Remove(SourceText source, YamlBlock block, IReadOnlyList<string> path, EmptiedList emptied = EmptiedList.Null)
     {
         CheckPath(path);
         YamlNode? node = block.Root;
+        YamlEntry? holder = null;
         for (var i = 0; i < path.Count; i++)
         {
             var segment = path[i];
@@ -137,7 +139,8 @@ internal static partial class YamlEditor
                         return mapping.IsFlow ? FlowRemove(source, mapping, k) : BlockRemoveEntry(source, mapping, k);
                     }
 
-                    node = mapping.Entries[k].Value;
+                    holder = mapping.Entries[k];
+                    node = holder.Value;
                     break;
                 }
 
@@ -156,9 +159,12 @@ internal static partial class YamlEditor
 
                     if (last)
                     {
-                        return sequence.IsFlow ? FlowRemove(source, sequence, k) : BlockRemoveItem(source, sequence, k);
+                        return sequence.IsFlow
+                            ? FlowRemove(source, sequence, k)
+                            : BlockRemoveItem(source, sequence, k, emptied == EmptiedList.EmptyList ? holder : null);
                     }
 
+                    holder = null;
                     node = sequence.Items[k];
                     break;
                 }
@@ -648,11 +654,21 @@ internal static partial class YamlEditor
         return string.Join(nl + new string(' ', keyColumn), lines);
     }
 
-    private static List<TextEdit> BlockRemoveItem(SourceText source, YamlSequence sequence, int k)
+    /// <param name="emptyListUnder">For <see cref="EmptiedList.EmptyList"/>: the
+    /// entry whose value the list is. If its last item goes, <c>[]</c> is
+    /// written after that key's colon, before any comment on its line.</param>
+    private static List<TextEdit> BlockRemoveItem(SourceText source, YamlSequence sequence, int k, YamlEntry? emptyListUnder = null)
     {
         var item = sequence.Items[k];
         var (dash, lineStart) = Dash(source, item);
-        return [DeleteOwnedLines(source, source.LineIndexOf(dash), LineIndexOfEnd(source, item), dash - lineStart)];
+        var delete = DeleteOwnedLines(source, source.LineIndexOf(dash), LineIndexOfEnd(source, item), dash - lineStart);
+        if (sequence.Items.Count > 1 || emptyListUnder is null)
+        {
+            return [delete];
+        }
+
+        var colon = ColonAfter(source, emptyListUnder.Key);
+        return [delete, new TextEdit(colon + 1, 0, " []")];
     }
 
     private static List<TextEdit> BlockRemoveEntry(SourceText source, YamlMapping mapping, int k)

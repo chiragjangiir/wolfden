@@ -223,26 +223,64 @@ public sealed partial class MarkdownFile : DenFile
     /// Nothing changes if it isn't there: a missing key, an item number past
     /// the end of a list, or a null value on the way. A block list or
     /// mapping that loses its last item is left as <c>key:</c> with no
-    /// value, which reads as unset (format.md F-RT-6); a flow one becomes
-    /// <c>[]</c> or <c>{}</c>.
+    /// value, which reads as unset (format.md F-RT-6), unless
+    /// <paramref name="emptied"/> is <see cref="EmptiedList.EmptyList"/>, which
+    /// leaves a block list under a key as <c>key: []</c>. A flow list or
+    /// mapping becomes <c>[]</c> or <c>{}</c> either way. For a chapter's list
+    /// fields, where <c>[]</c> means "none here", use <see cref="WithoutChapterFieldItem"/>.
     /// </summary>
     /// <exception cref="InvalidOperationException">The file can't be edited, or the path doesn't fit the file's shape:
     /// a segment that isn't an item number where the file holds a list, or a path into a scalar.</exception>
     /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it,
     /// or the key is written as an explicit <c>? key</c>.</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
-    public MarkdownFile WithoutFrontmatterValue(IReadOnlyList<string> path)
+    public MarkdownFile WithoutFrontmatterValue(IReadOnlyList<string> path, EmptiedList emptied = EmptiedList.Null)
     {
         ArgumentNullException.ThrowIfNull(path);
         return EditFrontmatter(
-            block => YamlEditor.Remove(Source!, block, path),
-            (before, after) => YamlTreeCheck.SameExcept(before, after, path.Take(path.Count - 1).ToList(), (b, a) => YamlTreeCheck.Removed(b, a, path[^1])),
+            block => YamlEditor.Remove(Source!, block, path, emptied),
+            (before, after) => YamlTreeCheck.SameExcept(before, after, path.Take(path.Count - 1).ToList(), (b, a) => YamlTreeCheck.Removed(b, a, path[^1], emptied)),
             addFrontmatter: false,
             $"Removing '{string.Join('.', path)}'");
     }
 
     /// <summary>Removes a field under <c>fields:</c>.</summary>
     public MarkdownFile WithoutField(string field) => WithoutFrontmatterValue(["fields", field]);
+
+    /// <summary>
+    /// Removes item <paramref name="item"/> of a list-valued field of the
+    /// chapter whose <c>key</c> is <paramref name="chapterKey"/>, in a
+    /// <c>book.md</c>'s <c>chapters</c> (format.md F-BOOK-2). If it was the
+    /// last item, the field is left as <c>[]</c>, "none here", block or flow
+    /// alike, so the chapter doesn't fall back to <c>chapter_defaults</c>
+    /// (types.md F-CHAP-5, format.md F-RT-6). Going back to the default is
+    /// a separate edit: removing the field.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">There's no chapter with that key, or the field isn't a list with that item.</exception>
+    /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it.</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public MarkdownFile WithoutChapterFieldItem(string chapterKey, string field, int item)
+    {
+        ArgumentNullException.ThrowIfNull(chapterKey);
+        ArgumentNullException.ThrowIfNull(field);
+        ArgumentOutOfRangeException.ThrowIfNegative(item);
+        var chapters = GetFrontmatterValue("chapters") as YamlSequence;
+        var index = chapters?.Items.ToList().FindIndex(c => (c as YamlMapping)?["key"] is YamlScalar { IsNull: false } key && key.Text == chapterKey) ?? -1;
+        if (index < 0)
+        {
+            throw new InvalidOperationException($"There's no chapter with the key '{chapterKey}'.");
+        }
+
+        string[] path = ["chapters", Index(index), "fields", field, Index(item)];
+        if (GetFrontmatterValue(path) is null)
+        {
+            throw new InvalidOperationException($"Chapter '{chapterKey}' has no item {item} in '{field}'.");
+        }
+
+        return WithoutFrontmatterValue(path, EmptiedList.EmptyList);
+
+        static string Index(int i) => i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
 
     /// <summary>Applies a frontmatter edit and checks that it read back as intended.</summary>
     /// <param name="edit">The edits for the frontmatter block.</param>

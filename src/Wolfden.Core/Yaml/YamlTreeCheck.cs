@@ -63,9 +63,11 @@ internal static class YamlTreeCheck
     /// True if <paramref name="after"/> is the mapping or list at
     /// <paramref name="before"/> without its key or item
     /// <paramref name="segment"/>. A block collection that loses its last
-    /// entry reads as null, and a flow one as empty.
+    /// entry reads as null, and a flow one as empty. With
+    /// <see cref="EmptiedList.EmptyList"/>, an emptied block list reads as
+    /// <c>[]</c> instead.
     /// </summary>
-    public static bool Removed(YamlNode? before, YamlNode? after, string segment)
+    public static bool Removed(YamlNode? before, YamlNode? after, string segment, EmptiedList emptied = EmptiedList.Null)
     {
         switch (before)
         {
@@ -113,7 +115,9 @@ internal static class YamlTreeCheck
 
                 if (old.Items.Count == 1)
                 {
-                    return old.IsFlow ? after is YamlSequence { IsFlow: true, Items.Count: 0 } : after is YamlScalar { IsNull: true };
+                    return old.IsFlow || emptied == EmptiedList.EmptyList
+                        ? after is YamlSequence { IsFlow: true, Items.Count: 0 }
+                        : after is YamlScalar { IsNull: true };
                 }
 
                 if (after is not YamlSequence edited || edited.IsFlow != old.IsFlow || edited.Items.Count != old.Items.Count - 1)
