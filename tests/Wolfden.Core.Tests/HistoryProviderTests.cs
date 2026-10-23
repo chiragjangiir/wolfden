@@ -13,6 +13,8 @@ public sealed class HistoryProviderTests
 {
     private static readonly IHistoryProvider None = NoHistory.Instance;
 
+    private static CancellationToken Token => TestContext.Current.CancellationToken;
+
     [Fact]
     [Trait("Scenario", "SC-HIST-1")]
     public void ADenWithoutABackendHasNoHistoryCapabilities()
@@ -28,28 +30,53 @@ public sealed class HistoryProviderTests
     {
         var results = new (string What, bool Available, string? Reason)[]
         {
-            Describe("log", None.Log(new HistoryLogQuery("universes/starfall/universe.md", 10))),
-            Describe("diff", None.Diff(new HistoryDiffQuery("HEAD~1"))),
-            Describe("checkpoint", None.Checkpoint(new CheckpointRequest("End of chapter 14 session", CoAuthors: ["Claude <noreply@anthropic.com>"]))),
-            Describe("tag", None.Tag(new TagRequest("book/ember/final"))),
-            Describe("tags", None.Tags("book/")),
+            Describe("log", None.Log(new HistoryLogQuery("universes/starfall/universe.md", 10), Token)),
+            Describe("diff", None.Diff(new HistoryDiffQuery(), Token)),
+            Describe("checkpoint", None.Checkpoint(new CheckpointRequest("End of chapter 14 session", CoAuthors: ["Claude <noreply@anthropic.com>"]), Token)),
+            Describe("tag", None.Tag(new TagRequest("ember-final"), Token)),
+            Describe("tags", None.Tags("ember", Token)),
         };
 
         Assert.All(results, r =>
         {
             Assert.False(r.Available, r.What);
-            Assert.StartsWith("This den has no history backend, so ", r.Reason, StringComparison.Ordinal);
+            Assert.StartsWith("This den has no history, so ", r.Reason, StringComparison.Ordinal);
             Assert.EndsWith(NoHistory.Hint, r.Reason, StringComparison.Ordinal);
         });
         Assert.Equal(
-            "This den has no history backend, so a checkpoint can't be recorded. Your edits are saved in the files as usual. " + NoHistory.Hint,
+            "This den has no history, so a note's history isn't available. Wolfden can keep history with git if the den is in a git repository that isn't in a synced folder (Dropbox, OneDrive, iCloud); use a private remote for backup.",
+            results[0].Reason);
+        Assert.Equal(
+            "This den has no history, so a checkpoint isn't available. Your edits are still saved in the files. " + NoHistory.Hint,
             results[2].Reason);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-1")]
+    public void TheMessagesSendTheWriterNowhereTheyCantGo()
+    {
+        // No design docs, issue numbers, or commands that don't exist yet.
+        var reasons = new[]
+        {
+            None.Log(new HistoryLogQuery(), Token).Reason!,
+            None.Diff(new HistoryDiffQuery(), Token).Reason!,
+            None.Checkpoint(new CheckpointRequest("x"), Token).Reason!,
+            None.Tag(new TagRequest("x"), Token).Reason!,
+            None.Tags(cancellationToken: Token).Reason!,
+        };
+
+        Assert.All(reasons, r =>
+        {
+            Assert.DoesNotContain(".md", r, StringComparison.Ordinal);
+            Assert.DoesNotContain("#", r, StringComparison.Ordinal);
+            Assert.DoesNotContain("wolfden ", r, StringComparison.Ordinal);
+        });
     }
 
     [Fact]
     public void TheValueOfAnUnavailableResultIsAProgrammingError()
     {
-        var log = None.Log(new HistoryLogQuery());
+        var log = None.Log(new HistoryLogQuery(), Token);
 
         var e = Assert.Throws<InvalidOperationException>(() => log.Value);
 
@@ -75,6 +102,18 @@ public sealed class HistoryProviderTests
     public void AnUnavailableResultMustSayWhy()
     {
         Assert.Throws<ArgumentException>(() => HistoryResult<HistoryTag>.Unavailable(" "));
+    }
+
+    [Fact]
+    public void ADiffWithoutRevisionsIsSinceTheLatestCheckpointAndALogStartsAtTheNewest()
+    {
+        var diff = new HistoryDiffQuery();
+        var log = new HistoryLogQuery();
+
+        Assert.Null(diff.From);
+        Assert.Null(diff.To);
+        Assert.Null(log.Before);
+        Assert.Null(log.Limit);
     }
 
     [Fact]

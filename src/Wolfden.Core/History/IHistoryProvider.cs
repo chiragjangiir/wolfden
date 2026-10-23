@@ -17,6 +17,24 @@ namespace Wolfden.Core.History;
 /// changed, or reported.
 /// </para>
 /// <para>
+/// <b>Den files only.</b> Hidden paths aren't part of the den (F-LAY-2), so
+/// they're never recorded or reported: not <c>.wolfden/</c>, not an
+/// editor's swap files, not a <c>.gitignore</c>.
+/// </para>
+/// <para>
+/// <b>Checkpoints leave the rest of the repository alone.</b> A checkpoint
+/// records the den's files and nothing else, even when the user had
+/// already staged other changes in a larger repository: those stay staged,
+/// and out of the checkpoint (for git, <c>git commit --only -- &lt;den paths&gt;</c>).
+/// </para>
+/// <para>
+/// <b>Tags belong to the whole repository.</b> A backend's tags, such as
+/// git's, aren't scoped to the den: a tag name is shared with everything
+/// else in the repository, other dens in it included. <see cref="Tags"/>
+/// lists them all, and a tag name must be chosen so it can't clash. How
+/// freeze tags are named is decided with the freeze workflow.
+/// </para>
+/// <para>
 /// <b>Unavailable isn't an error.</b> An operation the backend can't do,
 /// because there's no backend or it lacks the capability
 /// (<see cref="Capabilities"/>), returns a result that says so in words
@@ -28,6 +46,10 @@ namespace Wolfden.Core.History;
 /// <para>
 /// <b>Revisions</b> are the backend's own ids (a commit hash for git) or
 /// tag names, passed as strings and never parsed by the caller.
+/// </para>
+/// <para>
+/// <b>Cancellation.</b> A backend that runs a process, such as git, stops
+/// it when the token is cancelled and throws <see cref="OperationCanceledException"/>.
 /// </para>
 /// </remarks>
 public interface IHistoryProvider
@@ -42,23 +64,23 @@ public interface IHistoryProvider
     /// The checkpoints that changed the den, or <paramref name="query"/>'s
     /// file or folder, newest first.
     /// </summary>
-    HistoryResult<IReadOnlyList<HistoryEntry>> Log(HistoryLogQuery query);
+    HistoryResult<IReadOnlyList<HistoryEntry>> Log(HistoryLogQuery query, CancellationToken cancellationToken = default);
 
     /// <summary>What changed between two revisions, or between one and the files as they are now.</summary>
-    HistoryResult<HistoryDiff> Diff(HistoryDiffQuery query);
+    HistoryResult<HistoryDiff> Diff(HistoryDiffQuery query, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Records the den's files as they are now, with a message: a commit,
     /// for git. Only den files are recorded. The value is null when
     /// nothing changed since the last checkpoint, so there was nothing to record.
     /// </summary>
-    HistoryResult<HistoryEntry?> Checkpoint(CheckpointRequest request);
+    HistoryResult<HistoryEntry?> Checkpoint(CheckpointRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>Names a revision with a tag, such as the snapshot taken when a book is frozen (design.md §5).</summary>
-    HistoryResult<HistoryTag> Tag(TagRequest request);
+    HistoryResult<HistoryTag> Tag(TagRequest request, CancellationToken cancellationToken = default);
 
-    /// <summary>The tags whose names start with <paramref name="prefix"/>, or every tag if it's null, in ASCII order of name.</summary>
-    HistoryResult<IReadOnlyList<HistoryTag>> Tags(string? prefix = null);
+    /// <summary>The repository's tags whose names start with <paramref name="prefix"/>, or every tag if it's null, in ASCII order of name.</summary>
+    HistoryResult<IReadOnlyList<HistoryTag>> Tags(string? prefix = null, CancellationToken cancellationToken = default);
 }
 
 /// <summary>What a history backend can do for a den.</summary>
@@ -125,16 +147,21 @@ public sealed class HistoryResult<T>
     }
 }
 
-/// <summary>What a log asks for.</summary>
+/// <summary>What a log asks for, a page at a time.</summary>
 /// <param name="Path">A den-relative file or folder to limit the log to, or null for the whole den.</param>
 /// <param name="Limit">The most entries to return, or null for all.</param>
-public sealed record HistoryLogQuery(string? Path = null, int? Limit = null);
+/// <param name="Before">
+/// Only entries older than this revision, or null to start from the
+/// newest. For the next page, pass the <see cref="HistoryEntry.Id"/> of the
+/// last entry of the page before.
+/// </param>
+public sealed record HistoryLogQuery(string? Path = null, int? Limit = null, string? Before = null);
 
 /// <summary>What a diff compares.</summary>
-/// <param name="From">The older revision.</param>
-/// <param name="To">The newer revision, or null for the den's files as they are now.</param>
+/// <param name="From">The older revision, or null for the latest checkpoint.</param>
+/// <param name="To">The newer revision, or null for the den's files as they are now. Both null: what changed since the latest checkpoint.</param>
 /// <param name="Path">A den-relative file or folder to limit the diff to, or null for the whole den.</param>
-public sealed record HistoryDiffQuery(string From, string? To = null, string? Path = null);
+public sealed record HistoryDiffQuery(string? From = null, string? To = null, string? Path = null);
 
 /// <summary>A checkpoint to record.</summary>
 /// <param name="Message">What the checkpoint is, in the writer's words ("end of chapter 14 session").</param>
@@ -182,7 +209,7 @@ public enum HistoryChangeKind
 public sealed record HistoryFileChange(HistoryChangeKind Kind, string Path, string? OldPath = null);
 
 /// <summary>What changed between two revisions.</summary>
-/// <param name="From">The older revision, as asked.</param>
+/// <param name="From">The older revision: the one asked for, or the latest checkpoint's id.</param>
 /// <param name="To">The newer revision, as asked, or null for the files as they are now.</param>
 /// <param name="Files">Each den file that differs, with its unified diff.</param>
 public sealed record HistoryDiff(string From, string? To, IReadOnlyList<HistoryFileDiff> Files);
