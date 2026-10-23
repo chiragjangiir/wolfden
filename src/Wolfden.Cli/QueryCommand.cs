@@ -31,15 +31,17 @@ internal static partial class QueryCommand
 {
     internal static readonly CommandSpec Spec = new(
         "query",
-        "usage: wolfden query [<universe>] [--at <position>] [--series <key> | --book <key>] [--type <type>]... [--entity <name>] [--pinned] [--brief] [--den <den>] [--json]",
+        "usage: wolfden query [<universe> | --universe <key>] [--at <position>] [--series <key> | --book <key>] [--type <type>]... [--entity <name>] [--pinned] [--brief] [--den <den>] [--json]",
         """
         Shows canon as of a story position: every entity the reader has met by
         then, at any scope of the universe, with the field values and sections
         in effect there. Ideas, retconned material, and bookkeeping sections are
         left out, and draft material is marked draft.
 
-          <universe>          the universe's key; it can be left out when the den
-                              has only one universe
+          <universe>, --universe <key>
+                              the universe's key; it can be left out when the
+                              den has only one universe, or when --at names a
+                              book only one universe has
           --at <position>     a story position, 'book:chapter' or a bare 'book'
                               for the start of that book; by default, the end of
                               the story (all canon so far)
@@ -50,7 +52,8 @@ internal static partial class QueryCommand
           --type <type>       only entities of this type, such as 'character';
                               give it more than once for several types
           --entity <name>     only this entity, named as a link would name it:
-                              by name, alias, file name, or id
+                              by name, alias, file name, or id, among the
+                              entities the reader has met by then
           --pinned            only pinned facts: pinned canon (F-VIEW-2)
           --brief             one line per entity: no fields or sections
           --den <den>         the den's folder; by default, the current folder or
@@ -62,7 +65,7 @@ internal static partial class QueryCommand
         couldn't be.
         """,
         ["--json", "--pinned", "--brief"],
-        ["--den", "--at", "--series", "--book", "--type", "--entity"],
+        ["--den", "--universe", "--at", "--series", "--book", "--type", "--entity"],
         ["--type"],
         1,
         "give at most one universe.");
@@ -77,6 +80,13 @@ internal static partial class QueryCommand
         if (line.Value("--series") is not null && line.Value("--book") is not null)
         {
             error.WriteLine("wolfden query: give '--series' or '--book', not both.");
+            error.WriteLine(Spec.Usage);
+            return CliApp.ExitUsage;
+        }
+
+        if (line.Arguments.Count > 0 && line.Value("--universe") is not null)
+        {
+            error.WriteLine("wolfden query: give the universe once, as an argument or with '--universe', not both.");
             error.WriteLine(Spec.Usage);
             return CliApp.ExitUsage;
         }
@@ -129,22 +139,30 @@ internal static partial class QueryCommand
             return null;
         }
 
-        var universes = db.Containers.Where(c => c.Kind == "universe").Select(c => c.Key).ToList();
-        universes.Sort(StringComparer.Ordinal);
+        // The universe named, the den's only one, or the one --at's book
+        // belongs to (maintainer decision, 2026-10-23). A canon view is of one
+        // universe, so '*' (every universe) isn't a choice here.
+        var named = line.Arguments.Count > 0 ? line.Arguments[0] : line.Value("--universe");
+        if (named == "*")
+        {
+            problem = "a canon view is of one universe, so '*' (every universe) doesn't fit here; name one.";
+            return null;
+        }
+
         string universe;
-        if (line.Arguments.Count > 0)
+        try
         {
-            universe = line.Arguments[0];
+            universe = UniverseChoice.Choose(db, named, line.Value("--at"));
         }
-        else if (universes.Count == 1)
+        catch (UniverseChoiceException e)
         {
-            universe = universes[0];
-        }
-        else
-        {
-            problem = universes.Count == 0
-                ? "the den has no universes yet, so there's nothing to query."
-                : $"the den has {universes.Count} universes ({string.Join(", ", universes)}); name one, as in 'wolfden query {universes[0]}'.";
+            problem = e.Problem switch
+            {
+                UniverseChoiceProblem.NoUniverse => "the den has no universes yet, so there's nothing to query.",
+                UniverseChoiceProblem.UniverseRequired =>
+                    $"{e.Message} Name it with '--universe <key>', or give '--at' a position whose book only one universe has.",
+                _ => e.Message,
+            };
             return null;
         }
 
@@ -159,6 +177,8 @@ internal static partial class QueryCommand
             return null;
         }
 
+        // The whole view, before it's narrowed: --entity matches among what the reader has met.
+        var met = view.Entities.Select(e => e.Path).ToHashSet(StringComparer.Ordinal);
         if (line.Has("--pinned"))
         {
             view = view.Pinned();
@@ -184,14 +204,18 @@ internal static partial class QueryCommand
 
         if (line.Value("--entity") is { } name)
         {
-            var keys = index.MatchEntities(universeId, name).Select(e => e.Key).ToHashSet(StringComparer.Ordinal);
-            if (keys.Count == 0)
+            // Matched among the entities in the view, so one the reader meets
+            // later can't shadow or tie with one they've met. Only if none
+            // matches is the whole universe asked, to tell "not met yet"
+            // (an empty view) from "no such entity" (an error).
+            var paths = index.MatchEntities(universeId, name, met).Select(e => e.Path).ToHashSet(StringComparer.Ordinal);
+            if (paths.Count == 0 && index.MatchEntities(universeId, name).Count == 0)
             {
                 problem = $"universe '{universe}' has no entity '{name}' (matched as a link is: by id, file name, name, or alias).";
                 return null;
             }
 
-            view = view with { Entities = view.Entities.Where(e => keys.Contains(e.Key)).ToList() };
+            view = view with { Entities = view.Entities.Where(e => paths.Contains(e.Path)).ToList() };
         }
 
         return view;

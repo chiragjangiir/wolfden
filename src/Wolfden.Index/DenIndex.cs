@@ -99,10 +99,19 @@ public sealed class DenIndex : IDisposable
     /// in path order. With no file to resolve from, there's no scope chain to
     /// break a tie (F-LINK-7), so a tie keeps all its matches.
     /// </summary>
-    public IReadOnlyList<EntityRecord> MatchEntities(int universeId, string name)
+    /// <param name="universeId">The universe's row id.</param>
+    /// <param name="name">The name, as a link would give it.</param>
+    /// <param name="amongPaths">
+    /// If given, only the entities with these paths take part, so the tiers
+    /// run over them alone: for a canon view, the entities the reader has met,
+    /// so an entity met later can't shadow or tie with one met already.
+    /// </param>
+    public IReadOnlyList<EntityRecord> MatchEntities(int universeId, string name, IReadOnlySet<string>? amongPaths = null)
     {
         ArgumentNullException.ThrowIfNull(name);
-        var entities = Context.Entities.Where(e => e.UniverseId == universeId).ToList();
+        var entities = Context.Entities.Where(e => e.UniverseId == universeId).ToList()
+            .Where(e => amongPaths is null || amongPaths.Contains(e.Path))
+            .ToList();
         var ids = entities.Select(e => e.Id).ToList();
         var aliases = Context.Aliases.Where(a => ids.Contains(a.EntityId)).Select(a => new { a.EntityId, a.AliasNormalized }).ToList();
         var byId = entities.ToDictionary(e => e.Id);
