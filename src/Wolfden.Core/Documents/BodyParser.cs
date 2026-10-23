@@ -80,7 +80,7 @@ internal static partial class BodyParser
             var startOffset = bodyStart + heading.Span.Start;
             var firstLine = source.LineIndexOf(startOffset);
             var lastLine = source.LineIndexOf(bodyStart + Math.Max(heading.Span.Start, heading.Span.End));
-            var name = HeadingName(source, heading, bodyStart, firstLine, lastLine);
+            var (name, nameStart, nameEnd) = HeadingName(source, heading, bodyStart, firstLine, lastLine);
 
             if (!seenLevel2)
             {
@@ -114,6 +114,8 @@ internal static partial class BodyParser
             var section = new Section(owner, sections.Count)
             {
                 Name = name,
+                NameStart = nameStart,
+                NameEnd = nameEnd,
                 Level = level,
                 HeadingLevel = heading.Level,
                 IsSetext = heading.IsSetext,
@@ -312,8 +314,8 @@ internal static partial class BodyParser
         return (current as ContainerInline)?.ParentBlock;
     }
 
-    /// <summary>The section name (F-SEC-3) from the heading's source text.</summary>
-    private static string HeadingName(SourceText source, HeadingBlock heading, int bodyStart, int firstLine, int lastLine)
+    /// <summary>The section name (F-SEC-3) from the heading's source text, and the offsets of its text.</summary>
+    private static (string Name, int Start, int End) HeadingName(SourceText source, HeadingBlock heading, int bodyStart, int firstLine, int lastLine)
     {
         var text = source.Text;
         int contentStart, contentEnd;
@@ -377,14 +379,80 @@ internal static partial class BodyParser
 
         if (contentEnd <= contentStart)
         {
-            return "";
+            return ("", contentStart, contentStart);
+        }
+
+        // Where the name's text sits, without the spaces around it, so a
+        // rename replaces just those characters.
+        int nameStart = contentStart, nameEnd = contentEnd;
+        while (nameStart < nameEnd && text[nameStart] is ' ' or '\t' or '\r' or '\n')
+        {
+            nameStart++;
+        }
+
+        while (nameEnd > nameStart && text[nameEnd - 1] is ' ' or '\t' or '\r' or '\n')
+        {
+            nameEnd--;
         }
 
         var lines = text[contentStart..contentEnd].Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-        return string.Join(' ', lines.Select(l => l.Trim(' ', '\t')).Where(l => l.Length > 0));
+        return (string.Join(' ', lines.Select(l => l.Trim(' ', '\t')).Where(l => l.Length > 0)), nameStart, nameEnd);
     }
 
     private static bool IsBlank(string line) => line.All(c => c is ' ' or '\t');
+
+    /// <summary>
+    /// True if two link reference definitions in <paramref name="markdown"/>
+    /// have the same label, matched as CommonMark matches labels (case and
+    /// runs of whitespace don't matter). The first one wins, so reordering
+    /// the text could change which one links use.
+    /// </summary>
+    internal static bool HasDuplicateLinkReferenceLabels(string markdown)
+    {
+        if (!markdown.Contains("]:", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            var labels = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var definition in Markdown.Parse(markdown, Pipeline).Descendants<LinkReferenceDefinition>())
+            {
+                var label = string.Join(' ', (definition.Label ?? "").Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
+                if (!labels.Add(label.ToUpperInvariant().ToLowerInvariant()))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>True if <paramref name="markdown"/> holds a CommonMark link
+    /// reference definition (<c>[ref]: https://…</c>) outside code.</summary>
+    internal static bool HasLinkReferenceDefinition(string markdown)
+    {
+        if (!markdown.Contains("]:", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            return Markdown.Parse(markdown, Pipeline).Descendants<LinkReferenceDefinition>().Any();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Too deep to parse: assume there may be one.
+            return true;
+        }
+    }
 
     [GeneratedRegex(@"^[ \t]*<!--\s*wolfden:", RegexOptions.CultureInvariant)]
     private static partial Regex WolfdenCommentStart();

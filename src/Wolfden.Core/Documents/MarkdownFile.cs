@@ -154,19 +154,177 @@ public sealed partial class MarkdownFile : DenFile
         WithFrontmatterValue(["fields", field], value);
 
     /// <summary>
-    /// Sets the scalar at <paramref name="path"/>: a top-level key, then keys
-    /// of nested block mappings. Missing keys are added after their siblings;
-    /// frontmatter is added if the file has none. Replacing a scalar keeps
-    /// the spacing before it and a comment after it. Replacing a block list
-    /// or mapping replaces it whole, including any comments inside it.
+    /// Sets the scalar at <paramref name="path"/>. A path names a top-level
+    /// key, then keys of nested mappings, block or flow, and item numbers
+    /// from 0 in lists, so <c>["fields", "died", "from"]</c> changes only
+    /// <c>from</c> in <c>died: { value: ..., from: ... }</c>, and
+    /// <c>["fields", "rank", "1", "from"]</c> the second entry's. A segment
+    /// is an item number only where the file holds a list, so a chapter key
+    /// such as <c>14</c> still names a key. Missing keys are added after
+    /// their siblings, in the mapping's own style; frontmatter is added if
+    /// the file has none. Replacing a scalar keeps the spacing before it and
+    /// a comment after it. Replacing a block list or mapping replaces it
+    /// whole, including any comments inside it.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The file can't be edited, or a key on the path isn't a mapping.</exception>
-    /// <exception cref="NotSupportedException">The edit would have to change a flow mapping.</exception>
+    /// <exception cref="InvalidOperationException">The file can't be edited, something on the path isn't a mapping or list, or a list has no such item.</exception>
+    /// <exception cref="NotSupportedException">The edit can't be made in place without reformatting, such as filling an empty list item.</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
     public MarkdownFile WithFrontmatterValue(IReadOnlyList<string> path, YamlScalarValue value)
     {
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(value);
+        return EditFrontmatter(
+            block => YamlEditor.SetScalar(Source!, block, path, value),
+            (before, after) => YamlTreeCheck.SameExcept(before, after, path, value),
+            addFrontmatter: true,
+            $"Setting '{string.Join('.', path)}'");
+    }
+
+    /// <summary>
+    /// Adds <paramref name="item"/> to the list at <paramref name="path"/>,
+    /// such as an alias to <c>["aliases"]</c> or an entry to a temporal list
+    /// (format.md §7.3), before item <paramref name="index"/> or at the end.
+    /// The other items, their quoting, and comments are kept. The new item
+    /// takes the list's style: in a flow list (<c>[a, b]</c>) it goes on the
+    /// same line, or on a line of its own if the items have one each; in a
+    /// block list it gets its own <c>- item</c> line at the items' indent,
+    /// right after the item before it and the comment lines indented under
+    /// that item, so comment lines above the next item stay with it; a new
+    /// first item goes above the comments over the old first one. It copies
+    /// the quoting of the item before it, key by key for a mapping, so a
+    /// position next to a plain one stays plain. Where there's nothing to
+    /// copy, a string with a <c>:</c> in it, such as a position, is
+    /// double-quoted as format.md §7.3 writes them. A missing or null value becomes a new list:
+    /// <c>[item]</c> for a scalar, or a block list for a mapping.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="index"/> is past the end of the list.</exception>
+    /// <exception cref="InvalidOperationException">The file can't be edited, or the value at the path isn't a list.</exception>
+    /// <exception cref="NotSupportedException">The item can't be added without moving a comment or reformatting.</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public MarkdownFile WithNewListItem(IReadOnlyList<string> path, YamlValue item, int? index = null)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(item);
+        var at = index ?? (GetFrontmatterValue(path) as YamlSequence)?.Items.Count ?? 0;
+        return EditFrontmatter(
+            block => YamlEditor.AddItem(Source!, block, path, item, index),
+            (before, after) => YamlTreeCheck.SameExcept(before, after, path, (b, a) => YamlTreeCheck.AddedItem(b, a, at, item)),
+            addFrontmatter: true,
+            $"Adding an item to '{string.Join('.', path)}'");
+    }
+
+    /// <summary>
+    /// Removes the frontmatter key or list item at <paramref name="path"/>
+    /// (paths as in <see cref="WithFrontmatterValue(IReadOnlyList{string}, YamlScalarValue)"/>),
+    /// such as <c>["x-color"]</c>, <c>["fields", "died", "from"]</c>, or
+    /// <c>["aliases", "0"]</c>. Its lines go, with a comment on its last
+    /// line and comment lines right after it indented under it; comment
+    /// lines above it stay. If it sat between two blank lines, one goes.
+    /// Nothing changes if it isn't there: a missing key, an item number past
+    /// the end of a list, or a null value on the way. A block list or
+    /// mapping that loses its last item is left as <c>key:</c> with no
+    /// value, which reads as unset (format.md F-RT-6), unless
+    /// <paramref name="emptied"/> is <see cref="EmptiedList.EmptyList"/>, which
+    /// leaves a block list under a key as <c>key: []</c>. A flow list or
+    /// mapping becomes <c>[]</c> or <c>{}</c> either way. For a chapter's list
+    /// fields, where <c>[]</c> means "none here", use <see cref="WithoutChapterFieldItem"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The file can't be edited, or the path doesn't fit the file's shape:
+    /// a segment that isn't an item number where the file holds a list, or a path into a scalar.</exception>
+    /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it,
+    /// or the key is written as an explicit <c>? key</c>.</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public MarkdownFile WithoutFrontmatterValue(IReadOnlyList<string> path, EmptiedList emptied = EmptiedList.Null)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        return EditFrontmatter(
+            block => YamlEditor.Remove(Source!, block, path, emptied),
+            (before, after) => YamlTreeCheck.SameExcept(before, after, path.Take(path.Count - 1).ToList(), (b, a) => YamlTreeCheck.Removed(b, a, path[^1], emptied)),
+            addFrontmatter: false,
+            $"Removing '{string.Join('.', path)}'");
+    }
+
+    /// <summary>Removes a field under <c>fields:</c>.</summary>
+    public MarkdownFile WithoutField(string field) => WithoutFrontmatterValue(["fields", field]);
+
+    /// <summary>
+    /// Removes item <paramref name="item"/> of a list-valued field of the
+    /// chapter whose <c>key</c> is <paramref name="chapterKey"/>, in a
+    /// <c>book.md</c>'s <c>chapters</c> (format.md F-BOOK-2). If it was the
+    /// last item, the field is left as <c>[]</c>, "none here", block or flow
+    /// alike, so the chapter doesn't fall back to <c>chapter_defaults</c>
+    /// (types.md F-CHAP-5, format.md F-RT-6). Going back to the default is
+    /// a separate edit: removing the field.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No chapter, or more than one, has that key; or the field isn't a list with that item.</exception>
+    /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it.</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public MarkdownFile WithoutChapterFieldItem(string chapterKey, string field, int item)
+    {
+        ArgumentNullException.ThrowIfNull(chapterKey);
+        ArgumentNullException.ThrowIfNull(field);
+        ArgumentOutOfRangeException.ThrowIfNegative(item);
+        var chapters = (GetFrontmatterValue("chapters") as YamlSequence)?.Items ?? [];
+        var matches = Enumerable.Range(0, chapters.Count)
+            .Where(i => (chapters[i] as YamlMapping)?["key"] is YamlScalar { IsNull: false } key && key.Text == chapterKey)
+            .ToList();
+        if (matches.Count == 0)
+        {
+            throw new InvalidOperationException($"There's no chapter with the key '{chapterKey}'.");
+        }
+
+        if (matches.Count > 1)
+        {
+            throw new InvalidOperationException($"{matches.Count} chapters have the key '{chapterKey}', so it doesn't name one chapter.");
+        }
+
+        string[] listPath = ["chapters", matches[0].ToString(System.Globalization.CultureInfo.InvariantCulture), "fields", field];
+        return WithoutListItemAsEmpty(listPath, item, $"'{field}' in chapter '{chapterKey}'");
+    }
+
+    /// <summary>
+    /// Removes item <paramref name="item"/> of a list-valued field in this
+    /// container's <c>chapter_defaults</c> (<c>universe.md</c>,
+    /// <c>series.md</c>, or <c>book.md</c>). If it was the last item, the
+    /// field is left as <c>[]</c>, "none here", block or flow alike, so
+    /// inheritance from the container above stops (types.md F-CHAP-5,
+    /// format.md F-RT-6). Going back to inheriting is a separate edit:
+    /// removing the field.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The field isn't a list in <c>chapter_defaults</c>, or has no such item.</exception>
+    /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it.</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public MarkdownFile WithoutChapterDefaultItem(string field, int item)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ArgumentOutOfRangeException.ThrowIfNegative(item);
+        return WithoutListItemAsEmpty(["chapter_defaults", field], item, $"'{field}' in chapter_defaults");
+    }
+
+    /// <summary>Removes one item of the list at <paramref name="listPath"/>, leaving <c>[]</c> if it was the last.</summary>
+    private MarkdownFile WithoutListItemAsEmpty(string[] listPath, int item, string what)
+    {
+        if (GetFrontmatterValue(listPath) is not YamlSequence list)
+        {
+            throw new InvalidOperationException($"{what} isn't a list.");
+        }
+
+        if (item >= list.Items.Count)
+        {
+            throw new InvalidOperationException($"{what} has no item {item}.");
+        }
+
+        return WithoutFrontmatterValue([.. listPath, item.ToString(System.Globalization.CultureInfo.InvariantCulture)], EmptiedList.EmptyList);
+    }
+
+    /// <summary>Applies a frontmatter edit and checks that it read back as intended.</summary>
+    /// <param name="edit">The edits for the frontmatter block.</param>
+    /// <param name="check">Judges the old and new frontmatter trees.</param>
+    /// <param name="addFrontmatter">True if the edit adds frontmatter to a
+    /// file with none; otherwise there's nothing to change.</param>
+    /// <param name="what">The edit, for the error message.</param>
+    private MarkdownFile EditFrontmatter(Func<YamlBlock, List<TextEdit>> edit, Func<YamlNode?, YamlNode?, bool> check, bool addFrontmatter, string what)
+    {
         // Adding frontmatter to a file that has none fixes F-FM-1, so that
         // error doesn't block this edit.
         EnsureEditable(_frontmatter is null ? _missingFrontmatter : null);
@@ -174,15 +332,20 @@ public sealed partial class MarkdownFile : DenFile
         List<TextEdit> edits;
         if (_frontmatter is null)
         {
+            if (!addFrontmatter)
+            {
+                return this;
+            }
+
             // New frontmatter goes at the very start, after any BOM.
             var nl = Source!.Newline;
             var empty = YamlBlock.Parse(Source, 0, 0);
-            var entry = YamlEditor.SetScalar(Source, empty, path, value).Single().NewText;
+            var entry = edit(empty).Single().NewText;
             edits = [new TextEdit(0, 0, "---" + nl + entry + "---" + nl)];
         }
         else
         {
-            edits = YamlEditor.SetScalar(Source!, _frontmatter, path, value);
+            edits = edit(_frontmatter);
         }
 
         if (edits.Count == 0)
@@ -191,9 +354,9 @@ public sealed partial class MarkdownFile : DenFile
         }
 
         var result = Reparse(edits);
-        if (result.Body != Body || !result.CanEdit || !YamlTreeCheck.SameExcept(_frontmatter?.Root, result._frontmatter?.Root, path, value))
+        if (result.Body != Body || !result.CanEdit || !check(_frontmatter?.Root, result._frontmatter?.Root))
         {
-            throw new EditVerificationException($"Setting '{string.Join('.', path)}' didn't read back as written, or changed another value, so the edit was refused.");
+            throw new EditVerificationException($"{what} didn't read back as written, or changed another value, so the edit was refused.");
         }
 
         return result;
@@ -268,10 +431,7 @@ public sealed partial class MarkdownFile : DenFile
         ArgumentNullException.ThrowIfNull(section);
         ArgumentNullException.ThrowIfNull(body);
         EnsureEditable();
-        if (!ReferenceEquals(section.Owner, this))
-        {
-            throw new ArgumentException("The section belongs to a different file.", nameof(section));
-        }
+        CheckOwnSection(section);
 
         var source = Source!;
         var nl = source.Newline;
@@ -368,10 +528,7 @@ public sealed partial class MarkdownFile : DenFile
         ArgumentOutOfRangeException.ThrowIfLessThan(level, 2);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(level, 6);
         EnsureEditable();
-        if (name.Length == 0 || name != name.Trim() || name.Contains('\n') || name.Contains('\r'))
-        {
-            throw new ArgumentException("A section name is one line of text, with no leading or trailing spaces.", nameof(name));
-        }
+        CheckSectionName(name);
 
         if (level > 2 && !Sections.Any())
         {
@@ -417,6 +574,243 @@ public sealed partial class MarkdownFile : DenFile
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Renames a section: only the heading's text changes. Its <c>#</c>
+    /// markers, any closing <c>#</c>s or trailing HTML comment, a setext
+    /// underline, its section comment, and its text are kept. A setext
+    /// heading whose name runs over several lines gets the new name on one.
+    /// This edits one file. Format.md F-RT-5 also requires links to the old
+    /// name (<c>[[entity#Old name]]</c>) to be rewritten when the app or an
+    /// MCP tool renames a section; that den-wide rewrite belongs to the write
+    /// tools (#21).
+    /// </summary>
+    /// <exception cref="ArgumentException">The name isn't one line of text, or wouldn't read back as the section's
+    /// name with nothing else changed (for example, a setext heading renamed to <c>- x</c> becomes a list item).</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public MarkdownFile WithSectionName(Section section, string name)
+    {
+        ArgumentNullException.ThrowIfNull(section);
+        ArgumentNullException.ThrowIfNull(name);
+        EnsureEditable();
+        CheckOwnSection(section);
+        CheckSectionName(name);
+        if (section.Name == name)
+        {
+            return this;
+        }
+
+        var text = Source!.Text;
+        var insert = section.NameStart == section.NameEnd && section.NameStart > 0 && text[section.NameStart - 1] == '#' ? " " + name : name;
+        var result = Reparse([new TextEdit(section.NameStart, section.NameEnd - section.NameStart, insert)]);
+        if (result.FrontmatterText != FrontmatterText)
+        {
+            throw new EditVerificationException("Renaming a section changed the frontmatter, so the edit was refused.");
+        }
+
+        if (result.Lead != Lead || result.Title != Title)
+        {
+            // For example a setext heading renamed to `- x` becomes a list item.
+            throw new ArgumentException($"'{name}' wouldn't read back as a heading: the text before the sections would change.", nameof(name));
+        }
+
+        var expected = Shapes().ToList();
+        expected[section.Index] = expected[section.Index] with { Name = name };
+        if (!expected.SequenceEqual(result.Shapes()))
+        {
+            throw new ArgumentException($"'{name}' wouldn't read back as the name of '{section.Name}' with nothing else changed.", nameof(name));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Removes a section with its heading, section comment, text, and
+    /// subsections, up to the next heading of the same or a higher level.
+    /// The blank lines before the next heading stay, so the spacing between
+    /// the sections around it doesn't change. Removing the last section also
+    /// removes the blank lines before it, and the file ends as it did, with
+    /// or without a final newline (F-ENC-4).
+    /// </summary>
+    /// <exception cref="ArgumentException">The section belongs to a different file.</exception>
+    /// <exception cref="NotSupportedException">Without the section, the text around it would read differently,
+    /// for example a paragraph running into a setext heading; or the section holds a link reference
+    /// definition (<c>[ref]: https://…</c>), which links elsewhere in the file may use.</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public MarkdownFile WithoutSection(Section section)
+    {
+        ArgumentNullException.ThrowIfNull(section);
+        EnsureEditable();
+        CheckOwnSection(section);
+
+        var source = Source!;
+        var start = section.HeadingStart;
+        if (section.End == source.Text.Length)
+        {
+            var line = source.LineIndexOf(start) - 1;
+            while (line >= 0 && IsBlank(source.LineText(line)))
+            {
+                line--;
+            }
+
+            // The frontmatter's closing line keeps its line break.
+            start = line < 0 ? 0
+                : source.EndsWithNewline || source.Lines[line].EndIncludingTerminator <= _bodyStart ? source.Lines[line].EndIncludingTerminator
+                : source.Lines[line].End;
+        }
+
+        // A link reference definition (`[ref]: https://…`) serves the whole
+        // file, so removing one could turn links in other sections into plain
+        // text. Refused rather than checked link by link.
+        if (BodyParser.HasLinkReferenceDefinition(source.Text[section.HeadingStart..section.End]))
+        {
+            throw new NotSupportedException($"'{section.Name}' holds a link reference definition, which links elsewhere in the file may use, so it can't be removed in place. Move the definition out first.");
+        }
+
+        var result = Reparse([new TextEdit(start, section.End - start, "")]);
+        if (result.FrontmatterText != FrontmatterText)
+        {
+            throw new EditVerificationException("Removing a section changed the frontmatter, so the edit was refused.");
+        }
+
+        if (TrimBlankLines(result.Lead) != TrimBlankLines(Lead) || result.Title != Title)
+        {
+            // For example a stray level-1 heading after it would become the title.
+            throw new NotSupportedException($"Without '{section.Name}', the text before the sections would change, so it can't be removed in place.");
+        }
+
+        var removed = Sections.Count(s => s.Index >= section.Index && s.HeadingStart < section.End);
+        var expected = Shapes().ToList();
+        expected.RemoveRange(section.Index, removed);
+        if (!expected.SequenceEqual(result.Shapes()))
+        {
+            throw new NotSupportedException($"Without '{section.Name}', the text around it would read differently, so it can't be removed in place.");
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Moves a section, with its subsections, to just before
+    /// <paramref name="before"/>, or after the last of its siblings if
+    /// <paramref name="before"/> is null. Sections move only among their
+    /// siblings: the level-2 sections, or the subsections of one section.
+    /// Each section's text moves as written. The blank lines between
+    /// sections stay where they are, so the file keeps its spacing and ends
+    /// as it did (F-ENC-4).
+    /// </summary>
+    /// <exception cref="ArgumentException">A section belongs to a different file, or <paramref name="before"/> isn't a sibling.</exception>
+    /// <exception cref="NotSupportedException">In its new place, the text would read differently,
+    /// for example a paragraph running into a setext heading.</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public MarkdownFile WithSectionMovedBefore(Section section, Section? before)
+    {
+        ArgumentNullException.ThrowIfNull(section);
+        EnsureEditable();
+        CheckOwnSection(section);
+        if (before is not null)
+        {
+            CheckOwnSection(before, nameof(before));
+            if (!ReferenceEquals(before.Parent, section.Parent))
+            {
+                throw new ArgumentException("A section moves only among its siblings, the sections with the same parent.", nameof(before));
+            }
+        }
+
+        if (ReferenceEquals(section, before))
+        {
+            return this;
+        }
+
+        var siblings = (section.Parent?.Subsections ?? TopLevelSections).ToList();
+        var order = siblings.Where(s => !ReferenceEquals(s, section)).ToList();
+        order.Insert(before is null ? order.Count : order.IndexOf(before), section);
+        if (order.SequenceEqual(siblings))
+        {
+            return this;
+        }
+
+        // Each sibling is its text (up to its last non-blank line) and the
+        // line breaks after it. The texts trade places; the breaks don't.
+        var source = Source!;
+        var text = source.Text;
+
+        // The first of two same-labelled link reference definitions wins, so
+        // reordering sections that hold both could change where links go.
+        if (BodyParser.HasDuplicateLinkReferenceLabels(text[siblings[0].HeadingStart..siblings[^1].End]))
+        {
+            throw new NotSupportedException($"Two of the sections around '{section.Name}' define the same link reference label, so moving it could change where links go. Remove one definition first.");
+        }
+
+        var sb = new System.Text.StringBuilder();
+        for (var i = 0; i < siblings.Count; i++)
+        {
+            sb.Append(text, order[i].HeadingStart, TextEnd(order[i]) - order[i].HeadingStart)
+                .Append(text, TextEnd(siblings[i]), siblings[i].End - TextEnd(siblings[i]));
+        }
+
+        var regionStart = siblings[0].HeadingStart;
+        var result = Reparse([new TextEdit(regionStart, siblings[^1].End - regionStart, sb.ToString())]);
+        if (result.FrontmatterText != FrontmatterText)
+        {
+            throw new EditVerificationException("Moving a section changed the frontmatter, so the edit was refused.");
+        }
+
+        if (result.Lead != Lead || result.Title != Title)
+        {
+            // For example a setext heading moved first would run into the lead's last paragraph.
+            throw new NotSupportedException($"In its new place, '{section.Name}' would change the text before the sections, so it can't be moved in place.");
+        }
+
+        var shapes = Shapes().ToList();
+        var expected = shapes.Take(siblings[0].Index).ToList();
+        foreach (var moved in order)
+        {
+            expected.AddRange(shapes.Where((_, i) => i >= moved.Index && Sections[i].HeadingStart < moved.End));
+        }
+
+        expected.AddRange(shapes.Skip(expected.Count));
+        if (!expected.SequenceEqual(result.Shapes()))
+        {
+            throw new NotSupportedException($"In its new place, '{section.Name}' or the text around it would read differently, so it can't be moved in place.");
+        }
+
+        return result;
+
+        // The end of a section's last non-blank line, before its line break.
+        int TextEnd(Section s)
+        {
+            var line = source.LineIndexOf(Math.Max(s.HeadingStart, s.End - 1));
+            while (line > 0 && source.Lines[line].Start > s.HeadingStart && IsBlank(source.LineText(line)))
+            {
+                line--;
+            }
+
+            return Math.Min(source.Lines[line].End, s.End);
+        }
+    }
+
+    /// <summary>What a section reads as: the parts an edit to another section must not change.</summary>
+    private readonly record struct SectionShape(string Name, int HeadingLevel, string? Comment, string Body);
+
+    private IEnumerable<SectionShape> Shapes() =>
+        Sections.Select(s => new SectionShape(s.Name, s.HeadingLevel, s.Comment?.Text, TrimBlankLines(s.Body)));
+
+    private void CheckOwnSection(Section section, string paramName = "section")
+    {
+        if (!ReferenceEquals(section.Owner, this))
+        {
+            throw new ArgumentException("The section belongs to a different file.", paramName);
+        }
+    }
+
+    private static void CheckSectionName(string name)
+    {
+        if (name.Length == 0 || name != name.Trim() || name.Contains('\n') || name.Contains('\r'))
+        {
+            throw new ArgumentException("A section name is one line of text, with no leading or trailing spaces.", nameof(name));
+        }
     }
 
     private MarkdownFile Reparse(IEnumerable<TextEdit> edits) => new(ApplyEdits(edits), _requireFrontmatter, _isOutline);

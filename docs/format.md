@@ -361,8 +361,9 @@ ignored, and an identity with an invalid key, or one that isn't a mapping
 with a name, is skipped. A container that names a skipped author gets the
 F-CTR-2 warning.
 
-**F-DEN-4.** `packs` is an optional list of pack keys to enable. The `core`
-pack is always enabled, and listing it is allowed. An entry that names
+**F-DEN-4.** `packs` is an optional list of pack keys to enable. A null
+`packs` or an empty list enables none beyond `core`, the same as leaving it
+out. The `core` pack is always enabled, and listing it is allowed. An entry that names
 neither a built-in pack nor a den-local pack (a folder `packs/<key>/` that
 holds a `pack.yaml`) is an [error]. If the folder has a `pack.yml`
 instead, the message says to rename it. A repeated entry is an [error]. Pack
@@ -373,7 +374,8 @@ built-in one, are defined in [`types.md`](types.md) §2 and §4.
 
 **F-DEN-6.** `bookkeeping_sections` is an optional list of non-empty
 heading patterns that mark a section as bookkeeping, in addition to the
-built-in ones (F-SEC-12). Any other shape is an [error]. A pattern made
+built-in ones (F-SEC-12). A null value or an empty list adds none, the
+same as leaving it out. Any other shape is an [error]. A pattern made
 only of `*` and spaces, which matches every section, is a [warning].
 
 **F-DEN-7.** `spoiler_checks` is an optional boolean that turns on the
@@ -553,8 +555,12 @@ need a type (F-LAY-6, F-FLD-2, F-FLD-3, F-SEC-5) are skipped for it.
 **F-ENT-3.** `name` is REQUIRED and is a non-empty string after trimming.
 [error]
 
-**F-ENT-4.** `aliases` is an optional list of non-empty strings. Any other
-shape, including a single string, is an [error].
+**F-ENT-4.** `aliases` is an optional list of non-empty strings. A null
+`aliases` (the key with no value, or `~`) or an empty list means the
+entity has no aliases, the same as leaving the key out, with no
+diagnostic. That's what a writer leaves behind after removing the last
+alias from a block list (F-RT-6). Any other shape, including a single
+string, is an [error].
 
 **F-ENT-5.** `status` is optional and defaults to `draft`, so nothing
 counts as settled until the writer says so: an unmarked note still shows in
@@ -1445,15 +1451,40 @@ rewrite, in the same change, every reference that depends on the old name:
 - Changing an entity's `name` or one of its `aliases`: every link that
   matched the old text. The writer MAY instead offer to keep the old text
   as an alias, so those links keep resolving.
+- Renaming a section: every link to it by heading
+  (`[[entity#Old name]]`, matched as in F-LINK-4), in any file, so it
+  names the new heading.
 - Moving an entity to another scope: any link that would no longer resolve
   to it (F-LINK-7) is rewritten to its id or another unique form. An
   entity without an `id` MUST get one in the same change (F-ID-6).
 
+The core library's edits each change one file (`WithSectionName` renames
+a heading, for example). The den-wide rewrite belongs to the app's and
+the MCP server's write tools (#21), which make all of it one change.
+
 A rename made outside the app, by hand or in another tool, is a refactor
 Wolfden can't see. Positions that name the old key become F-POS-4
-warnings, and slug links to the old name become broken links (F-LINK-8).
-Links by id, name, or alias keep working. That is the sense in which files
-can be renamed by hand "without breaking links" (design.md §3).
+warnings, and slug links to the old name, or heading links to a renamed
+section, become broken links (F-LINK-8). Links by id, name, or alias keep
+working. That is the sense in which files can be renamed by hand "without
+breaking links" (design.md §3).
+
+**F-RT-6.** A writer that removes the last item from a block list, or the
+last key from a block mapping, leaves the key with no value (`aliases:`)
+rather than removing the key or writing `[]` or `{}`. That's the smallest
+change, and it reads as null: unset, the same as leaving the key out
+(F-FLD-4, F-ENT-4). A flow list or mapping keeps its brackets and becomes
+`[]` or `{}`.
+
+The exception is a chapter list field, where null and an empty list mean
+different things: `[]` is "none here" and null inherits (types.md
+F-CHAP-5). That's a list-valued field under a chapter's `fields:` in
+`book.md` (F-BOOK-2), or in the `chapter_defaults` of any container
+(`universe.md`, `series.md`, or `book.md`). There, removing the last item
+always leaves `[]`, whether the list was written flow or block, so it
+keeps saying "none" and inheritance stops, rather than falling back to
+the default or the container above. Going back to inheriting is a
+separate edit: clearing the field. (Maintainer decisions, 2026-10-23.)
 
 ## 13. Appendix: a minimal den
 

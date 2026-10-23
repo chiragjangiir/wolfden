@@ -58,13 +58,19 @@ public class PropertyTests
         for (var step = 0; step < StepsPerFile; step++)
         {
             var before = file;
-            var choice = random.Next(4);
+            var choice = random.Next(10);
             file = choice switch
             {
                 0 => SetTopLevel(file, random),
                 1 => SetField(file, random),
                 2 => ReplaceBody(file, random),
-                _ => Append(file, random),
+                3 => Append(file, random),
+                4 => SetDeep(file, random),
+                5 => AddListItem(file, random),
+                6 => RemoveValue(file, random),
+                7 => RenameSection(file, random),
+                8 => RemoveSection(file, random),
+                _ => MoveSection(file, random),
             };
 
             // Whatever happened, the file still round-trips.
@@ -100,9 +106,9 @@ public class PropertyTests
         }
         catch (NotSupportedException)
         {
-            // Refused: a flow mapping on the path. Refusing is fine;
-            // changing something else isn't.
-            Assert.Contains(Along(file, path), n => n is YamlMapping { IsFlow: true, Entries.Count: > 0 });
+            // Refused: a layout that can't be edited in place, inside a flow
+            // collection or a list. Refusing is fine; changing something else isn't.
+            Assert.Contains(Along(file, path), n => n is YamlMapping { IsFlow: true } or YamlSequence);
             return file;
         }
         catch (InvalidOperationException)
@@ -238,6 +244,276 @@ public class PropertyTests
         return edited;
     }
 
+    /// <summary>Sets a scalar anywhere in the frontmatter: in a flow mapping, a list item, or a nested entry.</summary>
+    private static MarkdownFile SetDeep(MarkdownFile file, Random random)
+    {
+        var scalars = Paths(file.Frontmatter).Where(p => p.Node is YamlScalar && p.Path.Length > 1).ToList();
+        return scalars.Count == 0 ? file : SetAndCheck(file, scalars[random.Next(scalars.Count)].Path, RandomValue(random));
+    }
+
+    private static MarkdownFile AddListItem(MarkdownFile file, Random random)
+    {
+        var lists = Paths(file.Frontmatter).Where(p => p.Node is YamlSequence).ToList();
+        string[] path = lists.Count > 0 && random.Next(4) > 0
+            ? lists[random.Next(lists.Count)].Path
+            : random.Next(2) == 0 ? ["aliases"] : ["fields", Keys[random.Next(Keys.Length)]];
+        var list = file.GetFrontmatterValue(path) as YamlSequence;
+        int? index = list is null || random.Next(2) == 0 ? null : random.Next(list.Items.Count + 1);
+        YamlValue item = random.Next(3) == 0
+            ? new YamlMappingValue { { "value", RandomValue(random) }, { "from", YamlScalarValue.String($"ember:{random.Next(1, 40)}") } }
+            : RandomValue(random);
+
+        MarkdownFile edited;
+        try
+        {
+            edited = file.WithNewListItem(path, item, index);
+        }
+        catch (InvalidOperationException)
+        {
+            // Refused: the value there isn't a list.
+            Assert.True(file.GetFrontmatterValue(path) is not (null or YamlSequence or YamlScalar { IsNull: true })
+                || Along(file, path.SkipLast(1)).Any(n => n is YamlScalar { IsNull: false }));
+            return file;
+        }
+        catch (NotSupportedException)
+        {
+            // Refused: the list's layout can't take an item without moving a comment.
+            return file;
+        }
+
+        var after = Assert.IsType<YamlSequence>(edited.GetFrontmatterValue(path));
+        Assert.Equal((list?.Items.Count ?? 0) + 1, after.Items.Count);
+        Assert.True(item.MatchesAsWritten(after.Items[index ?? after.Items.Count - 1]));
+        AssertOnlyEntryChanged(file, edited, path[0]);
+        return edited;
+    }
+
+    private static MarkdownFile RemoveValue(MarkdownFile file, Random random)
+    {
+        var all = Paths(file.Frontmatter).ToList();
+        if (all.Count == 0)
+        {
+            return file;
+        }
+
+        var path = all[random.Next(all.Count)].Path;
+        var parent = path.Length == 1 ? file.Frontmatter : file.GetFrontmatterValue(path[..^1]);
+        MarkdownFile edited;
+        try
+        {
+            edited = file.WithoutFrontmatterValue(path);
+        }
+        catch (NotSupportedException)
+        {
+            // Refused: the removal would delete or move a comment.
+            return file;
+        }
+
+        var parentAfter = path.Length == 1 ? edited.Frontmatter : edited.GetFrontmatterValue(path[..^1]);
+        switch (parent)
+        {
+            case YamlMapping m when m.Entries.Count == 1:
+                Assert.True(parentAfter is null or YamlScalar { IsNull: true } or YamlMapping { Entries.Count: 0 });
+                break;
+            case YamlMapping m:
+                Assert.Equal(m.Entries.Count - 1, Assert.IsType<YamlMapping>(parentAfter).Entries.Count);
+                Assert.False(((YamlMapping)parentAfter).ContainsKey(path[^1]) && m.Keys.Count(k => k == path[^1]) == 1);
+                break;
+            case YamlSequence s when s.Items.Count == 1:
+                Assert.True(parentAfter is YamlScalar { IsNull: true } or YamlSequence { Items.Count: 0 });
+                break;
+            case YamlSequence s:
+                Assert.Equal(s.Items.Count - 1, Assert.IsType<YamlSequence>(parentAfter).Items.Count);
+                break;
+        }
+
+        if (path.Length > 1)
+        {
+            AssertOnlyEntryChanged(file, edited, path[0]);
+        }
+        else
+        {
+            Assert.Equal(file.Body, edited.Body);
+        }
+
+        return edited;
+    }
+
+    private static MarkdownFile RenameSection(MarkdownFile file, Random random)
+    {
+        if (file.Sections.Count == 0)
+        {
+            return file;
+        }
+
+        var section = file.Sections[random.Next(file.Sections.Count)];
+        var name = random.Next(4) switch
+        {
+            0 => "Bad name ##",
+            1 => section.Name + " (old)",
+            2 => "Appearance",
+            _ => $"Renamed {random.Next(1000)}",
+        };
+        MarkdownFile edited;
+        try
+        {
+            edited = file.WithSectionName(section, name);
+        }
+        catch (ArgumentException)
+        {
+            Assert.True(name.EndsWith('#') || section.Name.Length == 0 || HasRiskyLine(file.Text), $"Refused a harmless rename to {name}");
+            return file;
+        }
+
+        if (ReferenceEquals(edited, file))
+        {
+            Assert.Equal(name, section.Name);
+            return file;
+        }
+
+        Assert.Equal(file.FrontmatterText, edited.FrontmatterText);
+        Assert.Equal(file.Lead, edited.Lead);
+        Assert.Equal(file.Sections.Count, edited.Sections.Count);
+        for (var i = 0; i < file.Sections.Count; i++)
+        {
+            Assert.Equal(i == section.Index ? name : file.Sections[i].Name, edited.Sections[i].Name);
+            Assert.Equal(file.Sections[i].Body, edited.Sections[i].Body);
+            Assert.Equal(file.Sections[i].Comment?.Text, edited.Sections[i].Comment?.Text);
+        }
+
+        // Only the heading's own lines changed.
+        var (start, oldEnd, _) = TestFiles.Diff(file.Text, edited.Text);
+        var headingStart = LineStart(file.Text, section.Line);
+        Assert.True(start >= headingStart && oldEnd <= headingStart + section.HeadingText.Length, $"Renaming changed [{start}, {oldEnd}), outside the heading [{headingStart}, {headingStart + section.HeadingText.Length}) '{section.HeadingText}' renamed to '{name}'.");
+        return edited;
+    }
+
+    private static MarkdownFile RemoveSection(MarkdownFile file, Random random)
+    {
+        if (file.Sections.Count == 0)
+        {
+            return file;
+        }
+
+        var section = file.Sections[random.Next(file.Sections.Count)];
+        MarkdownFile edited;
+        try
+        {
+            edited = file.WithoutSection(section);
+        }
+        catch (NotSupportedException)
+        {
+            // Refused: the text around it would read differently.
+            return file;
+        }
+
+        var removed = 1 + file.Sections.Skip(section.Index + 1).TakeWhile(s => s.Level > section.Level).Count();
+        Assert.Equal(file.FrontmatterText, edited.FrontmatterText);
+        Assert.Equal(file.Sections.Count - removed, edited.Sections.Count);
+        var expected = file.Sections.Where(s => s.Index < section.Index || s.Index >= section.Index + removed).Select(s => s.Name);
+        Assert.Equal(expected, edited.Sections.Select(s => s.Name));
+        return edited;
+    }
+
+    private static MarkdownFile MoveSection(MarkdownFile file, Random random)
+    {
+        if (file.Sections.Count == 0)
+        {
+            return file;
+        }
+
+        var section = file.Sections[random.Next(file.Sections.Count)];
+        // A target that changes the order: not the section itself or the one after it.
+        var siblings = file.Sections.Where(s => ReferenceEquals(s.Parent, section.Parent)).ToList();
+        var own = siblings.IndexOf(section);
+        var targets = Enumerable.Range(0, siblings.Count + 1).Where(t => t != own && t != own + 1).ToList();
+        if (targets.Count == 0)
+        {
+            return file;
+        }
+
+        var target = targets[random.Next(targets.Count)];
+        var before = target == siblings.Count ? null : siblings[target];
+        MarkdownFile edited;
+        try
+        {
+            edited = file.WithSectionMovedBefore(section, before);
+        }
+        catch (NotSupportedException)
+        {
+            // Refused: in its new place, the text would read differently.
+            return file;
+        }
+
+        // A move only reorders text: the same characters, frontmatter, lead,
+        // and sections, with the moved one among its siblings.
+        Assert.Equal(file.FrontmatterText, edited.FrontmatterText);
+        Assert.Equal(file.Lead, edited.Lead);
+        Assert.Equal(file.Text.Order().ToArray(), edited.Text.Order().ToArray());
+        Assert.Equal(file.Sections.Select(s => s.Name).Order(StringComparer.Ordinal), edited.Sections.Select(s => s.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(file.EndsWithNewline, edited.EndsWithNewline);
+        return edited;
+    }
+
+    /// <summary>Every top-level entry but <paramref name="key"/> reads the same, in the same order,
+    /// the body is unchanged, and the changed bytes lie inside that entry's lines or at the end of the frontmatter.</summary>
+    private static void AssertOnlyEntryChanged(MarkdownFile file, MarkdownFile edited, string key)
+    {
+        Assert.Equal(file.Body, edited.Body);
+        var before = file.Frontmatter?.Entries ?? [];
+        var after = edited.Frontmatter!.Entries;
+        for (var i = 0; i < before.Count; i++)
+        {
+            Assert.Equal(before[i].KeyText, after[i].KeyText);
+            if (before[i].KeyText != key)
+            {
+                Assert.Equal(Dump(before[i].Value), Dump(after[i].Value));
+            }
+        }
+
+        if (file.HasFrontmatter && file.Frontmatter?.Find(key) is { } target)
+        {
+            var (start, oldEnd, _) = TestFiles.Diff(file.Text, edited.Text);
+            var from = LineStart(file.Text, target.Key.Line);
+            var next = file.Frontmatter.Entries.SkipWhile(e => e != target).Skip(1).FirstOrDefault();
+            var to = next is null ? file.FrontmatterText.Length : LineStart(file.Text, next.Key.Line);
+            Assert.True(start >= from && oldEnd <= to, $"Editing {key} changed [{start}, {oldEnd}), outside [{from}, {to}).");
+        }
+    }
+
+    /// <summary>Every node under <paramref name="node"/>, with its path: keys in mappings, item numbers in lists.</summary>
+    private static IEnumerable<(string[] Path, YamlNode Node)> Paths(YamlNode? node, string[]? prefix = null)
+    {
+        prefix ??= [];
+        switch (node)
+        {
+            case YamlMapping mapping:
+                foreach (var entry in mapping.Entries.Where(e => e.KeyText is not null))
+                {
+                    string[] path = [.. prefix, entry.KeyText!];
+                    yield return (path, entry.Value);
+                    foreach (var inner in Paths(entry.Value, path))
+                    {
+                        yield return inner;
+                    }
+                }
+
+                break;
+            case YamlSequence sequence:
+                for (var i = 0; i < sequence.Items.Count; i++)
+                {
+                    string[] path = [.. prefix, i.ToString(System.Globalization.CultureInfo.InvariantCulture)];
+                    yield return (path, sequence.Items[i]);
+                    foreach (var inner in Paths(sequence.Items[i], path))
+                    {
+                        yield return inner;
+                    }
+                }
+
+                break;
+        }
+    }
+
     /// <summary>
     /// Same heading and comment. A heading on the file's last line, with no
     /// line break after it, gains one when text is added after it.
@@ -248,6 +524,14 @@ public class PropertyTests
         if (mayGainNewline && a.HeadingText != b.HeadingText && a.Comment is null && !a.HeadingText.EndsWith('\n'))
         {
             Assert.Equal(a.HeadingText, b.HeadingText.TrimEnd('\r', '\n'));
+            return;
+        }
+
+        // Clearing the last section's text in a file with no final newline
+        // drops the heading's line break too, so the file still has none.
+        if (mayGainNewline && a.HeadingText != b.HeadingText && a.Comment is null && !b.HeadingText.EndsWith('\n') && !b.Owner.EndsWithNewline)
+        {
+            Assert.Equal(a.HeadingText.TrimEnd('\r', '\n'), b.HeadingText);
             return;
         }
 

@@ -118,7 +118,8 @@ public class EditTests
     {
         var result = Edit(Entity, f => f.WithFrontmatterValue("from", YamlScalarValue.String("ember:1")));
 
-        Assert.Equal(Entity.Replace("x-color: teal\n", "x-color: teal\nfrom: ember:1\n", StringComparison.Ordinal), result);
+        // A new position is quoted, as format.md §7.3 writes them.
+        Assert.Equal(Entity.Replace("x-color: teal\n", "x-color: teal\nfrom: \"ember:1\"\n", StringComparison.Ordinal), result);
     }
 
     [Fact]
@@ -212,11 +213,11 @@ public class EditTests
     }
 
     [Fact]
-    public void FlowMappingsAndNonMappingsAreRefused()
+    public void FlowMappingsTakeNewKeysAndNonMappingsAreRefused()
     {
         var file = Md("---\nfields: { a: 1 }\naliases: [x]\n---\n");
 
-        Assert.Throws<NotSupportedException>(() => file.WithField("b", YamlScalarValue.String("2")));
+        Assert.Equal("---\nfields: { a: 1, b: \"2\" }\naliases: [x]\n---\n", file.WithField("b", YamlScalarValue.String("2")).Text);
         Assert.Throws<InvalidOperationException>(() => file.WithFrontmatterValue(["aliases", "x"], YamlScalarValue.String("2")));
         Assert.Throws<ArgumentException>(() => file.WithFrontmatterValue("bad key", YamlScalarValue.String("2")));
     }

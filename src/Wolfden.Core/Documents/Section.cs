@@ -106,6 +106,14 @@ public sealed class Section
     /// heading of the same or a higher level, subsections included.</summary>
     public string Text => Owner.Slice(HeadingStart, End);
 
+    /// <summary>Where the name's text starts in the heading, after the
+    /// <c>#</c> markers and spaces.</summary>
+    internal int NameStart { get; set; }
+
+    /// <summary>Where the name's text ends, before trailing spaces, closing
+    /// <c>#</c>s, and trailing HTML comments.</summary>
+    internal int NameEnd { get; set; }
+
     internal int HeadingStart { get; set; }
 
     internal int HeadingEnd { get; set; }

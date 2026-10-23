@@ -72,6 +72,8 @@ public class EntityCatalogTests
     [Theory]
     [InlineData("type: character\nname: 1984", "1984")]
     [InlineData("type: character\nname: X\naliases: ~", "X")]
+    [InlineData("type: character\nname: X\naliases:\nstatus: draft", "X")]
+    [InlineData("type: character\nname: X\naliases: []", "X")]
     [InlineData("type: character\nname: X\nstatus: ~\nfrom:", "X")]
     [InlineData("type: unknown-type\nname: X\nfields:\n  anything: [{ value: a, from: \"ember:1\" }]", "X")]
     public void ValidEntitiesLoad(string frontmatter, string name)

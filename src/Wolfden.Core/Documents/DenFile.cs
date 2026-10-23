@@ -115,20 +115,7 @@ public abstract class DenFile
         return SourceText.FromText(text, Source.HasBom).Encode();
     }
 
-    /// <summary>Finds the node at <paramref name="path"/> under <paramref name="root"/>.</summary>
-    private protected static YamlNode? Find(YamlNode? root, IReadOnlyList<string> path)
-    {
-        var node = root;
-        foreach (var key in path)
-        {
-            if (node is not YamlMapping mapping)
-            {
-                return null;
-            }
-
-            node = mapping[key];
-        }
-
-        return node;
-    }
+    /// <summary>Finds the node at <paramref name="path"/> under <paramref name="root"/>:
+    /// keys in mappings, and item numbers from 0 in lists.</summary>
+    private protected static YamlNode? Find(YamlNode? root, IReadOnlyList<string> path) => YamlEditor.Find(root, path);
 }
