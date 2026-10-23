@@ -129,6 +129,24 @@ public sealed class McpServerTests : IAsyncLifetime
         Assert.Contains("\"code\":\"unknown_entity\"", Text(unknown), StringComparison.Ordinal);
     }
 
+    [Theory]
+    [Trait("Scenario", "SC-MCP-6")]
+    [InlineData("search", "{\"query\":\"Mina\",\"limit\":\"lots\"}")]
+    [InlineData("search", "{}")]
+    [InlineData("get_entity", "{\"entity\":42}")]
+    [InlineData("canon_as_of", "{\"brief\":\"yes\"}")]
+    public async Task AnArgumentOfTheWrongTypeIsABadArgument(string tool, string args)
+    {
+        var parsed = JsonSerializer.Deserialize<Dictionary<string, object?>>(args)!;
+        var result = await Call(tool, parsed);
+
+        Assert.True(result.IsError);
+        using var json = JsonDocument.Parse(Text(result));
+        var error = json.RootElement.GetProperty("error");
+        Assert.Equal("bad_argument", error.GetProperty("code").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(error.GetProperty("message").GetString()));
+    }
+
     [Fact]
     [Trait("Scenario", "SC-MCP-7")]
     public async Task AnEditWhileConnectedShowsInTheNextCall()

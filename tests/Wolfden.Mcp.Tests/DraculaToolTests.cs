@@ -50,10 +50,21 @@ public sealed class DraculaToolTests : IClassFixture<DraculaToolTests.Den>
             using var index = Wolfden.Index.DenIndex.Open(_tools.Root);
             var view = index.CanonAsOf("dracula", position);
             Assert.Equal(view.Entities.Select(e => e.Key), result.Entities.Select(e => e.Key));
-            Assert.Equal(view.Entities.Count, result.EntityCount);
+            Assert.Equal(view.Entities.Count, result.Count);
             Assert.Equal(
                 view.Entities.SelectMany(e => e.Sections.Select(s => $"{e.Key}/{s.Line}")),
                 result.Entities.SelectMany(e => e.Sections!.Select(s => $"{e.Key}/{s.Line}")));
+
+            // Field names and values too, compared as JSON.
+            Assert.Equal(
+                view.Entities.SelectMany(e => e.Fields.Select(f => $"{e.Key}/{f.Name}={Compact(f.ValueJson)}/{f.Kind}")),
+                result.Entities.SelectMany(e => e.Fields!.Select(f => $"{e.Key}/{f.Name}={f.Value.GetRawText()}/{f.Kind}")));
+        }
+
+        static string Compact(string json)
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.GetRawText();
         }
     }
 
@@ -218,7 +229,8 @@ public sealed class DraculaToolTests : IClassFixture<DraculaToolTests.Den>
         var limited = _tools.ListEntities(limit: 3);
         Assert.Equal(3, limited.Entities.Count);
         Assert.True(limited.Truncated);
-        Assert.Equal(all.Count, limited.Count);
+        Assert.Equal(3, limited.Count);
+        Assert.Equal(all.Total, limited.Total);
     }
 
     [Fact]
@@ -248,7 +260,7 @@ public sealed class DraculaToolTests : IClassFixture<DraculaToolTests.Den>
         Assert.True(result.SpoilerChecks);
         Assert.Equal(0, result.Errors);
         Assert.True(result.Entities > 40);
-        Assert.Equal(result.Errors + result.Warnings, result.Count);
+        Assert.Equal(result.Errors + result.Warnings, result.Total);
     }
 
     private static string Json<T>(T value) => JsonSerializer.Serialize(value, ToolJson.Options);

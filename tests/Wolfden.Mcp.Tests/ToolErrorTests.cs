@@ -142,9 +142,6 @@ public sealed class OtherDenErrorTests
         Assert.Equal(ToolErrorCodes.UniverseRequired, e.Code);
         Assert.Contains("drift, starfall", e.Message, StringComparison.Ordinal);
         Assert.NotEmpty(tools.CanonAsOf(universe: "starfall").Entities);
-
-        // Listing and searching the whole den need no universe.
-        Assert.Contains(tools.ListEntities().Entities, x => x.Universe == "starfall");
         Assert.Empty(tools.ListEntities(universe: "drift").Entities);
     }
 
@@ -175,5 +172,77 @@ public sealed class OtherDenErrorTests
         // Fixed, the same tools work again.
         den.Write("den.yaml", "format: 1\nname: Dracula\n");
         Assert.NotEmpty(tools.CanonAsOf().Entities);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-6")]
+    public void WithAPositionALaterNamesakeCantShadowAnEntityTheReaderHasMet()
+    {
+        using var den = TempDen.Dracula();
+        // A name outranks an alias as a link target (F-LINK-6), but this
+        // "Mina" enters only at chapter 20.
+        den.Write(
+            "universes/dracula/entities/characters/mina.md",
+            "---\ntype: character\nname: Mina\nstatus: canon\nfrom: \"dracula:20\"\n---\n\nA namesake.\n");
+        var tools = new DenTools(den.Root);
+
+        Assert.Equal("Mina Harker", tools.GetEntity("Mina", asOf: "dracula:3").Entity!.Name);
+
+        // Lucy's exact path, before she's met: not in view, and no error.
+        var lucy = tools.GetEntity("universes/dracula/books/dracula/entities/characters/lucy-westenra.md", asOf: "dracula:3");
+        Assert.False(lucy.InView);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-6")]
+    public void AnUnknownTypeAtAPositionDoesntListTheTypesInUse()
+    {
+        using var den = TempDen.Dracula();
+        var tools = new DenTools(den.Root);
+
+        Assert.Contains("Types in use:", Assert.Throws<DenToolException>(() => tools.CanonAsOf(type: "spaceship")).Message, StringComparison.Ordinal);
+        var atPosition = Assert.Throws<DenToolException>(() => tools.CanonAsOf(position: "dracula:1", type: "spaceship"));
+        Assert.Equal(ToolErrorCodes.UnknownType, atPosition.Code);
+        Assert.DoesNotContain("Types in use:", atPosition.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("universes/dracula/books", "universes/dracula/books/dracula/book.md", true)]
+    [InlineData("universes/dracula/books", "universes/dracula/books", true)]
+    [InlineData("universes/dracula/book", "universes/dracula/books/dracula/book.md", false)]
+    [InlineData("den.yaml", "den.yaml", true)]
+    public void CheckMatchesItsPathOnASegmentBoundary(string prefix, string path, bool matches)
+    {
+        Assert.Equal(matches, DenTools.IsAtOrUnder(path, prefix));
+    }
+}
+
+/// <summary>Several calls at once.</summary>
+public sealed class ParallelCallTests
+{
+    [Fact]
+    [Trait("Scenario", "SC-MCP-10")]
+    public async Task ParallelFirstCallsOnADenWithNoIndexAllSucceed()
+    {
+        // No watcher, and no index yet: each call builds or waits for one.
+        using var den = TempDen.Dracula();
+        var tools = new DenTools(den.Root);
+        var cancel = TestContext.Current.CancellationToken;
+
+        var calls = new Func<object>[]
+        {
+            () => tools.CanonAsOf(position: "dracula:5"),
+            () => tools.GetEntity("Mina"),
+            () => tools.ListEntities(),
+            () => tools.Search("Voivode"),
+            () => tools.CanonAsOf(),
+            () => tools.GetEntity("Lucy", asOf: "dracula:9"),
+            () => tools.ListEntities(type: "location"),
+            () => tools.Search("Whitby"),
+        };
+        var results = await Task.WhenAll(calls.Select(call => Task.Run(() => WolfdenTools.Respond(call), cancel)));
+
+        Assert.All(results, r => Assert.NotEqual(true, r.IsError));
+        Assert.True(File.Exists(Path.Combine(den.Root, ".wolfden", ".gitignore")));
     }
 }

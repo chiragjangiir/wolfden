@@ -42,8 +42,18 @@ public sealed class DenTools
     /// <summary>The den's folder, as a full path.</summary>
     public string Root { get; }
 
+    /// <summary>The <c>universe</c> value that asks <c>search</c> and <c>list_entities</c> for every universe of the den.</summary>
+    public const string AllUniverses = "*";
+
     /// <summary>The longest a call waits for a running watcher to catch up before it rebuilds the index itself.</summary>
     public TimeSpan WatcherWait { get; init; } = IndexBuilder.WatcherWait;
+
+    /// <summary>
+    /// The universe this session is pinned to (<c>wolfden mcp --universe</c>),
+    /// or null. Every call reads it, and a call that names another universe,
+    /// or <see cref="AllUniverses"/>, is refused.
+    /// </summary>
+    public string? PinnedUniverse { get; init; }
 
     /// <summary>
     /// Full-text search over names, aliases, leads, and section text, every
@@ -62,15 +72,16 @@ public sealed class DenTools
         {
             var db = index.Context;
             var universes = db.Containers.Where(c => c.Kind == "universe").ToDictionary(c => c.Id, c => c.Key);
-            int? universeId = universe is null ? null : Universe(db, universe).Id;
+            var universeId = ChooseUniverse(db, universe, null, allowAll: true)?.Id;
             if (type is not null)
             {
                 CheckTypes(db, universeId, [type]);
             }
 
-            // Filters apply after the search, so ask for more when there are any.
-            var filtered = universe is not null || type is not null || canonOnly;
-            var hits = index.Search(query, filtered ? Math.Max(limit * 20, 1000) : limit);
+            // Filters apply after the search, so ask for more when there are
+            // any; one more than the limit says whether the hits were cut off.
+            var filtered = universeId is not null || type is not null || canonOnly;
+            var hits = index.Search(query, filtered ? Math.Max(limit * 20, 1000) : limit + 1);
             var paths = hits.Select(h => h.EntityPath).Distinct().ToList();
             var entities = db.Entities.Where(e => paths.Contains(e.Path)).ToList().ToDictionary(e => e.Path, StringComparer.Ordinal);
             var scopes = Scopes(db);
@@ -80,11 +91,13 @@ public sealed class DenTools
                 .Where(x => universeId is null || x.Entity.UniverseId == universeId)
                 .Where(x => type is null || x.Entity.Type == type)
                 .Where(x => !canonOnly || x.Hit.IsInCanon)
-                .Take(limit)
+                .Take(limit + 1)
                 .Select(x => new SearchHitView(
                     Summary(x.Entity, universes, scopes), x.Hit.SectionName, x.Hit.SectionLine, x.Hit.Snippet, x.Hit.Status, x.Hit.IsInCanon, x.Hit.InComment))
                 .ToList();
-            return new SearchResult(ToolJson.Version, query, views.Count, views);
+            var truncated = views.Count > limit;
+            views = views.Take(limit).ToList();
+            return new SearchResult(ToolJson.Version, query, views.Count, truncated, views);
         });
     }
 
@@ -107,47 +120,52 @@ public sealed class DenTools
             var db = index.Context;
             var universes = db.Containers.Where(c => c.Kind == "universe").ToDictionary(c => c.Id, c => c.Key);
             var scopes = Scopes(db);
-            var within = universe is null ? universes.Keys.ToList() : [Universe(db, universe).Id];
-            var matches = Match(index, within, entity.Trim());
-            if (matches.Count == 0)
-            {
-                throw new DenToolException(
-                    ToolErrorCodes.UnknownEntity,
-                    $"No entity {(universe is null ? "in the den" : $"in universe '{universe}'")} matches '{entity}' by id, path, file name, name, or alias. " +
-                    "Use search or list_entities to find it.");
-            }
-
-            if (matches.Select(m => m.UniverseId).Distinct().Count() > 1 || (asOf is null && matches.Count > 1))
-            {
-                throw Ambiguous(entity, matches, universes, scopes);
-            }
-
+            var u = ChooseUniverse(db, universe, asOf, allowAll: false)!;
+            var name = entity.Trim();
             if (asOf is null)
             {
+                var matches = Match(index, u.Id, name, null);
+                if (matches.Count == 0)
+                {
+                    throw UnknownEntity(entity, u.Key);
+                }
+
+                if (matches.Count > 1)
+                {
+                    throw Ambiguous(entity, matches, universes, scopes);
+                }
+
                 return new GetEntityResult(ToolJson.Version, "full", null, true, null, FullView(db, matches[0], universes, scopes));
             }
 
-            var universeKey = universes[matches[0].UniverseId];
-            var view = CanonView(index, universeKey, asOf, null);
-            var paths = matches.Select(m => m.Path).ToHashSet(StringComparer.Ordinal);
-            var inView = view.Entities.Where(e => paths.Contains(e.Path)).ToList();
-            switch (inView.Count)
+            // With a position, the name is matched, tier by tier, among the
+            // entities the reader has met by then: an entity met later can't
+            // shadow one met already, tie with it, or show in an error.
+            var found = CanonView(index, u.Key, asOf, null);
+            var met = Match(index, u.Id, name, found.Entities.Select(x => x.Path).ToHashSet(StringComparer.Ordinal));
+            if (met.Count > 1)
             {
-                case 0:
-                    return new GetEntityResult(
-                        ToolJson.Version, "canon_as_of", asOf, false,
-                        $"'{entity}' isn't in canon as of {asOf}: the reader hasn't met it by then, or it isn't draft or canon.", null);
-                case > 1:
-                    // Only the matches the reader has met by then, so the error gives nothing away.
-                    throw Ambiguous(entity, matches.Where(m => inView.Any(e => e.Path == m.Path)).ToList(), universes, scopes);
+                throw Ambiguous(entity, met, universes, scopes);
             }
 
-            var e = inView[0];
-            var pinned = view with { Entities = inView };
-            var pinnedEntity = pinned.Pinned().Entities.SingleOrDefault();
+            if (met.Count == 0)
+            {
+                // Matching every entity only tells "not met yet" from "no such entity".
+                if (Match(index, u.Id, name, null).Count == 0)
+                {
+                    throw UnknownEntity(entity, u.Key);
+                }
+
+                return new GetEntityResult(
+                    ToolJson.Version, "canon_as_of", asOf, false,
+                    $"'{entity}' isn't in canon as of {asOf}: the reader hasn't met it by then, or it isn't draft or canon.", null);
+            }
+
+            var inView = found.Entities.Single(x => x.Path == met[0].Path);
+            var pinnedEntity = (found with { Entities = [inView] }).Pinned().Entities.SingleOrDefault();
             return new GetEntityResult(
                 ToolJson.Version, "canon_as_of", asOf, true, null,
-                CanonEntityView(e, universeKey, includeContent: true) with
+                CanonEntityView(inView, u.Key, includeContent: true) with
                 {
                     Pinned = new PinnedFacts(
                         pinnedEntity?.Fields.Select(CanonField).ToList() ?? [],
@@ -179,13 +197,19 @@ public sealed class DenTools
             var universes = db.Containers.Where(c => c.Kind == "universe").ToDictionary(c => c.Id, c => c.Key);
             var scopes = Scopes(db);
 
-            // A series or book belongs to one universe, so it needs one.
-            List<ContainerRecord> chosen = universe is not null || filter is not null
-                ? [Universe(db, universe)]
+            var one = ChooseUniverse(db, universe, null, allowAll: true);
+            if (one is null && filter is not null)
+            {
+                throw new DenToolException(
+                    ToolErrorCodes.BadArgument, $"A series or book belongs to one universe, so it doesn't go with '{AllUniverses}'; name the universe.");
+            }
+
+            List<ContainerRecord> chosen = one is not null
+                ? [one]
                 : db.Containers.Where(c => c.Kind == "universe").ToList().OrderBy(c => c.Key, StringComparer.Ordinal).ToList();
             if (type is not null)
             {
-                CheckTypes(db, universe is null && filter is null ? null : chosen[0].Id, [type]);
+                CheckTypes(db, one?.Id, [type]);
             }
 
             var all = new List<EntitySummary>();
@@ -198,7 +222,8 @@ public sealed class DenTools
                     .Select(e => Summary(e, universes, scopes)));
             }
 
-            return new ListEntitiesResult(ToolJson.Version, all.Count, all.Count > limit, all.Take(limit).ToList());
+            var shown = all.Take(limit).ToList();
+            return new ListEntitiesResult(ToolJson.Version, shown.Count, all.Count, all.Count > limit, shown);
         });
     }
 
@@ -215,10 +240,10 @@ public sealed class DenTools
         return WithIndex(index =>
         {
             var db = index.Context;
-            var u = Universe(db, universe);
+            var u = ChooseUniverse(db, universe, position, allowAll: false)!;
             if (type is not null)
             {
-                CheckTypes(db, u.Id, [type]);
+                CheckTypes(db, u.Id, [type], listUsed: position is null);
             }
 
             var view = CanonView(index, u.Key, position, filter);
@@ -245,9 +270,13 @@ public sealed class DenTools
     /// <summary>
     /// Runs every check on the den's files, as <c>wolfden check</c> does,
     /// and returns the diagnostics, optionally only one severity or the
-    /// files under one path.
+    /// files under one path. With a universe (or in a pinned session), only
+    /// that universe's files and the den-level material every universe shares
+    /// are checked (<see cref="DenCheck.Run(IDenSource, string?)"/>); without
+    /// one, or with <see cref="AllUniverses"/>, the whole den, since check
+    /// validates files rather than a story view.
     /// </summary>
-    public CheckResult Check(string? severity = null, string? path = null, int limit = 200)
+    public CheckResult Check(string? severity = null, string? path = null, int limit = 200, string? universe = null)
     {
         CheckLimit(limit, 5000);
         if (severity is not null and not ("error" or "warning"))
@@ -255,28 +284,62 @@ public sealed class DenTools
             throw new DenToolException(ToolErrorCodes.BadArgument, $"'{severity}' isn't a severity. Use 'error' or 'warning'.");
         }
 
+        if (PinnedUniverse is not null)
+        {
+            if (universe == AllUniverses)
+            {
+                throw new DenToolException(
+                    ToolErrorCodes.BadArgument,
+                    $"This session is pinned to universe '{PinnedUniverse}' (wolfden mcp --universe), so it can't check the whole den.");
+            }
+
+            if (universe is not null && universe != PinnedUniverse)
+            {
+                throw new DenToolException(
+                    ToolErrorCodes.BadArgument,
+                    $"This session is pinned to universe '{PinnedUniverse}' (wolfden mcp --universe), so it can't check universe '{universe}'.");
+            }
+
+            universe = PinnedUniverse;
+        }
+
+        var scope = universe == AllUniverses ? null : universe;
         DenCheck check;
         try
         {
-            check = DenCheck.Run(Root);
+            check = DenCheck.Run(Root, scope);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             throw new DenToolException(ToolErrorCodes.DenUnreadable, $"Couldn't read the den's files: {e.Message}");
         }
 
-        var prefix = path?.Replace('\\', '/').TrimStart('/');
+        // A den.yaml that doesn't load is still reported: it's what's wrong.
+        if (scope is not null && check.IsLoaded && check.Structure.FindUniverse(scope) is null)
+        {
+            var keys = check.Structure.Universes.Select(u => u.Key).Order(StringComparer.Ordinal).ToList();
+            throw new DenToolException(
+                ToolErrorCodes.UnknownUniverse,
+                $"The den has no universe '{scope}'." + (keys.Count == 0 ? " It has no universes yet." : $" Its universes: {string.Join(", ", keys)}."));
+        }
+
+        var prefix = path?.Replace('\\', '/').Trim('/');
         var matching = check.Diagnostics
             .Where(d => severity is null || Severity(d.Diagnostic.Severity) == severity)
-            .Where(d => string.IsNullOrEmpty(prefix) || d.Path.StartsWith(prefix, StringComparison.Ordinal))
+            .Where(d => string.IsNullOrEmpty(prefix) || IsAtOrUnder(d.Path, prefix))
             .Select(d => new DiagnosticView(d.Path, d.Diagnostic.Line, Severity(d.Diagnostic.Severity), d.Diagnostic.RuleId, d.Diagnostic.Message))
             .ToList();
+        var shown = matching.Take(limit).ToList();
         return new CheckResult(
-            ToolJson.Version, check.IsLoaded, check.IsLoaded ? check.Structure.SpoilerChecks : null, check.Catalog.Entities.Count,
-            check.ErrorCount, check.WarningCount, matching.Count, matching.Count > limit, matching.Take(limit).ToList());
+            ToolJson.Version, scope, check.IsLoaded, check.IsLoaded ? check.Structure.SpoilerChecks : null, check.Catalog.Entities.Count,
+            check.ErrorCount, check.WarningCount, shown.Count, matching.Count, matching.Count > limit, shown);
 
         static string Severity(DiagnosticSeverity s) => s == DiagnosticSeverity.Error ? "error" : "warning";
     }
+
+    /// <summary>True if <paramref name="path"/> is <paramref name="prefix"/> or inside it, on a path-segment boundary: <c>books/a</c> isn't under <c>books/ab</c>.</summary>
+    internal static bool IsAtOrUnder(string path, string prefix) =>
+        path == prefix || path.StartsWith(prefix + "/", StringComparison.Ordinal);
 
     /// <summary>Brings the index up to date, opens it, and runs <paramref name="query"/>, turning failures into tool errors.</summary>
     private T WithIndex<T>(Func<DenIndex, T> query)
@@ -301,24 +364,72 @@ public sealed class DenTools
     }
 
     /// <summary>The universe named, or the den's only one.</summary>
-    private static ContainerRecord Universe(IndexDbContext db, string? key)
+    /// <summary>
+    /// The universe a call is about (maintainer decision, 2026-10-23): the
+    /// session's pinned universe, the one named, the den's only one, or the
+    /// one a position's book belongs to (<see cref="UniverseChoice"/>). Null
+    /// for <see cref="AllUniverses"/>, which only <paramref name="allowAll"/>
+    /// tools accept, never with a position, and never in a pinned session.
+    /// </summary>
+    private ContainerRecord? ChooseUniverse(IndexDbContext db, string? universe, string? position, bool allowAll)
     {
-        var universes = db.Containers.Where(c => c.Kind == "universe").ToList().OrderBy(c => c.Key, StringComparer.Ordinal).ToList();
-        var keys = string.Join(", ", universes.Select(u => u.Key));
-        if (key is not null)
+        if (universe == AllUniverses)
         {
-            return universes.FirstOrDefault(u => u.Key == key)
-                ?? throw new DenToolException(
-                    ToolErrorCodes.UnknownUniverse,
-                    universes.Count == 0 ? $"The den has no universe '{key}'; it has no universes yet." : $"The den has no universe '{key}'. Its universes: {keys}.");
+            if (!allowAll)
+            {
+                throw new DenToolException(
+                    ToolErrorCodes.BadArgument,
+                    $"'{AllUniverses}' (every universe) is only for search and list_entities; name one universe here.");
+            }
+
+            if (position is not null)
+            {
+                throw new DenToolException(ToolErrorCodes.BadArgument, $"'{AllUniverses}' doesn't go with a position: a position belongs to one universe.");
+            }
+
+            if (PinnedUniverse is not null)
+            {
+                throw new DenToolException(
+                    ToolErrorCodes.BadArgument,
+                    $"This session is pinned to universe '{PinnedUniverse}' (wolfden mcp --universe), so it can't read every universe.");
+            }
+
+            return null;
         }
 
-        return universes.Count switch
+        if (PinnedUniverse is not null)
         {
-            1 => universes[0],
-            0 => throw new DenToolException(ToolErrorCodes.NoUniverse, "The den has no universes yet, so there's nothing to read."),
-            _ => throw new DenToolException(ToolErrorCodes.UniverseRequired, $"The den has {universes.Count} universes ({keys}); name one in 'universe'."),
-        };
+            if (universe is not null && universe != PinnedUniverse)
+            {
+                throw new DenToolException(
+                    ToolErrorCodes.BadArgument,
+                    $"This session is pinned to universe '{PinnedUniverse}' (wolfden mcp --universe), so it can't read universe '{universe}'.");
+            }
+
+            universe = PinnedUniverse;
+        }
+
+        string key;
+        try
+        {
+            key = UniverseChoice.Choose(db, universe, position);
+        }
+        catch (UniverseChoiceException e)
+        {
+            throw new DenToolException(
+                e.Problem switch
+                {
+                    UniverseChoiceProblem.NoUniverse => ToolErrorCodes.NoUniverse,
+                    UniverseChoiceProblem.UnknownUniverse => ToolErrorCodes.UnknownUniverse,
+                    UniverseChoiceProblem.BadPosition => ToolErrorCodes.BadPosition,
+                    _ => ToolErrorCodes.UniverseRequired,
+                },
+                e.Problem == UniverseChoiceProblem.UniverseRequired
+                    ? $"{e.Message} Give its key in 'universe'{(allowAll ? $", or '{AllUniverses}' for every universe" : "")}."
+                    : e.Message);
+        }
+
+        return db.Containers.Single(c => c.Kind == "universe" && c.Key == key);
     }
 
     private static CanonFilter? Filter(string? series, string? book) => (series, book) switch
@@ -374,8 +485,13 @@ public sealed class DenTools
         }
     }
 
-    /// <summary>Checks that each type is defined by an enabled pack or used by an entity (of the universe, if one is given).</summary>
-    private void CheckTypes(IndexDbContext db, int? universeId, IEnumerable<string> types)
+    /// <summary>
+    /// Checks that each type is defined by an enabled pack or used by an
+    /// entity (of the universe, if one is given). The error lists the types in
+    /// use unless <paramref name="listUsed"/> is false: for a view at a
+    /// position, where a type only later entities use would give them away.
+    /// </summary>
+    private void CheckTypes(IndexDbContext db, int? universeId, IEnumerable<string> types, bool listUsed = true)
     {
         var used = db.Entities.Where(e => universeId == null || e.UniverseId == universeId).Select(e => e.Type).Distinct().ToList();
         HashSet<string>? known = null;
@@ -391,7 +507,8 @@ public sealed class DenTools
             {
                 throw new DenToolException(
                     ToolErrorCodes.UnknownType,
-                    $"There's no type '{type}': no enabled pack defines it, and no entity uses it. Types in use: {string.Join(", ", used.Order(StringComparer.Ordinal))}.");
+                    $"There's no type '{type}': no enabled pack defines it, and no entity uses it." +
+                    (listUsed ? $" Types in use: {string.Join(", ", used.Order(StringComparer.Ordinal))}." : ""));
             }
         }
     }
@@ -407,20 +524,29 @@ public sealed class DenTools
     /// <summary>
     /// The entities <paramref name="name"/> names in the given universes: an
     /// exact key or path first, then as a link would (<see cref="DenIndex.MatchEntities"/>).
+    /// With <paramref name="amongPaths"/>, only those entities take part in
+    /// either step.
     /// </summary>
-    private static List<EntityRecord> Match(DenIndex index, IReadOnlyCollection<int> universeIds, string name)
+    private static List<EntityRecord> Match(DenIndex index, int universeId, string name, IReadOnlySet<string>? amongPaths)
     {
         var path = name.Replace('\\', '/');
         var exact = index.Context.Entities
-            .Where(e => universeIds.Contains(e.UniverseId) && (e.Key == name || e.Path == path))
+            .Where(e => e.UniverseId == universeId && (e.Key == name || e.Path == path))
+            .ToList()
+            .Where(e => amongPaths is null || amongPaths.Contains(e.Path))
             .ToList();
         if (exact.Count > 0)
         {
             return exact.OrderBy(e => e.Path, StringComparer.Ordinal).ToList();
         }
 
-        return universeIds.SelectMany(u => index.MatchEntities(u, name)).ToList();
+        return index.MatchEntities(universeId, name, amongPaths).ToList();
     }
+
+    private static DenToolException UnknownEntity(string name, string universe) => new(
+        ToolErrorCodes.UnknownEntity,
+        $"No entity in universe '{universe}' matches '{name}' by id, path, file name, name, or alias. " +
+        "Use search or list_entities to find it.");
 
     private static DenToolException Ambiguous(
         string name, IReadOnlyList<EntityRecord> matches, Dictionary<int, string> universes, Dictionary<int, ContainerRecord> scopes) =>

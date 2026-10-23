@@ -9,6 +9,11 @@ namespace Wolfden.Mcp;
 // model reads only what applies. Every result carries a version for its
 // shape: within a version, members may be added, but never renamed, removed,
 // or given a new meaning.
+//
+// In every result, `count` is how many items this result holds (hits,
+// entities, or diagnostics), and `truncated` is true when more matched than
+// `limit` let through. Where the tool knows how many matched in all
+// (list_entities, check), `total` says so.
 
 /// <summary>The JSON settings for tool results.</summary>
 public static class ToolJson
@@ -205,11 +210,11 @@ public sealed record ScopeFilter(string Kind, string Key);
 /// <param name="Position">The position as given, or null for the end of the story.</param>
 /// <param name="At">The position in words.</param>
 /// <param name="Filter">The series or book the view is narrowed to, or null.</param>
-/// <param name="EntityCount">How many entities the view holds.</param>
+/// <param name="Count">How many entities the view holds (every one is returned).</param>
 /// <param name="Pinned">Pinned canon (format.md F-VIEW-2), first.</param>
 /// <param name="Entities">Every entity in the view (F-VIEW-1), in F-VIEW-3 order.</param>
 public sealed record CanonAsOfResult(
-    int Version, string Universe, string? Position, string At, ScopeFilter? Filter, int EntityCount,
+    int Version, string Universe, string? Position, string At, ScopeFilter? Filter, int Count,
     IReadOnlyList<PinnedEntity> Pinned, IReadOnlyList<EntityView> Entities);
 
 /// <summary>The result of <c>get_entity</c>.</summary>
@@ -223,10 +228,11 @@ public sealed record GetEntityResult(int Version, string View, string? Position,
 
 /// <summary>The result of <c>list_entities</c>.</summary>
 /// <param name="Version">The shape version.</param>
-/// <param name="Count">How many entities match.</param>
+/// <param name="Count">How many entities this result holds.</param>
+/// <param name="Total">How many entities match in all.</param>
 /// <param name="Truncated">True if more matched than <c>limit</c>.</param>
 /// <param name="Entities">The entities, by universe and then in F-VIEW-3 order.</param>
-public sealed record ListEntitiesResult(int Version, int Count, bool Truncated, IReadOnlyList<EntitySummary> Entities);
+public sealed record ListEntitiesResult(int Version, int Count, int Total, bool Truncated, IReadOnlyList<EntitySummary> Entities);
 
 /// <summary>A search hit.</summary>
 /// <param name="Entity">The entity.</param>
@@ -241,9 +247,10 @@ public sealed record SearchHitView(EntitySummary Entity, string? Section, int? L
 /// <summary>The result of <c>search</c>.</summary>
 /// <param name="Version">The shape version.</param>
 /// <param name="Query">The query.</param>
-/// <param name="Count">How many hits are returned.</param>
+/// <param name="Count">How many hits this result holds.</param>
+/// <param name="Truncated">True if more hits matched than <c>limit</c>.</param>
 /// <param name="Hits">The hits, best first.</param>
-public sealed record SearchResult(int Version, string Query, int Count, IReadOnlyList<SearchHitView> Hits);
+public sealed record SearchResult(int Version, string Query, int Count, bool Truncated, IReadOnlyList<SearchHitView> Hits);
 
 /// <summary>A diagnostic from <c>check</c>.</summary>
 /// <param name="Path">The file, relative to the den root.</param>
@@ -255,13 +262,16 @@ public sealed record DiagnosticView(string Path, int? Line, string Severity, str
 
 /// <summary>The result of <c>check</c>.</summary>
 /// <param name="Version">The shape version.</param>
+/// <param name="Universe">The universe checked (its files and the den-level ones), or null for the whole den.</param>
 /// <param name="Loaded">False if den.yaml doesn't load, so only it was checked.</param>
 /// <param name="SpoilerChecks">True if the den turns on spoiler checks; null if den.yaml doesn't load.</param>
 /// <param name="Entities">The entities checked.</param>
-/// <param name="Errors">All errors in the den.</param>
-/// <param name="Warnings">All warnings in the den.</param>
-/// <param name="Count">How many diagnostics match the filters.</param>
+/// <param name="Errors">All errors in what was checked.</param>
+/// <param name="Warnings">All warnings in what was checked.</param>
+/// <param name="Count">How many diagnostics this result holds.</param>
+/// <param name="Total">How many diagnostics match the filters in all.</param>
 /// <param name="Truncated">True if more matched than <c>limit</c>.</param>
 /// <param name="Diagnostics">The diagnostics, by path and line.</param>
 public sealed record CheckResult(
-    int Version, bool Loaded, bool? SpoilerChecks, int Entities, int Errors, int Warnings, int Count, bool Truncated, IReadOnlyList<DiagnosticView> Diagnostics);
+    int Version, string? Universe, bool Loaded, bool? SpoilerChecks, int Entities, int Errors, int Warnings, int Count, int Total, bool Truncated,
+    IReadOnlyList<DiagnosticView> Diagnostics);

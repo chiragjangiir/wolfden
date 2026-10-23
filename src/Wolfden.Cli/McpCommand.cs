@@ -1,5 +1,6 @@
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using Wolfden.Core.Structure;
 using Wolfden.Mcp;
 
 namespace Wolfden.Cli;
@@ -19,7 +20,8 @@ namespace Wolfden.Cli;
 /// </para>
 /// <para>
 /// Exit codes: 0 when the client disconnects (standard input closes) or on
-/// Ctrl+C, and 2 when the command line is wrong or there's no den. A den
+/// Ctrl+C, 2 when the command line is wrong or there's no den, and 3 when
+/// the server started but then stopped because of a failure. A den
 /// whose <c>den.yaml</c> doesn't load is still served, so the client can
 /// call <c>check</c> to find out why; the other tools report
 /// <c>den_not_loaded</c>.
@@ -29,26 +31,37 @@ internal static class McpCommand
 {
     internal static readonly CommandSpec Spec = new(
         "mcp",
-        "usage: wolfden mcp [<den>] [--den <den>] [--no-watch]",
+        "usage: wolfden mcp [<den>] [--den <den>] [--universe <key>] [--no-watch]",
         """
         Runs Wolfden's MCP server over standard input and output, for an AI
         client such as an editor or a desktop assistant. Its tools only read
         the den: search, get_entity, list_entities, canon_as_of, and check.
         It keeps the den's index up to date as files change while it runs.
-        Log messages go to standard error.
+        If another Wolfden is already watching the den (such as 'wolfden index
+        --watch'), it relies on that one, and on a check of the files before
+        each call, and doesn't take over the watch. Log messages go to
+        standard error.
 
           <den>, --den <den>  the den's folder; by default, the current folder or
                               the nearest folder above it with a den.yaml
+          --universe <key>    pin the session to this universe: every call reads
+                              it, and a call that names another universe, or
+                              '*' for every universe, is refused
           --no-watch          don't watch the files; each tool call still checks
                               them first and rebuilds the index if they changed
+
+        In a den with several universes, each call names one (or gives a story
+        position whose book only one universe has) unless --universe pins it.
 
         To use it, add a server to your AI client's MCP settings that runs
         'wolfden mcp --den <folder>'.
 
-        Exits 0 when the client disconnects, and 2 if the server couldn't start.
+        Exits 0 when the client disconnects or on Ctrl+C, 2 if the server
+        couldn't start (including a --universe the den doesn't have), and 3
+        if it started but then stopped because of a failure.
         """,
         ["--no-watch"],
-        ["--den"],
+        ["--den", "--universe"],
         [],
         1,
         "give at most one den folder.");
@@ -68,6 +81,25 @@ internal static class McpCommand
             return CliApp.ExitUsage;
         }
 
+        var pinned = line.Value("--universe");
+        if (pinned is not null)
+        {
+            var structure = DenStructure.Load(root);
+            if (!structure.IsLoaded)
+            {
+                error.WriteLine($"wolfden mcp: den.yaml doesn't load, so universe '{pinned}' can't be found. Run 'wolfden check' to see why.");
+                return CliApp.ExitUsage;
+            }
+
+            if (structure.FindUniverse(pinned) is null)
+            {
+                var keys = structure.Universes.Select(u => u.Key).Order(StringComparer.Ordinal).ToList();
+                error.WriteLine(
+                    $"wolfden mcp: the den has no universe '{pinned}'." + (keys.Count == 0 ? " It has no universes yet." : $" Its universes: {string.Join(", ", keys)}."));
+                return CliApp.ExitUsage;
+            }
+        }
+
         ITransport transport;
         if (TransportFactory is { } factory)
         {
@@ -84,7 +116,7 @@ internal static class McpCommand
         CliApp.RunsUntilStopped = true;
         try
         {
-            WolfdenMcpServer.RunAsync(transport, new DenTools(root), CliApp.Version, error, !line.Has("--no-watch"), stop)
+            WolfdenMcpServer.RunAsync(transport, new DenTools(root) { PinnedUniverse = pinned }, CliApp.Version, error, !line.Has("--no-watch"), stop)
                 .GetAwaiter().GetResult();
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)
@@ -94,7 +126,7 @@ internal static class McpCommand
         catch (Exception e) when (e is not OutOfMemoryException)
         {
             error.WriteLine($"wolfden mcp: the server stopped: {e.Message}");
-            return CliApp.ExitUsage;
+            return CliApp.ExitStoppedByFailure;
         }
         finally
         {

@@ -26,6 +26,11 @@ public static class WolfdenMcpServer
         book. Facts can carry the position where the reader learns them (from) and where they stop holding (until), so canon
         changes as the story goes on.
 
+        Every tool except check reads one universe. A den with one universe uses it. In a den with several, pass 'universe'
+        (its key), or a position whose book only one universe has, which settles it. Only search and list_entities take
+        universe '*', for every universe at once, and never with a position. check validates files, so it checks the whole
+        den unless given a universe, and then checks that universe's files and the den-level ones.
+
         Every entity, section, and field entry has a status: idea, undecided, or candidate (not decided yet), draft or canon (in
         canon; draft isn't settled), or retconned (replaced). Pinned facts are hard canon: check them before writing.
 
@@ -44,16 +49,46 @@ public static class WolfdenMcpServer
         {
             if (method.GetCustomAttribute<McpServerToolAttribute>() is not null)
             {
-                collection.Add(McpServerTool.Create(method, target));
+                collection.Add(new BindingErrorsAsBadArgument(McpServerTool.Create(method, target)));
             }
         }
 
-        return new McpServerOptions
+        var options = new McpServerOptions
         {
             ServerInfo = new Implementation { Name = "wolfden", Title = "Wolfden", Version = version },
-            ServerInstructions = Instructions,
+            ServerInstructions = tools.PinnedUniverse is null
+                ? Instructions
+                : Instructions + $"\nThis session is pinned to universe '{tools.PinnedUniverse}': every call reads it (check included), and a call " +
+                  "that names another universe, or '*', is refused.\n",
             ToolCollection = collection,
         };
+        return options;
+    }
+
+    /// <summary>
+    /// A tool whose argument-binding errors come back in Wolfden's error
+    /// shape. The tool methods catch every failure of their own
+    /// (<see cref="WolfdenTools.Respond{T}"/>), so what the SDK throws, or
+    /// reports as an error result in its own words, is a failure to bind the
+    /// arguments: a required one missing, or one of the wrong type.
+    /// </summary>
+    private sealed class BindingErrorsAsBadArgument(McpServerTool inner) : DelegatingMcpServerTool(inner)
+    {
+        public override async ValueTask<CallToolResult> InvokeAsync(
+            RequestContext<CallToolRequestParams> request, CancellationToken cancellationToken = default)
+        {
+            CallToolResult result;
+            try
+            {
+                result = await base.InvokeAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception e) when (e is not OperationCanceledException and not OutOfMemoryException)
+            {
+                return WolfdenTools.BadArgument(ProtocolTool.Name, e.Message);
+            }
+
+            return WolfdenTools.AsBadArgument(result, ProtocolTool.Name);
+        }
     }
 
     /// <summary>

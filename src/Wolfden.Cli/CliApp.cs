@@ -26,6 +26,9 @@ internal static class CliApp
     /// <summary>The command couldn't do its job: a wrong command line, no den, a <c>den.yaml</c> that doesn't load, or a failure.</summary>
     internal const int ExitUsage = 2;
 
+    /// <summary>For a command that runs until stopped (<c>mcp</c>): it started and did its job for a while, then stopped because of a failure.</summary>
+    internal const int ExitStoppedByFailure = 3;
+
     /// <summary>
     /// True while a command that runs until it's stopped (<c>index --watch</c>, <c>mcp</c>)
     /// is running, so Ctrl+C stops it cleanly instead of ending the process.
