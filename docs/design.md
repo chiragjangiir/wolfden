@@ -448,7 +448,7 @@ don't fit the timeline, and open threads at a frozen book's end.
 
 ### The command line (v0)
 
-**v0 behaviour, not a recorded decision** (#17). The CLI has five
+**v0 behaviour, not a recorded decision** (#17). The CLI has six
 commands, and `wolfden <command> --help` describes each one:
 
 | Command | What it does |
@@ -458,6 +458,7 @@ commands, and `wolfden <command> --help` describes each one:
 | `wolfden index [<den>] [--watch]` | Rebuilds `.wolfden/index.db` from the files and says what it holds. `--watch` then keeps it up to date as files change (#14), printing one line for each batch of changes it applies (with `--json`, one JSON object per line), until Ctrl+C. Only one watcher runs per den; a second exits 2. |
 | `wolfden query [<universe>] [--at <position>]` | Canon as of a position (format.md F-VIEW-1), from the index. The universe can be left out when the den has only one. `--series` or `--book` narrows the view, `--type` (any type an enabled pack defines) and `--entity` (matched as a link is, F-LINK-6) pick entities out of it, `--pinned` gives pinned canon (F-VIEW-2), and `--brief` lists one line per entity. |
 | `wolfden new-id [<count>]` | Prints new ids for files made by hand (format.md F-ID-5). |
+| `wolfden mcp [<den>] [--no-watch]` | Runs the MCP server over stdio for an AI client (§8, #20) until the client disconnects or Ctrl+C. Standard output carries only the protocol; log messages go to standard error. It exits 2 if there's no den, but serves a den whose `den.yaml` doesn't load, so the client can call `check` to find out why. |
 
 They share one surface:
 
@@ -476,7 +477,8 @@ They share one surface:
   mistakes and failures to standard error.
 - **Exit codes.** 0 when the command did its job; for `check`, when the
   den has no errors (warnings alone pass, format.md F-GEN-1); for `index
-  --watch`, when it's stopped with Ctrl+C. 1 only from
+  --watch`, when it's stopped with Ctrl+C; for `mcp`, when the client
+  disconnects or it's stopped with Ctrl+C. 1 only from
   `check`, when the den has at least one error. 2 when the command
   couldn't do its job: a wrong command line, no den, a `den.yaml` that
   doesn't load, a universe, position, filter, type, or entity that doesn't
@@ -490,27 +492,30 @@ They share one surface:
   lags behind an edit. `index --watch` keeps both the index and that hash
   up to date as files change, so while it runs a query rarely needs to
   rebuild: when the hash differs and a watcher is running, `query` first
-  waits up to about a second for it to catch up (#108). The long-running `serve` and `mcp` will host the same watcher.
+  waits up to about a second for it to catch up (#108). The long-running
+  `mcp` hosts the same watcher (unless `--no-watch`, or another Wolfden
+  is already watching the den), and checks the hash the same way before
+  each tool call; `serve` will do the same.
   `--watch` keeps going when `den.yaml` stops loading, so the writer can
   fix it, and reports a batch that fails on standard error, then rebuilds.
 
 ## 8. AI integration (MCP)
 
 Wolfden ships an MCP server, using the official C# MCP SDK, over the same core
-library the API uses. Draft tool surface:
+library the API uses. `wolfden mcp` runs it over stdio (§7). Tool surface:
 
-| Tool | Purpose |
-|---|---|
-| `search` | Full-text and field search across a den or scope |
-| `get_entity` | One entity, optionally `as_of` a position |
-| `list_entities` | By type, scope, or status |
-| `canon_as_of` | A summary of canon at a position, with an optional series or book filter |
-| `get_history` | Commit history and diffs for an entity |
-| `create_entity` | From a type template |
-| `update_fields` / `append_section` | Structured edits that keep everything else intact |
-| `add_idea` | Record undecided material with `status: idea` |
-| `check` | Run continuity checks and return findings |
-| `checkpoint` | Commit with a message |
+| Tool | Status | Purpose |
+|---|---|---|
+| `search` | shipped (#20) | Full-text search across the den, or one universe or type |
+| `get_entity` | shipped (#20) | One entity, optionally `as_of` a position |
+| `list_entities` | shipped (#20) | By universe, type, status, series, or book |
+| `canon_as_of` | shipped (#20) | Canon at a position, with an optional series or book filter |
+| `check` | shipped (#20) | Run continuity checks and return findings |
+| `get_history` | planned (#19) | Commit history and diffs for an entity |
+| `create_entity` | planned (#21) | From a type template |
+| `update_fields` / `append_section` | planned (#21) | Structured edits that keep everything else intact |
+| `add_idea` | planned (#21) | Record undecided material with `status: idea` |
+| `checkpoint` | planned | Commit with a message |
 
 Writes go through the same validation as the UI. An agent can't save a file
 the parser would reject.
@@ -518,6 +523,37 @@ the parser would reject.
 `canon_as_of` and `get_entity` serve **pinned canon** first
 ([`format.md`](format.md) §9.4), so an agent sees the hard facts before
 the rest.
+
+**The read tools (#20; v0 behaviour, not a recorded decision).** They
+reuse the index's queries and `check`, so they answer as `wolfden query`
+and `wolfden check` do:
+
+- **Positions are opt-in.** Without one, `get_entity`, `list_entities`,
+  and `search` give the author's full view: every entity and fact,
+  whatever its status, each marked with its status, pin, and `from` and
+  `until`. `canon_as_of` without a position is the end of the story, as
+  in `query`. With a position, `canon_as_of` and `get_entity` give the
+  canon-as-of view (format.md F-VIEW-1), so nothing the reader meets later
+  is in the result. `get_entity` then matches the name among the
+  entities the reader has met by then, and for one they haven't met
+  returns `in_view: false` and nothing about it.
+- **Pinned first.** Results of `canon_as_of` and `get_entity` start with
+  `pinned`, the pinned canon view (F-VIEW-2), and list the same facts in
+  place too, so each entity is complete.
+- **Naming things.** `get_entity` takes a name, alias, file name, or id,
+  matched as a link is (F-LINK-6), or a key or path. A series or book
+  filter means what it means in a canon view (F-VIEW-1), for
+  `list_entities` too. The universe can be left out when the den has
+  only one.
+- **Results** are JSON with snake_case names, like the tools' arguments,
+  sent both as text and as structured content, with a `version` for
+  their shape (the same rule as `--json`). Errors are error results whose
+  JSON holds a stable `code` (such as `bad_position`, `unknown_entity`,
+  `ambiguous_entity`, `den_not_loaded`) and a message that says what to
+  do next.
+- **Fresh answers.** Each call checks the files hash first and rebuilds
+  the index if it differs, waiting briefly for the watcher the server
+  hosts (§7). `check` reads the files, not the index.
 
 ## 9. Architecture
 

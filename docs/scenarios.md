@@ -44,6 +44,7 @@ of Book 3 (format.md §8).
 | RT | What saving a note keeps, and what an edit changes |
 | CLI | Using the other `wolfden` commands: init, index, query, check --fix, new-id |
 | WATCH | Keeping the index up to date while notes are edited outside Wolfden |
+| MCP | An AI assistant reading the den through `wolfden mcp` |
 
 ## CANON: what's canon at a point in the story
 
@@ -1079,3 +1080,162 @@ Spec: design.md §7 (#116). Covered by:
 `UnlistableFolderTests.TheWatcherLeavesOutAnEntitiesFolderItCantList`,
 `UnlistableFolderTests.TheWatcherRebuildsWithoutAContainerFolderItCantList`,
 `UnlistableFolderTests.TheWatcherLeavesOutAFolderItCantListWhenAFileInItChanges`.
+
+## MCP: an AI assistant reads the den
+
+Background: `wolfden mcp` (design.md §8, #20) runs an MCP server over
+stdio, so an AI assistant can read the den with five tools: `search`,
+`get_entity`, `list_entities`, `canon_as_of`, and `check`. They only
+read. Without a story position, a tool gives the author's full view;
+with one, it gives canon as the reader knows it there. Pinned canon comes
+first. The examples use the Dracula sample, whose book is `dracula`.
+
+### SC-MCP-1. My assistant reads canon as of the chapter I'm drafting
+
+The writer is drafting chapter 4 and asks the assistant to check what's
+established so far. It calls `canon_as_of` with `position: "dracula:4"`.
+
+- The result holds every entity the reader has met by chapter 4, at any
+  scope, with the field values and sections in effect there: the same
+  view `wolfden query --at dracula:4` shows. Lucy and Renfield, who enter
+  at chapter 5, and what the Count is, which comes out in chapter 18,
+  aren't in it anywhere. Ideas, undecided questions, and retconned or
+  bookkeeping material are left out. `type` narrows it, and `brief`
+  lists the entities without their content.
+
+Spec: F-VIEW-1, F-VIEW-3. Covered by:
+`DraculaToolTests.CanonAsOfAnEarlyChapterLeaksNothingTheReaderMeetsLater`,
+`DraculaToolTests.CanonAsOfMatchesTheIndexsViewEntityForEntity`,
+`DraculaToolTests.CanonAsOfLeavesOutIdeasAndUndecidedQuestions`,
+`DraculaToolTests.CanonAsOfCanBeBriefAndNarrowedToAType`.
+
+### SC-MCP-2. My assistant asks about a character the reader hasn't met yet
+
+Drafting chapter 4, the assistant calls `get_entity` for "Lucy" with
+`as_of: "dracula:4"`.
+
+- The result says Lucy isn't in canon as of chapter 4 (`in_view` is
+  false) and gives nothing about her: not even her full name. At chapter
+  5 it gives her as the reader first meets her, without her death or what
+  follows.
+
+Spec: F-VIEW-1, F-ENT-6, format.md §9.5. Covered by:
+`DraculaToolTests.GetEntityAsOfAChapterBeforeTheReaderMeetsItReturnsNothingAboutIt`,
+`DraculaToolTests.GetEntityAsOfAChapterShowsOnlyWhatsKnownThen`,
+`McpServerTests.OverTheWireAnEarlyViewHoldsNoSpoilers`.
+
+### SC-MCP-3. My assistant sees the hard facts first
+
+The writer has pinned the Count's species and the rules of the Un-Dead.
+The assistant calls `canon_as_of` at chapter 18, and `get_entity` for the
+Count.
+
+- Each result starts with `pinned`: the pinned facts in effect, grouped
+  by entity, ahead of the rest. They're listed in place as well, so each
+  entity is complete. At chapter 17 the Count's species isn't among them,
+  since the reader learns it at chapter 18.
+
+Spec: F-PIN-1, F-VIEW-2, design.md §8. Covered by:
+`DraculaToolTests.CanonAsOfServesPinnedCanonFirst`,
+`DraculaToolTests.PinnedCanonKeepsToThePositionToo`,
+`DraculaToolTests.GetEntityServesPinnedFactsFirst`.
+
+### SC-MCP-4. My assistant reads a whole note, ideas and all
+
+The writer asks the assistant to help decide an open question in the
+thread "The Count's end". It calls `get_entity` with no position.
+
+- The result is the author's full view: every field entry and section,
+  whatever its status, each with its status, pin, and the positions
+  where it starts and ends, so the undecided question and both candidate
+  answers are there, marked as such. The entity can be named by its
+  name, an alias, its file name, its id, or its path.
+
+Spec: F-STAT-1, F-STAT-4, F-LINK-6. Covered by:
+`DraculaToolTests.GetEntityWithoutAPositionIsTheAuthorsFullView`,
+`DraculaToolTests.GetEntityTakesANameAnAliasAFileNameAnIdOrAPath`.
+
+### SC-MCP-5. My assistant looks for notes
+
+The assistant searches for "Voivode", and lists the den's characters.
+
+- `search` finds the Count's "Who he was" section, with the match marked
+  in a snippet, and says for each hit whether it's canon text;
+  `canon_only` leaves out ideas, candidates, and retconned material.
+  `list_entities` lists entities of every status as one line each, and
+  narrows by type, status, series, or book.
+
+Spec: design.md §7, §8. Covered by:
+`DraculaToolTests.SearchFindsNotesAndSaysWhatsCanon`,
+`DraculaToolTests.ListEntitiesFiltersByTypeStatusAndScope`.
+
+### SC-MCP-6. My assistant gets a position or a name wrong
+
+The assistant asks for canon as of `dracula:99`, then for "Sherlock
+Holmes", then for "Lucy Westenra" in a den where two notes have that
+name.
+
+- Each answer is an error result with a code the assistant can act on
+  (`bad_position`, `unknown_entity`, `ambiguous_entity`, and so on) and a
+  message saying what to do: a bad position lists the universe's books in
+  story order, and an ambiguous name lists the matches. With a position,
+  a name is matched among what the reader has met by then, so the error
+  never lists an entity from later in the story. A den with several
+  universes asks which one.
+
+Spec: F-POS-2, F-POS-3, F-POS-4, F-LINK-6. Covered by:
+`ToolErrorTests`, `OtherDenErrorTests.ANameThatMatchesTwoEntitiesListsThemWithoutSpoilingEarlierViews`,
+`OtherDenErrorTests.ADenWithSeveralUniversesNeedsOneNamed`,
+`McpServerTests.ABadCallIsAnErrorResultWithACode`.
+
+### SC-MCP-7. I edit a note while my assistant is connected
+
+With `wolfden mcp` running, the writer adds a section to Mr Swales's note
+in their editor, and the assistant reads him again.
+
+- The next call shows the new section. The server runs the same watcher
+  as `wolfden index --watch`, and each call also checks the files first,
+  as `wolfden query` does, so an answer never lags behind a save. If
+  another Wolfden is already watching the den, the server uses that one.
+
+Spec: design.md §7, §8. Covered by:
+`McpServerTests.AnEditWhileConnectedShowsInTheNextCall`.
+
+### SC-MCP-8. My assistant runs the continuity checks
+
+The assistant calls `check` after helping with an edit.
+
+- It gets the same findings as `wolfden check`, each with a path, line,
+  severity, rule id, and message, and the den's error and warning
+  counts. `severity` and `path` narrow the list. It never changes a
+  file.
+
+Spec: F-GEN-1, design.md §7. Covered by:
+`DraculaToolTests.CheckReportsTheSamplesFindings`.
+
+### SC-MCP-9. `den.yaml` stops loading while my assistant is connected
+
+The writer makes a typo in `den.yaml`.
+
+- The reading tools answer `den_not_loaded` and say to call `check`,
+  which reports what's wrong with `den.yaml`. Once it's fixed, the tools
+  work again without restarting the server.
+
+Spec: F-DEN-1. Covered by:
+`OtherDenErrorTests.ADenWhoseSettingsDontLoadIsDenNotLoadedButCheckSaysWhy`.
+
+### SC-MCP-10. I connect my AI client to my den
+
+The writer adds `wolfden mcp --den <folder>` to their AI client's MCP
+settings.
+
+- The client starts the server, sees the five read-only tools with
+  descriptions that explain dens, scopes, and positions, and can call
+  each one. Nothing but the protocol goes to standard output. Without a
+  den, the server doesn't start, says why on standard error, and exits 2.
+
+Spec: design.md §8, §9. Covered by:
+`McpCommandTests.AnAIClientRunsItOverStdio`,
+`McpCommandTests.WithoutADenItDoesntStart`,
+`McpServerTests.TheClientSeesTheServerAndItsReadOnlyTools`,
+`McpServerTests.EachToolAnswersWithJson`.
