@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
-using Wolfden.Core.Links;
 using Wolfden.Core.Structure;
 using Wolfden.Index;
 
@@ -185,7 +184,7 @@ internal static partial class QueryCommand
 
         if (line.Value("--entity") is { } name)
         {
-            var keys = MatchEntities(db, universeId, name);
+            var keys = index.MatchEntities(universeId, name).Select(e => e.Key).ToHashSet(StringComparer.Ordinal);
             if (keys.Count == 0)
             {
                 problem = $"universe '{universe}' has no entity '{name}' (matched as a link is: by id, file name, name, or alias).";
@@ -196,30 +195,6 @@ internal static partial class QueryCommand
         }
 
         return view;
-    }
-
-    /// <summary>
-    /// The keys of the universe's entities that <paramref name="name"/>
-    /// names, matched as a link is (<see cref="LinkMatching"/>, F-LINK-4,
-    /// F-LINK-6): every match in the first tier that has any. With no file
-    /// to resolve from, there's no scope chain to break a tie (F-LINK-7),
-    /// so a tie keeps all its matches.
-    /// </summary>
-    private static HashSet<string> MatchEntities(IndexDbContext db, int universeId, string name)
-    {
-        var entities = db.Entities.Where(e => e.UniverseId == universeId)
-            .Select(e => new { e.Id, e.Key, e.Ulid, e.Slug, e.NameNormalized })
-            .ToList();
-        var ids = entities.Select(e => e.Id).ToList();
-        var aliases = db.Aliases.Where(a => ids.Contains(a.EntityId)).Select(a => new { a.EntityId, a.AliasNormalized }).ToList();
-        var keyById = entities.ToDictionary(e => e.Id, e => e.Key);
-        var (_, matches) = LinkMatching.FirstTier<string>(
-            name,
-            id => entities.Where(e => e.Ulid == id).Select(e => e.Key).ToList(),
-            slug => entities.Where(e => e.Slug is not null && LinkText.Normalize(e.Slug) == slug).Select(e => e.Key).ToList(),
-            normalized => entities.Where(e => e.NameNormalized == normalized).Select(e => e.Key).ToList(),
-            normalized => aliases.Where(a => a.AliasNormalized == normalized).Select(a => keyById[a.EntityId]).Distinct().ToList());
-        return matches.ToHashSet(StringComparer.Ordinal);
     }
 
     private static void WriteText(CanonView view, bool pinned, bool brief, TextWriter output)

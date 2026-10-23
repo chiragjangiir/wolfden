@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Wolfden.Core.Links;
 
 namespace Wolfden.Index;
 
@@ -75,6 +76,43 @@ public sealed class DenIndex : IDisposable
             .Where(e => e.Ulid == idKeyOrPath || e.Key == idKeyOrPath || e.Path == idKeyOrPath)
             .OrderBy(e => e.Path)
             .FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Every entity of the universe with key <paramref name="universeKey"/>,
+    /// whatever its status or where it enters canon, in the order views list
+    /// them (F-VIEW-3). With a <paramref name="filter"/>, only the entities
+    /// filed in the scopes a view with that filter covers (F-VIEW-1).
+    /// </summary>
+    /// <exception cref="CanonViewException">The universe or filter doesn't exist.</exception>
+    public IReadOnlyList<EntityRecord> Entities(string universeKey, CanonFilter? filter = null)
+    {
+        ArgumentNullException.ThrowIfNull(universeKey);
+        return CanonQuery.Entities(Context, universeKey, filter);
+    }
+
+    /// <summary>
+    /// The entities of the universe with row id <paramref name="universeId"/>
+    /// that <paramref name="name"/> names, matched as a link is
+    /// (<see cref="LinkMatching"/>, F-LINK-4, F-LINK-6): every match in the
+    /// first tier that has any (id, then file name, then name, then alias),
+    /// in path order. With no file to resolve from, there's no scope chain to
+    /// break a tie (F-LINK-7), so a tie keeps all its matches.
+    /// </summary>
+    public IReadOnlyList<EntityRecord> MatchEntities(int universeId, string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        var entities = Context.Entities.Where(e => e.UniverseId == universeId).ToList();
+        var ids = entities.Select(e => e.Id).ToList();
+        var aliases = Context.Aliases.Where(a => ids.Contains(a.EntityId)).Select(a => new { a.EntityId, a.AliasNormalized }).ToList();
+        var byId = entities.ToDictionary(e => e.Id);
+        var (_, matches) = LinkMatching.FirstTier<EntityRecord>(
+            name,
+            id => entities.Where(e => e.Ulid == id).ToList(),
+            slug => entities.Where(e => e.Slug is not null && LinkText.Normalize(e.Slug) == slug).ToList(),
+            normalized => entities.Where(e => e.NameNormalized == normalized).ToList(),
+            normalized => aliases.Where(a => a.AliasNormalized == normalized).Select(a => a.EntityId).Distinct().Select(id => byId[id]).ToList());
+        return matches.DistinctBy(e => e.Id).OrderBy(e => e.Path, StringComparer.Ordinal).ToList();
     }
 
     /// <summary>

@@ -20,11 +20,7 @@ internal static class CanonQuery
     /// </summary>
     public static CanonView Run(IndexDbContext db, string universeKey, string? position, CanonFilter? filter)
     {
-        var universe = db.Containers.Where(c => c.Kind == "universe" && c.Key == universeKey).ToList() switch
-        {
-            [var only] => only,
-            _ => throw new CanonViewException($"The den has no universe '{universeKey}'."),
-        };
+        var universe = Universe(db, universeKey);
         var containers = db.Containers.Where(c => c.UniverseId == universe.Id).ToDictionary(c => c.Id);
         var covered = CoveredScopes(filter is null ? universe : Container(containers.Values, universe, filter), containers);
         var point = Point(db, containers.Values, universe, position);
@@ -76,6 +72,35 @@ internal static class CanonQuery
             .ToList();
         return new CanonView(universe.Key, position, filter, view);
     }
+
+    /// <summary>
+    /// Every entity of universe <paramref name="universeKey"/>, whatever its
+    /// status or position, at every scope or only those <paramref name="filter"/>
+    /// covers (the same scopes a filtered view covers, F-VIEW-1), in F-VIEW-3
+    /// order. It's the list a view chooses from, not a view: nothing is left
+    /// out for being out of canon or not yet entered.
+    /// </summary>
+    public static IReadOnlyList<EntityRecord> Entities(IndexDbContext db, string universeKey, CanonFilter? filter)
+    {
+        var universe = Universe(db, universeKey);
+        var containers = db.Containers.Where(c => c.UniverseId == universe.Id).ToDictionary(c => c.Id);
+        var covered = CoveredScopes(filter is null ? universe : Container(containers.Values, universe, filter), containers);
+        return db.Entities
+            .Where(e => e.UniverseId == universe.Id && covered.Contains(e.ScopeId))
+            .ToList()
+            .OrderBy(e => ScopeRank(containers[e.ScopeId]))
+            .ThenBy(e => e.Type, StringComparer.Ordinal)
+            .ThenBy(e => e.NameNormalized, StringComparer.Ordinal)
+            .ThenBy(e => e.Path, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static ContainerRecord Universe(IndexDbContext db, string universeKey) =>
+        db.Containers.Where(c => c.Kind == "universe" && c.Key == universeKey).ToList() switch
+        {
+            [var only] => only,
+            _ => throw new CanonViewException($"The den has no universe '{universeKey}'."),
+        };
 
     /// <summary>
     /// F-TMP-5: of the live entries in effect, the one with the later
