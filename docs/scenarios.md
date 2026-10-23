@@ -755,21 +755,141 @@ section, and adds a section at the end.
   mark stays, and the file still ends the way it did.
 
 Spec: F-RT-1, F-ENC-2, F-ENC-3, F-ENC-4. Covered by:
-`SampleEditTests.EditsOnAWindowsSavedSampleKeepCrlfBomAndFinalNewline`.
+`SampleEditTests.EditsOnAWindowsSavedSampleKeepCrlfBomAndFinalNewline`,
+`SampleEditTests.ListKeyAndSectionEditsOnAWindowsSavedSampleKeepCrlfBomAndFinalNewline`,
+`CollectionEditTests.CollectionEditsKeepCrlfBomAndMissingFinalNewline`,
+`SectionEditTests.SectionEditsKeepCrlf`.
 
 ### SC-RT-7. I add an alias, or a new value for a field that changes over time
 
 The writer adds `Miss Lucy` to Lucy's `aliases`, or adds another entry to
-a temporal field's list.
+a temporal field's list, or another point-of-view character to a
+chapter's `pov` list.
 
-- The new item goes at the end of the list, in the list's own style
-  (flow or block), and the other items, their quoting, and any comments
-  are unchanged.
+- The new item goes at the end of the list, in the list's own style: on
+  the same line in a flow list (`[Lucy, Miss Lucy]`), or on a line of its
+  own at the same indent in a block list. A new temporal entry is written
+  like the entry before it (`- { value: ..., from: "dracula:27" }`). The
+  other items, their quoting, and any comments are unchanged.
 
-Spec: F-RT-2. Covered by: not yet. Wolfden can't add or remove a single
-list item yet. A path that treats a list as a mapping is refused and
-leaves the file unchanged
-(`SampleEditTests.TreatingAListAsAMappingIsRefusedAndChangesNothing`).
+Spec: F-RT-2, F-TMP-7. Covered by:
+`SampleEditTests.AnAliasGoesAtTheEndOfTheFlowList`,
+`SampleEditTests.ANewTemporalEntryGoesAfterTheLastOneInItsStyle`,
+`SampleEditTests.ANestedBlockListGetsANewItemAtItsIndentAndQuoting`,
+`SampleEditTests.ANewChapterIsABlockMappingLikeTheOthers`,
+`CollectionEditTests.AnItemGoesAtTheEndOfAFlowList`,
+`CollectionEditTests.AnItemInABlockListGetsItsOwnLineAfterTheItemBeforeIt`,
+`CollectionEditTests.ANewTemporalEntryCopiesItsNeighborsStyle`.
+
+### SC-RT-8. I remove an alias, or one value of a field that changes over time
+
+The writer drops `the Count` from the Count's aliases, or deletes one
+entry of Lucy's `role`.
+
+- Only that item goes: in a flow list, the item and the comma next to
+  it; in a block list, the item's line, with a comment on that line. The
+  other items, and comment lines above the removed one, are unchanged.
+
+Spec: F-RT-2. Covered by:
+`SampleEditTests.RemovingAnAliasKeepsTheOthers`,
+`SampleEditTests.RemovingATemporalEntryRemovesOnlyItsLine`,
+`CollectionEditTests.RemovingAFlowItemTakesOneSeparatorWithIt`,
+`CollectionEditTests.RemovingABlockItemRemovesItsLinesAndKeepsTheCommentsAboveIt`.
+
+### SC-RT-9. I change when a fact becomes known, or pin it
+
+Lucy's death is written `died: { value: ..., from: "dracula:12" }`. The
+writer moves its `from` to chapter 13, or unpins the Count's `species`.
+
+- Only that value changes, inside the braces. The date, its quotes, the
+  other keys, and the comment above the field stay as they were. A new
+  key, such as `status`, goes at the end of the braces.
+
+Spec: F-RT-2, F-TMP-8. Covered by:
+`SampleEditTests.ChangingWhenAFactIsKnownChangesOnlyItsFrom`,
+`SampleEditTests.UnpinningAFactKeepsTheCommentAboveIt`,
+`CollectionEditTests.ChangingOneKeyOfAFlowMappingChangesOnlyItsValue`,
+`CollectionEditTests.ANewKeyGoesAtTheEndOfAFlowMapping`,
+`CollectionEditTests.ChangingOrRemovingAKeyInAMultiLineFlowMappingKeepsItsComments`.
+
+### SC-RT-10. I remove a field
+
+The writer removes the Count's `skills` and `born` fields, or
+`spoiler_checks` from `den.yaml`.
+
+- The field's lines go, with any comments inside its value and on its
+  last line. Comment lines above it, and every other field, stay.
+
+Spec: F-RT-2. Covered by:
+`SampleEditTests.RemovingAFieldRemovesOnlyItsLine`,
+`SampleEditTests.RemovingADenYamlKeyKeepsTheRest`,
+`CollectionEditTests.RemovingAKeyRemovesItsLinesAndKeepsTheCommentAboveIt`,
+`CollectionEditTests.RemovingAKeyWithABlockValueRemovesTheCommentsInsideIt`,
+`CollectionEditTests.RemovingAKeyOfAFlowMappingKeepsTheRest`.
+
+### SC-RT-11. I rename a section
+
+Lucy has three `## Appearance` sections. The writer renames the second
+one to `Appearance in death`.
+
+- Only that heading's text changes. Its `<!-- wolfden: from=dracula:15 -->`
+  comment, its text, and the other two Appearance sections are untouched.
+  Closing `#`s, a setext underline, or a trailing HTML comment on the
+  heading line stay.
+
+Spec: F-RT-2, F-SEC-3, F-SEC-4. Covered by:
+`SampleEditTests.RenamingOneOfThreeSameNamedSectionsLeavesTheOthersAlone`,
+`SectionEditTests.RenamingChangesOnlyTheHeadingText`,
+`SectionEditTests.RenamingKeepsTheHeadingsMarkup`.
+
+### SC-RT-12. I remove a section
+
+The writer removes Lucy's `### The Un-Dead` subsection, or her last
+section, `### Rest`.
+
+- The section goes with its comment, text, and subsections. The spacing
+  between the sections around it doesn't change, and the file still ends
+  the way it did, with or without a final newline.
+
+Spec: F-RT-2, F-ENC-4. Covered by:
+`SampleEditTests.RemovingASubsectionKeepsItsParentAndSiblings`,
+`SampleEditTests.RemovingTheLastSectionKeepsTheFileEnding`,
+`SectionEditTests.RemovingASectionKeepsTheSpacingAroundIt`,
+`SectionEditTests.RemovingASectionRemovesItsSubsections`,
+`SectionEditTests.RemovingTheLastSectionRemovesTheBlankLinesBeforeIt`.
+
+### SC-RT-13. I move a section
+
+The writer moves Lucy's `## Relationships` above `## Want`.
+
+- The section moves with its comment, text, and subsections, among its
+  siblings. Each section's text is unchanged, the blank lines between
+  sections stay where they were, and the file ends the way it did.
+
+Spec: F-RT-2, F-ENC-4. Covered by:
+`SampleEditTests.MovingASectionKeepsItsCommentAndTheSpacing`,
+`SectionEditTests.MovingASectionKeepsItsTextAndTheSpacingBetweenSections`,
+`SectionEditTests.MovingTheLastSectionKeepsTheFilesEnding`,
+`SectionEditTests.MovingASectionToTheEndTakesItsSubsections`.
+
+### SC-RT-14. An edit that can't be made cleanly is refused
+
+The writer, or an AI assistant, asks for an edit that Wolfden can't make
+without reformatting something else: removing a flow list item whose
+comma sits before a comment on the same line, removing a section whose
+neighbors would then run together into one heading, or treating a list
+as a mapping.
+
+- The edit is refused with a message that says why, and the file is left
+  exactly as it was. Wolfden never rewrites the rest of the file to make
+  an edit fit.
+
+Spec: F-RT-1, F-RT-2. Covered by:
+`SampleEditTests.TreatingAListAsAMappingIsRefusedAndChangesNothing`,
+`CollectionEditTests.RemovingAFlowItemThatWouldTakeACommentWithItIsRefused`,
+`CollectionEditTests.RemovingTheFirstKeyOfAListItemIsRefusedWhenItWouldMoveACommentOrEmptyTheItem`,
+`SectionEditTests.RemovingASectionThatWouldMergeTheTextAroundItIsRefused`,
+`SectionEditTests.MovingASectionThatWouldMergeWithTheTextBeforeItIsRefused`.
 
 ## CLI: working with a den from the command line
 
