@@ -32,15 +32,18 @@ internal static class CheckCommand
 {
     internal static readonly CommandSpec Spec = new(
         "check",
-        "usage: wolfden check [<den>] [--den <den>] [--fix] [--json]",
+        "usage: wolfden check [<den>] [--den <den>] [--universe <key>] [--fix] [--json]",
         """
         Checks a den for errors and continuity problems: broken links, positions
         that don't resolve, missing ids, values that don't fit their fields,
         outlines, and the rest of the rules in format.md and types.md. It reads
-        the files, not the index.
+        the files, not the index, and checks the whole den, every universe
+        included, unless --universe names one.
 
           <den>, --den <den>  the den's folder; by default, the current folder or
                               the nearest folder above it with a den.yaml
+          --universe <key>    check only this universe's files and the den-level
+                              ones (den.yaml and packs); '*' means the whole den
           --fix               first add a new id to every container and entity
                               file that has none (F-ID-2); nothing else changes.
                               Files in a final book and files with errors are
@@ -51,7 +54,7 @@ internal static class CheckCommand
         least one, and 2 if it couldn't be checked.
         """,
         ["--json", "--fix"],
-        ["--den"],
+        ["--den", "--universe"],
         [],
         1,
         "give at most one den folder.");
@@ -80,6 +83,15 @@ internal static class CheckCommand
             return CliApp.ExitUsage;
         }
 
+        // '*' asks for the whole den, which is also what no --universe means.
+        var universe = line.Value("--universe") is "*" ? null : line.Value("--universe");
+        if (universe is not null && line.Has("--fix"))
+        {
+            error.WriteLine("wolfden check: '--fix' adds ids across the whole den, so it doesn't go with '--universe'.");
+            error.WriteLine(Spec.Usage);
+            return CliApp.ExitUsage;
+        }
+
         IReadOnlyList<IdFixResult> fixes = [];
         DenCheck check;
         try
@@ -89,7 +101,7 @@ internal static class CheckCommand
                 fixes = IdFix.Run(path);
             }
 
-            check = runCheck(path);
+            check = universe is null ? runCheck(path) : DenCheck.Run(path, universe);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -100,6 +112,15 @@ internal static class CheckCommand
         {
             // A bug, not a problem with the den: 2 still means "couldn't check".
             return Unexpected(error, debug, $"while checking '{path}'", e);
+        }
+
+        // A den.yaml that doesn't load is reported below: it's what's wrong.
+        if (universe is not null && check.IsLoaded && check.Structure.FindUniverse(universe) is null)
+        {
+            var keys = check.Structure.Universes.Select(u => u.Key).Order(StringComparer.Ordinal).ToList();
+            error.WriteLine(
+                $"wolfden check: the den has no universe '{universe}'." + (keys.Count == 0 ? " It has no universes yet." : $" Its universes: {string.Join(", ", keys)}."));
+            return CliApp.ExitUsage;
         }
 
         try
