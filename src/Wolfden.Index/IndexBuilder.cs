@@ -99,20 +99,22 @@ public static class IndexBuilder
                 $"'{folder}' is a file, but Wolfden keeps its index in a folder by that name. Move or rename the file, then try again.");
         }
 
-        Directory.CreateDirectory(folder);
-        WriteGitignore(folder);
-        RemoveStaleTempFiles(folder);
-
         var target = Path.Combine(folder, IndexFileName);
-        if (Directory.Exists(target))
-        {
-            throw new IOException(
-                $"'{target}' is a folder, but it should be Wolfden's index file. Move or delete the folder (the index is rebuilt from the den's files), then try again.");
-        }
-
         var temp = Path.Combine(folder, $"{IndexFileName}.{Guid.NewGuid():N}{TempSuffix}");
         lock (IndexLock.For(root))
         {
+            // Inside the lock, so two rebuilds in this process (such as an MCP
+            // server's parallel first calls on a den with no index) don't
+            // write the folder's .gitignore at the same time.
+            Directory.CreateDirectory(folder);
+            WriteGitignore(folder);
+            RemoveStaleTempFiles(folder);
+            if (Directory.Exists(target))
+            {
+                throw new IOException(
+                    $"'{target}' is a folder, but it should be Wolfden's index file. Move or delete the folder (the index is rebuilt from the den's files), then try again.");
+            }
+
             try
             {
                 // Taken before the build reads anything, so an edit made during
@@ -486,9 +488,20 @@ public static class IndexBuilder
     private static void WriteGitignore(string folder)
     {
         var path = Path.Combine(folder, ".gitignore");
-        if (!File.Exists(path))
+        if (File.Exists(path))
         {
-            File.WriteAllText(path, "# Wolfden's index and local state: derived from the den's files, never committed.\n*\n");
+            return;
+        }
+
+        try
+        {
+            // CreateNew, so a rebuild in another process writing it at the same moment doesn't fail this one.
+            using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+            stream.Write("# Wolfden's index and local state: derived from the den's files, never committed.\n*\n"u8);
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            // Another process wrote it first.
         }
     }
 
