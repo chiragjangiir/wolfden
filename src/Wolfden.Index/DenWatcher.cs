@@ -122,6 +122,13 @@ public sealed class DenWatcher : IDisposable
     /// <summary>The den's store, whose change feed the watcher listens to.</summary>
     public FileSystemDenStore Store => _store;
 
+    /// <summary>
+    /// For tests: called by <see cref="Start"/> once it holds the watch lock
+    /// and listens for changes, just before the first build, so a test can
+    /// hold the start there.
+    /// </summary>
+    internal Action? BeforeFirstBuild { get; init; }
+
     /// <summary>The pause before the first retry after a failure. Tests shorten it.</summary>
     internal TimeSpan FirstPause { get; init; } = TimeSpan.FromSeconds(1);
 
@@ -181,6 +188,7 @@ public sealed class DenWatcher : IDisposable
                 _listeningSince = DateTime.UtcNow;
             }
 
+            BeforeFirstBuild?.Invoke();
             var first = _updater.Rebuild("the watcher started");
             _thread = new Thread(Run) { IsBackground = true, Name = "Wolfden index watcher" };
             _thread.Start();

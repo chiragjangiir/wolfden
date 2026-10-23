@@ -1,6 +1,7 @@
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using Wolfden.Core.Structure;
+using Wolfden.Index;
 using Wolfden.Mcp;
 
 namespace Wolfden.Cli;
@@ -69,6 +70,9 @@ internal static class McpCommand
     /// <summary>For tests: makes the transport in place of standard input and output.</summary>
     internal static Func<ITransport>? TransportFactory { get; set; }
 
+    /// <summary>For tests: starts the watcher in place of <see cref="WolfdenMcpServer.DefaultWatcher"/>.</summary>
+    internal static Func<TextWriter, CancellationToken, DenWatcher?>? WatcherFactory { get; set; }
+
     public static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error, CancellationToken stop = default)
     {
         if (CommandLine.Parse(Spec, args, output, error, out var line) is { } exit)
@@ -122,7 +126,8 @@ internal static class McpCommand
         CliApp.RunsUntilStopped = true;
         try
         {
-            WolfdenMcpServer.RunAsync(transport, new DenTools(root) { PinnedUniverse = pinned }, CliApp.Version, error, !line.Has("--no-watch"), stop)
+            var watcher = line.Has("--no-watch") ? null : WatcherFactory ?? WolfdenMcpServer.DefaultWatcher(root);
+            WolfdenMcpServer.RunAsync(transport, new DenTools(root) { PinnedUniverse = pinned }, CliApp.Version, error, watcher, stop)
                 .GetAwaiter().GetResult();
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)

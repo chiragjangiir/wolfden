@@ -73,6 +73,27 @@ public class McpCommandTests
     }
 
     [Fact]
+    public void AWatcherThatFailsToStartIsExitThree()
+    {
+        using var den = TempDen.DraculaCopy();
+        McpCommand.TransportFactory = () => new SilentTransport();
+        McpCommand.WatcherFactory = (_, _) => throw new FormatException("the watcher broke");
+        try
+        {
+            var (exitCode, output, error) = Cli.Run("mcp", den.Root);
+
+            Assert.Equal(CliApp.ExitStoppedByFailure, exitCode);
+            Assert.Equal("", output);
+            Assert.Contains("wolfden mcp: the server stopped: the watcher broke", error, StringComparison.Ordinal);
+        }
+        finally
+        {
+            McpCommand.TransportFactory = null;
+            McpCommand.WatcherFactory = null;
+        }
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-MCP-10")]
     public async Task OverRawPipesStdoutHoldsOnlyJsonRpcAndStdinEofEndsTheServer()
     {
@@ -196,5 +217,23 @@ public class McpCommandTests
         public Task SendMessageAsync(JsonRpcMessage message, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    /// <summary>A transport whose client never says anything and never leaves.</summary>
+    private sealed class SilentTransport : ITransport
+    {
+        private readonly System.Threading.Channels.Channel<JsonRpcMessage> _channel = System.Threading.Channels.Channel.CreateUnbounded<JsonRpcMessage>();
+
+        public string? SessionId => null;
+
+        public System.Threading.Channels.ChannelReader<JsonRpcMessage> MessageReader => _channel.Reader;
+
+        public Task SendMessageAsync(JsonRpcMessage message, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public ValueTask DisposeAsync()
+        {
+            _channel.Writer.TryComplete();
+            return ValueTask.CompletedTask;
+        }
     }
 }

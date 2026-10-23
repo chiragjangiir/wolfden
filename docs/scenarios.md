@@ -1282,9 +1282,8 @@ settings.
 - The client starts the server, sees the five read-only tools with
   descriptions that explain dens, scopes, and positions, and can call
   each one, several at once even before the den has an index. The
-  server answers the client at once, without waiting for its first
-  build of the index, so the client connects on the newest protocol
-  version even on a big den or a busy machine (#135). Nothing
+  server doesn't make the client wait for its first index build
+  (#135). Nothing
   but the protocol goes to standard output, and when the client closes
   standard input the server exits 0. Without a den, the server doesn't
   start, says why on standard error, and exits 2; one that fails after
@@ -1298,7 +1297,7 @@ Spec: design.md §7, §8, §9. Covered by:
 `ParallelCallTests.ParallelFirstCallsOnADenWithNoIndexAllSucceed`,
 `McpServerTests.TheClientSeesTheServerAndItsReadOnlyTools`,
 `McpServerTests.EachToolAnswersWithJson`,
-`McpHandshakeTests.TheServerAnswersBeforeTheWatcherHasBuiltTheIndex`.
+`McpHandshakeTests.TheServerAnswersWhileTheWatchersFirstBuildIsHeldUp`.
 
 ### SC-MCP-11. My assistant works in a den with two universes
 

@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -102,12 +103,21 @@ public static class WolfdenMcpServer
     /// never to the transport.
     /// </summary>
     /// <remarks>
-    /// The server answers the client before the watcher's first build of
-    /// the index is done, which can take seconds on a big den or a busy
-    /// machine. A client that waits too long for its first answer gives up
-    /// on the newest protocol and tries the older handshake, which can then
-    /// fail (#135). A tool call that comes in during that build waits for
-    /// it, or builds the index itself, as it does when no watcher runs.
+    /// <para>
+    /// The server doesn't make the client wait for the watcher's first build
+    /// of the index, which can take seconds on a big den or a busy machine:
+    /// it starts the watcher in the background. A client that waits too long
+    /// for its first answer gives up on the newest protocol and tries the
+    /// older handshake, which can then fail (#135). A tool call that comes in
+    /// during that build waits for it, or builds the index itself, as it does
+    /// when no watcher runs.
+    /// </para>
+    /// <para>
+    /// If the watcher can't start because of an I/O error, such as a tool
+    /// call holding the index open when the first build replaces it, it tries
+    /// again a few times (<see cref="WatcherRetryDelays"/>) before the server
+    /// goes on without one.
+    /// </para>
     /// </remarks>
     public static Task RunAsync(
         ITransport transport, DenTools tools, string version, TextWriter log, bool watch = true, CancellationToken cancellationToken = default)
@@ -115,17 +125,33 @@ public static class WolfdenMcpServer
         ArgumentNullException.ThrowIfNull(transport);
         ArgumentNullException.ThrowIfNull(tools);
         ArgumentNullException.ThrowIfNull(log);
-        return RunAsync(transport, tools, version, log, watch ? () => StartWatcher(tools.Root, log) : null, cancellationToken);
+        return RunAsync(transport, tools, version, log, watch ? DefaultWatcher(tools.Root) : null, cancellationToken);
     }
+
+    /// <summary>How long the server waits before each new try at starting a watcher whose start failed with an I/O error.</summary>
+    internal static readonly IReadOnlyList<TimeSpan> WatcherRetryDelays =
+        [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30)];
+
+    /// <summary>Starts a <see cref="DenWatcher"/> on the den at <paramref name="root"/>, the way <c>wolfden mcp</c> does.</summary>
+    internal static Func<TextWriter, CancellationToken, DenWatcher?> DefaultWatcher(string root) =>
+        (log, stop) => StartWatcher(root, log, WatcherRetryDelays, r => new DenWatcher(r), stop);
 
     /// <summary>
     /// <see cref="RunAsync(ITransport, DenTools, string, TextWriter, bool, CancellationToken)"/>,
     /// with <paramref name="startWatcher"/>, if given, starting the watcher
-    /// alongside the server. For tests, which hold it up.
+    /// in the background, given the log and a token that says the server is
+    /// stopping. For tests, which hold it up or make it fail.
     /// </summary>
     internal static async Task RunAsync(
-        ITransport transport, DenTools tools, string version, TextWriter log, Func<DenWatcher?>? startWatcher, CancellationToken cancellationToken)
+        ITransport transport,
+        DenTools tools,
+        string version,
+        TextWriter log,
+        Func<TextWriter, CancellationToken, DenWatcher?>? startWatcher,
+        CancellationToken cancellationToken)
     {
+        // The watcher logs from another thread.
+        log = TextWriter.Synchronized(log);
         using var logs = LoggerFactory.Create(b => b.AddProvider(new TextWriterLoggerProvider(log)).SetMinimumLevel(LogLevel.Warning));
         await using var server = McpServer.Create(transport, Options(tools, version), logs);
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -136,18 +162,30 @@ public static class WolfdenMcpServer
             : Task.Run(
                 () =>
                 {
+                    if (stop.IsCancellationRequested)
+                    {
+                        // The client has gone already, so there's nothing to build the index for.
+                        return null;
+                    }
+
                     try
                     {
-                        return startWatcher();
+                        return startWatcher(log, stop.Token);
+                    }
+                    catch (OperationCanceledException) when (stop.IsCancellationRequested)
+                    {
+                        return null;
                     }
                     catch
                     {
-                        // A failure StartWatcher doesn't expect stops the server, and the await below reports it.
+                        // A failure StartWatcher doesn't expect stops the server, and is reported below.
                         stop.Cancel();
                         throw;
                     }
                 },
                 CancellationToken.None);
+
+        ExceptionDispatchInfo? failure = null;
         try
         {
             await server.RunAsync(stop.Token).ConfigureAwait(false);
@@ -156,50 +194,84 @@ public static class WolfdenMcpServer
         {
             // Only a watcher that failed to start cancels stop on its own: the await below throws why.
         }
-        finally
+        catch (Exception e)
         {
-            // Never leave a watcher running: wait for it to finish starting, then stop it.
-            DenWatcher? watcher = null;
-            try
-            {
-                watcher = await watching.ConfigureAwait(false);
-            }
-            finally
-            {
-                watcher?.Dispose();
-            }
+            failure = ExceptionDispatchInfo.Capture(e);
         }
-    }
 
-    /// <summary>Starts a watcher on the den, or returns null after logging why it couldn't.</summary>
-    private static DenWatcher? StartWatcher(string root, TextWriter log)
-    {
-        var watcher = new DenWatcher(root);
-        var gate = new object();
-        watcher.Failed += (_, e) =>
-        {
-            lock (gate)
-            {
-                Log(log, $"wolfden mcp: {e.Message}");
-            }
-        };
+        // The server has stopped, say because the client closed standard
+        // input: a watcher that hasn't started yet doesn't, and one waiting
+        // to try again gives up.
+        await stop.CancelAsync().ConfigureAwait(false);
+
+        // Never leave a watcher running: wait for it to finish starting, then stop it.
+        DenWatcher? watcher = null;
         try
         {
-            watcher.Start();
-            Log(log, $"wolfden mcp: serving the den at '{root}', keeping its index up to date as files change.");
-            return watcher;
+            watcher = await watching.ConfigureAwait(false);
         }
-        catch (InvalidOperationException e)
+        catch (Exception e) when (failure is not null)
         {
-            watcher.Dispose();
-            Log(log, $"wolfden mcp: serving the den at '{root}' without its own watcher: {e.Message} Each call checks the files first.");
-            return null;
+            // The server's own failure comes first.
+            throw new AggregateException(failure.SourceException, e);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+        finally
         {
-            watcher.Dispose();
-            Log(log, $"wolfden mcp: couldn't watch the den at '{root}': {e.Message} Each call checks the files first.");
-            return null;
+            watcher?.Dispose();
+        }
+
+        failure?.Throw();
+    }
+
+    /// <summary>
+    /// Starts a watcher on the den, or returns null after logging why it
+    /// couldn't. After an I/O error it tries again after each of
+    /// <paramref name="retryDelays"/> in turn, unless <paramref name="stop"/>
+    /// is cancelled meanwhile.
+    /// </summary>
+    internal static DenWatcher? StartWatcher(
+        string root, TextWriter log, IReadOnlyList<TimeSpan> retryDelays, Func<string, DenWatcher> create, CancellationToken stop)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            if (stop.IsCancellationRequested)
+            {
+                return null;
+            }
+
+            var watcher = create(root);
+            watcher.Failed += (_, e) => Log(log, $"wolfden mcp: {e.Message}");
+            try
+            {
+                watcher.Start();
+                Log(log, $"wolfden mcp: serving the den at '{root}', keeping its index up to date as files change.");
+                return watcher;
+            }
+            catch (InvalidOperationException e)
+            {
+                watcher.Dispose();
+                Log(log, $"wolfden mcp: serving the den at '{root}' without its own watcher: {e.Message} Each call checks the files first.");
+                return null;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+            {
+                watcher.Dispose();
+                if (attempt >= retryDelays.Count)
+                {
+                    Log(log, $"wolfden mcp: couldn't watch the den at '{root}': {e.Message} Each call checks the files first.");
+                    return null;
+                }
+
+                var delay = retryDelays[attempt];
+                Log(
+                    log,
+                    $"wolfden mcp: couldn't start watching the den at '{root}' yet: {e.Message} Trying again in " +
+                    $"{delay.TotalSeconds.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)} s; meanwhile each call checks the files first.");
+                if (stop.WaitHandle.WaitOne(delay))
+                {
+                    return null;
+                }
+            }
         }
     }
 

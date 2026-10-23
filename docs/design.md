@@ -651,6 +651,16 @@ and `wolfden check` do:
 - **Fresh answers.** Each call checks the files hash first and rebuilds
   the index if it differs, waiting briefly for the watcher the server
   hosts (§7). `check` reads the files, not the index.
+- **Serve first, watcher in the background.** The server answers the
+  client before the watcher's first build of the index is done, so a
+  slow build never delays the handshake. A client that waits too long
+  for `server/discover` falls back to `initialize`, which the server
+  refuses once it has answered the late probe (#135). If the watcher
+  can't start because of an I/O error, such as a call holding the index
+  open on Windows while the first build replaces it, the server tries
+  again a few times before going on without it. The server doesn't pin
+  an MCP protocol version: it serves both the 2026-07-28 revision and
+  the `initialize` handshake, so older clients keep working.
 
 ## 9. Architecture
 
