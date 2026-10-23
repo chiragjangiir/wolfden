@@ -155,6 +155,12 @@ public sealed class HistoryResult<T>
 /// newest. For the next page, pass the <see cref="HistoryEntry.Id"/> of the
 /// last entry of the page before.
 /// </param>
+/// <remarks>
+/// For git (#19), the next page is <c>git log &lt;before&gt; --skip=1</c>
+/// with the same path filter, not <c>git log &lt;before&gt;^</c>: the
+/// <c>^</c> form follows only the first parent of a merge, so the commits
+/// that came in through the merge's other parents would never be listed.
+/// </remarks>
 public sealed record HistoryLogQuery(string? Path = null, int? Limit = null, string? Before = null);
 
 /// <summary>What a diff compares.</summary>
