@@ -45,6 +45,8 @@ of Book 3 (format.md §8).
 | CLI | Using the other `wolfden` commands: init, index, query, check --fix, new-id |
 | WATCH | Keeping the index up to date while notes are edited outside Wolfden |
 | MCP | An AI assistant reading the den through `wolfden mcp` |
+| STORE | Saving, moving, and deleting notes through Wolfden's den store |
+| HIST | Version history, checkpoints, and tags, with or without a history backend |
 
 ## CANON: what's canon at a point in the story
 
@@ -1173,7 +1175,8 @@ den's `README.md`, and drafts chapters in a book's `drafts/` folder.
 Spec: F-LAY-2. Covered by:
 `IncrementalUpdateTests.FilesTheIndexDoesntReadChangeNothing`,
 `FingerprintTests.FilesTheIndexDoesntReadDontChangeARebuild`,
-`ChangeBatcherTests.HiddenPathsAreIgnored`.
+`ChangeBatcherTests.HiddenPathsAreIgnored`,
+`ChangeBatcherTests.AStoresAtomicWriteIsBatchedAsTheNoteAlone`.
 
 ### SC-WATCH-5. Something else rebuilds the index while Wolfden watches
 
@@ -1485,3 +1488,136 @@ Spec: F-DEN-1, F-ID-3, design.md §7, §8 (maintainer decision, 2026-10-23). Cov
 `UniverseChoiceTests.ACheckOfOneUniverseFindsAnIdSharedWithAnotherUniverse`,
 `UniverseChoiceTests.WhenTheIndexCantBeBuiltTheScopedCheckSaysTheIdComparisonWasSkipped`,
 `UniverseChoiceTests.ABrokenPackOrDenYamlIsReportedWhenAUniverseIsGiven`.
+
+## STORE: Wolfden saves, moves, and deletes notes
+
+Background: the den store (design.md §6, #121) is how Wolfden writes a
+den's files: the write API, and the MCP write tools to come (#21), save
+through it. A den on disk is written in place, atomically, byte for byte
+as given. The store refuses a path that could leave the den, or that
+wouldn't be the same file on every OS, before anything is touched. The
+examples use the invented Starfall den from the tests.
+
+### SC-STORE-1. Wolfden saves a note while something else is reading it, or the power goes out
+
+Wolfden saves Mara Voss's note while the index's watcher, or another
+program, reads it, and once the machine loses power part way through a
+save.
+
+- Whatever reads the note sees the old note or the new one, never part
+  of either, and after a failed save the old note is still there,
+  unchanged. No temporary file is left among the notes, and the watcher
+  never indexes one. The saved bytes are exactly the ones given: line
+  endings, a byte order mark, and a missing final newline are kept.
+
+Spec: F-RT-1, F-ENC-2, F-LAY-2, design.md §6. Covered by:
+`DenStoreTests.AWriteKeepsTheBytesExactlyAsGiven`,
+`DenStoreTests.AWriteLeavesNoTemporaryFileBehind`,
+`DenStoreTests.AWriteThatFailsPartWayLeavesTheOldFileAndNoTemporaryFile`,
+`DenStoreTests.AReaderSeesTheOldFileOrTheNewOneNeverPartOfEither`,
+`DenWatcherTests.AWriteThroughTheDenStoreIsFollowedLikeAnyEdit`.
+
+### SC-STORE-2. My assistant asks to write a file outside the den
+
+An AI assistant asks to save `../outside/escaped.md`, an absolute path,
+`.git/hooks/pre-commit`, or a note inside a folder that's a link to a
+folder outside the den.
+
+- The write is refused, saying why, and nothing outside the den, or in
+  `.git/` or `.wolfden/`, is created, changed, or deleted. The same holds
+  for deleting and moving.
+
+Spec: F-LAY-2, design.md §6. Covered by:
+`DenPathTests.APathThatCouldLeaveTheDenOrIsHiddenIsRefused`,
+`DenPathTests.ANameWindowsDoesntKeepAsWrittenIsRefusedOnEveryOs`,
+`DenStoreTests.AWriteOutsideTheDenOrIntoAHiddenFolderIsRefusedAndTouchesNothing`,
+`DenStoreTests.AnAbsolutePathIsRefused`,
+`DenStoreTests.EveryWriteChecksItsPaths`,
+`DenStoreTests.AWriteNeverGoesThroughAFolderLink`.
+
+### SC-STORE-3. A new note whose name differs from another only in case
+
+Series `long-dark` has `mara-voss.md`. Wolfden is asked to save
+`Mara-Voss.md` beside it, or a note under `universes/Starfall/`.
+
+- The save is refused on every OS, naming the file or folder that's
+  already there. On Windows and macOS the two names are one file, so the
+  save would overwrite Mara's note; on Linux the den would no longer
+  clone onto those systems. A Windows short name such as `CHARAC~1`, and
+  a name that differs only in Unicode form (`café` typed two ways), are
+  refused the same way. So is a new name that an invisible character
+  disguises: a zero-width space, a byte order mark, or a text-direction
+  control anywhere in it, an invisible character at its start or end, or
+  one that looks empty or hidden without them. Emoji (a red heart with
+  its variation selector, a family joined with zero-width joiners) and
+  the zero-width non-joiner of Persian and Indic spelling are fine, and a
+  file already named with any of these, made outside Wolfden, can still
+  be saved, moved, and deleted.
+
+Spec: design.md §6. Covered by:
+`DenStoreTests.ANameThatDiffersOnlyInCaseIsRefusedOnEveryOs`,
+`DenStoreTests.AWindowsShortNameIsAnotherNameAndIsRefused`,
+`DenStoreTests.ANameInAnotherUnicodeFormIsRefused`,
+`DenStoreTests.ACaseOnlyRenameOntoAnotherFileWithThatNameIsRefused`,
+`DenPathTests.ANewNameThatInvisibleCharactersDisguiseIsRefused`,
+`DenPathTests.EmojiAndScriptsThatNeedJoinersAreFine`,
+`DenStoreTests.ANewNameDisguisedByAnInvisibleCharacterIsRefused`,
+`DenStoreTests.ANoteNamedWithEmojiOrAJoinerCanBeMadeMovedAndDeleted`,
+`DenStoreTests.AFileAlreadyNamedWithAnInvisibleCharacterCanStillBeSavedMovedAndDeleted`.
+
+### SC-STORE-4. Wolfden is asked to change a built-in pack
+
+Something asks the store of the built-in packs to change
+`core/types/thread.yaml`.
+
+- It's refused as read-only, with a message that says to extend the type
+  from a pack in the den's `packs/` folder instead. The built-in pack is
+  unchanged.
+
+Spec: F-PACK-4, design.md §6. Covered by:
+`DenStoreTests.TheBuiltInPacksRefuseEveryWrite`.
+
+### SC-STORE-5. I rename a note or a book's folder
+
+The writer renames `mara-voss.md` to `Mara-Voss.md`, which changes only
+the case, and moves book `ember` out of its series.
+
+- The note keeps its bytes under its new name, and the book's folder
+  moves with everything in it. A rename that changes only the case works
+  on Windows and macOS too. A move never overwrites a file or folder
+  that's there, and a folder can't be moved into itself. A case-only
+  rename that fails part way leaves the folder under its old name.
+
+Spec: design.md §3, §6. Covered by:
+`DenStoreTests.AFileIsMovedOrRenamedWithItsBytes`,
+`DenStoreTests.ARenameThatChangesOnlyTheCaseIsAllowed`,
+`DenStoreTests.AFolderIsMovedWithEverythingInIt`,
+`DenStoreTests.AMoveDoesntOverwriteOrMoveAFolderIntoItself`,
+`DenStoreTests.ACaseOnlyFolderRenameGoesThroughAHiddenNameWhenThePlainMoveIsRefused`,
+`DenStoreTests.ACaseOnlyFolderRenameThatFailsHalfWayIsPutBack`.
+
+## HIST: version history
+
+Background: history is a capability that a backend provides (design.md
+§6). Git is the v0 backend (#19); a den can also be a plain folder, with
+no history at all.
+
+### SC-HIST-1. My den has no history
+
+The writer keeps the den in a synced folder without git, and asks for a
+note's history, a diff, a checkpoint, or a freeze tag.
+
+- Each says, in words, that the den has no history, so that isn't
+  available, and that Wolfden can keep history with git if the den is in
+  a git repository that isn't in a synced folder, with a private remote
+  for backup. None of them is an error, and none points the writer at
+  a design document or a command that doesn't exist. A checkpoint's
+  message adds that the edits are still saved in the files. The den still loads, checks,
+  and indexes, and freezing a book is still `status: final` (F-BOOK-1);
+  only the tag is missing.
+
+Spec: F-BOOK-1, design.md §5, §6. Covered by:
+`HistoryProviderTests.ADenWithoutABackendHasNoHistoryCapabilities`,
+`HistoryProviderTests.EveryOperationSaysHistoryIsntAvailableWithoutThrowing`,
+`HistoryProviderTests.TheMessagesSendTheWriterNowhereTheyCantGo`,
+`HistoryProviderTests.ADenWithoutHistoryStillLoadsAndChecks`.

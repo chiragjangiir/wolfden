@@ -1,3 +1,5 @@
+using Wolfden.Core.Structure;
+
 namespace Wolfden.Index;
 
 /// <summary>
@@ -11,7 +13,7 @@ namespace Wolfden.Index;
 internal sealed record ChangeBatch(IReadOnlySet<string> Paths, IReadOnlySet<string> Moved, bool Overflowed);
 
 /// <summary>
-/// Collects file events into batches (#14). Editors save in bursts (a
+/// Collects a den store's changes (<see cref="DenChange"/>) into batches (#14). Editors save in bursts (a
 /// temporary file, a rename, a delete), and a git checkout touches many
 /// files at once, so events are coalesced by path, and a batch is ready
 /// once events have stopped for <see cref="Quiet"/>, or <see cref="MaxDelay"/>
@@ -22,19 +24,16 @@ internal sealed record ChangeBatch(IReadOnlySet<string> Paths, IReadOnlySet<stri
 /// </summary>
 internal sealed class ChangeBatcher
 {
-    private readonly string _root;
     private HashSet<string> _paths = new(StringComparer.Ordinal);
     private HashSet<string> _moved = new(StringComparer.Ordinal);
     private bool _overflowed;
     private DateTime? _first;
     private DateTime _last;
 
-    /// <param name="root">The den root's full path.</param>
     /// <param name="quiet">How long events must stop before a batch is ready.</param>
     /// <param name="maxDelay">The longest a batch waits after its first event.</param>
-    public ChangeBatcher(string root, TimeSpan quiet, TimeSpan maxDelay)
+    public ChangeBatcher(TimeSpan quiet, TimeSpan maxDelay)
     {
-        _root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         Quiet = quiet;
         MaxDelay = maxDelay;
     }
@@ -47,26 +46,6 @@ internal sealed class ChangeBatcher
 
     /// <summary>True if any event is waiting.</summary>
     public bool HasPending => _first is not null;
-
-    /// <summary>
-    /// Adds a file event: <paramref name="fullPath"/> was created, changed,
-    /// deleted, or (with <paramref name="oldFullPath"/>) renamed. Events for
-    /// hidden paths or paths outside the den are dropped.
-    /// </summary>
-    public void Add(WatcherChangeTypes kind, string fullPath, string? oldFullPath, DateTime now)
-    {
-        var moved = kind != WatcherChangeTypes.Changed;
-        var any = AddPath(fullPath, moved);
-        if (oldFullPath is not null)
-        {
-            any |= AddPath(oldFullPath, moved);
-        }
-
-        if (any)
-        {
-            Touch(now);
-        }
-    }
 
     /// <summary>Adds den-relative paths to look at again, such as files that couldn't be read because an editor was still writing them.</summary>
     public void AddAgain(IEnumerable<string> paths, DateTime now)
@@ -119,38 +98,43 @@ internal sealed class ChangeBatcher
     }
 
     /// <summary>
-    /// <paramref name="fullPath"/> relative to the den root, with <c>/</c>,
-    /// or null if it's the root itself, outside it, or hidden: a name on the
-    /// way starts with <c>.</c> (F-LAY-2).
+    /// Adds a change a den store's feed reported (<see cref="IDenChangeFeed"/>),
+    /// with den-relative paths. A created, deleted, or renamed path is a
+    /// move, so a folder among them is looked into. Hidden paths are
+    /// dropped (F-LAY-2): a rename out of a hidden folder keeps only the
+    /// visible name.
     /// </summary>
-    public static string? Relative(string root, string fullPath)
+    public void Add(DenChange change, DateTime now)
     {
-        // Only the OS's separators: on Linux a '\' is part of a file name.
-        var relative = Path.GetRelativePath(root, fullPath).Replace(Path.DirectorySeparatorChar, '/');
-        if (Path.AltDirectorySeparatorChar != '/')
+        ArgumentNullException.ThrowIfNull(change);
+        var moved = change.Kind != DenChangeKind.Changed;
+        var any = AddDenPath(change.Path, moved);
+        if (change.OldPath is not null)
         {
-            relative = relative.Replace(Path.AltDirectorySeparatorChar, '/');
-        }
-        if (relative == "." || Path.IsPathRooted(relative))
-        {
-            return null;
+            any |= AddDenPath(change.OldPath, moved);
         }
 
-        var names = relative.Split('/');
-        return names.Any(n => n.Length == 0 || n.StartsWith('.')) ? null : relative;
+        if (any)
+        {
+            Touch(now);
+        }
     }
 
-    private bool AddPath(string fullPath, bool moved)
+    /// <summary>True unless a name on <paramref name="relative"/> is empty or hidden (F-LAY-2).</summary>
+    internal static bool IsDenPath(string relative) =>
+        !relative.Split('/').Any(n => n.Length == 0 || n.StartsWith('.'));
+
+    private bool AddDenPath(string relative, bool moved)
     {
-        if (Relative(_root, fullPath) is not { } path)
+        if (!IsDenPath(relative))
         {
             return false;
         }
 
-        _paths.Add(path);
+        _paths.Add(relative);
         if (moved)
         {
-            _moved.Add(path);
+            _moved.Add(relative);
         }
 
         return true;

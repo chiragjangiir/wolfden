@@ -61,7 +61,7 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
         private readonly Random _random;
         private readonly List<string> _targets = ["nobody-at-all", "Nobody Known"];
         private readonly List<string> _ids = [];
-        private readonly List<(WatcherChangeTypes Kind, string Path, string? OldPath)> _events = [];
+        private readonly List<DenChange> _events = [];
         private readonly List<string> _links = [];
         private DenStructure _structure;
         private int _keys;
@@ -94,11 +94,12 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
                 LastOperations.Add(Change());
             }
 
-            var batcher = new ChangeBatcher(_root, TimeSpan.Zero, TimeSpan.Zero);
+            // As the den store's change feed reports them (#121).
+            var batcher = new ChangeBatcher(TimeSpan.Zero, TimeSpan.Zero);
             var now = DateTime.UtcNow;
-            foreach (var (kind, path, old) in _events)
+            foreach (var change in _events)
             {
-                batcher.Add(kind, Full(_root, path), old is null ? null : Full(_root, old), now);
+                batcher.Add(change, now);
             }
 
             return batcher.Take(now) ?? new ChangeBatch(new HashSet<string>(), new HashSet<string>(), false);
@@ -132,7 +133,7 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
                 {
                     var path = Pick(entities);
                     File.Delete(Full(_root, path));
-                    _events.Add((WatcherChangeTypes.Deleted, path, null));
+                    _events.Add(new DenChange(DenChangeKind.Deleted, path, null));
                     return $"delete {path}";
                 }
 
@@ -142,7 +143,7 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
                     var to = _random.Next(2) == 0 ? $"{path[..path.LastIndexOf('/')]}/{Key()}.md" : NewEntityPath();
                     EnsureFolder(to[..to.LastIndexOf('/')]);
                     File.Move(Full(_root, path), Full(_root, to));
-                    _events.Add((WatcherChangeTypes.Renamed, to, path));
+                    _events.Add(new DenChange(DenChangeKind.Renamed, to, path));
                     return $"move {path} to {to}";
                 }
 
@@ -167,14 +168,14 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
                         Directory.Move(Full(_root, folder), Full(_root, temp));
                         Directory.CreateDirectory(Full(_root, folder));
                         Directory.Move(Full(_root, temp), Full(_root, to));
-                        _events.Add((WatcherChangeTypes.Renamed, temp, folder));
-                        _events.Add((WatcherChangeTypes.Created, folder, null));
-                        _events.Add((WatcherChangeTypes.Renamed, to, temp));
+                        _events.Add(new DenChange(DenChangeKind.Renamed, temp, folder));
+                        _events.Add(new DenChange(DenChangeKind.Created, folder, null));
+                        _events.Add(new DenChange(DenChangeKind.Renamed, to, temp));
                     }
                     else
                     {
                         Directory.Move(Full(_root, folder), Full(_root, to));
-                        _events.Add((WatcherChangeTypes.Renamed, to, folder));
+                        _events.Add(new DenChange(DenChangeKind.Renamed, to, folder));
                     }
 
                     return $"move folder {folder} to {to}";
@@ -193,7 +194,7 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
                     if (File.Exists(Full(_root, path)) && _random.Next(4) == 0)
                     {
                         File.Delete(Full(_root, path));
-                        _events.Add((WatcherChangeTypes.Deleted, path, null));
+                        _events.Add(new DenChange(DenChangeKind.Deleted, path, null));
                         return $"delete {path}";
                     }
 
@@ -219,9 +220,9 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
                     var path = Pick(entities);
                     var temp = $"{path}.tmp{_random.Next(1000)}";
                     File.WriteAllText(Full(_root, temp), Entity(path, keep: File.ReadAllText(Full(_root, path))), new UTF8Encoding(false));
-                    _events.Add((WatcherChangeTypes.Created, temp, null));
+                    _events.Add(new DenChange(DenChangeKind.Created, temp, null));
                     File.Move(Full(_root, temp), Full(_root, path), overwrite: true);
-                    _events.Add((WatcherChangeTypes.Renamed, path, temp));
+                    _events.Add(new DenChange(DenChangeKind.Renamed, path, temp));
                     return $"atomic save {path}";
                 }
 
@@ -286,7 +287,7 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
                             var work = Pick(works);
                             var to = $"{work.Path[..work.Path.LastIndexOf('/')]}/{Key()}";
                             Directory.Move(Full(_root, work.Path), Full(_root, to));
-                            _events.Add((WatcherChangeTypes.Renamed, to, work.Path));
+                            _events.Add(new DenChange(DenChangeKind.Renamed, to, work.Path));
                             what = $"rename container folder {work.Path} to {to}";
                             break;
                         }
@@ -295,7 +296,7 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
                         {
                             var work = Pick(works);
                             Directory.Delete(Full(_root, work.Path), recursive: true);
-                            _events.Add((WatcherChangeTypes.Deleted, work.Path, null));
+                            _events.Add(new DenChange(DenChangeKind.Deleted, work.Path, null));
                             what = $"delete container folder {work.Path}";
                             break;
                         }
@@ -348,7 +349,7 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
                 var healed = Pick(links);
                 _links.Remove(healed);
                 File.Delete(Full(_root, healed));
-                _events.Add((WatcherChangeTypes.Deleted, healed, null));
+                _events.Add(new DenChange(DenChangeKind.Deleted, healed, null));
                 Write(healed, Entity(healed, keep: null));
                 return $"note in place of broken link {healed}";
             }
@@ -358,7 +359,7 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
             if (replace)
             {
                 File.Delete(Full(_root, path));
-                _events.Add((WatcherChangeTypes.Deleted, path, null));
+                _events.Add(new DenChange(DenChangeKind.Deleted, path, null));
             }
             else
             {
@@ -366,7 +367,7 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
             }
 
             File.CreateSymbolicLink(Full(_root, path), Path.Combine(_root, "nowhere", $"{Key()}.md"));
-            _events.Add((WatcherChangeTypes.Created, path, null));
+            _events.Add(new DenChange(DenChangeKind.Created, path, null));
             _links.Add(path);
             return $"broken link {path}";
         }
@@ -413,11 +414,11 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
             var slash = path.LastIndexOf('/');
             EnsureFolder(slash > 0 ? path[..slash] : "");
             File.WriteAllText(full, text, new UTF8Encoding(false));
-            _events.Add((existed ? WatcherChangeTypes.Changed : WatcherChangeTypes.Created, path, null));
+            _events.Add(new DenChange(existed ? DenChangeKind.Changed : DenChangeKind.Created, path, null));
             if (_random.Next(3) == 0 && path.Contains('/', StringComparison.Ordinal))
             {
                 // Windows also reports the folder whose contents changed.
-                _events.Add((WatcherChangeTypes.Changed, path[..path.LastIndexOf('/')], null));
+                _events.Add(new DenChange(DenChangeKind.Changed, path[..path.LastIndexOf('/')], null));
             }
         }
 
@@ -435,7 +436,7 @@ public sealed partial class IncrementalUpdatePropertyTests(ITestOutputHelper out
                 if (!Directory.Exists(Full(_root, path)))
                 {
                     Directory.CreateDirectory(Full(_root, path));
-                    _events.Add((WatcherChangeTypes.Created, path, null));
+                    _events.Add(new DenChange(DenChangeKind.Created, path, null));
                 }
             }
         }

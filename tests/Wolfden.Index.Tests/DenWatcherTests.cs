@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Wolfden.Core.Structure;
 
 namespace Wolfden.Index.Tests;
 
@@ -57,6 +58,28 @@ public sealed class DenWatcherTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-STORE-1")]
+    public void AWriteThroughTheDenStoreIsFollowedLikeAnyEdit()
+    {
+        // The atomic write's temporary file is hidden, so only the note shows.
+        using var den = TempDen.Starfall();
+        var store = new FileSystemDenStore(den.Root);
+        using var watcher = new DenWatcher(store, TimeSpan.FromMilliseconds(100));
+        var updates = new BlockingCollection<IndexUpdate>();
+        watcher.Updated += (_, u) => updates.Add(u);
+        watcher.Start();
+        Assert.Same(store, watcher.Store);
+
+        var text = File.ReadAllText(Path.Combine(den.Root, Mara)).Replace("name: Mara Voss", "name: Mara Ellery", StringComparison.Ordinal);
+        store.WriteFile(Mara, System.Text.Encoding.UTF8.GetBytes(text), DenWriteMode.Replace);
+
+        var update = WaitFor(updates, u => u.Files.Contains(Mara) || u.Kind == IndexUpdateKind.Rebuilt);
+        Assert.DoesNotContain(update.Files, f => f.Contains(FileSystemDenStore.TempPrefix, StringComparison.Ordinal));
+        using var index = DenIndex.Open(den.Root);
+        Assert.Equal("Mara Ellery", index.FindEntity("01JA7Q8M4XK3V9R2D5W8HN6TQB")!.Name);
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-WATCH-5")]
     public void OnlyOneWatcherRunsPerDen()
     {
@@ -92,17 +115,61 @@ public sealed class DenWatcherTests
     public void LostEventsRebuildWithoutAnError()
     {
         using var den = TempDen.Starfall();
-        using var watcher = Quick(den);
+        var feed = new CapturingFeed(new FileSystemDenStore(den.Root));
+        using var watcher = new DenWatcher(den.Root, TimeSpan.FromMilliseconds(50))
+        {
+            FirstPause = TimeSpan.FromMilliseconds(20),
+            MaxPause = TimeSpan.FromMilliseconds(100),
+            Changes = feed,
+        };
         var updates = new BlockingCollection<IndexUpdate>();
         var failures = new BlockingCollection<Exception>();
         watcher.Updated += (_, u) => updates.Add(u);
         watcher.Failed += (_, e) => failures.Add(e);
         watcher.Start();
 
-        watcher.ReportWatcherError(new InternalBufferOverflowException());
+        // As the store's watch reports a full event buffer.
+        feed.Observers[^1].Lost();
 
         WaitFor(updates, u => u.Kind == IndexUpdateKind.Rebuilt && u.Reason!.Contains("too many changes", StringComparison.Ordinal));
         Assert.Empty(failures);
+    }
+
+    [Fact]
+    public void AReplacedWatchsLostEventsAndBreaksAreIgnored()
+    {
+        using var den = TempDen.Starfall();
+        var feed = new CapturingFeed(new FileSystemDenStore(den.Root));
+        using var watcher = new DenWatcher(den.Root, TimeSpan.FromMilliseconds(50))
+        {
+            FirstPause = TimeSpan.FromMilliseconds(20),
+            MaxPause = TimeSpan.FromMilliseconds(100),
+            Changes = feed,
+        };
+        var updates = new BlockingCollection<IndexUpdate>();
+        var failures = new BlockingCollection<Exception>();
+        watcher.Updated += (_, u) => updates.Add(u);
+        watcher.Failed += (_, e) => failures.Add(e);
+        watcher.Start();
+        watcher.ReportWatcherError(new IOException("The drive went away."));
+        WaitFor(failures, e => e.Message.Contains("Listening again", StringComparison.Ordinal));
+        WaitFor(updates, u => u.Kind == IndexUpdateKind.Rebuilt);
+        Assert.Equal(2, feed.Observers.Count);
+
+        // The first watch, replaced, has a last word: neither is acted on.
+        feed.Observers[0].Lost();
+        feed.Observers[0].Broken(new IOException("The old watch broke."));
+
+        Assert.False(updates.TryTake(out _, TimeSpan.FromMilliseconds(500)));
+        Assert.False(failures.TryTake(out _, TimeSpan.FromMilliseconds(100)));
+    }
+
+    [Fact]
+    public void TheChangeFeedCantBeNull()
+    {
+        using var den = TempDen.Starfall();
+
+        Assert.Throws<ArgumentNullException>(() => new DenWatcher(den.Root) { Changes = null! });
     }
 
     [Fact]
@@ -140,7 +207,7 @@ public sealed class DenWatcherTests
             FirstPause = TimeSpan.FromMilliseconds(20),
             MaxPause = TimeSpan.FromMilliseconds(80),
             // The first watcher works; the next two can't be made; then it works again.
-            CreateWatcher = root => ++created is 2 or 3 ? throw new IOException("No space left on device.") : new FileSystemWatcher(root),
+            Changes = new FlakyFeed(new FileSystemDenStore(den.Root), () => ++created is 2 or 3),
         };
         var updates = new BlockingCollection<IndexUpdate>();
         var failures = new BlockingCollection<Exception>();
@@ -315,6 +382,29 @@ public sealed class DenWatcherTests
     public void PausesDoubleUpToTheMaximum(int pause, int max, int next)
     {
         Assert.Equal(TimeSpan.FromMilliseconds(next), DenWatcher.NextPause(TimeSpan.FromMilliseconds(pause), TimeSpan.FromMilliseconds(max)));
+    }
+
+    /// <summary>A den store's change feed whose watches can't be started while <paramref name="fail"/> says so.</summary>
+    private sealed class FlakyFeed(IDenChangeFeed inner, Func<bool> fail) : IDenChangeFeed
+    {
+        public IDisposable Watch(IDenChangeObserver observer) =>
+            fail() ? throw new IOException("No space left on device.") : inner.Watch(observer);
+    }
+
+    /// <summary>A den store's change feed that keeps each watch's observer, so a test can report as the store would.</summary>
+    private sealed class CapturingFeed(IDenChangeFeed inner) : IDenChangeFeed
+    {
+        public List<IDenChangeObserver> Observers { get; } = [];
+
+        public IDisposable Watch(IDenChangeObserver observer)
+        {
+            lock (Observers)
+            {
+                Observers.Add(observer);
+            }
+
+            return inner.Watch(observer);
+        }
     }
 
     private static DenWatcher Quick(TempDen den) => new(den.Root, TimeSpan.FromMilliseconds(50))
