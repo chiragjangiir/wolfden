@@ -55,7 +55,9 @@ brought in only when a change needs human judgment.
 **Roles**
 
 - **Orchestrator:** picks the next Ready issue from the project board,
-  moves its card, and assigns the work.
+  moves its card, and assigns the work. When agents start an issue, the
+  Orchestrator moves its card to In Progress and assigns the issue to
+  `gavin-wolfe`, so contributors can see it's taken.
 
 **Issues set aside for contributors.** Agents never start an issue that is
 assigned to anyone other than `gavin-wolfe`, or one labeled
