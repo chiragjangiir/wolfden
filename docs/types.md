@@ -881,7 +881,8 @@ chapter's **effective value** for a chapter field is:
 For a list-valued chapter field, an explicit empty list is a value, not
 an unset field (unlike F-FT-12): it means "none here" and stops
 inheritance for that field. A null, or leaving the field out, still
-inherits. Scalar fields have no "none" value, so a chapter that differs
+inherits. Removing the last item of a block list leaves a null, so the
+chapter inherits again (format.md F-RT-6). Scalar fields have no "none" value, so a chapter that differs
 writes the value it wants. This is for a book told by one narrator that
 has, say, an omniscient prologue or a chapter that is a found document:
 

@@ -883,7 +883,8 @@ comma sits before a comment on the same line, removing an explicit
 `? key`, editing a list that puts its commas at the start of lines,
 removing or moving a section so that its neighbors (or the lead) would
 run together into one heading, removing a section that holds a link
-reference definition (`[map]: https://…`) other sections may use, or
+reference definition (`[map]: https://…`) other sections may use, moving
+sections that define the same reference label (the first one wins), or
 treating a list as a mapping.
 
 - The edit is refused with a message that says why, and the file is left
@@ -896,12 +897,14 @@ Spec: F-RT-1, F-RT-2. Covered by:
 `CollectionEditTests.RemovingTheFirstKeyOfAListItemIsRefusedWhenItWouldMoveACommentOrEmptyTheItem`,
 `CollectionEditTests.RemovingAnExplicitBlockKeyIsRefused`,
 `CollectionEditTests.RemovingAnExplicitFlowKeyIsRefused`,
+`CollectionEditTests.RemovingTheFlowKeyBeforeAnExplicitKeyIsRefused`,
 `CollectionEditTests.AddingToOrRemovingFromALeadingCommaFlowListIsRefused`,
 `SectionEditTests.RemovingASectionThatWouldMergeTheTextAroundItIsRefused`,
 `SectionEditTests.MovingASectionThatWouldMergeWithTheTextBeforeItIsRefused`,
 `SectionEditTests.RemovingASectionThatWouldMakeAStrayHeadingPartOfTheLeadIsRefused`,
 `SectionEditTests.MovingASetextSectionAgainstTheLeadIsRefused`,
-`SectionEditTests.RemovingASectionWithALinkReferenceDefinitionIsRefused`.
+`SectionEditTests.RemovingASectionWithALinkReferenceDefinitionIsRefused`,
+`SectionEditTests.MovingSectionsThatDefineTheSameLinkReferenceIsRefused`.
 
 ## CLI: working with a den from the command line
 
