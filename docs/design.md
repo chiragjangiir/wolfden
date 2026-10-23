@@ -515,7 +515,7 @@ library the API uses. `wolfden mcp` runs it over stdio (§7). Tool surface:
 | `create_entity` | planned (#21) | From a type template |
 | `update_fields` / `append_section` | planned (#21) | Structured edits that keep everything else intact |
 | `add_idea` | planned (#21) | Record undecided material with `status: idea` |
-| `checkpoint` | planned | Commit with a message |
+| `checkpoint` | planned (#21) | Commit with a message |
 
 Writes go through the same validation as the UI. An agent can't save a file
 the parser would reject.
@@ -561,7 +561,7 @@ and `wolfden check` do:
 src/
   Wolfden.Core/     # model, markdown and frontmatter parsing, positions, canon-as-of logic
   Wolfden.Index/    # EF Core + SQLite index, file watcher, FTS
-  Wolfden.Git/      # git history provider: log, diffs, checkpoints, tags (LibGit2Sharp or git CLI)
+  Wolfden.Git/      # git history provider: log, diffs, checkpoints, tags (git CLI, #19)
   Wolfden.Api/      # ASP.NET Core minimal API (.NET 10)
   Wolfden.Mcp/      # MCP server
   Wolfden.Cli/      # `wolfden init | check | index | query | new-id | serve | mcp`
