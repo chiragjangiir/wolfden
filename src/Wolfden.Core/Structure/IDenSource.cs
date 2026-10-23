@@ -3,7 +3,8 @@ using System.Collections.Concurrent;
 namespace Wolfden.Core.Structure;
 
 /// <summary>
-/// Read-only access to a den's files. Paths are relative to the den root and
+/// Read-only access to a den's files: the read half of the den store
+/// (<see cref="IDenStore"/>, #121). Paths are relative to the den root and
 /// use <c>/</c> as the separator; the root itself is the empty string.
 /// </summary>
 public interface IDenSource
