@@ -64,8 +64,11 @@ public sealed partial class YamlScalarValue : YamlValue
     /// The YAML text for this value in block or flow context. In a flow
     /// collection a null is written <c>~</c>, since an empty value there is
     /// easy to misread, and a plain string must also avoid the flow
-    /// indicators <c>, [ ] { }</c> and <c>:</c>, which some YAML 1.1
-    /// readers reject inside braces.
+    /// indicators <c>, [ ] { }</c>, <c>:</c>, and <c>?</c>, which some YAML
+    /// 1.1 readers (PyYAML) take as the end of a plain scalar inside
+    /// braces. A new string with a <c>:</c> in it, such as a position
+    /// (<c>ember:22</c>), is double-quoted as format.md §7.3 writes
+    /// positions; one that replaces a plain value keeps that style.
     /// </summary>
     internal string Render(YamlScalarStyle? existing, bool flow)
     {
@@ -84,7 +87,9 @@ public sealed partial class YamlScalarValue : YamlValue
             return "'" + _text.Replace("'", "''", StringComparison.Ordinal) + "'";
         }
 
-        if (existing != YamlScalarStyle.DoubleQuoted && IsPlainSafe(_text) && !(flow && _text.AsSpan().IndexOfAny(",[]{}:") >= 0))
+        if (existing != YamlScalarStyle.DoubleQuoted && IsPlainSafe(_text)
+            && !(flow && _text.AsSpan().IndexOfAny(",[]{}:?") >= 0)
+            && !(existing is null && _text.Contains(':', StringComparison.Ordinal)))
         {
             return _text;
         }
@@ -92,7 +97,11 @@ public sealed partial class YamlScalarValue : YamlValue
         return DoubleQuote(_text);
     }
 
-    internal override string RenderFlow(YamlNode? like, SourceText? source) => Render((like as YamlScalar)?.Style, flow: true);
+    internal override string RenderFlow(YamlNode? like, SourceText? source) => Render(StyleOf(like), flow: true);
+
+    /// <summary>The style a new value should copy from <paramref name="node"/>:
+    /// a non-null scalar's, or none. An empty or <c>~</c> value has no style to keep.</summary>
+    internal static YamlScalarStyle? StyleOf(YamlNode? node) => node is YamlScalar { IsNull: false } scalar ? scalar.Style : null;
 
     /// <summary>
     /// True if <paramref name="node"/> holds this value as Wolfden wrote it:

@@ -188,8 +188,11 @@ public sealed partial class MarkdownFile : DenFile
     /// takes the list's style: in a flow list (<c>[a, b]</c>) it goes on the
     /// same line, or on a line of its own if the items have one each; in a
     /// block list it gets its own <c>- item</c> line at the items' indent,
-    /// right after the item before it. It copies the quoting of the item
-    /// before it where it can. A missing or null value becomes a new list:
+    /// right after the item before it and the comment lines indented under
+    /// that item, so comment lines above the next item stay with it; a new
+    /// first item goes above the comments over the old first one. It copies
+    /// the quoting of the item before it where it can, and a new position
+    /// value is quoted as format.md §7.3 writes them. A missing or null value becomes a new list:
     /// <c>[item]</c> for a scalar, or a block list for a mapping.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="index"/> is past the end of the list.</exception>
@@ -213,13 +216,18 @@ public sealed partial class MarkdownFile : DenFile
     /// (paths as in <see cref="WithFrontmatterValue(IReadOnlyList{string}, YamlScalarValue)"/>),
     /// such as <c>["x-color"]</c>, <c>["fields", "died", "from"]</c>, or
     /// <c>["aliases", "0"]</c>. Its lines go, with a comment on its last
-    /// line; comment lines above it stay. Nothing changes if it isn't
-    /// there. A block list or mapping that loses its last item is left as
-    /// <c>key:</c> with no value, which reads as unset (F-FLD-4); a flow one
-    /// becomes <c>[]</c> or <c>{}</c>.
+    /// line and comment lines right after it indented under it; comment
+    /// lines above it stay. If it sat between two blank lines, one goes.
+    /// Nothing changes if it isn't there: a missing key, an item number past
+    /// the end of a list, or a null value on the way. A block list or
+    /// mapping that loses its last item is left as <c>key:</c> with no
+    /// value, which reads as unset (format.md F-RT-6); a flow one becomes
+    /// <c>[]</c> or <c>{}</c>.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The file can't be edited, or the path names an item a list doesn't have.</exception>
-    /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it.</exception>
+    /// <exception cref="InvalidOperationException">The file can't be edited, or the path doesn't fit the file's shape:
+    /// a segment that isn't an item number where the file holds a list, or a path into a scalar.</exception>
+    /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it,
+    /// or the key is written as an explicit <c>? key</c>.</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
     public MarkdownFile WithoutFrontmatterValue(IReadOnlyList<string> path)
     {
@@ -498,10 +506,13 @@ public sealed partial class MarkdownFile : DenFile
     /// markers, any closing <c>#</c>s or trailing HTML comment, a setext
     /// underline, its section comment, and its text are kept. A setext
     /// heading whose name runs over several lines gets the new name on one.
-    /// Links to the old name in other files (<c>[[entity#Heading]]</c>)
-    /// aren't rewritten here.
+    /// This edits one file. Format.md F-RT-5 also requires links to the old
+    /// name (<c>[[entity#Old name]]</c>) to be rewritten when the app or an
+    /// MCP tool renames a section; that den-wide rewrite belongs to the write
+    /// tools (#21).
     /// </summary>
-    /// <exception cref="ArgumentException">The name isn't one line of text, or wouldn't read back as the section's name.</exception>
+    /// <exception cref="ArgumentException">The name isn't one line of text, or wouldn't read back as the section's
+    /// name with nothing else changed (for example, a setext heading renamed to <c>- x</c> becomes a list item).</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
     public MarkdownFile WithSectionName(Section section, string name)
     {
@@ -518,9 +529,15 @@ public sealed partial class MarkdownFile : DenFile
         var text = Source!.Text;
         var insert = section.NameStart == section.NameEnd && section.NameStart > 0 && text[section.NameStart - 1] == '#' ? " " + name : name;
         var result = Reparse([new TextEdit(section.NameStart, section.NameEnd - section.NameStart, insert)]);
-        if (result.FrontmatterText != FrontmatterText || result.Lead != Lead)
+        if (result.FrontmatterText != FrontmatterText)
         {
-            throw new EditVerificationException("Renaming a section changed the frontmatter or lead, so the edit was refused.");
+            throw new EditVerificationException("Renaming a section changed the frontmatter, so the edit was refused.");
+        }
+
+        if (result.Lead != Lead || result.Title != Title)
+        {
+            // For example a setext heading renamed to `- x` becomes a list item.
+            throw new ArgumentException($"'{name}' wouldn't read back as a heading: the text before the sections would change.", nameof(name));
         }
 
         var expected = Shapes().ToList();
@@ -543,7 +560,8 @@ public sealed partial class MarkdownFile : DenFile
     /// </summary>
     /// <exception cref="ArgumentException">The section belongs to a different file.</exception>
     /// <exception cref="NotSupportedException">Without the section, the text around it would read differently,
-    /// for example a paragraph running into a setext heading.</exception>
+    /// for example a paragraph running into a setext heading; or the section holds a link reference
+    /// definition (<c>[ref]: https://…</c>), which links elsewhere in the file may use.</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
     public MarkdownFile WithoutSection(Section section)
     {
@@ -567,10 +585,24 @@ public sealed partial class MarkdownFile : DenFile
                 : source.Lines[line].End;
         }
 
-        var result = Reparse([new TextEdit(start, section.End - start, "")]);
-        if (result.FrontmatterText != FrontmatterText || TrimBlankLines(result.Lead) != TrimBlankLines(Lead))
+        // A link reference definition (`[ref]: https://…`) serves the whole
+        // file, so removing one could turn links in other sections into plain
+        // text. Refused rather than checked link by link.
+        if (BodyParser.HasLinkReferenceDefinition(source.Text[section.HeadingStart..section.End]))
         {
-            throw new EditVerificationException("Removing a section changed the frontmatter or lead, so the edit was refused.");
+            throw new NotSupportedException($"'{section.Name}' holds a link reference definition, which links elsewhere in the file may use, so it can't be removed in place. Move the definition out first.");
+        }
+
+        var result = Reparse([new TextEdit(start, section.End - start, "")]);
+        if (result.FrontmatterText != FrontmatterText)
+        {
+            throw new EditVerificationException("Removing a section changed the frontmatter, so the edit was refused.");
+        }
+
+        if (TrimBlankLines(result.Lead) != TrimBlankLines(Lead) || result.Title != Title)
+        {
+            // For example a stray level-1 heading after it would become the title.
+            throw new NotSupportedException($"Without '{section.Name}', the text before the sections would change, so it can't be removed in place.");
         }
 
         var removed = Sections.Count(s => s.Index >= section.Index && s.HeadingStart < section.End);
@@ -637,9 +669,15 @@ public sealed partial class MarkdownFile : DenFile
 
         var regionStart = siblings[0].HeadingStart;
         var result = Reparse([new TextEdit(regionStart, siblings[^1].End - regionStart, sb.ToString())]);
-        if (result.FrontmatterText != FrontmatterText || result.Lead != Lead)
+        if (result.FrontmatterText != FrontmatterText)
         {
-            throw new EditVerificationException("Moving a section changed the frontmatter or lead, so the edit was refused.");
+            throw new EditVerificationException("Moving a section changed the frontmatter, so the edit was refused.");
+        }
+
+        if (result.Lead != Lead || result.Title != Title)
+        {
+            // For example a setext heading moved first would run into the lead's last paragraph.
+            throw new NotSupportedException($"In its new place, '{section.Name}' would change the text before the sections, so it can't be moved in place.");
         }
 
         var shapes = Shapes().ToList();

@@ -20,6 +20,7 @@ internal static partial class YamlEditor
     private static List<TextEdit> FlowInsert(SourceText source, YamlNode collection, string itemText, int at)
     {
         var layout = FlowLayout.Of(source, collection);
+        layout.RefuseLeadingCommas(collection);
         var text = source.Text;
         var nl = source.Newline;
         var items = layout.Items;
@@ -80,9 +81,14 @@ internal static partial class YamlEditor
     private static List<TextEdit> FlowRemove(SourceText source, YamlNode collection, int k)
     {
         var layout = FlowLayout.Of(source, collection);
+        layout.RefuseLeadingCommas(collection);
         var items = layout.Items;
         var count = items.Count;
         var item = items[k];
+        if (collection is YamlMapping && layout.IsExplicitKey(k))
+        {
+            throw new NotSupportedException($"The key at line {source.LineIndexOf(item.Start) + 1} is an explicit `? key`, so it can't be removed in place.");
+        }
 
         if (count == 1 && !layout.HasComment(layout.Open + 1, item.Start) && !layout.HasComment(item.End, layout.Close))
         {
@@ -206,6 +212,35 @@ internal static partial class YamlEditor
         /// <summary>True if a comment starts in [<paramref name="start"/>, <paramref name="end"/>),
         /// a stretch between items, where every <c>#</c> starts one.</summary>
         public bool HasComment(int start, int end) => _text.AsSpan(start, end - start).Contains('#');
+
+        /// <summary>True if entry <paramref name="k"/>'s key is written <c>? key</c>.</summary>
+        public bool IsExplicitKey(int k)
+        {
+            var p = Items[k].Start - 1;
+            while (p > Open && _text[p] is ' ' or '\t' or '\r' or '\n')
+            {
+                p--;
+            }
+
+            return _text[p] == '?';
+        }
+
+        /// <summary>
+        /// Refuses a layout with commas at the start of lines
+        /// (<c>[ a\n, b ]</c>): an item added or removed there can't take
+        /// its separator the way the rest of the list does.
+        /// </summary>
+        public void RefuseLeadingCommas(YamlNode collection)
+        {
+            for (var k = 0; k < Items.Count; k++)
+            {
+                var comma = CommaAfter(k);
+                if (comma >= 0 && IsSpaces(_text, _source.Lines[_source.LineIndexOf(comma)].Start, comma))
+                {
+                    throw new NotSupportedException($"The collection at line {collection.Line} puts its commas at the start of lines, so an item can't be added or removed in place.");
+                }
+            }
+        }
 
         /// <summary>
         /// True if item <paramref name="k"/> has its lines to itself: only

@@ -96,48 +96,79 @@ internal static partial class YamlEditor
 
     /// <summary>
     /// Edits that remove the key or list item at <paramref name="path"/>,
-    /// with its lines: a comment on its last line goes with it, and comment
-    /// lines above it stay. Nothing to remove gives no edits. A block list
-    /// or mapping that loses its last item reads as null afterwards
-    /// (<c>aliases:</c>), which format.md F-FLD-4 treats as unset; a flow
-    /// one becomes <c>[]</c> or <c>{}</c>.
+    /// with its lines: a comment on its last line, and comment lines right
+    /// after it indented under it, go with it; comment lines above it stay.
+    /// A block list or mapping that loses its last item is left as
+    /// <c>key:</c> with no value (format.md F-RT-6); a flow one becomes
+    /// <c>[]</c> or <c>{}</c>.
     /// </summary>
-    /// <exception cref="InvalidOperationException">What holds the last segment isn't a mapping or list, or a list has no such item.</exception>
-    /// <exception cref="NotSupportedException">The removal would delete or move a comment that belongs to something else.</exception>
+    /// <remarks>
+    /// Nothing there means nothing to remove, so no edits: a missing key, an
+    /// item number past the end of a list, or a null value on the way. A
+    /// path that doesn't fit the file's shape is an error, the same as for
+    /// setting a value: a segment that isn't an item number where the file
+    /// holds a list, or a path that runs into a scalar.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The path doesn't fit the file's shape.</exception>
+    /// <exception cref="NotSupportedException">The removal would delete or move a comment that belongs to something else,
+    /// or the key is written in a form that can't be removed in place.</exception>
     public static List<TextEdit> Remove(SourceText source, YamlBlock block, IReadOnlyList<string> path)
     {
         CheckPath(path);
-        var parent = Find(block.Root, path.Take(path.Count - 1).ToList());
-        var last = path[^1];
-        switch (parent)
+        YamlNode? node = block.Root;
+        for (var i = 0; i < path.Count; i++)
         {
-            case YamlMapping mapping:
+            var segment = path[i];
+            var last = i == path.Count - 1;
+            switch (node)
             {
-                var k = IndexOfKey(mapping, last);
-                if (k < 0)
-                {
+                case null or YamlScalar { IsNull: true }:
                     return [];
-                }
-
-                return mapping.IsFlow ? FlowRemove(source, mapping, k) : BlockRemoveEntry(source, mapping, k);
-            }
-
-            case YamlSequence sequence:
-            {
-                if (!TryIndex(last, sequence.Items.Count, out var k))
+                case YamlMapping mapping:
                 {
-                    throw new InvalidOperationException(
-                        $"'{Join(path, path.Count - 1)}' at line {sequence.Line} is a list, and '{last}' isn't the number of one of its {sequence.Items.Count} items.");
+                    var k = IndexOfKey(mapping, segment);
+                    if (k < 0)
+                    {
+                        return [];
+                    }
+
+                    if (last)
+                    {
+                        return mapping.IsFlow ? FlowRemove(source, mapping, k) : BlockRemoveEntry(source, mapping, k);
+                    }
+
+                    node = mapping.Entries[k].Value;
+                    break;
                 }
 
-                return sequence.IsFlow ? FlowRemove(source, sequence, k) : BlockRemoveItem(source, sequence, k);
-            }
+                case YamlSequence sequence:
+                {
+                    if (!TryIndex(segment, int.MaxValue, out var k))
+                    {
+                        throw new InvalidOperationException(
+                            $"'{Join(path, i)}' at line {sequence.Line} is a list, and '{segment}' isn't an item number.");
+                    }
 
-            case null or YamlScalar { IsNull: true }:
-                return [];
-            default:
-                throw new InvalidOperationException($"'{Join(path, path.Count - 1)}' at line {parent.Line} isn't a mapping or a list.");
+                    if (k >= sequence.Items.Count)
+                    {
+                        return [];
+                    }
+
+                    if (last)
+                    {
+                        return sequence.IsFlow ? FlowRemove(source, sequence, k) : BlockRemoveItem(source, sequence, k);
+                    }
+
+                    node = sequence.Items[k];
+                    break;
+                }
+
+                default:
+                    throw new InvalidOperationException($"'{Join(path, i)}' at line {node.Line} isn't a mapping or a list.");
+            }
         }
+
+        return [];
     }
 
     /// <summary>Finds the node at <paramref name="path"/>: keys in mappings, item numbers in lists.</summary>
@@ -364,7 +395,7 @@ internal static partial class YamlEditor
         }
 
         var colon = ColonAfter(source, entry.Key);
-        var existing = (current as YamlScalar)?.Style;
+        var existing = YamlScalarValue.StyleOf(current);
         var token = value.Inline(flow, existing);
         if (token is null)
         {
@@ -413,7 +444,7 @@ internal static partial class YamlEditor
             return [];
         }
 
-        var token = value.Inline(sequence.IsFlow, (item as YamlScalar)?.Style)
+        var token = value.Inline(sequence.IsFlow, YamlScalarValue.StyleOf(item))
             ?? throw new InvalidOperationException("Only a scalar can replace a list item.");
         if (token.Length == 0)
         {
@@ -517,23 +548,80 @@ internal static partial class YamlEditor
         {
             YamlMappingValue { Entries.Count: > 0 } mapping when like is YamlMapping { IsFlow: false } block =>
                 BlockMapping(mapping, block, keyColumn, nl, source),
-            YamlScalarValue scalar => NonEmpty(scalar.Render((like as YamlScalar)?.Style, flow: false)),
+            YamlScalarValue scalar => NonEmpty(scalar.Render(YamlScalarValue.StyleOf(like), flow: false)),
             _ => item.RenderFlow(like, source),
         };
         var newLine = text[lineStart..dash] + "-" + gap + body;
 
         if (at == 0)
         {
-            return [new TextEdit(lineStart, 0, newLine + nl)];
+            // Before the comment lines right above the first item: they belong to it.
+            var first = source.LineIndexOf(dash);
+            while (first > 0 && IsCommentLine(source, first - 1))
+            {
+                first--;
+            }
+
+            return [new TextEdit(source.Lines[first].Start, 0, newLine + nl)];
         }
 
-        // After the item before it, so comment lines above the next item stay with it.
-        var line = source.Lines[LineIndexOfEnd(source, sequence.Items[at - 1])];
+        // After the item before it and the comments indented under it, so
+        // comment lines above the next item stay with that item.
+        var previous = sequence.Items[at - 1];
+        var (previousDash, previousLineStart) = Dash(source, previous);
+        var line = source.Lines[OwnedEnd(source, LineIndexOfEnd(source, previous), previousDash - previousLineStart)];
         return line.TerminatorLength > 0
             ? [new TextEdit(line.EndIncludingTerminator, 0, newLine + nl)]
             : [new TextEdit(line.End, 0, nl + newLine)];
 
         static string NonEmpty(string token) => token.Length > 0 ? token : "~";
+    }
+
+    /// <summary>True if line <paramref name="index"/> holds only a YAML comment.</summary>
+    private static bool IsCommentLine(SourceText source, int index) =>
+        source.LineText(index).TrimStart(' ', '\t').StartsWith('#');
+
+    private static bool IsBlankLine(SourceText source, int index) =>
+        index >= 0 && index < source.Lines.Count && source.Lines[index].TerminatorLength > 0
+        && IsSpaces(source.Text, source.Lines[index].Start, source.Lines[index].End);
+
+    /// <summary>
+    /// The last line that belongs to a block item or entry ending on
+    /// <paramref name="lastLine"/>: that line, then any comment lines right
+    /// after it indented deeper than <paramref name="column"/> (its dash or
+    /// key), which are written under it.
+    /// </summary>
+    private static int OwnedEnd(SourceText source, int lastLine, int column)
+    {
+        var i = lastLine;
+        while (i + 1 < source.Lines.Count && IsCommentLine(source, i + 1))
+        {
+            var lineText = source.LineText(i + 1);
+            if (lineText.Length - lineText.TrimStart(' ', '\t').Length <= column)
+            {
+                break;
+            }
+
+            i++;
+        }
+
+        return i;
+    }
+
+    /// <summary>
+    /// Deletes the lines of a block item or entry, with the comments
+    /// indented under it. If it sat between two blank lines, one of them
+    /// goes too, so blank lines don't pile up.
+    /// </summary>
+    private static TextEdit DeleteOwnedLines(SourceText source, int first, int last, int column)
+    {
+        last = OwnedEnd(source, last, column);
+        if (IsBlankLine(source, first - 1) && IsBlankLine(source, last + 1))
+        {
+            last++;
+        }
+
+        return DeleteLines(source, first, last);
     }
 
     /// <summary>A new list item written as a block mapping, like its neighbor:
@@ -544,7 +632,7 @@ internal static partial class YamlEditor
         {
             var neighbor = like[e.Key];
             var token = e.Value is YamlScalarValue scalar
-                ? scalar.Render((neighbor as YamlScalar)?.Style, flow: false)
+                ? scalar.Render(YamlScalarValue.StyleOf(neighbor), flow: false)
                 : e.Value.RenderFlow(neighbor, source);
             return token.Length > 0 ? e.Key + ": " + token : e.Key + ":";
         });
@@ -554,24 +642,41 @@ internal static partial class YamlEditor
     private static List<TextEdit> BlockRemoveItem(SourceText source, YamlSequence sequence, int k)
     {
         var item = sequence.Items[k];
-        var (dash, _) = Dash(source, item);
-        return [DeleteLines(source, source.LineIndexOf(dash), LineIndexOfEnd(source, item))];
+        var (dash, lineStart) = Dash(source, item);
+        return [DeleteOwnedLines(source, source.LineIndexOf(dash), LineIndexOfEnd(source, item), dash - lineStart)];
     }
 
     private static List<TextEdit> BlockRemoveEntry(SourceText source, YamlMapping mapping, int k)
     {
         var text = source.Text;
         var entry = mapping.Entries[k];
+
+        // An explicit key (`?` then `: value` on another line) is refused here.
+        ColonAfter(source, entry.Key);
         var keyLine = source.LineIndexOf(entry.Key.Start);
         var lastLine = LastLineOfEntry(source, entry);
-        if (IsSpaces(text, source.Lines[keyLine].Start, entry.Key.Start))
+        var keyLineStart = source.Lines[keyLine].Start;
+        if (IsSpaces(text, keyLineStart, entry.Key.Start))
         {
-            return [DeleteLines(source, keyLine, lastLine)];
+            return [DeleteOwnedLines(source, keyLine, lastLine, entry.Key.Start - keyLineStart)];
         }
 
-        // `- key: value`, the first key of a list item: the next key moves up
-        // after the dash, unless it's the only key.
-        if (k != 0 || mapping.Entries.Count == 1)
+        // Something before the key on its line: a list item's dash
+        // (`- key: value`), or `?` for an explicit key.
+        var before = entry.Key.Start - 1;
+        while (before > keyLineStart && text[before] is ' ' or '\t')
+        {
+            before--;
+        }
+
+        if (text[before] != '-' || !IsSpaces(text, keyLineStart, before))
+        {
+            throw new NotSupportedException($"'{entry.KeyText}' at line {entry.Key.Line} isn't written as `key: value` at the start of its line (an explicit `? key`, for example), so it can't be removed in place.");
+        }
+
+        // The first key of a list item: the next key moves up after the
+        // dash, unless it's the only key.
+        if (mapping.Entries.Count == 1)
         {
             throw new NotSupportedException($"'{entry.KeyText}' at line {entry.Key.Line} is the only key of a list item. Remove the item instead.");
         }
@@ -609,6 +714,13 @@ internal static partial class YamlEditor
     {
         var start = source.Lines[first];
         var end = source.Lines[last];
+        if (start.Start == 0 && end.TerminatorLength > 0 && end.EndIncludingTerminator == source.Text.Length)
+        {
+            // Emptying the whole file: its last line break stays, so it still
+            // ends with a newline.
+            return new TextEdit(0, end.End, "");
+        }
+
         if (end.TerminatorLength > 0 || first == 0)
         {
             return new TextEdit(start.Start, end.EndIncludingTerminator - start.Start, "");

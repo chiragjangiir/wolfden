@@ -401,6 +401,26 @@ internal static partial class BodyParser
 
     private static bool IsBlank(string line) => line.All(c => c is ' ' or '\t');
 
+    /// <summary>True if <paramref name="markdown"/> holds a CommonMark link
+    /// reference definition (<c>[ref]: https://…</c>) outside code.</summary>
+    internal static bool HasLinkReferenceDefinition(string markdown)
+    {
+        if (!markdown.Contains("]:", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            return Markdown.Parse(markdown, Pipeline).Descendants<LinkReferenceDefinition>().Any();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Too deep to parse: assume there may be one.
+            return true;
+        }
+    }
+
     [GeneratedRegex(@"^[ \t]*<!--\s*wolfden:", RegexOptions.CultureInvariant)]
     private static partial Regex WolfdenCommentStart();
 

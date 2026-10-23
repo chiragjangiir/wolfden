@@ -321,13 +321,139 @@ public class CollectionEditTests
     }
 
     [Fact]
-    public void RemovingAnItemThatIsNotThereIsRefused()
+    public void RemovingAnItemPastTheEndChangesNothingButAPathThatDoesNotFitIsRefused()
     {
-        var file = Md("aliases: [Voss]\n");
+        var file = Md("name: Mara\naliases: [Voss]\n");
 
-        Assert.Throws<InvalidOperationException>(() => file.WithoutFrontmatterValue(["aliases", "1"]));
+        // Nothing there: like a missing key, nothing to remove.
+        Assert.Same(file, file.WithoutFrontmatterValue(["aliases", "1"]));
+        Assert.Same(file, file.WithoutFrontmatterValue(["aliases", "7", "value"]));
+
+        // The path doesn't fit the file: not an item number, or into a scalar.
         Assert.Throws<InvalidOperationException>(() => file.WithoutFrontmatterValue(["aliases", "first"]));
         Assert.Throws<InvalidOperationException>(() => file.WithoutFrontmatterValue(["aliases", "00"]));
+        Assert.Throws<InvalidOperationException>(() => file.WithoutFrontmatterValue(["name", "x"]));
+    }
+
+    // ---- Review round 1: comment placement in block lists (M2) ----
+
+    [Fact]
+    public void AnItemAtIndexZeroGoesAboveTheCommentsOverTheFirstItem()
+    {
+        var text = "aliases:\n  # her surname\n  - Voss\n";
+
+        Assert.Equal("aliases:\n  - Mara\n  # her surname\n  - Voss\n", Fm(Md(text).WithNewListItem(["aliases"], S("Mara"), 0)));
+    }
+
+    private const string Indented = """
+        aliases:
+          - Voss
+            # her surname, from her father
+          # the rank she earns
+          - the Commander
+
+        """;
+
+    [Theory]
+    [InlineData(1, "aliases:\n  - Voss\n    # her surname, from her father\n  - Mara\n  # the rank she earns\n  - the Commander\n")]
+    [InlineData(null, "aliases:\n  - Voss\n    # her surname, from her father\n  # the rank she earns\n  - the Commander\n  - Mara\n")]
+    public void CommentsIndentedUnderAnItemStayWithIt(int? index, string after)
+    {
+        Assert.Equal(after, Fm(Md(Indented).WithNewListItem(["aliases"], S("Mara"), index)));
+    }
+
+    [Fact]
+    public void RemovingAnItemRemovesTheCommentsIndentedUnderIt()
+    {
+        Assert.Equal("aliases:\n  # the rank she earns\n  - the Commander\n", Fm(Md(Indented).WithoutFrontmatterValue(["aliases", "0"])));
+    }
+
+    [Fact]
+    public void RemovingAKeyRemovesTheCommentsIndentedUnderIt()
+    {
+        var text = "fields:\n  born: \"2291\"\n    # checked against the census\n  # about rank\n  rank: x\n";
+
+        Assert.Equal("fields:\n  # about rank\n  rank: x\n", Fm(Md(text).WithoutField("born")));
+    }
+
+    [Theory]
+    [InlineData("aliases:\n  - a\n\n  - b\n\n  - c\n", "1", "aliases:\n  - a\n\n  - c\n")]
+    [InlineData("a: 1\n\nb: 2\n\nc: 3\n", null, "a: 1\n\nc: 3\n")]
+    public void RemovingSomethingBetweenBlankLinesLeavesOneBlankLine(string text, string? index, string after)
+    {
+        var edited = index is null ? Md(text).WithoutFrontmatterValue(["b"]) : Md(text).WithoutFrontmatterValue(["aliases", index]);
+
+        Assert.Equal(after, Fm(edited));
+    }
+
+    // ---- Review round 1: layouts that are refused (M1, L2) ----
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-14")]
+    public void RemovingAnExplicitBlockKeyIsRefused()
+    {
+        var file = Md("? a\n: 1\nb: 2\n");
+
+        Assert.Throws<NotSupportedException>(() => file.WithoutFrontmatterValue(["a"]));
+        Assert.Equal("? a\n: 1\n", Fm(file.WithoutFrontmatterValue(["b"])));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-14")]
+    public void RemovingAnExplicitFlowKeyIsRefused()
+    {
+        var file = Md("x: { ? a : 1, b: 2 }\n");
+
+        Assert.Throws<NotSupportedException>(() => file.WithoutFrontmatterValue(["x", "a"]));
+        Assert.Equal("x: { ? a : 1 }\n", Fm(file.WithoutFrontmatterValue(["x", "b"])));
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-RT-14")]
+    [InlineData("0")]
+    [InlineData("1")]
+    [InlineData("2")]
+    public void AddingToOrRemovingFromALeadingCommaFlowListIsRefused(string index)
+    {
+        var file = Md("aliases: [ a\n  , b\n  , c ]\n");
+
+        Assert.Throws<NotSupportedException>(() => file.WithoutFrontmatterValue(["aliases", index]));
+        Assert.Throws<NotSupportedException>(() => file.WithNewListItem(["aliases"], S("d"), int.Parse(index, System.Globalization.CultureInfo.InvariantCulture)));
+        Assert.Equal("aliases: [ a\n  , x\n  , c ]\n", Fm(file.WithFrontmatterValue(["aliases", "1"], S("x"))));
+    }
+
+    // ---- Review round 1: quoting new values (H1, nit) ----
+
+    [Theory]
+    [InlineData("Who?", "\"Who?\"")]
+    [InlineData("what?now", "\"what?now\"")]
+    public void AQuestionMarkIsQuotedInFlowContext(string value, string written)
+    {
+        var list = Md("aliases: [Voss]\n").WithNewListItem(["aliases"], S(value));
+        var mapping = Md("died: { value: x, from: \"a1:1\" }\n").WithFrontmatterValue(["died", "value"], S(value));
+
+        Assert.Equal($"aliases: [Voss, {written}]\n", Fm(list));
+        Assert.Equal($"died: {{ value: {written}, from: \"a1:1\" }}\n", Fm(mapping));
+        Assert.Equal(value, mapping.GetFrontmatterValue("died", "value")!.ToString());
+    }
+
+    [Theory]
+    [InlineData("rank:\n  - value: x\n", "rank:\n  - value: x\n  - value: Captain\n    from: \"e:2\"\n")]
+    [InlineData("rank:\n  - value: x\n    from: e:1\n", "rank:\n  - value: x\n    from: e:1\n  - value: Captain\n    from: e:2\n")]
+    public void ANewPositionIsQuotedUnlessItsNeighborIsPlain(string before, string after)
+    {
+        var entry = new YamlMappingValue { { "value", S("Captain") }, { "from", S("e:2") } };
+
+        Assert.Equal(after, Fm(Md(before).WithNewListItem(["rank"], entry)));
+    }
+
+    [Theory]
+    [InlineData("from:\n", "from: \"a1:2\"\n")]
+    [InlineData("from: ~\n", "from: \"a1:2\"\n")]
+    [InlineData("from: a1:1\n", "from: a1:2\n")]
+    public void FillingAnEmptyValueWithAPositionQuotesIt(string before, string after)
+    {
+        Assert.Equal(after, Fm(Md(before).WithFrontmatterValue(["from"], S("a1:2"))));
     }
 
     // ---- #96: one key inside a flow mapping ----
@@ -570,6 +696,18 @@ public class CollectionEditTests
         var file = YamlFile.Parse(TestFiles.Utf8("format: 1\nname: Starfall\nx-old: v"));
 
         Assert.Equal("format: 1\nname: Starfall", file.WithoutValue(["x-old"]).Text);
+    }
+
+    [Theory]
+    [InlineData("name: Starfall\n", "\n")]
+    [InlineData("name: Starfall\r\n", "\r\n")]
+    [InlineData("name: Starfall", "")]
+    public void EmptyingAYamlFileKeepsHowItEnded(string before, string after)
+    {
+        var edited = YamlFile.Parse(TestFiles.Utf8(before)).WithoutValue(["name"]);
+
+        Assert.Equal(after, edited.Text);
+        Assert.Null(edited.Root);
     }
 
     [Fact]

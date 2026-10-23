@@ -118,7 +118,8 @@ public class EditTests
     {
         var result = Edit(Entity, f => f.WithFrontmatterValue("from", YamlScalarValue.String("ember:1")));
 
-        Assert.Equal(Entity.Replace("x-color: teal\n", "x-color: teal\nfrom: ember:1\n", StringComparison.Ordinal), result);
+        // A new position is quoted, as format.md §7.3 writes them.
+        Assert.Equal(Entity.Replace("x-color: teal\n", "x-color: teal\nfrom: \"ember:1\"\n", StringComparison.Ordinal), result);
     }
 
     [Fact]

@@ -271,6 +271,53 @@ public class SectionEditTests
         Assert.Throws<NotSupportedException>(() => file.WithSectionMovedBefore(file.Sections[2], file.Sections[1]));
     }
 
+    // ---- Review round 1: refusals at the lead, and link references (M1, L1) ----
+
+    [Fact]
+    public void RenamingAHeadingIntoSomethingElseIsRefused()
+    {
+        // `- x` over `---` is a list item and a thematic break, not a heading.
+        var file = Md("Old\n---\ntext\n");
+
+        Assert.Throws<ArgumentException>(() => file.WithSectionName(file.Sections[0], "- x"));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-14")]
+    public void RemovingASectionThatWouldMakeAStrayHeadingPartOfTheLeadIsRefused()
+    {
+        var file = Md("# Title\n\n## A\na\n\n# Stray\ns\n");
+
+        Assert.Throws<NotSupportedException>(() => file.WithoutSection(file.Sections[0]));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-14")]
+    public void MovingASetextSectionAgainstTheLeadIsRefused()
+    {
+        var file = Md("Lead.\n## A\na\n\nB\n---\nb\n");
+
+        Assert.Throws<NotSupportedException>(() => file.WithSectionMovedBefore(file.Sections[1], file.Sections[0]));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-14")]
+    public void RemovingASectionWithALinkReferenceDefinitionIsRefused()
+    {
+        var file = Md("## A\nSee [the map][map].\n\n## B\n[map]: https://example.com/map\n\n## C\nc\n");
+
+        Assert.Throws<NotSupportedException>(() => file.WithoutSection(file.Sections[1]));
+        Assert.Equal("## A\nSee [the map][map].\n\n## B\n[map]: https://example.com/map\n", file.WithoutSection(file.Sections[2]).Text);
+    }
+
+    [Fact]
+    public void AReferenceDefinitionInsideCodeDoesNotBlockRemoval()
+    {
+        var file = Md("## A\na\n\n## B\n```\n[map]: https://example.com/map\n```\n\n## C\nc\n");
+
+        Assert.Equal("## A\na\n\n## C\nc\n", file.WithoutSection(file.Sections[1]).Text);
+    }
+
     [Fact]
     [Trait("Scenario", "SC-RT-6")]
     public void SectionEditsKeepCrlf()
