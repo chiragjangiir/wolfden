@@ -109,7 +109,9 @@ public sealed class WolfdenTools
         "and (when the den turns them on) spoiler checks. Each finding has a path, a line, a severity (error or warning), a rule " +
         "id from Wolfden's format spec, and a message. Errors keep a file out of the index; warnings don't. It never changes a file. " +
         "Unlike the other tools it checks the whole den by default, every universe included, since it validates files rather than " +
-        "a story view; give a universe to check only that universe's files and the den-level ones (den.yaml and packs).")]
+        "a story view; give a universe to check only that universe's files and the den-level ones (den.yaml and packs). Ids are " +
+        "still compared with the other universes' notes, so a duplicate id across universes is found; if that comparison couldn't " +
+        "run, 'note' says why.")]
     public CallToolResult Check(
         [Description("Only 'error' or only 'warning'.")] string? severity = null,
         [Description("Only files under this path, relative to the den root, such as 'universes/dracula/books'.")] string? path = null,

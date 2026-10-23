@@ -40,6 +40,10 @@ public class McpCommandTests
         Assert.Equal(CliApp.ExitUsage, exitCode);
         Assert.Equal("", output);
         Assert.Equal("wolfden mcp: the den has no universe 'nowhere'. Its universes: dracula.\n", error);
+
+        var (star, _, starError) = Cli.Run("mcp", TempDen.DraculaRoot, "--universe", "*");
+        Assert.Equal(CliApp.ExitUsage, star);
+        Assert.StartsWith("wolfden mcp: '*' (every universe) can't be pinned", starError, StringComparison.Ordinal);
     }
 
     [Fact]

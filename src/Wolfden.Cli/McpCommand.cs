@@ -82,6 +82,12 @@ internal static class McpCommand
         }
 
         var pinned = line.Value("--universe");
+        if (pinned == DenTools.AllUniverses)
+        {
+            error.WriteLine("wolfden mcp: '*' (every universe) can't be pinned: --universe pins one universe. Leave it out to serve them all.");
+            return CliApp.ExitUsage;
+        }
+
         if (pinned is not null)
         {
             var structure = DenStructure.Load(root);

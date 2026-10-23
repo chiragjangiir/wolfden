@@ -80,8 +80,9 @@ public sealed class DenTools
 
             // Filters apply after the search, so ask for more when there are
             // any; one more than the limit says whether the hits were cut off.
-            var filtered = universeId is not null || type is not null || canonOnly;
-            var hits = index.Search(query, filtered ? Math.Max(limit * 20, 1000) : limit + 1);
+            var filtered = (universeId is not null && universes.Count > 1) || type is not null || canonOnly;
+            var fetch = filtered ? Math.Max(limit * 20, 1000) : limit + 1;
+            var hits = index.Search(query, fetch);
             var paths = hits.Select(h => h.EntityPath).Distinct().ToList();
             var entities = db.Entities.Where(e => paths.Contains(e.Path)).ToList().ToDictionary(e => e.Path, StringComparer.Ordinal);
             var scopes = Scopes(db);
@@ -95,7 +96,8 @@ public sealed class DenTools
                 .Select(x => new SearchHitView(
                     Summary(x.Entity, universes, scopes), x.Hit.SectionName, x.Hit.SectionLine, x.Hit.Snippet, x.Hit.Status, x.Hit.IsInCanon, x.Hit.InComment))
                 .ToList();
-            var truncated = views.Count > limit;
+            // Filtered hits that reached the raw cap may have more beyond it.
+            var truncated = views.Count > limit || (filtered && hits.Count == fetch);
             views = views.Take(limit).ToList();
             return new SearchResult(ToolJson.Version, query, views.Count, truncated, views);
         });
@@ -305,9 +307,18 @@ public sealed class DenTools
 
         var scope = universe == AllUniverses ? null : universe;
         DenCheck check;
+        string? note = null;
         try
         {
-            check = DenCheck.Run(Root, scope);
+            if (scope is null)
+            {
+                check = DenCheck.Run(Root);
+            }
+            else
+            {
+                // The other universes' ids come from the index, so a duplicate across universes is found (F-ID-3).
+                (check, note) = UniverseCheck.Run(Root, scope, WatcherWait);
+            }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -332,7 +343,7 @@ public sealed class DenTools
         var shown = matching.Take(limit).ToList();
         return new CheckResult(
             ToolJson.Version, scope, check.IsLoaded, check.IsLoaded ? check.Structure.SpoilerChecks : null, check.Catalog.Entities.Count,
-            check.ErrorCount, check.WarningCount, shown.Count, matching.Count, matching.Count > limit, shown);
+            check.ErrorCount, check.WarningCount, shown.Count, matching.Count, matching.Count > limit, shown, note);
 
         static string Severity(DiagnosticSeverity s) => s == DiagnosticSeverity.Error ? "error" : "warning";
     }

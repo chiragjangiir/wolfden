@@ -272,6 +272,7 @@ public sealed record DiagnosticView(string Path, int? Line, string Severity, str
 /// <param name="Total">How many diagnostics match the filters in all.</param>
 /// <param name="Truncated">True if more matched than <c>limit</c>.</param>
 /// <param name="Diagnostics">The diagnostics, by path and line.</param>
+/// <param name="Note">For a check of one universe, set when the comparison of ids with other universes (F-ID-3) was skipped, and why.</param>
 public sealed record CheckResult(
     int Version, string? Universe, bool Loaded, bool? SpoilerChecks, int Entities, int Errors, int Warnings, int Count, int Total, bool Truncated,
-    IReadOnlyList<DiagnosticView> Diagnostics);
+    IReadOnlyList<DiagnosticView> Diagnostics, string? Note = null);

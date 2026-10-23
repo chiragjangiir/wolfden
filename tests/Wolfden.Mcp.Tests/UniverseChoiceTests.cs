@@ -172,13 +172,79 @@ public sealed class UniverseChoiceTests : IDisposable
     [Trait("Scenario", "SC-MCP-13")]
     public void TheWholeDenIsTheUnionOfItsUniversesAndTheDenLevel()
     {
+        AssertWholeIsTheUnion();
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-13")]
+    public void ACheckOfOneUniverseFindsAnIdSharedWithAnotherUniverse()
+    {
+        // Mara Voss copied from Starfall into the Drift, id and all, and a
+        // Drift note that links to her.
+        const string starfallMara = "universes/starfall/series/long-dark/entities/characters/mara-voss.md";
+        const string driftMara = "universes/drift/entities/characters/mara-voss.md";
+        const string driftNote = "universes/drift/entities/notes/crew.md";
+        _den.Write(driftMara, _den.Read(starfallMara));
+        _den.Write(driftNote, "---\ntype: note\nname: Crew\nstatus: canon\n---\n\nAboard: [[Mara Voss]].\n");
+
+        var whole = _tools.Check(limit: 5000);
+        var drift = _tools.Check(universe: "drift", limit: 5000);
+
+        // The whole den: F-ID-3 on both copies, and the link breaks.
+        Assert.Contains(whole.Diagnostics, d => d.Path == starfallMara && d.Rule == "F-ID-3");
+        Assert.Contains(whole.Diagnostics, d => d.Path == driftMara && d.Rule == "F-ID-3");
+        Assert.Contains(whole.Diagnostics, d => d.Path == driftNote && d.Rule == "F-LINK-8");
+
+        // The Drift alone: the same findings on its files, naming Starfall's copy.
+        Assert.Null(drift.Note);
+        var dup = Assert.Single(drift.Diagnostics, d => d.Path == driftMara && d.Rule == "F-ID-3");
+        Assert.Contains(starfallMara, dup.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            whole.Diagnostics.Where(d => d.Rule == "F-ID-3" && d.Path.StartsWith("universes/drift/", StringComparison.Ordinal)),
+            drift.Diagnostics.Where(d => d.Rule == "F-ID-3"));
+
+        // F-LINK-8 too, but for the one accepted difference: a scoped check
+        // can't add the hint that names a match in another universe.
+        Assert.Contains(drift.Diagnostics, d => d.Path == driftNote && d.Rule == "F-LINK-8");
+        Assert.Equal(
+            whole.Diagnostics.Where(d => d.Rule == "F-LINK-8" && d.Path.StartsWith("universes/drift/", StringComparison.Ordinal)).Select(WithoutHint),
+            drift.Diagnostics.Where(d => d.Rule == "F-LINK-8").Select(WithoutHint));
+
+        static DiagnosticView WithoutHint(DiagnosticView d) =>
+            d with { Message = d.Message.Split(" It matches only ", StringSplitOptions.None)[0] };
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-13")]
+    public void WhenTheIndexCantBeBuiltTheScopedCheckSaysTheIdComparisonWasSkipped()
+    {
+        _den.Write("den.yaml", "format: 1\nname: [broken\n");
+
+        var drift = _tools.Check(universe: "drift");
+
+        Assert.False(drift.Loaded);
+        Assert.Contains("weren't checked", drift.Note!, StringComparison.Ordinal);
+        Assert.Null(_tools.Check().Note);
+    }
+
+    /// <summary>The whole den's findings are each universe's own plus the den-level ones, each reported once.</summary>
+    private void AssertWholeIsTheUnion()
+    {
         var whole = _tools.Check(limit: 5000).Diagnostics;
-        var parts = _tools.Check(universe: "starfall", limit: 5000).Diagnostics
-            .Concat(_tools.Check(universe: "drift", limit: 5000).Diagnostics)
-            .Distinct()
+        var starfall = _tools.Check(universe: "starfall", limit: 5000).Diagnostics;
+        var drift = _tools.Check(universe: "drift", limit: 5000).Diagnostics;
+
+        static bool In(DiagnosticView d, string universe) => d.Path.StartsWith($"universes/{universe}/", StringComparison.Ordinal);
+        var denLevel = starfall.Where(d => !In(d, "starfall")).ToList();
+        Assert.Equal(denLevel, drift.Where(d => !In(d, "drift")).ToList());
+        var parts = starfall.Where(d => In(d, "starfall"))
+            .Concat(drift.Where(d => In(d, "drift")))
+            .Concat(denLevel)
             .OrderBy(d => d.Path, StringComparer.Ordinal).ThenBy(d => d.Line ?? 0).ThenBy(d => d.Rule, StringComparer.Ordinal).ThenBy(d => d.Message, StringComparer.Ordinal)
             .ToList();
 
+        Assert.Equal(whole.Count, whole.Distinct().Count());
+        Assert.Equal(parts.Count, parts.Distinct().Count());
         Assert.Equal(whole, parts);
     }
 
