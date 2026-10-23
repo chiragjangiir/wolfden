@@ -1,3 +1,6 @@
+using System.Buffers;
+using System.Text;
+
 namespace Wolfden.Core.Structure;
 
 /// <summary>
@@ -26,6 +29,7 @@ public static class DenPaths
     /// <item>isn't empty, <c>.</c>, or <c>..</c>, so the path can't leave the den;</item>
     /// <item>doesn't start with <c>.</c>: hidden files aren't part of the den (F-LAY-2), and <c>.git/</c> and <c>.wolfden/</c> are never written through the store;</item>
     /// <item>has no <c>\</c>, which is a separator on Windows but a letter on Linux, and none of <c>&lt; &gt; : " | ? *</c> or control characters, which Windows doesn't allow (a <c>:</c> would also name a drive or an NTFS stream);</item>
+    /// <item>is valid text with no invisible characters (Unicode default-ignorable code points such as a zero-width space or a byte order mark), so names that look alike are never different files;</item>
     /// <item>doesn't end with a space or <c>.</c>, which Windows drops, so <c>mara.md.</c> would be <c>mara.md</c>;</item>
     /// <item>isn't a Windows device name such as <c>CON</c> or <c>nul.md</c>.</item>
     /// </list>
@@ -124,6 +128,21 @@ public static class DenPaths
             }
         }
 
+        for (var i = 0; i < name.Length; i++)
+        {
+            if (Rune.DecodeFromUtf16(name.AsSpan(i), out var rune, out var used) != OperationStatus.Done)
+            {
+                return $"'{Printable(name)}' isn't valid text (a lone surrogate)";
+            }
+
+            if (IsDefaultIgnorable(rune.Value))
+            {
+                return $"'{Printable(name)}' has an invisible character (U+{rune.Value:X4}), so two names that look the same would be different files";
+            }
+
+            i += used - 1;
+        }
+
         if (name.EndsWith(' ') || name.EndsWith('.'))
         {
             return $"'{name}' ends with a space or '.', which Windows drops from a name";
@@ -139,5 +158,24 @@ public static class DenPaths
     }
 
     private static string Printable(string name) =>
-        string.Concat(name.Select(c => c < ' ' || c == '\u007f' ? $"\\u{(int)c:x4}" : c.ToString()));
+        string.Concat(name.Select(c => c < ' ' || c == '\u007f' || char.IsSurrogate(c) || IsDefaultIgnorable(c) ? $"\\u{(int)c:x4}" : c.ToString()));
+
+    /// <summary>
+    /// True for a Unicode default-ignorable code point (DerivedCoreProperties,
+    /// Unicode 15): characters that show as nothing, such as a zero-width
+    /// space, a soft hyphen, a byte order mark, or a direction mark.
+    /// </summary>
+    private static bool IsDefaultIgnorable(int c) =>
+        c is 0x00AD or 0x034F or 0x061C or 0x3164 or 0xFEFF or 0xFFA0
+        || c is >= 0x115F and <= 0x1160
+        || c is >= 0x17B4 and <= 0x17B5
+        || c is >= 0x180B and <= 0x180F
+        || c is >= 0x200B and <= 0x200F
+        || c is >= 0x202A and <= 0x202E
+        || c is >= 0x2060 and <= 0x206F
+        || c is >= 0xFE00 and <= 0xFE0F
+        || c is >= 0xFFF0 and <= 0xFFF8
+        || c is >= 0x1BCA0 and <= 0x1BCA3
+        || c is >= 0x1D173 and <= 0x1D17A
+        || c is >= 0xE0000 and <= 0xE0FFF;
 }

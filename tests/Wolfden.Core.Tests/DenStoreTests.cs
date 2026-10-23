@@ -424,6 +424,200 @@ public sealed class DenStoreTests : IDisposable
         Assert.Equal(DenStoreError.NotFound, Assert.Throws<DenStoreException>(() => store.DeleteFolder(Characters)).Error);
     }
 
+    [Fact]
+    public void AFolderWhoseOnlyEntriesAreHiddenIsntDeletedAndTheMessageNamesOne()
+    {
+        var store = Store();
+        store.DeleteFile(Mara);
+        File.WriteAllText(Path.Combine(Full(Characters), ".mara-voss.md.swp"), "swap");
+
+        var e = Assert.Throws<DenStoreException>(() => store.DeleteFolder(Characters));
+
+        Assert.Equal(DenStoreError.NotEmpty, e.Error);
+        Assert.Contains("'.mara-voss.md.swp', which is hidden", e.Message, StringComparison.Ordinal);
+        Assert.True(Directory.Exists(Full(Characters)));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-STORE-5")]
+    public void ACaseOnlyFolderRenameThatFailsHalfWayIsPutBack()
+    {
+        // As on Windows, where the plain move is refused or does nothing, so
+        // the rename goes through a hidden name, and its second step fails.
+        const string books = "universes/starfall/series/long-dark/books";
+        var moves = 0;
+        var store = new FileSystemDenStore(_root)
+        {
+            OneNameForAllCases = true,
+            DirectoryMove = (from, to) =>
+            {
+                switch (++moves)
+                {
+                    case 1:
+                        throw new IOException("Source and destination path must be different.");
+                    case 3:
+                        throw new IOException("The disk is full.");
+                    default:
+                        Directory.Move(from, to);
+                        break;
+                }
+            },
+        };
+
+        var e = Assert.Throws<IOException>(() => store.MoveFolder($"{books}/ember", $"{books}/Ember"));
+
+        Assert.Equal("The disk is full.", e.Message);
+        Assert.Equal(4, moves);
+        Assert.Equal(["ash", "ember"], Directory.EnumerateDirectories(Full(books)).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        Assert.True(store.FileExists($"{books}/ember/book.md"));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-STORE-5")]
+    public void ACaseOnlyFolderRenameGoesThroughAHiddenNameWhenThePlainMoveIsRefused()
+    {
+        const string books = "universes/starfall/series/long-dark/books";
+        var moves = 0;
+        var store = new FileSystemDenStore(_root)
+        {
+            OneNameForAllCases = true,
+            DirectoryMove = (from, to) =>
+            {
+                if (++moves == 1)
+                {
+                    throw new IOException("Source and destination path must be different.");
+                }
+
+                Directory.Move(from, to);
+            },
+        };
+
+        store.MoveFolder($"{books}/ember", $"{books}/Ember");
+
+        Assert.Equal(3, moves);
+        Assert.Equal(["Ember", "ash"], Directory.EnumerateDirectories(Full(books)).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-STORE-3")]
+    public void ACaseOnlyRenameOntoAnotherFileWithThatNameIsRefused()
+    {
+        // Only Linux can hold mara-voss.md and Mara-Voss.md side by side.
+        File.WriteAllText(Full($"{Characters}/Mara-Voss.md"), "another Mara");
+        if (Directory.GetFiles(Full(Characters)).Length < 2)
+        {
+            Assert.Skip("This file system takes names that differ only in case as one name.");
+        }
+
+        var e = Assert.Throws<DenStoreException>(() => new FileSystemDenStore(_root).MoveFile(Mara, $"{Characters}/MARA-VOSS.md"));
+
+        Assert.Equal(DenStoreError.CaseConflict, e.Error);
+        Assert.Equal("another Mara", File.ReadAllText(Full($"{Characters}/Mara-Voss.md")));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-STORE-3")]
+    public void ANameInAnotherUnicodeFormIsRefused()
+    {
+        // "Café" with é as one character (NFC), and with e and a combining accent (NFD).
+        var nfc = "café.md";
+        var nfd = "café.md";
+        var store = Store();
+        store.WriteFile($"{Characters}/{nfc}", Bytes("---\nname: Café\n---\n"), DenWriteMode.Create);
+
+        var e = Assert.Throws<DenStoreException>(() => store.WriteFile($"{Characters}/{nfd}", Bytes("another café")));
+
+        Assert.Equal(DenStoreError.CaseConflict, e.Error);
+        Assert.Contains("Unicode form", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AReadOnlyFileIsRefusedAtOnceWithAClearReason()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("On Linux and macOS a read-only file can be replaced: its folder's permissions decide.");
+        }
+
+        var store = Store();
+        File.SetAttributes(Full(Mara), FileAttributes.ReadOnly);
+        try
+        {
+            var watch = Stopwatch.StartNew();
+            var e = Assert.Throws<DenStoreException>(() => store.WriteFile(Mara, Bytes("x"), DenWriteMode.Replace));
+
+            Assert.Equal(DenStoreError.AccessDenied, e.Error);
+            Assert.Equal($"'{Mara}' can't be written: the file is read-only.", e.Message);
+            Assert.IsType<UnauthorizedAccessException>(e.InnerException);
+            Assert.True(watch.ElapsedMilliseconds < 200, $"It took {watch.ElapsedMilliseconds} ms: a read-only file isn't worth trying again.");
+        }
+        finally
+        {
+            File.SetAttributes(Full(Mara), FileAttributes.Normal);
+        }
+    }
+
+    [Fact]
+    public void AFileAnotherProgramHoldsOpenIsReportedAsInUse()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Only Windows keeps an open file from being replaced.");
+        }
+
+        var store = Store();
+        using var held = new FileStream(Full(Mara), FileMode.Open, FileAccess.Read, FileShare.None);
+
+        var e = Assert.Throws<DenStoreException>(() => store.WriteFile(Mara, Bytes("x"), DenWriteMode.Replace));
+
+        Assert.True(e.Error is DenStoreError.InUse or DenStoreError.AccessDenied, e.Error.ToString());
+        Assert.NotNull(e.InnerException);
+    }
+
+    [Theory]
+    [InlineData("/", "/universes/x.md", true)]
+    [InlineData("/den", "/den/universes/x.md", true)]
+    [InlineData("/den", "/den", false)]
+    [InlineData("/den", "/denmark/x.md", false)]
+    [InlineData("/", "/", false)]
+    public void ADenAtTheRootOfAFileSystemCanBeWritten(string root, string full, bool inside)
+    {
+        var separator = Path.DirectorySeparatorChar.ToString();
+        var drive = OperatingSystem.IsWindows() ? "C:" : "";
+        Assert.Equal(inside, FileSystemDenStore.IsInside(drive + root.Replace("/", separator), drive + full.Replace("/", separator)));
+    }
+
+    // ----- a store that lives as long as its host -----
+
+    [Fact]
+    public void ReadsSeeAFolderRenamedOutsideTheStore()
+    {
+        // A long-lived store, as in the MCP server: something else renames
+        // characters/ to Characters/ between two reads.
+        var store = Store();
+        Assert.True(store.FileExists(Mara));
+        var renamed = Mara.Replace("/characters/", "/Characters/", StringComparison.Ordinal);
+
+        Directory.Move(Full(Characters), Full(Characters) + "-moving");
+        Directory.Move(Full(Characters) + "-moving", Full(Characters.Replace("characters", "Characters", StringComparison.Ordinal)));
+
+        Assert.False(store.FileExists(Mara));
+        Assert.True(store.FileExists(renamed));
+        store.WriteFile(renamed, Bytes("---\nname: Mara Voss\n---\n"), DenWriteMode.Replace);
+        Assert.Equal(DenStoreError.CaseConflict, Assert.Throws<DenStoreException>(() => store.WriteFile(Mara, Bytes("x"), DenWriteMode.Replace)).Error);
+    }
+
+    [Fact]
+    public void ASnapshotReadsOneLoad()
+    {
+        var store = Store();
+
+        var snapshot = store.Snapshot();
+
+        Assert.Equal(store.Root, snapshot.Root);
+        Assert.True(snapshot.FileExists(Mara));
+    }
+
     // ----- read-only stores -----
 
     [Fact]

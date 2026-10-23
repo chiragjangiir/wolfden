@@ -103,7 +103,7 @@ public sealed class BuiltInPacks : IDenStore
     public void DeleteFolder(string path) => throw Refused(path);
 
     private static DenStoreException Refused(string path) =>
-        DenStoreException.ReadOnly(path ?? "", "the built-in packs ship with Wolfden and can't be changed. To change a built-in type, extend it from a pack in the den's packs/ folder (types.md)");
+        DenStoreException.ReadOnly(path, "the built-in packs ship with Wolfden and can't be changed. To change a built-in type, extend it from a pack in the den's packs/ folder (types.md)");
 
     /// <summary>Built-in packs made of the given files, for tests of packs that don't ship yet.</summary>
     internal static BuiltInPacks FromFiles(IReadOnlyDictionary<string, string> files) =>

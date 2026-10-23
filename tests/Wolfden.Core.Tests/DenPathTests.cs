@@ -89,6 +89,33 @@ public sealed class DenPathTests
         Assert.Contains(why, problem, StringComparison.Ordinal);
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-STORE-3")]
+    public void ANameWithAnInvisibleCharacterIsRefused()
+    {
+        // Each looks like mara-voss.md, but isn't the same name.
+        foreach (var invisible in new[] { "​", "‍", "­", "﻿", "⁠", "‎", "‮", "️", "\U000E0041" })
+        {
+            var problem = DenPaths.Problem($"universes/starfall/mara{invisible}-voss.md");
+
+            Assert.NotNull(problem);
+            Assert.Contains("invisible character", problem, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void ANameThatIsntValidTextIsRefused()
+    {
+        Assert.Contains("isn't valid text", DenPaths.Problem("universes/starfall/mara\uD800.md"), StringComparison.Ordinal);
+        Assert.Contains("isn't valid text", DenPaths.Problem("universes/starfall/mara\uDC00.md"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACharacterOutsideTheBasicPlaneIsFine()
+    {
+        Assert.Null(DenPaths.Problem("universes/starfall/entities/items/\U0001F680-rocket.md"));
+    }
+
     [Theory]
     [InlineData("a/b/c.md", "a/b", "c.md")]
     [InlineData("den.yaml", "", "den.yaml")]

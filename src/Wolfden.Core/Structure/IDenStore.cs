@@ -19,9 +19,22 @@ namespace Wolfden.Core.Structure;
 /// through <see cref="IsReadOnly"/>, and refuses every write with
 /// <see cref="DenStoreError.ReadOnly"/>. Writes keep the bytes exactly as
 /// given: a store never converts line endings or encodings (format.md §12).
-/// Failures the store can't foresee, such as a file another program holds
-/// open or one the user may not write, are the <see cref="IOException"/> or
-/// <see cref="UnauthorizedAccessException"/> the system raised.
+/// A file that's read-only, that the user may not write, or that another
+/// program holds open is refused with <see cref="DenStoreError.AccessDenied"/>
+/// or <see cref="DenStoreError.InUse"/>, with the system's error as the inner
+/// exception. Other failures, such as a full disk, are the <see cref="IOException"/>
+/// the system raised.
+/// </para>
+/// <para>
+/// <b>Checks and writes aren't one step.</b> A store checks what's at a
+/// path, then writes. Another program can change the den in between: make
+/// a file that <see cref="DenWriteMode.Create"/> found missing, delete one
+/// that <see cref="DenWriteMode.Replace"/> found, or make a name that
+/// differs only in case. The store never writes outside the den because of
+/// that, and a file made in between isn't overwritten by
+/// <see cref="DenWriteMode.Create"/> or a move. Callers that need more,
+/// such as refusing to save over an edit made since a note was read, check
+/// for it themselves.
 /// </para>
 /// </remarks>
 public interface IDenStore : IDenSource
@@ -100,7 +113,12 @@ public enum DenStoreError
     /// <summary>A file or folder is already at the path.</summary>
     AlreadyExists,
 
-    /// <summary>A name on the path differs only in case (or is another name for) one that's already there, so the two would be one file on Windows and macOS.</summary>
+    /// <summary>
+    /// A name on the path differs only in case or Unicode form (é as one
+    /// character or as e and an accent) from one that's already there, or
+    /// is another name for it, so the two would be one file on Windows or
+    /// macOS.
+    /// </summary>
     CaseConflict,
 
     /// <summary>A folder is where a file was expected, or a file where a folder was.</summary>
@@ -108,14 +126,20 @@ public enum DenStoreError
 
     /// <summary>The folder to delete isn't empty.</summary>
     NotEmpty,
+
+    /// <summary>The file is read-only, or the user may not change it.</summary>
+    AccessDenied,
+
+    /// <summary>Another program has the file open, so it can't be replaced, moved, or deleted now.</summary>
+    InUse,
 }
 
 /// <summary>A write a den store refused, and why (<see cref="Error"/>).</summary>
 public sealed class DenStoreException : IOException
 {
     /// <summary>A refusal of a write to <paramref name="path"/>.</summary>
-    public DenStoreException(DenStoreError error, string path, string message)
-        : base(message)
+    public DenStoreException(DenStoreError error, string path, string message, Exception? inner = null)
+        : base(message, inner)
     {
         Error = error;
         Path = path;
