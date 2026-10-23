@@ -115,17 +115,61 @@ public sealed class DenWatcherTests
     public void LostEventsRebuildWithoutAnError()
     {
         using var den = TempDen.Starfall();
-        using var watcher = Quick(den);
+        var feed = new CapturingFeed(new FileSystemDenStore(den.Root));
+        using var watcher = new DenWatcher(den.Root, TimeSpan.FromMilliseconds(50))
+        {
+            FirstPause = TimeSpan.FromMilliseconds(20),
+            MaxPause = TimeSpan.FromMilliseconds(100),
+            Changes = feed,
+        };
         var updates = new BlockingCollection<IndexUpdate>();
         var failures = new BlockingCollection<Exception>();
         watcher.Updated += (_, u) => updates.Add(u);
         watcher.Failed += (_, e) => failures.Add(e);
         watcher.Start();
 
-        watcher.ReportWatcherError(new InternalBufferOverflowException());
+        // As the store's watch reports a full event buffer.
+        feed.Observers[^1].Lost();
 
         WaitFor(updates, u => u.Kind == IndexUpdateKind.Rebuilt && u.Reason!.Contains("too many changes", StringComparison.Ordinal));
         Assert.Empty(failures);
+    }
+
+    [Fact]
+    public void AReplacedWatchsLostEventsAndBreaksAreIgnored()
+    {
+        using var den = TempDen.Starfall();
+        var feed = new CapturingFeed(new FileSystemDenStore(den.Root));
+        using var watcher = new DenWatcher(den.Root, TimeSpan.FromMilliseconds(50))
+        {
+            FirstPause = TimeSpan.FromMilliseconds(20),
+            MaxPause = TimeSpan.FromMilliseconds(100),
+            Changes = feed,
+        };
+        var updates = new BlockingCollection<IndexUpdate>();
+        var failures = new BlockingCollection<Exception>();
+        watcher.Updated += (_, u) => updates.Add(u);
+        watcher.Failed += (_, e) => failures.Add(e);
+        watcher.Start();
+        watcher.ReportWatcherError(new IOException("The drive went away."));
+        WaitFor(failures, e => e.Message.Contains("Listening again", StringComparison.Ordinal));
+        WaitFor(updates, u => u.Kind == IndexUpdateKind.Rebuilt);
+        Assert.Equal(2, feed.Observers.Count);
+
+        // The first watch, replaced, has a last word: neither is acted on.
+        feed.Observers[0].Lost();
+        feed.Observers[0].Broken(new IOException("The old watch broke."));
+
+        Assert.False(updates.TryTake(out _, TimeSpan.FromMilliseconds(500)));
+        Assert.False(failures.TryTake(out _, TimeSpan.FromMilliseconds(100)));
+    }
+
+    [Fact]
+    public void TheChangeFeedCantBeNull()
+    {
+        using var den = TempDen.Starfall();
+
+        Assert.Throws<ArgumentNullException>(() => new DenWatcher(den.Root) { Changes = null! });
     }
 
     [Fact]
@@ -345,6 +389,22 @@ public sealed class DenWatcherTests
     {
         public IDisposable Watch(IDenChangeObserver observer) =>
             fail() ? throw new IOException("No space left on device.") : inner.Watch(observer);
+    }
+
+    /// <summary>A den store's change feed that keeps each watch's observer, so a test can report as the store would.</summary>
+    private sealed class CapturingFeed(IDenChangeFeed inner) : IDenChangeFeed
+    {
+        public List<IDenChangeObserver> Observers { get; } = [];
+
+        public IDisposable Watch(IDenChangeObserver observer)
+        {
+            lock (Observers)
+            {
+                Observers.Add(observer);
+            }
+
+            return inner.Watch(observer);
+        }
     }
 
     private static DenWatcher Quick(TempDen den) => new(den.Root, TimeSpan.FromMilliseconds(50))

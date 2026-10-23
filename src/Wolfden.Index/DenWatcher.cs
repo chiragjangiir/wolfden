@@ -6,10 +6,10 @@ namespace Wolfden.Index;
 /// Keeps a den's index up to date while its files are edited outside
 /// Wolfden, in an editor or by an AI agent (#14, design.md §7). It listens
 /// to the den store's change feed (<see cref="IDenChangeFeed"/>, #121),
-/// which for a den on disk watches the den folder, collects the file events of a burst of saves into one
-/// batch, and brings the index up to date from it: reading only the changed
-/// files where that's safe, and rebuilding the index where it isn't
-/// (see <see cref="IndexUpdater"/>). A host such as <c>wolfden index --watch</c>,
+/// which for a den on disk watches the den folder, collects the changes of
+/// a burst of saves into one batch, and brings the index up to date from
+/// it: reading only the changed files where that's safe, and rebuilding the
+/// index where it isn't (see <see cref="IndexUpdater"/>). A host such as <c>wolfden index --watch</c>,
 /// and later <c>wolfden serve</c> and the MCP server, runs one per den.
 /// </summary>
 /// <remarks>
@@ -27,6 +27,13 @@ namespace Wolfden.Index;
 /// watcher starts listening again and rebuilds. Each of these is reported
 /// through <see cref="Failed"/>, and retried after a pause that grows while
 /// failures repeat.
+/// </para>
+/// <para>
+/// Only the listening goes through the store abstraction so far. The
+/// watcher takes a <see cref="FileSystemDenStore"/>, and the index, with
+/// its updater and lock, lives in the den folder and reads the files from
+/// disk. A store kept anywhere else needs its own index host as well as
+/// its own change feed.
 /// </para>
 /// </remarks>
 public sealed class DenWatcher : IDisposable
@@ -52,6 +59,7 @@ public sealed class DenWatcher : IDisposable
     private readonly CancellationTokenSource _stop = new();
     private IDisposable? _watch;
     private Observer? _observer;
+    private IDenChangeFeed _changes;
     private FileStream? _lock;
     private Thread? _thread;
     private int _disposed;
@@ -91,9 +99,9 @@ public sealed class DenWatcher : IDisposable
         ArgumentNullException.ThrowIfNull(store);
         _store = store;
         _root = store.Root;
-        _batcher = new ChangeBatcher(_root, quiet ?? DefaultQuiet, maxDelay ?? DefaultMaxDelay);
+        _batcher = new ChangeBatcher(quiet ?? DefaultQuiet, maxDelay ?? DefaultMaxDelay);
         _updater = new IndexUpdater(_root);
-        Changes = store;
+        _changes = store;
     }
 
     /// <summary>Raised after each batch that changed what the index holds. <see cref="Start"/> returns the first build instead.</summary>
@@ -129,7 +137,11 @@ public sealed class DenWatcher : IDisposable
     internal TimeSpan HealthyAfter { get; init; } = TimeSpan.FromSeconds(30);
 
     /// <summary>The change feed listened to: the store's own. Tests replace it to fail on purpose.</summary>
-    internal IDenChangeFeed Changes { get; init; }
+    internal IDenChangeFeed Changes
+    {
+        get => _changes;
+        init => _changes = value ?? throw new ArgumentNullException(nameof(value));
+    }
 
     /// <summary>Called before each batch is applied. Tests use it to make a batch fail.</summary>
     internal Action<ChangeBatch>? BeforeApply { get; init; }
@@ -195,18 +207,11 @@ public sealed class DenWatcher : IDisposable
     }
 
     /// <summary>
-    /// Reports an error from the file system watcher, as its
-    /// <see cref="FileSystemWatcher.Error"/> event does, so tests can fake one.
+    /// Reports that the current watch broke, as the change feed does
+    /// (<see cref="IDenChangeObserver.Broken"/>), so tests can fake one.
     /// </summary>
     internal void ReportWatcherError(Exception error)
     {
-        if (error is InternalBufferOverflowException)
-        {
-            // Events were lost, but the watch goes on: rebuild.
-            Add(b => b.AddOverflow(DateTime.UtcNow));
-            return;
-        }
-
         // The watch itself broke (on Windows it stops for good; on Linux new
         // folders may go unwatched): listen again, on the watcher's thread,
         // after a pause. A watch that breaks again soon after it was made
@@ -339,18 +344,32 @@ public sealed class DenWatcher : IDisposable
         }
     }
 
-    private void OnBroken(Observer from, Exception error)
+    /// <summary>True if <paramref name="from"/> is the current watch's observer, not one of a watch since replaced.</summary>
+    private bool IsCurrent(Observer from)
     {
         lock (_gate)
         {
-            // An old watch's last word, after it was replaced: not this watch's problem.
-            if (!ReferenceEquals(from, _observer))
-            {
-                return;
-            }
+            return ReferenceEquals(from, _observer);
         }
+    }
 
-        ReportWatcherError(error);
+    private void OnBroken(Observer from, Exception error)
+    {
+        // An old watch's last word, after it was replaced: not this watch's problem.
+        if (IsCurrent(from))
+        {
+            ReportWatcherError(error);
+        }
+    }
+
+    private void OnLost(Observer from)
+    {
+        // Events were lost, but the watch goes on: rebuild. A replaced
+        // watch's loss doesn't matter: listening again rebuilds anyway.
+        if (IsCurrent(from))
+        {
+            Add(b => b.AddOverflow(DateTime.UtcNow));
+        }
     }
 
     private void Add(Action<ChangeBatcher> add)
@@ -526,7 +545,7 @@ public sealed class DenWatcher : IDisposable
     {
         public void Changed(DenChange change) => watcher.Add(b => b.Add(change, DateTime.UtcNow));
 
-        public void Lost() => watcher.Add(b => b.AddOverflow(DateTime.UtcNow));
+        public void Lost() => watcher.OnLost(this);
 
         public void Broken(Exception error) => watcher.OnBroken(this, error);
     }

@@ -1,3 +1,5 @@
+using Wolfden.Core.Structure;
+
 namespace Wolfden.Index.Tests;
 
 /// <summary>
@@ -457,11 +459,15 @@ public sealed class IncrementalUpdateTests
     /// <summary>A batch of events, by den-relative path, as the watcher would collect them.</summary>
     internal static ChangeBatch Batch(TempDen den, params (WatcherChangeTypes Kind, string Path, string? OldPath)[] events)
     {
-        var batcher = new ChangeBatcher(den.Root, TimeSpan.Zero, TimeSpan.Zero);
+        // File events as the den store's watch maps them (#121).
+        var batcher = new ChangeBatcher(TimeSpan.Zero, TimeSpan.Zero);
         var now = DateTime.UtcNow;
         foreach (var (kind, path, old) in events)
         {
-            batcher.Add(kind, Full(den.Root, path), old is null ? null : Full(den.Root, old), now);
+            if (FileSystemDenStore.ToDenChange(den.Root, kind, Full(den.Root, path), old is null ? null : Full(den.Root, old)) is { } change)
+            {
+                batcher.Add(change, now);
+            }
         }
 
         return batcher.Take(now) ?? new ChangeBatch(new HashSet<string>(), new HashSet<string>(), false);
