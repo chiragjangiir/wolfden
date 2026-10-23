@@ -1,3 +1,4 @@
+using Wolfden.Core.Text;
 using Wolfden.Core.Yaml;
 
 namespace Wolfden.Core.Documents;
@@ -7,6 +8,10 @@ namespace Wolfden.Core.Documents;
 /// definition, parsed as one YAML document (format.md §3). It writes back
 /// byte for byte, and edits change only the value they set.
 /// </summary>
+/// <remarks>
+/// Paths name keys in mappings and item numbers from 0 in lists, as in
+/// <see cref="MarkdownFile.WithFrontmatterValue(IReadOnlyList{string}, YamlScalarValue)"/>.
+/// </remarks>
 public sealed class YamlFile : DenFile
 {
     private readonly YamlBlock? _block;
@@ -37,24 +42,68 @@ public sealed class YamlFile : DenFile
     public YamlFile WithValue(string key, YamlScalarValue value) => WithValue([key], value);
 
     /// <summary>Sets the scalar at <paramref name="path"/>, creating missing keys.</summary>
-    /// <exception cref="InvalidOperationException">The file can't be edited, or a key on the path isn't a mapping.</exception>
-    /// <exception cref="NotSupportedException">The edit would have to change a flow mapping.</exception>
+    /// <exception cref="InvalidOperationException">The file can't be edited, or something on the path isn't a mapping or list.</exception>
+    /// <exception cref="NotSupportedException">The edit can't be made in place without reformatting.</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
     public YamlFile WithValue(IReadOnlyList<string> path, YamlScalarValue value)
     {
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(value);
+        return Edit(
+            (source, block) => YamlEditor.SetScalar(source, block, path, value),
+            (before, after) => YamlTreeCheck.SameExcept(before, after, path, value),
+            $"Setting '{string.Join('.', path)}'");
+    }
+
+    /// <summary>
+    /// Adds <paramref name="item"/> to the list at <paramref name="path"/>,
+    /// before item <paramref name="index"/> or at the end, in the list's own
+    /// style. See <see cref="MarkdownFile.WithNewListItem"/>.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="index"/> is past the end of the list.</exception>
+    /// <exception cref="InvalidOperationException">The file can't be edited, or the value at the path isn't a list.</exception>
+    /// <exception cref="NotSupportedException">The item can't be added without moving a comment or reformatting.</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public YamlFile WithNewListItem(IReadOnlyList<string> path, YamlValue item, int? index = null)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(item);
+        var at = index ?? (GetValue(path) as YamlSequence)?.Items.Count ?? 0;
+        return Edit(
+            (source, block) => YamlEditor.AddItem(source, block, path, item, index),
+            (before, after) => YamlTreeCheck.SameExcept(before, after, path, (b, a) => YamlTreeCheck.AddedItem(b, a, at, item)),
+            $"Adding an item to '{string.Join('.', path)}'");
+    }
+
+    /// <summary>
+    /// Removes the key or list item at <paramref name="path"/>. Nothing
+    /// changes if it isn't there. See <see cref="MarkdownFile.WithoutFrontmatterValue"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The file can't be edited, or the path names an item a list doesn't have.</exception>
+    /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it.</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public YamlFile WithoutValue(IReadOnlyList<string> path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        return Edit(
+            (source, block) => YamlEditor.Remove(source, block, path),
+            (before, after) => YamlTreeCheck.SameExcept(before, after, path.Take(path.Count - 1).ToList(), (b, a) => YamlTreeCheck.Removed(b, a, path[^1])),
+            $"Removing '{string.Join('.', path)}'");
+    }
+
+    private YamlFile Edit(Func<SourceText, YamlBlock, List<TextEdit>> edit, Func<YamlNode?, YamlNode?, bool> check, string what)
+    {
         EnsureEditable();
-        var edits = YamlEditor.SetScalar(Source!, _block!, path, value);
+        var edits = edit(Source!, _block!);
         if (edits.Count == 0)
         {
             return this;
         }
 
         var result = new YamlFile(ApplyEdits(edits));
-        if (!result.CanEdit || !YamlTreeCheck.SameExcept(_block!.Root, result._block!.Root, path, value))
+        if (!result.CanEdit || !check(_block!.Root, result._block!.Root))
         {
-            throw new EditVerificationException($"Setting '{string.Join('.', path)}' didn't read back as written, or changed another value, so the edit was refused.");
+            throw new EditVerificationException($"{what} didn't read back as written, or changed another value, so the edit was refused.");
         }
 
         return result;

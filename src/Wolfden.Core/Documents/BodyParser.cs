@@ -80,7 +80,7 @@ internal static partial class BodyParser
             var startOffset = bodyStart + heading.Span.Start;
             var firstLine = source.LineIndexOf(startOffset);
             var lastLine = source.LineIndexOf(bodyStart + Math.Max(heading.Span.Start, heading.Span.End));
-            var name = HeadingName(source, heading, bodyStart, firstLine, lastLine);
+            var (name, nameStart, nameEnd) = HeadingName(source, heading, bodyStart, firstLine, lastLine);
 
             if (!seenLevel2)
             {
@@ -114,6 +114,8 @@ internal static partial class BodyParser
             var section = new Section(owner, sections.Count)
             {
                 Name = name,
+                NameStart = nameStart,
+                NameEnd = nameEnd,
                 Level = level,
                 HeadingLevel = heading.Level,
                 IsSetext = heading.IsSetext,
@@ -312,8 +314,8 @@ internal static partial class BodyParser
         return (current as ContainerInline)?.ParentBlock;
     }
 
-    /// <summary>The section name (F-SEC-3) from the heading's source text.</summary>
-    private static string HeadingName(SourceText source, HeadingBlock heading, int bodyStart, int firstLine, int lastLine)
+    /// <summary>The section name (F-SEC-3) from the heading's source text, and the offsets of its text.</summary>
+    private static (string Name, int Start, int End) HeadingName(SourceText source, HeadingBlock heading, int bodyStart, int firstLine, int lastLine)
     {
         var text = source.Text;
         int contentStart, contentEnd;
@@ -377,11 +379,24 @@ internal static partial class BodyParser
 
         if (contentEnd <= contentStart)
         {
-            return "";
+            return ("", contentStart, contentStart);
+        }
+
+        // Where the name's text sits, without the spaces around it, so a
+        // rename replaces just those characters.
+        int nameStart = contentStart, nameEnd = contentEnd;
+        while (nameStart < nameEnd && text[nameStart] is ' ' or '\t' or '\r' or '\n')
+        {
+            nameStart++;
+        }
+
+        while (nameEnd > nameStart && text[nameEnd - 1] is ' ' or '\t' or '\r' or '\n')
+        {
+            nameEnd--;
         }
 
         var lines = text[contentStart..contentEnd].Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-        return string.Join(' ', lines.Select(l => l.Trim(' ', '\t')).Where(l => l.Length > 0));
+        return (string.Join(' ', lines.Select(l => l.Trim(' ', '\t')).Where(l => l.Length > 0)), nameStart, nameEnd);
     }
 
     private static bool IsBlank(string line) => line.All(c => c is ' ' or '\t');

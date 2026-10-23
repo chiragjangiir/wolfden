@@ -212,11 +212,11 @@ public class EditTests
     }
 
     [Fact]
-    public void FlowMappingsAndNonMappingsAreRefused()
+    public void FlowMappingsTakeNewKeysAndNonMappingsAreRefused()
     {
         var file = Md("---\nfields: { a: 1 }\naliases: [x]\n---\n");
 
-        Assert.Throws<NotSupportedException>(() => file.WithField("b", YamlScalarValue.String("2")));
+        Assert.Equal("---\nfields: { a: 1, b: \"2\" }\naliases: [x]\n---\n", file.WithField("b", YamlScalarValue.String("2")).Text);
         Assert.Throws<InvalidOperationException>(() => file.WithFrontmatterValue(["aliases", "x"], YamlScalarValue.String("2")));
         Assert.Throws<ArgumentException>(() => file.WithFrontmatterValue("bad key", YamlScalarValue.String("2")));
     }

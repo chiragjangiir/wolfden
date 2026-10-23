@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using Wolfden.Core.Text;
 
 namespace Wolfden.Core.Yaml;
 
@@ -10,7 +11,7 @@ namespace Wolfden.Core.Yaml;
 /// replaces where it can (format.md F-RT-1), and is quoted whenever YAML
 /// would otherwise read it as something other than that text.
 /// </summary>
-public sealed partial class YamlScalarValue
+public sealed partial class YamlScalarValue : YamlValue
 {
     private enum Kind
     {
@@ -57,8 +58,22 @@ public sealed partial class YamlScalarValue
     /// The YAML text for this value. An empty result means null.
     /// <paramref name="existing"/> is the style of the value being replaced.
     /// </summary>
-    internal string Render(YamlScalarStyle? existing)
+    internal string Render(YamlScalarStyle? existing) => Render(existing, flow: false);
+
+    /// <summary>
+    /// The YAML text for this value in block or flow context. In a flow
+    /// collection a null is written <c>~</c>, since an empty value there is
+    /// easy to misread, and a plain string must also avoid the flow
+    /// indicators <c>, [ ] { }</c> and <c>:</c>, which some YAML 1.1
+    /// readers reject inside braces.
+    /// </summary>
+    internal string Render(YamlScalarStyle? existing, bool flow)
     {
+        if (_kind == Kind.Null && flow)
+        {
+            return "~";
+        }
+
         if (_kind != Kind.String)
         {
             return _text;
@@ -69,7 +84,7 @@ public sealed partial class YamlScalarValue
             return "'" + _text.Replace("'", "''", StringComparison.Ordinal) + "'";
         }
 
-        if (existing != YamlScalarStyle.DoubleQuoted && IsPlainSafe(_text))
+        if (existing != YamlScalarStyle.DoubleQuoted && IsPlainSafe(_text) && !(flow && _text.AsSpan().IndexOfAny(",[]{}:") >= 0))
         {
             return _text;
         }
@@ -77,13 +92,15 @@ public sealed partial class YamlScalarValue
         return DoubleQuote(_text);
     }
 
+    internal override string RenderFlow(YamlNode? like, SourceText? source) => Render((like as YamlScalar)?.Style, flow: true);
+
     /// <summary>
     /// True if <paramref name="node"/> holds this value as Wolfden wrote it:
     /// like <see cref="Matches"/>, but a string written plain must also be a
     /// string to other YAML readers (<see cref="PlainScalarResolver"/>), so
     /// a quoting gap can't turn it into a number, bool, or null.
     /// </summary>
-    internal bool MatchesAsWritten(YamlNode? node) =>
+    internal override bool MatchesAsWritten(YamlNode? node) =>
         Matches(node) && (_kind != Kind.String || node is not YamlScalar { Style: YamlScalarStyle.Plain } plain
             || PlainScalarResolver.IsStringInBothSchemas(plain.Text));
 

@@ -2,8 +2,8 @@ namespace Wolfden.Core.Yaml;
 
 /// <summary>
 /// Checks an edit's result against the tree it started from: everything
-/// reads the same as before except the value it set (and the keys it added
-/// on the way), so an editing bug can't silently change another value.
+/// reads the same as before except what the edit changed (and the keys it
+/// added on the way), so an editing bug can't silently change another value.
 /// </summary>
 internal static class YamlTreeCheck
 {
@@ -14,13 +14,134 @@ internal static class YamlTreeCheck
     /// mapping, and every other node identical in text and style.
     /// </summary>
     public static bool SameExcept(YamlNode? before, YamlNode? after, IReadOnlyList<string> path, YamlScalarValue value) =>
-        Check(before, after, path, 0, value);
+        SameExcept(before, after, path, (_, edited) => value.MatchesAsWritten(edited));
 
-    private static bool Check(YamlNode? before, YamlNode? after, IReadOnlyList<string> path, int index, YamlScalarValue value)
+    /// <summary>
+    /// True if <paramref name="after"/> equals <paramref name="before"/>
+    /// everywhere except at <paramref name="path"/>, where
+    /// <paramref name="changed"/> judges the old and new nodes. The path
+    /// runs through mappings by key and lists by item number; keys missing
+    /// before must have been added at the end of their mapping.
+    /// </summary>
+    public static bool SameExcept(YamlNode? before, YamlNode? after, IReadOnlyList<string> path, Func<YamlNode?, YamlNode?, bool> changed) =>
+        Check(before, after, path, 0, changed);
+
+    /// <summary>
+    /// True if <paramref name="after"/> is the list at <paramref name="before"/>
+    /// with <paramref name="item"/> inserted at <paramref name="index"/>, or
+    /// a new one-item list where there was none.
+    /// </summary>
+    public static bool AddedItem(YamlNode? before, YamlNode? after, int index, YamlValue item)
+    {
+        if (after is not YamlSequence edited)
+        {
+            return false;
+        }
+
+        if (before is not YamlSequence old)
+        {
+            return before is null or YamlScalar { IsNull: true } && edited.Items.Count == 1 && item.MatchesAsWritten(edited.Items[0]);
+        }
+
+        if (old.IsFlow != edited.IsFlow || edited.Items.Count != old.Items.Count + 1 || !item.MatchesAsWritten(edited.Items[index]))
+        {
+            return false;
+        }
+
+        for (var i = 0; i < old.Items.Count; i++)
+        {
+            if (!Same(old.Items[i], edited.Items[i < index ? i : i + 1]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// True if <paramref name="after"/> is the mapping or list at
+    /// <paramref name="before"/> without its key or item
+    /// <paramref name="segment"/>. A block collection that loses its last
+    /// entry reads as null, and a flow one as empty.
+    /// </summary>
+    public static bool Removed(YamlNode? before, YamlNode? after, string segment)
+    {
+        switch (before)
+        {
+            case YamlMapping old:
+            {
+                var k = -1;
+                for (var i = 0; i < old.Entries.Count && k < 0; i++)
+                {
+                    k = old.Entries[i].KeyText == segment ? i : -1;
+                }
+
+                if (k < 0)
+                {
+                    return false;
+                }
+
+                if (old.Entries.Count == 1)
+                {
+                    return old.IsFlow ? after is YamlMapping { IsFlow: true, Entries.Count: 0 } : after is null or YamlScalar { IsNull: true };
+                }
+
+                if (after is not YamlMapping edited || edited.IsFlow != old.IsFlow || edited.Entries.Count != old.Entries.Count - 1)
+                {
+                    return false;
+                }
+
+                for (var i = 0; i < edited.Entries.Count; i++)
+                {
+                    var o = old.Entries[i < k ? i : i + 1];
+                    if (!Same(o.Key, edited.Entries[i].Key) || !Same(o.Value, edited.Entries[i].Value))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            case YamlSequence old:
+            {
+                if (!YamlEditor.TryIndex(segment, old.Items.Count, out var k))
+                {
+                    return false;
+                }
+
+                if (old.Items.Count == 1)
+                {
+                    return old.IsFlow ? after is YamlSequence { IsFlow: true, Items.Count: 0 } : after is YamlScalar { IsNull: true };
+                }
+
+                if (after is not YamlSequence edited || edited.IsFlow != old.IsFlow || edited.Items.Count != old.Items.Count - 1)
+                {
+                    return false;
+                }
+
+                for (var i = 0; i < edited.Items.Count; i++)
+                {
+                    if (!Same(old.Items[i < k ? i : i + 1], edited.Items[i]))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            default:
+                return false;
+        }
+    }
+
+    private static bool Check(YamlNode? before, YamlNode? after, IReadOnlyList<string> path, int index, Func<YamlNode?, YamlNode?, bool> changed)
     {
         if (index == path.Count)
         {
-            return value.MatchesAsWritten(after);
+            return changed(before, after);
         }
 
         // Missing or empty before (no key, `key:`, `key: ~`, `key: {}`):
@@ -29,7 +150,29 @@ internal static class YamlTreeCheck
         {
             return after is YamlMapping { Entries.Count: 1 } created
                 && created.Entries[0].KeyText == path[index]
-                && Check(null, created.Entries[0].Value, path, index + 1, value);
+                && Check(null, created.Entries[0].Value, path, index + 1, changed);
+        }
+
+        if (before is YamlSequence list)
+        {
+            if (after is not YamlSequence editedList || list.IsFlow != editedList.IsFlow || list.Items.Count != editedList.Items.Count
+                || !YamlEditor.TryIndex(path[index], list.Items.Count, out var k))
+            {
+                return false;
+            }
+
+            for (var i = 0; i < list.Items.Count; i++)
+            {
+                var ok = i == k
+                    ? Check(list.Items[i], editedList.Items[i], path, index + 1, changed)
+                    : Same(list.Items[i], editedList.Items[i]);
+                if (!ok)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         if (before is not YamlMapping old || after is not YamlMapping edited || old.IsFlow != edited.IsFlow)
@@ -53,7 +196,7 @@ internal static class YamlTreeCheck
             }
 
             var ok = a.KeyText == target
-                ? Check(a.Value, b.Value, path, index + 1, value)
+                ? Check(a.Value, b.Value, path, index + 1, changed)
                 : Same(a.Value, b.Value);
             if (!ok)
             {
@@ -61,7 +204,7 @@ internal static class YamlTreeCheck
             }
         }
 
-        return hadKey || (edited.Entries[^1].KeyText == target && Check(null, edited.Entries[^1].Value, path, index + 1, value));
+        return hadKey || (edited.Entries[^1].KeyText == target && Check(null, edited.Entries[^1].Value, path, index + 1, changed));
     }
 
     /// <summary>

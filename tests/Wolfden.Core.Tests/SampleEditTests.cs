@@ -14,6 +14,7 @@ namespace Wolfden.Core.Tests;
 /// Expected text is written with LF and converted to the file's own line
 /// ending, so the tests don't depend on how git checked the samples out.
 /// The crafted-text versions of these edits are in <see cref="EditTests"/>,
+/// <see cref="CollectionEditTests"/>, and <see cref="SectionEditTests"/>,
 /// and random edit sequences over every sample are in
 /// <see cref="PropertyTests"/>.
 /// </remarks>
@@ -253,28 +254,249 @@ public class SampleEditTests
     }
 
     [Fact]
-    public void ChangingAValueInsideAFlowMappingIsRefusedAndChangesNothing()
-    {
-        // Editing one key of a temporal entry like `died: { value: ..., from: ... }`
-        // isn't supported yet (a follow-up to #18). It must be refused, not
-        // written as a rewrite of the whole entry.
-        var file = Md(Lucy);
-        var before = file.ToBytes();
-
-        Assert.Throws<NotSupportedException>(() => file.WithFrontmatterValue(["fields", "died", "from"], YamlScalarValue.String("dracula:13")));
-        Assert.Equal(before, file.ToBytes());
-    }
-
-    [Fact]
+    [Trait("Scenario", "SC-RT-14")]
     public void TreatingAListAsAMappingIsRefusedAndChangesNothing()
     {
-        // There's no API yet to add or remove one item of `aliases` or of a
-        // temporal list (a follow-up to #18). A path that treats the list as
-        // a mapping is refused, and the file is left as it was.
+        // In a list, a path segment is an item number. A key is refused, and
+        // the file is left as it was.
         var file = Md(Lucy);
         var before = file.ToBytes();
 
         Assert.Throws<InvalidOperationException>(() => file.WithFrontmatterValue(["aliases", "extra"], YamlScalarValue.String("Miss Lucy")));
         Assert.Equal(before, file.ToBytes());
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-7")]
+    public void AnAliasGoesAtTheEndOfTheFlowList()
+    {
+        var file = Md(Lucy);
+
+        var edited = file.WithNewListItem(["aliases"], YamlScalarValue.String("Miss Lucy"));
+
+        Assert.Equal(ReplaceOnce(file, "aliases: [Lucy]\n", "aliases: [Lucy, Miss Lucy]\n"), edited.Text);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-7")]
+    public void ANewTemporalEntryGoesAfterTheLastOneInItsStyle()
+    {
+        var file = Md(Lucy);
+        var entry = new YamlMappingValue
+        {
+            { "value", YamlScalarValue.String("Remembered by her friends.") },
+            { "from", YamlScalarValue.String("dracula:27") },
+        };
+
+        var edited = file.WithNewListItem(["fields", "role"], entry);
+
+        Assert.Equal(
+            ReplaceOnce(file,
+                "    - { value: At peace., from: \"dracula:16\" }\n",
+                "    - { value: At peace., from: \"dracula:16\" }\n    - { value: Remembered by her friends., from: \"dracula:27\" }\n"),
+            edited.Text);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-7")]
+    public void ANestedBlockListGetsANewItemAtItsIndentAndQuoting()
+    {
+        var file = Md(BookFile);
+        var chapters = (YamlSequence)file.GetFrontmatterValue("chapters")!;
+        var last = chapters.Items.Select((c, i) => (c, i)).Single(x => (x.c as YamlMapping)?["key"]?.ToString() == "27").i;
+
+        var edited = file.WithNewListItem(["chapters", last.ToString(System.Globalization.CultureInfo.InvariantCulture), "fields", "pov"], YamlScalarValue.String("[[quincey-morris]]"));
+
+        Assert.Equal(
+            ReplaceOnce(file,
+                "        - \"[[john-seward]]\"\n      when: { text: \"1–6 November\"",
+                "        - \"[[john-seward]]\"\n        - \"[[quincey-morris]]\"\n      when: { text: \"1–6 November\""),
+            edited.Text);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-7")]
+    public void ANewChapterIsABlockMappingLikeTheOthers()
+    {
+        var file = Md(BookFile);
+        var chapter = new YamlMappingValue { { "key", YamlScalarValue.String("postscript") }, { "title", YamlScalarValue.String("Postscript") } };
+
+        var edited = file.WithNewListItem(["chapters"], chapter);
+
+        Assert.Equal(
+            ReplaceOnce(file,
+                "      when: { text: \"seven years later\", sort: [7] }\n---\n",
+                "      when: { text: \"seven years later\", sort: [7] }\n  - key: postscript\n    title: Postscript\n---\n"),
+            edited.Text);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-8")]
+    public void RemovingAnAliasKeepsTheOthers()
+    {
+        var file = Md(Count);
+
+        var edited = file.WithoutFrontmatterValue(["aliases", "1"]);
+
+        Assert.Equal(ReplaceOnce(file, "aliases: [Dracula, the Count, Count de Ville]\n", "aliases: [Dracula, Count de Ville]\n"), edited.Text);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-8")]
+    public void RemovingATemporalEntryRemovesOnlyItsLine()
+    {
+        var file = Md(Lucy);
+
+        var edited = file.WithoutFrontmatterValue(["fields", "role", "1"]);
+
+        Assert.Equal(ReplaceOnce(file, "    - { value: The Count's first victim in England., from: \"dracula:8\" }\n", ""), edited.Text);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-9")]
+    public void ChangingWhenAFactIsKnownChangesOnlyItsFrom()
+    {
+        var file = Md(Lucy);
+
+        var edited = file.WithFrontmatterValue(["fields", "died", "from"], YamlScalarValue.String("dracula:13"));
+
+        Assert.Equal(
+            ReplaceOnce(file, "sort: [0, 9, 20] }, from: \"dracula:12\" }\n", "sort: [0, 9, 20] }, from: \"dracula:13\" }\n"),
+            edited.Text);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-9")]
+    public void UnpinningAFactKeepsTheCommentAboveIt()
+    {
+        var file = Md(Count);
+
+        var edited = file
+            .WithFrontmatterValue(["fields", "species", "pin"], YamlScalarValue.Boolean(false))
+            .WithFrontmatterValue(["fields", "born", "status"], YamlScalarValue.String("candidate"));
+
+        var expected = ReplaceOnce(file, "from: \"dracula:18\", pin: true }\n", "from: \"dracula:18\", pin: false }\n");
+        expected = ReplaceOnce(expected, Newline(file),
+            "  born: { value: { text: \"centuries before the story\" }, from: \"dracula:18\" }\n",
+            "  born: { value: { text: \"centuries before the story\" }, from: \"dracula:18\", status: candidate }\n");
+        Assert.Equal(expected, edited.Text);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-10")]
+    public void RemovingAFieldRemovesOnlyItsLine()
+    {
+        var file = Md(Count);
+
+        var edited = file.WithoutField("skills").WithoutField("born");
+
+        var expected = ReplaceOnce(file, "  skills: [command of wolves and rats, English learned from books]\n", "");
+        expected = ReplaceOnce(expected, Newline(file), "  born: { value: { text: \"centuries before the story\" }, from: \"dracula:18\" }\n", "");
+        Assert.Equal(expected, edited.Text);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-10")]
+    public void RemovingADenYamlKeyKeepsTheRest()
+    {
+        var file = YamlFile.Parse(TestFiles.ReadRepoFile(Den));
+
+        var edited = file.WithoutValue(["spoiler_checks"]);
+
+        Assert.Equal(ReplaceOnce(file, "spoiler_checks: true\n", ""), edited.Text);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-11")]
+    public void RenamingOneOfThreeSameNamedSectionsLeavesTheOthersAlone()
+    {
+        var file = Md(Lucy);
+        var second = file.Sections.Where(s => s.Name == "Appearance").ElementAt(1);
+
+        var edited = file.WithSectionName(second, "Appearance in death");
+
+        Assert.Equal(
+            ReplaceOnce(file, "## Appearance\n<!-- wolfden: from=dracula:15 -->\n", "## Appearance in death\n<!-- wolfden: from=dracula:15 -->\n"),
+            edited.Text);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-12")]
+    public void RemovingASubsectionKeepsItsParentAndSiblings()
+    {
+        var file = Md(Lucy);
+
+        var edited = file.WithoutSection(file.Sections.Single(s => s.Name == "The Un-Dead"));
+
+        Assert.Equal(
+            ReplaceOnce(file,
+                "### The Un-Dead\n<!-- wolfden: from=dracula:14 until=dracula:17 -->\nChildren on Hampstead Heath are lured away by a \"bloofer lady\" and found\nwith small wounds in their throats. See [[the-bloofer-lady]].\n\n",
+                ""),
+            edited.Text);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-12")]
+    public void RemovingTheLastSectionKeepsTheFileEnding()
+    {
+        var file = Md(Lucy);
+
+        var edited = file.WithoutSection(file.Sections.Single(s => s.Name == "Rest"));
+
+        Assert.Equal(
+            ReplaceOnce(file,
+                "\n\n### Rest\n<!-- wolfden: from=dracula:16 -->\nArthur drives the stake on 29 September. See [[lucy-is-laid-to-rest]].\n",
+                "\n"),
+            edited.Text);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-13")]
+    public void MovingASectionKeepsItsCommentAndTheSpacing()
+    {
+        var file = Md(Lucy);
+
+        var edited = file.WithSectionMovedBefore(file.Sections.Single(s => s.Name == "Relationships"), file.Sections.Single(s => s.Name == "Want"));
+
+        var want = "## Want\nTo marry [[arthur-holmwood|Arthur]], and to be kind to the two men she\nrefuses.\n";
+        var relationships = "## Relationships\n- [[mina-harker]]: her closest friend.\n- [[mrs-westenra]]: her mother, whose heart is failing.\n- [[arthur-holmwood]]: her fiancé.\n- [[john-seward]] and [[quincey-morris]]: suitors she refuses on the same\n  day, who stay her friends.\n";
+        Assert.Equal(ReplaceOnce(file, want + "\n" + relationships, relationships + "\n" + want), edited.Text);
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-RT-6")]
+    [InlineData("crlf")]
+    [InlineData("bom-crlf")]
+    [InlineData("crlf-no-final-newline")]
+    [InlineData("bom-crlf-no-final-newline")]
+    public void ListKeyAndSectionEditsOnAWindowsSavedSampleKeepCrlfBomAndFinalNewline(string variant)
+    {
+        var file = MarkdownFile.Parse(RoundTripTests.Variant(TestFiles.ReadRepoFile(Lucy), variant), requireFrontmatter: true);
+        var entry = new YamlMappingValue { { "value", YamlScalarValue.String("Remembered.") }, { "from", YamlScalarValue.String("dracula:27") } };
+
+        var edited = file
+            .WithNewListItem(["aliases"], YamlScalarValue.String("Miss Lucy"))
+            .WithNewListItem(["fields", "role"], entry)
+            .WithFrontmatterValue(["fields", "died", "from"], YamlScalarValue.String("dracula:13"))
+            .WithoutField("heritage");
+        edited = edited.WithSectionName(edited.Sections.Single(s => s.Name == "Want"), "Wants");
+        // Arc is the last level-2 section, with subsections, at the end of
+        // the file: it moves up, and Relationships now ends the file.
+        edited = edited.WithSectionMovedBefore(edited.Sections.Single(s => s.Name == "Arc"), edited.Sections.Single(s => s.Name == "Wants"));
+
+        const string nl = "\r\n";
+        var expected = ReplaceOnce(file, "aliases: [Lucy]\n", "aliases: [Lucy, Miss Lucy]\n");
+        expected = ReplaceOnce(expected, nl, "from: \"dracula:16\" }\n", "from: \"dracula:16\" }\n    - { value: Remembered., from: \"dracula:27\" }\n");
+        expected = ReplaceOnce(expected, nl, "from: \"dracula:12\" }\n", "from: \"dracula:13\" }\n");
+        expected = ReplaceOnce(expected, nl, "  heritage: The only child of a wealthy widow of Hampstead.\n", "");
+        var arcAt = expected.IndexOf("## Arc", StringComparison.Ordinal);
+        var arc = expected[arcAt..].TrimEnd('\r', '\n');
+        var wantAt = expected.IndexOf("## Want", StringComparison.Ordinal);
+        var between = expected[wantAt..arcAt].TrimEnd('\r', '\n');
+        expected = expected[..wantAt] + arc + nl + nl + between.Replace("## Want", "## Wants", StringComparison.Ordinal) + (file.EndsWithNewline ? nl : "");
+        Assert.Equal(expected, edited.Text);
+        Assert.Equal(LineEndingKind.CrLf, edited.LineEndings);
+        Assert.Equal(file.HasByteOrderMark, edited.HasByteOrderMark);
+        Assert.Equal(file.EndsWithNewline, edited.EndsWithNewline);
     }
 }
