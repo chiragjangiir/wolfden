@@ -1474,9 +1474,16 @@ last key from a block mapping, leaves the key with no value (`aliases:`)
 rather than removing the key or writing `[]` or `{}`. That's the smallest
 change, and it reads as null: unset, the same as leaving the key out
 (F-FLD-4, F-ENT-4). A flow list or mapping keeps its brackets and becomes
-`[]` or `{}`. Where null and an empty list mean different things, as for
-a chapter's list fields (types.md F-CHAP-5, where `[]` means "none here"
-and null inherits), a writer that means "none here" writes `[]`.
+`[]` or `{}`.
+
+The exception is a list-valued field of a chapter, under a chapter's
+`fields:` in `book.md` (F-BOOK-2), where null and an empty list mean
+different things: `[]` is "none here" and null inherits from
+`chapter_defaults` (types.md F-CHAP-5). There, removing the last item
+always leaves `[]`, whether the list was written flow or block, so the
+chapter keeps saying "none" rather than falling back to the default.
+Going back to the default is a separate edit: clearing the field.
+(Maintainer decision, 2026-10-23.)
 
 ## 13. Appendix: a minimal den
 

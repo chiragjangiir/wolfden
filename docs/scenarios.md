@@ -908,6 +908,24 @@ Spec: F-RT-1, F-RT-2. Covered by:
 `SectionEditTests.RemovingASectionWithALinkReferenceDefinitionIsRefused`,
 `SectionEditTests.MovingSectionsThatDefineTheSameLinkReferenceIsRefused`.
 
+### SC-RT-15. I remove the last point-of-view character from a chapter
+
+`book.md` gives chapter 27 four `pov` characters as a block list, and
+chapter 1 one as a flow list. The writer removes them one by one until
+none are left.
+
+- Each chapter ends with `pov: []`, "none here", block and flow alike, so
+  it doesn't fall back to the book's `chapter_defaults`. A comment on the
+  `pov:` line stays. Every other field that loses its last item is left
+  as `key:` with no value. Going back to the book's default is a separate
+  action, clearing the field.
+
+Spec: F-RT-6, F-CHAP-5. Covered by:
+`SampleEditTests.EmptyingAChaptersPovListLeavesNoneHere`,
+`CollectionEditTests.RemovingTheLastItemOfABlockChapterListLeavesAnEmptyList`,
+`CollectionEditTests.RemovingTheLastItemOfAFlowChapterListLeavesAnEmptyList`,
+`CollectionEditTests.AnEmptiedChapterListKeepsCrlf`.
+
 ## CLI: working with a den from the command line
 
 Background: besides `check`, the CLI has `init`, `index`, `query`, and
