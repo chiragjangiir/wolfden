@@ -191,8 +191,10 @@ public sealed partial class MarkdownFile : DenFile
     /// right after the item before it and the comment lines indented under
     /// that item, so comment lines above the next item stay with it; a new
     /// first item goes above the comments over the old first one. It copies
-    /// the quoting of the item before it where it can, and a new position
-    /// value is quoted as format.md §7.3 writes them. A missing or null value becomes a new list:
+    /// the quoting of the item before it, key by key for a mapping, so a
+    /// position next to a plain one stays plain. Where there's nothing to
+    /// copy, a string with a <c>:</c> in it, such as a position, is
+    /// double-quoted as format.md §7.3 writes them. A missing or null value becomes a new list:
     /// <c>[item]</c> for a scalar, or a block list for a mapping.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="index"/> is past the end of the list.</exception>
@@ -660,6 +662,14 @@ public sealed partial class MarkdownFile : DenFile
         // line breaks after it. The texts trade places; the breaks don't.
         var source = Source!;
         var text = source.Text;
+
+        // The first of two same-labelled link reference definitions wins, so
+        // reordering sections that hold both could change where links go.
+        if (BodyParser.HasDuplicateLinkReferenceLabels(text[siblings[0].HeadingStart..siblings[^1].End]))
+        {
+            throw new NotSupportedException($"Two of the sections around '{section.Name}' define the same link reference label, so moving it could change where links go. Remove one definition first.");
+        }
+
         var sb = new System.Text.StringBuilder();
         for (var i = 0; i < siblings.Count; i++)
         {

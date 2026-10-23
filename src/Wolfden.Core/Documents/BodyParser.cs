@@ -401,6 +401,39 @@ internal static partial class BodyParser
 
     private static bool IsBlank(string line) => line.All(c => c is ' ' or '\t');
 
+    /// <summary>
+    /// True if two link reference definitions in <paramref name="markdown"/>
+    /// have the same label, matched as CommonMark matches labels (case and
+    /// runs of whitespace don't matter). The first one wins, so reordering
+    /// the text could change which one links use.
+    /// </summary>
+    internal static bool HasDuplicateLinkReferenceLabels(string markdown)
+    {
+        if (!markdown.Contains("]:", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            var labels = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var definition in Markdown.Parse(markdown, Pipeline).Descendants<LinkReferenceDefinition>())
+            {
+                var label = string.Join(' ', (definition.Label ?? "").Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries));
+                if (!labels.Add(label.ToUpperInvariant().ToLowerInvariant()))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return true;
+        }
+    }
+
     /// <summary>True if <paramref name="markdown"/> holds a CommonMark link
     /// reference definition (<c>[ref]: https://…</c>) outside code.</summary>
     internal static bool HasLinkReferenceDefinition(string markdown)

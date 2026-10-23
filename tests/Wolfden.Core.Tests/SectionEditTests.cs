@@ -311,6 +311,24 @@ public class SectionEditTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-RT-14")]
+    public void MovingSectionsThatDefineTheSameLinkReferenceIsRefused()
+    {
+        // The first [map] wins. Swapping A and B would change where links go.
+        var file = Md("## A\n[map]: https://example.com/a\n\n## B\n[MAP]: https://example.com/b\n\n## C\nSee [the map][map].\n");
+
+        Assert.Throws<NotSupportedException>(() => file.WithSectionMovedBefore(file.Sections[1], file.Sections[0]));
+    }
+
+    [Fact]
+    public void MovingSectionsWithDifferentLinkReferencesIsFine()
+    {
+        var file = Md("## A\n[a]: https://example.com/a\n\n## B\n[b]: https://example.com/b\n");
+
+        Assert.Equal("## B\n[b]: https://example.com/b\n\n## A\n[a]: https://example.com/a\n", file.WithSectionMovedBefore(file.Sections[1], file.Sections[0]).Text);
+    }
+
+    [Fact]
     public void AReferenceDefinitionInsideCodeDoesNotBlockRemoval()
     {
         var file = Md("## A\na\n\n## B\n```\n[map]: https://example.com/map\n```\n\n## C\nc\n");

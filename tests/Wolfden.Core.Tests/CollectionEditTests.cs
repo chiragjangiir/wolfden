@@ -408,6 +408,30 @@ public class CollectionEditTests
         Assert.Equal("x: { ? a : 1 }\n", Fm(file.WithoutFrontmatterValue(["x", "b"])));
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-RT-14")]
+    public void RemovingTheFlowKeyBeforeAnExplicitKeyIsRefused()
+    {
+        // Deleting `b: 2, ` up to the next key would take its `?` too.
+        var file = Md("x: { b: 2, ? a : 1, c: 3 }\n");
+
+        Assert.Throws<NotSupportedException>(() => file.WithoutFrontmatterValue(["x", "b"]));
+        Assert.Equal("x: { b: 2, ? a : 1 }\n", Fm(file.WithoutFrontmatterValue(["x", "c"])));
+    }
+
+    [Theory]
+    [InlineData("1234567890")]
+    [InlineData("99999999999999999999999")]
+    [InlineData("2147483647")]
+    public void AVeryLargeItemNumberIsPastTheEnd(string index)
+    {
+        var file = Md("aliases: [Voss]\n");
+
+        Assert.Same(file, file.WithoutFrontmatterValue(["aliases", index]));
+        Assert.Null(file.GetFrontmatterValue("aliases", index));
+        Assert.Throws<InvalidOperationException>(() => file.WithFrontmatterValue(["aliases", index], S("x")));
+    }
+
     [Theory]
     [Trait("Scenario", "SC-RT-14")]
     [InlineData("0")]

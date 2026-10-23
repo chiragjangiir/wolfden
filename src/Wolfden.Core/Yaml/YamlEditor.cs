@@ -143,7 +143,7 @@ internal static partial class YamlEditor
 
                 case YamlSequence sequence:
                 {
-                    if (!TryIndex(segment, int.MaxValue, out var k))
+                    if (!ParseIndex(segment, out var k))
                     {
                         throw new InvalidOperationException(
                             $"'{Join(path, i)}' at line {sequence.Line} is a list, and '{segment}' isn't an item number.");
@@ -194,16 +194,25 @@ internal static partial class YamlEditor
 
     /// <summary>True if <paramref name="segment"/> is an item number below
     /// <paramref name="count"/>, written in digits with no leading zero.</summary>
-    internal static bool TryIndex(string segment, int count, out int index)
+    internal static bool TryIndex(string segment, int count, out int index) => ParseIndex(segment, out index) && index < count;
+
+    /// <summary>
+    /// True if <paramref name="segment"/> is written as an item number: digits
+    /// only, of any length, with no leading zero. A number too large for an
+    /// <see cref="int"/> is <see cref="int.MaxValue"/>, past the end of any list.
+    /// </summary>
+    internal static bool ParseIndex(string segment, out int index)
     {
         index = -1;
-        if (segment.Length is 0 or > 9 || !segment.All(char.IsAsciiDigit) || (segment.Length > 1 && segment[0] == '0'))
+        if (segment.Length == 0 || !segment.All(char.IsAsciiDigit) || (segment.Length > 1 && segment[0] == '0'))
         {
             return false;
         }
 
-        index = int.Parse(segment, System.Globalization.CultureInfo.InvariantCulture);
-        return index < count;
+        index = segment.Length > 9 || !int.TryParse(segment, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+            ? int.MaxValue
+            : parsed;
+        return true;
     }
 
     private static void CheckPath(IReadOnlyList<string> path)

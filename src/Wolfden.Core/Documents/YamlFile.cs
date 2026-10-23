@@ -79,8 +79,11 @@ public sealed class YamlFile : DenFile
     /// Removes the key or list item at <paramref name="path"/>. Nothing
     /// changes if it isn't there. See <see cref="MarkdownFile.WithoutFrontmatterValue"/>.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The file can't be edited, or the path names an item a list doesn't have.</exception>
-    /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it.</exception>
+    /// <exception cref="InvalidOperationException">The file can't be edited, or the path doesn't fit the file's shape:
+    /// a segment that isn't an item number where the file holds a list, or a path into a scalar. A missing key
+    /// or an item number past the end of a list isn't an error: nothing changes.</exception>
+    /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it,
+    /// or touches an explicit <c>? key</c>.</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
     public YamlFile WithoutValue(IReadOnlyList<string> path)
     {

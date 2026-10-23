@@ -90,6 +90,12 @@ internal static partial class YamlEditor
             throw new NotSupportedException($"The key at line {source.LineIndexOf(item.Start) + 1} is an explicit `? key`, so it can't be removed in place.");
         }
 
+        if (collection is YamlMapping && k < count - 1 && layout.IsExplicitKey(k + 1))
+        {
+            // Deleting up to the next entry would take its `?` too.
+            throw new NotSupportedException($"The key after the one at line {source.LineIndexOf(item.Start) + 1} is an explicit `? key`, so this key can't be removed in place.");
+        }
+
         if (count == 1 && !layout.HasComment(layout.Open + 1, item.Start) && !layout.HasComment(item.End, layout.Close))
         {
             // The last item: an empty collection, `[]` or `{}`.
