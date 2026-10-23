@@ -836,8 +836,11 @@ one to `Appearance in death`.
   comment, its text, and the other two Appearance sections are untouched.
   Closing `#`s, a setext underline, or a trailing HTML comment on the
   heading line stay.
+- When the app or an AI assistant makes the rename, links to the old
+  heading in other notes (`[[lucy-westenra#Appearance]]`) are rewritten
+  in the same change (F-RT-5). That part comes with the write tools (#21).
 
-Spec: F-RT-2, F-SEC-3, F-SEC-4. Covered by:
+Spec: F-RT-2, F-RT-5, F-SEC-3, F-SEC-4. Covered by (the one-file edit):
 `SampleEditTests.RenamingOneOfThreeSameNamedSectionsLeavesTheOthersAlone`,
 `SectionEditTests.RenamingChangesOnlyTheHeadingText`,
 `SectionEditTests.RenamingKeepsTheHeadingsMarkup`.
@@ -876,9 +879,12 @@ Spec: F-RT-2, F-ENC-4. Covered by:
 
 The writer, or an AI assistant, asks for an edit that Wolfden can't make
 without reformatting something else: removing a flow list item whose
-comma sits before a comment on the same line, removing a section whose
-neighbors would then run together into one heading, or treating a list
-as a mapping.
+comma sits before a comment on the same line, removing an explicit
+`? key`, editing a list that puts its commas at the start of lines,
+removing or moving a section so that its neighbors (or the lead) would
+run together into one heading, removing a section that holds a link
+reference definition (`[map]: https://…`) other sections may use, or
+treating a list as a mapping.
 
 - The edit is refused with a message that says why, and the file is left
   exactly as it was. Wolfden never rewrites the rest of the file to make
@@ -888,8 +894,14 @@ Spec: F-RT-1, F-RT-2. Covered by:
 `SampleEditTests.TreatingAListAsAMappingIsRefusedAndChangesNothing`,
 `CollectionEditTests.RemovingAFlowItemThatWouldTakeACommentWithItIsRefused`,
 `CollectionEditTests.RemovingTheFirstKeyOfAListItemIsRefusedWhenItWouldMoveACommentOrEmptyTheItem`,
+`CollectionEditTests.RemovingAnExplicitBlockKeyIsRefused`,
+`CollectionEditTests.RemovingAnExplicitFlowKeyIsRefused`,
+`CollectionEditTests.AddingToOrRemovingFromALeadingCommaFlowListIsRefused`,
 `SectionEditTests.RemovingASectionThatWouldMergeTheTextAroundItIsRefused`,
-`SectionEditTests.MovingASectionThatWouldMergeWithTheTextBeforeItIsRefused`.
+`SectionEditTests.MovingASectionThatWouldMergeWithTheTextBeforeItIsRefused`,
+`SectionEditTests.RemovingASectionThatWouldMakeAStrayHeadingPartOfTheLeadIsRefused`,
+`SectionEditTests.MovingASetextSectionAgainstTheLeadIsRefused`,
+`SectionEditTests.RemovingASectionWithALinkReferenceDefinitionIsRefused`.
 
 ## CLI: working with a den from the command line
 
