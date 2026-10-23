@@ -256,7 +256,7 @@ public sealed partial class MarkdownFile : DenFile
     /// (types.md F-CHAP-5, format.md F-RT-6). Going back to the default is
     /// a separate edit: removing the field.
     /// </summary>
-    /// <exception cref="InvalidOperationException">There's no chapter with that key, or the field isn't a list with that item.</exception>
+    /// <exception cref="InvalidOperationException">No chapter, or more than one, has that key; or the field isn't a list with that item.</exception>
     /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it.</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
     public MarkdownFile WithoutChapterFieldItem(string chapterKey, string field, int item)
@@ -264,22 +264,57 @@ public sealed partial class MarkdownFile : DenFile
         ArgumentNullException.ThrowIfNull(chapterKey);
         ArgumentNullException.ThrowIfNull(field);
         ArgumentOutOfRangeException.ThrowIfNegative(item);
-        var chapters = GetFrontmatterValue("chapters") as YamlSequence;
-        var index = chapters?.Items.ToList().FindIndex(c => (c as YamlMapping)?["key"] is YamlScalar { IsNull: false } key && key.Text == chapterKey) ?? -1;
-        if (index < 0)
+        var chapters = (GetFrontmatterValue("chapters") as YamlSequence)?.Items ?? [];
+        var matches = Enumerable.Range(0, chapters.Count)
+            .Where(i => (chapters[i] as YamlMapping)?["key"] is YamlScalar { IsNull: false } key && key.Text == chapterKey)
+            .ToList();
+        if (matches.Count == 0)
         {
             throw new InvalidOperationException($"There's no chapter with the key '{chapterKey}'.");
         }
 
-        string[] path = ["chapters", Index(index), "fields", field, Index(item)];
-        if (GetFrontmatterValue(path) is null)
+        if (matches.Count > 1)
         {
-            throw new InvalidOperationException($"Chapter '{chapterKey}' has no item {item} in '{field}'.");
+            throw new InvalidOperationException($"{matches.Count} chapters have the key '{chapterKey}', so it doesn't name one chapter.");
         }
 
-        return WithoutFrontmatterValue(path, EmptiedList.EmptyList);
+        string[] listPath = ["chapters", matches[0].ToString(System.Globalization.CultureInfo.InvariantCulture), "fields", field];
+        return WithoutListItemAsEmpty(listPath, item, $"'{field}' in chapter '{chapterKey}'");
+    }
 
-        static string Index(int i) => i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    /// <summary>
+    /// Removes item <paramref name="item"/> of a list-valued field in this
+    /// container's <c>chapter_defaults</c> (<c>universe.md</c>,
+    /// <c>series.md</c>, or <c>book.md</c>). If it was the last item, the
+    /// field is left as <c>[]</c>, "none here", block or flow alike, so
+    /// inheritance from the container above stops (types.md F-CHAP-5,
+    /// format.md F-RT-6). Going back to inheriting is a separate edit:
+    /// removing the field.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The field isn't a list in <c>chapter_defaults</c>, or has no such item.</exception>
+    /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it.</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public MarkdownFile WithoutChapterDefaultItem(string field, int item)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ArgumentOutOfRangeException.ThrowIfNegative(item);
+        return WithoutListItemAsEmpty(["chapter_defaults", field], item, $"'{field}' in chapter_defaults");
+    }
+
+    /// <summary>Removes one item of the list at <paramref name="listPath"/>, leaving <c>[]</c> if it was the last.</summary>
+    private MarkdownFile WithoutListItemAsEmpty(string[] listPath, int item, string what)
+    {
+        if (GetFrontmatterValue(listPath) is not YamlSequence list)
+        {
+            throw new InvalidOperationException($"{what} isn't a list.");
+        }
+
+        if (item >= list.Items.Count)
+        {
+            throw new InvalidOperationException($"{what} has no item {item}.");
+        }
+
+        return WithoutFrontmatterValue([.. listPath, item.ToString(System.Globalization.CultureInfo.InvariantCulture)], EmptiedList.EmptyList);
     }
 
     /// <summary>Applies a frontmatter edit and checks that it read back as intended.</summary>

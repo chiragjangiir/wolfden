@@ -413,6 +413,81 @@ public class CollectionEditTests
         Assert.Throws<InvalidOperationException>(() => file.WithoutChapterFieldItem("prologue", "narration", 0));
     }
 
+    [Fact]
+    public void AChapterKeyThatNamesTwoChaptersIsRefused()
+    {
+        var file = Md("chapters:\n  - key: a\n    fields: { pov: [x] }\n  - key: a\n    fields: { pov: [y] }\n");
+
+        Assert.Throws<InvalidOperationException>(() => file.WithoutChapterFieldItem("a", "pov", 0));
+    }
+
+    [Theory]
+    [InlineData("chapters:\n  - key: a\n    fields:\n      pov: { 0: x }\n")]
+    [InlineData("chapters:\n  - key: a\n    fields:\n      pov:\n        0: x\n")]
+    [InlineData("chapter_defaults:\n  pov: { 0: x }\n")]
+    [InlineData("chapter_defaults:\n  pov:\n    0: x\n")]
+    public void AChapterFieldThatIsAMappingIsRefused(string text)
+    {
+        var file = Md(text);
+
+        Assert.Throws<InvalidOperationException>(() => text.StartsWith("chapters", StringComparison.Ordinal)
+            ? file.WithoutChapterFieldItem("a", "pov", 0)
+            : file.WithoutChapterDefaultItem("pov", 0));
+    }
+
+    [Fact]
+    public void AnEmptyListForAListThatNoKeyHoldsIsRefused()
+    {
+        var file = Md("x:\n  -\n    - a\n");
+
+        Assert.Throws<NotSupportedException>(() => file.WithoutFrontmatterValue(["x", "0", "0"], EmptiedList.EmptyList));
+        Assert.Equal("x:\n  -\n", Fm(file.WithoutFrontmatterValue(["x", "0", "0"])));
+    }
+
+    // ---- chapter_defaults lists emptied are `[]` too (F-CHAP-5, F-RT-6) ----
+
+    private const string BookDefaults = "name: Ember\nchapter_defaults:\n  pov:  # the usual narrator\n    - \"[[mara-voss]]\"\n  narration: first\nchapters:\n  - key: \"1\"\n";
+
+    private const string SeriesDefaults = "name: The Long Dark\nbooks: [ember, ash]\nchapter_defaults: { pov: [\"[[mara-voss]]\"], narration: first }\n";
+
+    [Theory]
+    [Trait("Scenario", "SC-RT-15")]
+    [InlineData(BookDefaults, "  pov:  # the usual narrator\n    - \"[[mara-voss]]\"\n", "  pov: []  # the usual narrator\n")]
+    [InlineData(SeriesDefaults, "{ pov: [\"[[mara-voss]]\"], narration", "{ pov: [], narration")]
+    [InlineData("name: The Long Dark\nbooks: [ember]\nchapter_defaults:\n  pov:\n    - \"[[mara-voss]]\"\n", "  pov:\n    - \"[[mara-voss]]\"\n", "  pov: []\n")]
+    [InlineData("name: Ember\nchapter_defaults: { pov: [\"[[mara-voss]]\"] }\nchapters: []\n", "[\"[[mara-voss]]\"]", "[]")]
+    public void RemovingTheLastChapterDefaultLeavesAnEmptyList(string frontmatter, string oldText, string newText)
+    {
+        // Block and flow lists, in book.md (with chapters) and series.md (with books).
+        var edited = Md(frontmatter).WithoutChapterDefaultItem("pov", 0);
+
+        Assert.Equal(frontmatter.Replace(oldText, newText, StringComparison.Ordinal), Fm(edited));
+        Assert.True(edited.GetFrontmatterValue("chapter_defaults", "pov") is YamlSequence { IsFlow: true, Items.Count: 0 });
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-15")]
+    public void AnEmptiedChapterDefaultKeepsCrlf()
+    {
+        var text = "---\r\nname: Ember\r\nchapter_defaults:\r\n  pov:\r\n    - \"[[mara-voss]]\"\r\n    - \"[[wren-calder]]\"\r\n---\r\n";
+        var file = MarkdownFile.Parse(TestFiles.Utf8(text));
+
+        var edited = file.WithoutChapterDefaultItem("pov", 1).WithoutChapterDefaultItem("pov", 0);
+
+        Assert.Equal("---\r\nname: Ember\r\nchapter_defaults:\r\n  pov: []\r\n---\r\n", edited.Text);
+    }
+
+    [Fact]
+    public void AChapterDefaultThatIsNotThereIsRefused()
+    {
+        var file = Md("chapter_defaults:\n  pov: [x]\n  narration: first\n");
+
+        Assert.Throws<InvalidOperationException>(() => file.WithoutChapterDefaultItem("pov", 1));
+        Assert.Throws<InvalidOperationException>(() => file.WithoutChapterDefaultItem("narration", 0));
+        Assert.Throws<InvalidOperationException>(() => file.WithoutChapterDefaultItem("tense", 0));
+        Assert.Throws<InvalidOperationException>(() => Md("name: x\n").WithoutChapterDefaultItem("pov", 0));
+    }
+
     // ---- Review round 1: comment placement in block lists (M2) ----
 
     [Fact]

@@ -161,7 +161,7 @@ internal static partial class YamlEditor
                     {
                         return sequence.IsFlow
                             ? FlowRemove(source, sequence, k)
-                            : BlockRemoveItem(source, sequence, k, emptied == EmptiedList.EmptyList ? holder : null);
+                            : BlockRemoveItem(source, sequence, k, emptied, holder);
                     }
 
                     holder = null;
@@ -654,20 +654,26 @@ internal static partial class YamlEditor
         return string.Join(nl + new string(' ', keyColumn), lines);
     }
 
-    /// <param name="emptyListUnder">For <see cref="EmptiedList.EmptyList"/>: the
-    /// entry whose value the list is. If its last item goes, <c>[]</c> is
-    /// written after that key's colon, before any comment on its line.</param>
-    private static List<TextEdit> BlockRemoveItem(SourceText source, YamlSequence sequence, int k, YamlEntry? emptyListUnder = null)
+    /// <param name="emptied">What the list becomes if its last item goes.</param>
+    /// <param name="holder">The entry whose value the list is, or null for a
+    /// list that's an item of another list. For <see cref="EmptiedList.EmptyList"/>,
+    /// <c>[]</c> is written after that key's colon, before any comment on its line.</param>
+    private static List<TextEdit> BlockRemoveItem(SourceText source, YamlSequence sequence, int k, EmptiedList emptied, YamlEntry? holder)
     {
         var item = sequence.Items[k];
         var (dash, lineStart) = Dash(source, item);
         var delete = DeleteOwnedLines(source, source.LineIndexOf(dash), LineIndexOfEnd(source, item), dash - lineStart);
-        if (sequence.Items.Count > 1 || emptyListUnder is null)
+        if (sequence.Items.Count > 1 || emptied == EmptiedList.Null)
         {
             return [delete];
         }
 
-        var colon = ColonAfter(source, emptyListUnder.Key);
+        if (holder is null)
+        {
+            throw new NotSupportedException($"The list at line {sequence.Line} is an item of another list, not the value of a key, so it can't be left as [] in place.");
+        }
+
+        var colon = ColonAfter(source, holder.Key);
         return [delete, new TextEdit(colon + 1, 0, " []")];
     }
 
