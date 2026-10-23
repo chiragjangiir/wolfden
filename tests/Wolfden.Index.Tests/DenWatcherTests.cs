@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Wolfden.Core.Structure;
 
 namespace Wolfden.Index.Tests;
 
@@ -54,6 +55,28 @@ public sealed class DenWatcherTests
         Assert.NotNull(index.FindEntity(wren));
         Assert.Null(index.FindEntity(Mara));
         Assert.Equal(IndexStatus.Current, IndexBuilder.CheckFiles(den.Root));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-STORE-1")]
+    public void AWriteThroughTheDenStoreIsFollowedLikeAnyEdit()
+    {
+        // The atomic write's temporary file is hidden, so only the note shows.
+        using var den = TempDen.Starfall();
+        var store = new FileSystemDenStore(den.Root);
+        using var watcher = new DenWatcher(store, TimeSpan.FromMilliseconds(100));
+        var updates = new BlockingCollection<IndexUpdate>();
+        watcher.Updated += (_, u) => updates.Add(u);
+        watcher.Start();
+        Assert.Same(store, watcher.Store);
+
+        var text = File.ReadAllText(Path.Combine(den.Root, Mara)).Replace("name: Mara Voss", "name: Mara Ellery", StringComparison.Ordinal);
+        store.WriteFile(Mara, System.Text.Encoding.UTF8.GetBytes(text), DenWriteMode.Replace);
+
+        var update = WaitFor(updates, u => u.Files.Contains(Mara) || u.Kind == IndexUpdateKind.Rebuilt);
+        Assert.DoesNotContain(update.Files, f => f.Contains(FileSystemDenStore.TempPrefix, StringComparison.Ordinal));
+        using var index = DenIndex.Open(den.Root);
+        Assert.Equal("Mara Ellery", index.FindEntity("01JA7Q8M4XK3V9R2D5W8HN6TQB")!.Name);
     }
 
     [Fact]
@@ -140,7 +163,7 @@ public sealed class DenWatcherTests
             FirstPause = TimeSpan.FromMilliseconds(20),
             MaxPause = TimeSpan.FromMilliseconds(80),
             // The first watcher works; the next two can't be made; then it works again.
-            CreateWatcher = root => ++created is 2 or 3 ? throw new IOException("No space left on device.") : new FileSystemWatcher(root),
+            Changes = new FlakyFeed(new FileSystemDenStore(den.Root), () => ++created is 2 or 3),
         };
         var updates = new BlockingCollection<IndexUpdate>();
         var failures = new BlockingCollection<Exception>();
@@ -315,6 +338,13 @@ public sealed class DenWatcherTests
     public void PausesDoubleUpToTheMaximum(int pause, int max, int next)
     {
         Assert.Equal(TimeSpan.FromMilliseconds(next), DenWatcher.NextPause(TimeSpan.FromMilliseconds(pause), TimeSpan.FromMilliseconds(max)));
+    }
+
+    /// <summary>A den store's change feed whose watches can't be started while <paramref name="fail"/> says so.</summary>
+    private sealed class FlakyFeed(IDenChangeFeed inner, Func<bool> fail) : IDenChangeFeed
+    {
+        public IDisposable Watch(IDenChangeObserver observer) =>
+            fail() ? throw new IOException("No space left on device.") : inner.Watch(observer);
     }
 
     private static DenWatcher Quick(TempDen den) => new(den.Root, TimeSpan.FromMilliseconds(50))

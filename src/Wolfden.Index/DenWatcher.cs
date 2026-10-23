@@ -1,9 +1,12 @@
+using Wolfden.Core.Structure;
+
 namespace Wolfden.Index;
 
 /// <summary>
 /// Keeps a den's index up to date while its files are edited outside
-/// Wolfden, in an editor or by an AI agent (#14, design.md §7). It watches
-/// the den folder, collects the file events of a burst of saves into one
+/// Wolfden, in an editor or by an AI agent (#14, design.md §7). It listens
+/// to the den store's change feed (<see cref="IDenChangeFeed"/>, #121),
+/// which for a den on disk watches the den folder, collects the file events of a burst of saves into one
 /// batch, and brings the index up to date from it: reading only the changed
 /// files where that's safe, and rebuilding the index where it isn't
 /// (see <see cref="IndexUpdater"/>). A host such as <c>wolfden index --watch</c>,
@@ -41,12 +44,14 @@ public sealed class DenWatcher : IDisposable
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(500);
 
     private readonly string _root;
+    private readonly FileSystemDenStore _store;
     private readonly object _gate = new();
     private readonly ChangeBatcher _batcher;
     private readonly IndexUpdater _updater;
     private readonly AutoResetEvent _wake = new(false);
     private readonly CancellationTokenSource _stop = new();
-    private FileSystemWatcher? _watcher;
+    private IDisposable? _watch;
+    private Observer? _observer;
     private FileStream? _lock;
     private Thread? _thread;
     private int _disposed;
@@ -69,11 +74,26 @@ public sealed class DenWatcher : IDisposable
     /// <param name="quiet">How long a batch waits for more events; <see cref="DefaultQuiet"/> if null.</param>
     /// <param name="maxDelay">The longest a batch waits while events keep coming; <see cref="DefaultMaxDelay"/> if null.</param>
     public DenWatcher(string denRoot, TimeSpan? quiet = null, TimeSpan? maxDelay = null)
+        : this(new FileSystemDenStore(denRoot ?? throw new ArgumentNullException(nameof(denRoot))), quiet, maxDelay)
     {
-        ArgumentNullException.ThrowIfNull(denRoot);
-        _root = Path.GetFullPath(denRoot);
+    }
+
+    /// <summary>
+    /// A watcher for the den in <paramref name="store"/>, listening to its
+    /// change feed, so a host that writes through the store can share it
+    /// with the watcher. Call <see cref="Start"/> to start it.
+    /// </summary>
+    /// <param name="store">The den's store.</param>
+    /// <param name="quiet">How long a batch waits for more events; <see cref="DefaultQuiet"/> if null.</param>
+    /// <param name="maxDelay">The longest a batch waits while events keep coming; <see cref="DefaultMaxDelay"/> if null.</param>
+    public DenWatcher(FileSystemDenStore store, TimeSpan? quiet = null, TimeSpan? maxDelay = null)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        _store = store;
+        _root = store.Root;
         _batcher = new ChangeBatcher(_root, quiet ?? DefaultQuiet, maxDelay ?? DefaultMaxDelay);
         _updater = new IndexUpdater(_root);
+        Changes = store;
     }
 
     /// <summary>Raised after each batch that changed what the index holds. <see cref="Start"/> returns the first build instead.</summary>
@@ -91,6 +111,9 @@ public sealed class DenWatcher : IDisposable
     /// <summary>The den's folder, as a full path.</summary>
     public string DenRoot => _root;
 
+    /// <summary>The den's store, whose change feed the watcher listens to.</summary>
+    public FileSystemDenStore Store => _store;
+
     /// <summary>The pause before the first retry after a failure. Tests shorten it.</summary>
     internal TimeSpan FirstPause { get; init; } = TimeSpan.FromSeconds(1);
 
@@ -105,8 +128,8 @@ public sealed class DenWatcher : IDisposable
     /// </summary>
     internal TimeSpan HealthyAfter { get; init; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>Makes the file system watcher for a folder. Tests replace it to fail on purpose.</summary>
-    internal Func<string, FileSystemWatcher> CreateWatcher { get; init; } = root => new FileSystemWatcher(root);
+    /// <summary>The change feed listened to: the store's own. Tests replace it to fail on purpose.</summary>
+    internal IDenChangeFeed Changes { get; init; }
 
     /// <summary>Called before each batch is applied. Tests use it to make a batch fail.</summary>
     internal Action<ChangeBatch>? BeforeApply { get; init; }
@@ -289,7 +312,7 @@ public sealed class DenWatcher : IDisposable
         }
     }
 
-    /// <summary>Starts a new file system watcher, replacing any old one.</summary>
+    /// <summary>Starts a new watch of the store's change feed, replacing any old one.</summary>
     private void Listen()
     {
         lock (_gate)
@@ -300,55 +323,34 @@ public sealed class DenWatcher : IDisposable
                 return;
             }
 
-            var watcher = CreateWatcher(_root);
-            try
-            {
-                watcher.IncludeSubdirectories = true;
-                watcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size;
-                watcher.InternalBufferSize = 64 * 1024;
-                watcher.Created += OnEvent;
-                watcher.Changed += OnEvent;
-                watcher.Deleted += OnEvent;
-                watcher.Renamed += OnRenamed;
-                watcher.Error += OnError;
-                watcher.EnableRaisingEvents = true;
-            }
-            catch
-            {
-                watcher.Dispose();
-                throw;
-            }
-
-            _watcher = watcher;
+            var observer = new Observer(this);
+            _watch = Changes.Watch(observer);
+            _observer = observer;
         }
     }
 
     private void DisposeWatcher()
     {
-        if (_watcher is { } watcher)
+        _observer = null;
+        if (_watch is { } watch)
         {
-            watcher.EnableRaisingEvents = false;
-            watcher.Dispose();
-            _watcher = null;
+            _watch = null;
+            watch.Dispose();
         }
     }
 
-    private void OnEvent(object sender, FileSystemEventArgs e) => Add(b => b.Add(e.ChangeType, e.FullPath, null, DateTime.UtcNow));
-
-    private void OnRenamed(object sender, RenamedEventArgs e) => Add(b => b.Add(WatcherChangeTypes.Renamed, e.FullPath, e.OldFullPath, DateTime.UtcNow));
-
-    private void OnError(object sender, ErrorEventArgs e)
+    private void OnBroken(Observer from, Exception error)
     {
         lock (_gate)
         {
-            // An old watcher's last word, after it was replaced: not this watch's problem.
-            if (!ReferenceEquals(sender, _watcher))
+            // An old watch's last word, after it was replaced: not this watch's problem.
+            if (!ReferenceEquals(from, _observer))
             {
                 return;
             }
         }
 
-        ReportWatcherError(e.GetException());
+        ReportWatcherError(error);
     }
 
     private void Add(Action<ChangeBatcher> add)
@@ -518,4 +520,14 @@ public sealed class DenWatcher : IDisposable
 
     private static string Seconds(TimeSpan pause) =>
         pause.TotalSeconds >= 1 ? FormattableString.Invariant($"{pause.TotalSeconds:0.#} s") : FormattableString.Invariant($"{pause.TotalMilliseconds:0} ms");
+
+    /// <summary>What one watch of the change feed reports to.</summary>
+    private sealed class Observer(DenWatcher watcher) : IDenChangeObserver
+    {
+        public void Changed(DenChange change) => watcher.Add(b => b.Add(change, DateTime.UtcNow));
+
+        public void Lost() => watcher.Add(b => b.AddOverflow(DateTime.UtcNow));
+
+        public void Broken(Exception error) => watcher.OnBroken(this, error);
+    }
 }

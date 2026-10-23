@@ -1,3 +1,5 @@
+using Wolfden.Core.Structure;
+
 namespace Wolfden.Index.Tests;
 
 /// <summary>
@@ -95,6 +97,27 @@ public sealed class ChangeBatcherTests
         batcher.Add(WatcherChangeTypes.Changed, Full(path), null, T0);
 
         Assert.False(batcher.HasPending);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WATCH-4")]
+    public void AStoresChangesAreBatchedLikeFileEvents()
+    {
+        // As a den store's change feed reports them (#121): den-relative paths.
+        var batcher = New();
+        const string note = "universes/vael/entities/characters/ione.md";
+        const string temp = "universes/vael/entities/characters/.wolfden-write-0123.tmp";
+
+        batcher.Add(new DenChange(DenChangeKind.Created, temp), T0);
+        batcher.Add(new DenChange(DenChangeKind.Renamed, note, temp), T0);
+        batcher.Add(new DenChange(DenChangeKind.Changed, "universes/vael/universe.md"), T0);
+        batcher.Add(new DenChange(DenChangeKind.Changed, ".wolfden/index.db"), T0);
+
+        var batch = batcher.Take(T0 + Quiet);
+        Assert.NotNull(batch);
+        Assert.Equal([note, "universes/vael/universe.md"], batch.Paths.Order(StringComparer.Ordinal));
+        Assert.Equal([note], batch.Moved);
+        Assert.False(batch.Overflowed);
     }
 
     [Fact]

@@ -1,3 +1,5 @@
+using Wolfden.Core.Structure;
+
 namespace Wolfden.Index;
 
 /// <summary>
@@ -119,42 +121,56 @@ internal sealed class ChangeBatcher
     }
 
     /// <summary>
+    /// Adds a change a den store's feed reported (<see cref="IDenChangeFeed"/>),
+    /// with den-relative paths. Changes to hidden paths are dropped, as in
+    /// <see cref="Add(WatcherChangeTypes, string, string?, DateTime)"/>.
+    /// </summary>
+    public void Add(DenChange change, DateTime now)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        var moved = change.Kind != DenChangeKind.Changed;
+        var any = AddDenPath(change.Path, moved);
+        if (change.OldPath is not null)
+        {
+            any |= AddDenPath(change.OldPath, moved);
+        }
+
+        if (any)
+        {
+            Touch(now);
+        }
+    }
+
+    /// <summary>
     /// <paramref name="fullPath"/> relative to the den root, with <c>/</c>,
     /// or null if it's the root itself, outside it, or hidden: a name on the
     /// way starts with <c>.</c> (F-LAY-2).
     /// </summary>
-    public static string? Relative(string root, string fullPath)
-    {
-        // Only the OS's separators: on Linux a '\' is part of a file name.
-        var relative = Path.GetRelativePath(root, fullPath).Replace(Path.DirectorySeparatorChar, '/');
-        if (Path.AltDirectorySeparatorChar != '/')
-        {
-            relative = relative.Replace(Path.AltDirectorySeparatorChar, '/');
-        }
-        if (relative == "." || Path.IsPathRooted(relative))
-        {
-            return null;
-        }
+    public static string? Relative(string root, string fullPath) =>
+        FileSystemDenStore.DenPath(root, fullPath) is { } relative && IsDenPath(relative) ? relative : null;
 
-        var names = relative.Split('/');
-        return names.Any(n => n.Length == 0 || n.StartsWith('.')) ? null : relative;
-    }
+    /// <summary>True unless a name on <paramref name="relative"/> is empty or hidden (F-LAY-2).</summary>
+    private static bool IsDenPath(string relative) =>
+        !relative.Split('/').Any(n => n.Length == 0 || n.StartsWith('.'));
 
-    private bool AddPath(string fullPath, bool moved)
+    private bool AddDenPath(string relative, bool moved)
     {
-        if (Relative(_root, fullPath) is not { } path)
+        if (!IsDenPath(relative))
         {
             return false;
         }
 
-        _paths.Add(path);
+        _paths.Add(relative);
         if (moved)
         {
-            _moved.Add(path);
+            _moved.Add(relative);
         }
 
         return true;
     }
+
+    private bool AddPath(string fullPath, bool moved) =>
+        Relative(_root, fullPath) is { } path && AddDenPath(path, moved);
 
     private void Touch(DateTime now)
     {
