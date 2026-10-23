@@ -1041,7 +1041,7 @@ Spec: F-LAY-2. Covered by:
 `IncrementalUpdateTests.FilesTheIndexDoesntReadChangeNothing`,
 `FingerprintTests.FilesTheIndexDoesntReadDontChangeARebuild`,
 `ChangeBatcherTests.HiddenPathsAreIgnored`,
-`ChangeBatcherTests.AStoresChangesAreBatchedLikeFileEvents`.
+`ChangeBatcherTests.AStoresAtomicWriteIsBatchedAsTheNoteAlone`.
 
 ### SC-WATCH-5. Something else rebuilds the index while Wolfden watches
 
@@ -1408,12 +1408,17 @@ Series `long-dark` has `mara-voss.md`. Wolfden is asked to save
 - The save is refused on every OS, naming the file or folder that's
   already there. On Windows and macOS the two names are one file, so the
   save would overwrite Mara's note; on Linux the den would no longer
-  clone onto those systems. A Windows short name such as `CHARAC~1` is
+  clone onto those systems. A Windows short name such as `CHARAC~1`, a
+  name that differs only in Unicode form (`café` typed two ways), and a
+  name with an invisible character such as a zero-width space are
   refused the same way.
 
 Spec: design.md §6. Covered by:
 `DenStoreTests.ANameThatDiffersOnlyInCaseIsRefusedOnEveryOs`,
-`DenStoreTests.AWindowsShortNameIsAnotherNameAndIsRefused`.
+`DenStoreTests.AWindowsShortNameIsAnotherNameAndIsRefused`,
+`DenStoreTests.ANameInAnotherUnicodeFormIsRefused`,
+`DenStoreTests.ACaseOnlyRenameOntoAnotherFileWithThatNameIsRefused`,
+`DenPathTests.ANameWithAnInvisibleCharacterIsRefused`.
 
 ### SC-STORE-4. Wolfden is asked to change a built-in pack
 
@@ -1435,13 +1440,16 @@ the case, and moves book `ember` out of its series.
 - The note keeps its bytes under its new name, and the book's folder
   moves with everything in it. A rename that changes only the case works
   on Windows and macOS too. A move never overwrites a file or folder
-  that's there, and a folder can't be moved into itself.
+  that's there, and a folder can't be moved into itself. A case-only
+  rename that fails part way leaves the folder under its old name.
 
 Spec: design.md §3, §6. Covered by:
 `DenStoreTests.AFileIsMovedOrRenamedWithItsBytes`,
 `DenStoreTests.ARenameThatChangesOnlyTheCaseIsAllowed`,
 `DenStoreTests.AFolderIsMovedWithEverythingInIt`,
-`DenStoreTests.AMoveDoesntOverwriteOrMoveAFolderIntoItself`.
+`DenStoreTests.AMoveDoesntOverwriteOrMoveAFolderIntoItself`,
+`DenStoreTests.ACaseOnlyFolderRenameGoesThroughAHiddenNameWhenThePlainMoveIsRefused`,
+`DenStoreTests.ACaseOnlyFolderRenameThatFailsHalfWayIsPutBack`.
 
 ## HIST: version history
 
@@ -1454,13 +1462,17 @@ no history at all.
 The writer keeps the den in a synced folder without git, and asks for a
 note's history, a diff, a checkpoint, or a freeze tag.
 
-- Each says, in words, that the den has no history backend and how to
-  get one, and none of them is an error. A checkpoint's message adds that
-  the edits are saved in the files as usual. The den still loads, checks,
+- Each says, in words, that the den has no history, so that isn't
+  available, and that Wolfden can keep history with git if the den is in
+  a git repository that isn't in a synced folder, with a private remote
+  for backup. None of them is an error, and none points the writer at
+  a design document or a command that doesn't exist. A checkpoint's
+  message adds that the edits are still saved in the files. The den still loads, checks,
   and indexes, and freezing a book is still `status: final` (F-BOOK-1);
   only the tag is missing.
 
 Spec: F-BOOK-1, design.md §5, §6. Covered by:
 `HistoryProviderTests.ADenWithoutABackendHasNoHistoryCapabilities`,
 `HistoryProviderTests.EveryOperationSaysHistoryIsntAvailableWithoutThrowing`,
+`HistoryProviderTests.TheMessagesSendTheWriterNowhereTheyCantGo`,
 `HistoryProviderTests.ADenWithoutHistoryStillLoadsAndChecks`.
