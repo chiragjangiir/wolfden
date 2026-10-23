@@ -1,6 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Wolfden.Mcp.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Wolfden.Core\Wolfden.Core.csproj" />
     <ProjectReference Include="..\Wolfden.Index\Wolfden.Index.csproj" />
   </ItemGroup>

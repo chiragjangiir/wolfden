@@ -27,17 +27,17 @@ internal static class CliApp
     internal const int ExitUsage = 2;
 
     /// <summary>
-    /// True while a command that runs until it's stopped (<c>index --watch</c>)
+    /// True while a command that runs until it's stopped (<c>index --watch</c>, <c>mcp</c>)
     /// is running, so Ctrl+C stops it cleanly instead of ending the process.
     /// Other commands end at Ctrl+C as usual.
     /// </summary>
     internal static volatile bool RunsUntilStopped;
 
     /// <summary>Commands that work, in the order the usage lists them.</summary>
-    internal static readonly string[] Commands = ["init", "check", "index", "query", "new-id"];
+    internal static readonly string[] Commands = ["init", "check", "index", "query", "new-id", "mcp"];
 
     /// <summary>Commands planned for v0 that aren't implemented yet.</summary>
-    internal static readonly string[] PlannedCommands = ["serve", "mcp"];
+    internal static readonly string[] PlannedCommands = ["serve"];
 
     internal static string Version =>
         typeof(CliApp).Assembly
@@ -57,6 +57,7 @@ internal static class CliApp
                                    (--watch keeps it up to date as files change)
           query [<universe>]       show canon as of a story position (--at book:chapter)
           new-id [<count>]         print new ids for files made by hand
+          mcp [<den>]              run the MCP server over stdio for an AI client
 
         Run 'wolfden <command> --help' for a command's options. Commands find the
         den from the current folder, or take '--den <folder>', and '--json'
@@ -106,6 +107,8 @@ internal static class CliApp
                 return QueryCommand.Run(rest, output, error);
             case ["new-id", .. var rest]:
                 return NewIdCommand.Run(rest, output, error);
+            case ["mcp", .. var rest]:
+                return McpCommand.Run(rest, output, error, stop);
             case [var command, ..] when PlannedCommands.Contains(command):
                 error.WriteLine($"wolfden: '{command}' isn't implemented yet.");
                 error.WriteLine(Usage);

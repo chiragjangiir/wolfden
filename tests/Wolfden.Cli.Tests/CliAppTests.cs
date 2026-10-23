@@ -28,7 +28,7 @@ public class CliAppTests
             Assert.Contains($"\n  {command} ", text.ReplaceLineEndings("\n"));
         }
 
-        Assert.Contains("not yet implemented: serve, mcp", text);
+        Assert.Contains("not yet implemented: serve", text);
     }
 
     [Theory]
