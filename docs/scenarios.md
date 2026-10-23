@@ -922,6 +922,41 @@ Spec: design.md §7 (#116). Covered by:
 `UnlistableFolderTests.AFolderDeletedAfterTheLoadReadItLeavesTheIndexStale`,
 `UnlistableFolderTests.AFolderThatCantBeListedIsLeftOutAndTheCommandsStillWork` (CLI).
 
+### SC-CLI-10. I query a den with two universes
+
+The writer's den has two universes, `vael` and `orn`. They run `wolfden
+query`, then `wolfden query --at fen:1` (`fen` is a book of `vael`), then
+`wolfden query --at common:1`, where both universes have a book
+`common`.
+
+- With no universe and no position, the query says the den has two
+  universes, lists their keys, and exits 2. `--at fen:1` settles it:
+  `fen` is only in `vael`, so it shows `vael`'s canon as of `fen:1`.
+  `common:1` doesn't settle it, so the query asks for `--universe` and
+  exits 2, as it does for a book in neither universe. `--universe vael`
+  (or `vael` as a plain argument) always works. `--universe '*'` is
+  refused, since a canon view is of one universe.
+
+Spec: F-POS-5, design.md §7 (maintainer decision, 2026-10-23). Covered by:
+`QueryCommandTests.ADenWithSeveralUniversesNeedsOneNamed`,
+`QueryCommandTests.APositionSettlesTheUniverseWhenItsBookIsInOnlyOne`.
+
+### SC-CLI-11. I check one universe of my den
+
+The writer's den has two universes, and they're working in `vael`. They
+run `wolfden check --universe vael`.
+
+- It reports `vael`'s findings and the den-level ones (`den.yaml`, packs),
+  and nothing from `orn`, whose notes it doesn't read. A broken
+  `den.yaml` is still reported. Without `--universe`, or with
+  `--universe '*'`, it checks the whole den. A universe the den doesn't
+  have, or `--fix` with `--universe`, exits 2.
+
+Spec: F-DEN-1, design.md §7 (maintainer decision, 2026-10-23). Covered by:
+`CheckUniverseTests.WithAUniverseOnlyItsFindingsAreReported`,
+`CheckUniverseTests.ABrokenDenYamlIsStillReported`,
+`CheckUniverseTests.AnUnknownUniverseOrFixWithAUniverseExitsTwo`.
+
 ## WATCH: keeping the index up to date while notes change
 
 Background: `wolfden index --watch` (design.md §7, #14) keeps the index up
@@ -1179,14 +1214,21 @@ name.
   (`bad_position`, `unknown_entity`, `ambiguous_entity`, and so on) and a
   message saying what to do: a bad position lists the universe's books in
   story order, and an ambiguous name lists the matches. With a position,
-  a name is matched among what the reader has met by then, so the error
-  never lists an entity from later in the story. A den with several
-  universes asks which one.
+  a name is matched, tier by tier, among what the reader has met by
+  then: a namesake met later can't shadow the entity the reader knows,
+  tie with it, or show in the error. `wolfden query --entity --at`
+  matches the same way. A den with several universes asks which one
+  (SC-MCP-11). An argument of the wrong type, or a missing one, is
+  `bad_argument` in the same shape.
 
 Spec: F-POS-2, F-POS-3, F-POS-4, F-LINK-6. Covered by:
 `ToolErrorTests`, `OtherDenErrorTests.ANameThatMatchesTwoEntitiesListsThemWithoutSpoilingEarlierViews`,
+`OtherDenErrorTests.WithAPositionALaterNamesakeCantShadowAnEntityTheReaderHasMet`,
+`OtherDenErrorTests.AnUnknownTypeAtAPositionDoesntListTheTypesInUse`,
 `OtherDenErrorTests.ADenWithSeveralUniversesNeedsOneNamed`,
-`McpServerTests.ABadCallIsAnErrorResultWithACode`.
+`QueryCommandTests.AtAPositionTheEntityIsMatchedAmongThoseTheReaderHasMet`,
+`McpServerTests.ABadCallIsAnErrorResultWithACode`,
+`McpServerTests.AnArgumentOfTheWrongTypeIsABadArgument`.
 
 ### SC-MCP-7. I edit a note while my assistant is connected
 
@@ -1231,11 +1273,69 @@ settings.
 
 - The client starts the server, sees the five read-only tools with
   descriptions that explain dens, scopes, and positions, and can call
-  each one. Nothing but the protocol goes to standard output. Without a
-  den, the server doesn't start, says why on standard error, and exits 2.
+  each one, several at once even before the den has an index. Nothing
+  but the protocol goes to standard output, and when the client closes
+  standard input the server exits 0. Without a den, the server doesn't
+  start, says why on standard error, and exits 2; one that fails after
+  starting exits 3.
 
-Spec: design.md §8, §9. Covered by:
+Spec: design.md §7, §8, §9. Covered by:
 `McpCommandTests.AnAIClientRunsItOverStdio`,
+`McpCommandTests.OverRawPipesStdoutHoldsOnlyJsonRpcAndStdinEofEndsTheServer`,
+`McpCommandTests.AServerThatFailsAfterStartingIsExitThree`,
 `McpCommandTests.WithoutADenItDoesntStart`,
+`ParallelCallTests.ParallelFirstCallsOnADenWithNoIndexAllSucceed`,
 `McpServerTests.TheClientSeesTheServerAndItsReadOnlyTools`,
 `McpServerTests.EachToolAnswersWithJson`.
+
+### SC-MCP-11. My assistant works in a den with two universes
+
+The writer's den holds two universes, `starfall` and `drift`, and each
+has a Lantern. The assistant calls `canon_as_of`, then `canon_as_of` at
+`ember:1`, then `get_entity` for "Lantern" at `ash:2`.
+
+- With no universe and no position, every tool but `check` answers
+  `universe_required`, listing the universe keys and nothing else: no
+  entity from either universe. A position settles the universe when its
+  book is in only one (`ember` and `ash` are Starfall's), so the third
+  call gives Starfall's Lantern as the reader knows it at `ash:2`. A book
+  key both universes have doesn't settle it (`universe_required`), and
+  one neither has is `bad_position`. `search` and `list_entities` take
+  `universe: "*"` to read both universes; the other tools refuse it, and
+  so does any tool given a position with it.
+
+Spec: F-POS-5, design.md §8 (maintainer decision, 2026-10-23). Covered by:
+`UniverseChoiceTests.WithoutAUniverseOrPositionEveryToolButCheckAsksForOne`,
+`UniverseChoiceTests.APositionsBookSettlesTheUniverse`,
+`UniverseChoiceTests.ABookKeyInTwoUniversesOrInNoneDoesntSettleIt`,
+`UniverseChoiceTests.StarReadsEveryUniverseInSearchAndListOnly`.
+
+### SC-MCP-12. I pin my assistant to one universe
+
+The writer starts the server with `wolfden mcp --universe drift`.
+
+- Every call reads `drift` without naming it, and the server's
+  instructions say the session is pinned. A call that names `starfall`,
+  or `"*"`, is refused with `bad_argument`, so the assistant can't leave
+  its universe; `check` checks `drift` and the den-level files. A
+  `--universe` the den doesn't have stops the server from starting (exit
+  2).
+
+Spec: design.md §7, §8 (maintainer decision, 2026-10-23). Covered by:
+`UniverseChoiceTests.APinnedSessionReadsOnlyItsUniverse`,
+`McpCommandTests.AUniverseTheDenDoesntHaveCantBePinned`.
+
+### SC-MCP-13. My assistant checks one universe
+
+The assistant calls `check` with `universe: "drift"`.
+
+- It gets `drift`'s findings and the den-level ones, and none from
+  `starfall`, whose notes aren't read. A broken pack or `den.yaml` is
+  still reported. Without a universe, or with `"*"`, it checks the whole
+  den, whose findings are those of each universe plus the den-level
+  ones. `path` still narrows the list.
+
+Spec: F-DEN-1, design.md §7, §8 (maintainer decision, 2026-10-23). Covered by:
+`UniverseChoiceTests.CheckOfAUniverseLeavesOutTheOthers`,
+`UniverseChoiceTests.TheWholeDenIsTheUnionOfItsUniversesAndTheDenLevel`,
+`UniverseChoiceTests.ABrokenPackOrDenYamlIsReportedWhenAUniverseIsGiven`.

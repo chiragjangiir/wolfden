@@ -454,11 +454,11 @@ commands, and `wolfden <command> --help` describes each one:
 | Command | What it does |
 |---|---|
 | `wolfden init [<folder>] [--name <name>] [--universe <key>]` | Creates a den: a `den.yaml`, and with `--universe` a first universe with an id. It never overwrites anything, and refuses a folder inside another den or one that holds a den up to four folder levels below it (format.md F-LAY-1; the downward search skips hidden folders and folder links, and stops after 2,000 folders). The new den passes `check` with no warnings. |
-| `wolfden check [<den>] [--fix]` | The continuity lint above. It reads the files directly, not the index. Without `--fix` it never writes. `--fix` first gives every container and entity file that loads without an `id` a new one (format.md F-ID-2, F-ID-6), skipping files in a final book (F-BOOK-1), and then checks the den as it is after the fix. |
+| `wolfden check [<den>] [--universe <key>] [--fix]` | The continuity lint above. It reads the files directly, not the index. It checks the whole den, every universe included, since it validates files rather than a story view; `--universe` checks only that universe's files and the den-level ones (see "Which universe" below), and `*` means the whole den. Without `--fix` it never writes. `--fix` first gives every container and entity file that loads without an `id` a new one (format.md F-ID-2, F-ID-6), skipping files in a final book (F-BOOK-1), and then checks the den as it is after the fix. |
 | `wolfden index [<den>] [--watch]` | Rebuilds `.wolfden/index.db` from the files and says what it holds. `--watch` then keeps it up to date as files change (#14), printing one line for each batch of changes it applies (with `--json`, one JSON object per line), until Ctrl+C. Only one watcher runs per den; a second exits 2. |
-| `wolfden query [<universe>] [--at <position>]` | Canon as of a position (format.md F-VIEW-1), from the index. The universe can be left out when the den has only one. `--series` or `--book` narrows the view, `--type` (any type an enabled pack defines) and `--entity` (matched as a link is, F-LINK-6) pick entities out of it, `--pinned` gives pinned canon (F-VIEW-2), and `--brief` lists one line per entity. |
+| `wolfden query [<universe>] [--universe <key>] [--at <position>]` | Canon as of a position (format.md F-VIEW-1), from the index, of one universe (see "Which universe" below; `*` is refused, since a view is of one universe). `--series` or `--book` narrows the view, `--type` (any type an enabled pack defines) and `--entity` (matched as a link is, F-LINK-6, among the entities in the view, so one the reader meets later can't shadow one they've met) pick entities out of it, `--pinned` gives pinned canon (F-VIEW-2), and `--brief` lists one line per entity. |
 | `wolfden new-id [<count>]` | Prints new ids for files made by hand (format.md F-ID-5). |
-| `wolfden mcp [<den>] [--no-watch]` | Runs the MCP server over stdio for an AI client (§8, #20) until the client disconnects or Ctrl+C. Standard output carries only the protocol; log messages go to standard error. It exits 2 if there's no den, but serves a den whose `den.yaml` doesn't load, so the client can call `check` to find out why. |
+| `wolfden mcp [<den>] [--universe <key>] [--no-watch]` | Runs the MCP server over stdio for an AI client (§8, #20) until the client disconnects or Ctrl+C. `--universe` pins the session to one universe (§8); a key the den doesn't have exits 2. Standard output carries only the protocol; log messages go to standard error. It exits 2 if there's no den and 3 if it stops because of a failure after it started, but serves a den whose `den.yaml` doesn't load, so the client can call `check` to find out why. |
 
 They share one surface:
 
@@ -466,6 +466,27 @@ They share one surface:
   it as a plain argument). Otherwise it's the current folder, or the
   nearest folder above it that holds a `den.yaml`, as git finds its
   repository.
+- **Which universe** (maintainer decision, 2026-10-23). A den with one
+  universe uses it. In a den with several, a command that reads a story
+  view (`query`, and the MCP tools, §8) needs one: named with
+  `--universe` (or `query`'s plain argument), or settled by a position
+  whose book key only one universe has (a book belongs to one universe,
+  format.md F-POS-5). A key in more than one universe, or no universe
+  and no position, is an error that lists the universes and nothing
+  else. `*` (every universe) is accepted only where a search or list
+  makes sense, and never with a position. `check` is the exception: it
+  validates files, not a story view, so it checks the whole den unless
+  `--universe` names one (`*` is the whole den too). Then it reads that
+  universe's files and the den-level ones every universe shares
+  (`den.yaml`, packs, authors, and the den's layout), and of the other
+  universes only their container files, so positions resolve as in the
+  whole den; their notes and outlines aren't read, and their findings
+  are left out. Two checks compare notes across universes and can't see
+  the others' notes in a scoped check: an id shared with a note in
+  another universe (F-ID-3) isn't found, and a broken link that only
+  another universe's note matches is still reported, without the hint
+  that names that note. A whole-den check reports both. `--fix` works on
+  the whole den, so it doesn't go with `--universe`.
 - **Output.** Text by default. `check` prints one line per diagnostic,
   `path:line: severity rule: message`, with paths relative to the den
   root, then a summary. `query` prints each entity as a heading, its
@@ -484,7 +505,9 @@ They share one surface:
   doesn't load, a universe, position, filter, type, or entity that doesn't
   exist (for `query`, a den with no universes yet, or with several and
   none named), or an unexpected failure. A `query` whose view is empty,
-  such as one for a character the reader hasn't met yet, exits 0.
+  such as one for a character the reader hasn't met yet, exits 0. 3 only
+  from `mcp`, when the server started but then stopped because of a
+  failure.
 - **A fresh index.** `query` reads the index, but first compares a hash
   of the files the index reads (`den.yaml`, packs, container files,
   entity files, and outlines) with the one recorded when the index was
@@ -534,23 +557,44 @@ and `wolfden check` do:
   `until`. `canon_as_of` without a position is the end of the story, as
   in `query`. With a position, `canon_as_of` and `get_entity` give the
   canon-as-of view (format.md F-VIEW-1), so nothing the reader meets later
-  is in the result. `get_entity` then matches the name among the
-  entities the reader has met by then, and for one they haven't met
-  returns `in_view: false` and nothing about it.
+  is in the result. `get_entity` then matches the
+  name, every tier of it (F-LINK-6), among the entities the reader has met
+  by then, so an entity met later can't shadow one met already, tie with
+  it, or show up in an `ambiguous_entity` error. Only when nothing there
+  matches does it ask all the entities, to tell one the reader hasn't met
+  (`in_view: false`, and nothing about it) from one that doesn't exist
+  (`unknown_entity`). Aliases aren't positional (format.md §9.5).
 - **Pinned first.** Results of `canon_as_of` and `get_entity` start with
   `pinned`, the pinned canon view (F-VIEW-2), and list the same facts in
   place too, so each entity is complete.
 - **Naming things.** `get_entity` takes a name, alias, file name, or id,
   matched as a link is (F-LINK-6), or a key or path. A series or book
   filter means what it means in a canon view (F-VIEW-1), for
-  `list_entities` too. The universe can be left out when the den has
-  only one.
+  `list_entities` too.
+- **One universe per call** (maintainer decision, 2026-10-23; §7, "Which
+  universe"). Every tool but `check` reads one universe: the den's only
+  one, the one named in `universe`, or the one a position's book belongs
+  to; otherwise `universe_required`, which lists the universe keys and
+  never entities. So an ambiguity never spans universes. `universe: "*"`
+  reads every universe, in `search` and `list_entities` only, never with
+  a position or a series or book filter; elsewhere it's `bad_argument`.
+  `check` checks the whole den unless given a universe, and `"*"` means
+  the whole den. `wolfden mcp --universe <key>` pins the session: every
+  call reads that universe (`check` checks it and the den-level files),
+  a call that names another universe or `"*"` gets `bad_argument`, and
+  the server instructions say so.
 - **Results** are JSON with snake_case names, like the tools' arguments,
   sent both as text and as structured content, with a `version` for
   their shape (the same rule as `--json`). Errors are error results whose
   JSON holds a stable `code` (such as `bad_position`, `unknown_entity`,
   `ambiguous_entity`, `den_not_loaded`) and a message that says what to
-  do next.
+  do next. Arguments that don't bind to a tool's parameters (a required
+  one missing, or a value of the wrong type) are reported by the SDK in
+  its own words; the server wraps that as `bad_argument` in the same
+  shape. In every result, `count` is how many items it holds, `truncated`
+  says whether `limit` cut the list short, and `list_entities` and
+  `check` also give the `total` that matched. `canon_as_of` is never cut
+  short.
 - **Fresh answers.** Each call checks the files hash first and rebuilds
   the index if it differs, waiting briefly for the watcher the server
   hosts (§7). `check` reads the files, not the index.
