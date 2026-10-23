@@ -94,23 +94,81 @@ public static class WolfdenMcpServer
     /// <summary>
     /// Serves the den over <paramref name="transport"/> until the client
     /// disconnects or <paramref name="cancellationToken"/> is cancelled.
-    /// With <paramref name="watch"/>, it first starts a <see cref="DenWatcher"/>
+    /// With <paramref name="watch"/>, it also starts a <see cref="DenWatcher"/>
     /// that keeps the index up to date while it runs, as <c>wolfden index --watch</c>
     /// does. If another process is already watching the den, that watcher
     /// does the job, and each tool call waits briefly for it, as
     /// <c>wolfden query</c> does. Everything it logs goes to <paramref name="log"/>,
     /// never to the transport.
     /// </summary>
-    public static async Task RunAsync(
+    /// <remarks>
+    /// The server answers the client before the watcher's first build of
+    /// the index is done, which can take seconds on a big den or a busy
+    /// machine. A client that waits too long for its first answer gives up
+    /// on the newest protocol and tries the older handshake, which can then
+    /// fail (#135). A tool call that comes in during that build waits for
+    /// it, or builds the index itself, as it does when no watcher runs.
+    /// </remarks>
+    public static Task RunAsync(
         ITransport transport, DenTools tools, string version, TextWriter log, bool watch = true, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transport);
         ArgumentNullException.ThrowIfNull(tools);
         ArgumentNullException.ThrowIfNull(log);
-        using var watcher = watch ? StartWatcher(tools.Root, log) : null;
+        return RunAsync(transport, tools, version, log, watch ? () => StartWatcher(tools.Root, log) : null, cancellationToken);
+    }
+
+    /// <summary>
+    /// <see cref="RunAsync(ITransport, DenTools, string, TextWriter, bool, CancellationToken)"/>,
+    /// with <paramref name="startWatcher"/>, if given, starting the watcher
+    /// alongside the server. For tests, which hold it up.
+    /// </summary>
+    internal static async Task RunAsync(
+        ITransport transport, DenTools tools, string version, TextWriter log, Func<DenWatcher?>? startWatcher, CancellationToken cancellationToken)
+    {
         using var logs = LoggerFactory.Create(b => b.AddProvider(new TextWriterLoggerProvider(log)).SetMinimumLevel(LogLevel.Warning));
         await using var server = McpServer.Create(transport, Options(tools, version), logs);
-        await server.RunAsync(cancellationToken).ConfigureAwait(false);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        // Serve first: the client's first message is answered while the watcher builds the index.
+        var watching = startWatcher is null
+            ? Task.FromResult<DenWatcher?>(null)
+            : Task.Run(
+                () =>
+                {
+                    try
+                    {
+                        return startWatcher();
+                    }
+                    catch
+                    {
+                        // A failure StartWatcher doesn't expect stops the server, and the await below reports it.
+                        stop.Cancel();
+                        throw;
+                    }
+                },
+                CancellationToken.None);
+        try
+        {
+            await server.RunAsync(stop.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            // Only a watcher that failed to start cancels stop on its own: the await below throws why.
+        }
+        finally
+        {
+            // Never leave a watcher running: wait for it to finish starting, then stop it.
+            DenWatcher? watcher = null;
+            try
+            {
+                watcher = await watching.ConfigureAwait(false);
+            }
+            finally
+            {
+                watcher?.Dispose();
+            }
+        }
     }
 
     /// <summary>Starts a watcher on the den, or returns null after logging why it couldn't.</summary>

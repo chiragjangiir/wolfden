@@ -145,8 +145,18 @@ public class McpCommandTests
         });
         var cancel = TestContext.Current.CancellationToken;
 
-        await using (var client = await McpClient.CreateAsync(transport, cancellationToken: cancel))
+        // The SDK's client gives the server 5 seconds by default to answer
+        // server/discover, from before the process has even started. On a
+        // busy CI machine, starting .NET alone can take longer. The client
+        // then falls back to initialize, which the server can refuse once it
+        // has answered the probe after all (#135). The server answers at once
+        // (McpHandshakeTests), so this test waits longer, and checks that the
+        // client didn't fall back.
+        var options = new McpClientOptions { DiscoverProbeTimeout = TimeSpan.FromSeconds(30) };
+        await using (var client = await McpClient.CreateAsync(transport, options, cancellationToken: cancel))
         {
+            Assert.Equal("2026-07-28", client.NegotiatedProtocolVersion);
+
             var tools = await client.ListToolsAsync(cancellationToken: cancel);
             Assert.Equal(["canon_as_of", "check", "get_entity", "list_entities", "search"], tools.Select(t => t.Name).Order(StringComparer.Ordinal));
 
