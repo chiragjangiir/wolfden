@@ -199,7 +199,8 @@ public sealed class QueryCommandTests : IDisposable
     // ----- Mistakes: exit 2, a message on standard error, nothing on standard output -----
 
     [Theory]
-    [InlineData(new[] { "nowhere" }, "The den has no universe 'nowhere'.")]
+    [InlineData(new[] { "nowhere" }, "The den has no universe 'nowhere'. Its universes: dracula.")]
+    [InlineData(new[] { "--universe", "nowhere" }, "The den has no universe 'nowhere'. Its universes: dracula.")]
     [InlineData(new[] { "--at", "dracula:99" }, "Book 'dracula' has no chapter '99'.")]
     [InlineData(new[] { "--at", "lost:1" }, "Universe 'dracula' has no book 'lost'.")]
     [InlineData(new[] { "--series", "lost" }, "Universe 'dracula' has no series 'lost'.")]
@@ -231,6 +232,44 @@ public sealed class QueryCommandTests : IDisposable
         Assert.Equal(
             $"Canon of universe 'dracula' at the end of the story: 1 entity.\n- Jonathan Harker (character, canon, filed in book 'dracula', from dracula:1): {Jonathan}\n",
             output);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-6")]
+    public void AtAPositionTheEntityIsMatchedAmongThoseTheReaderHasMet()
+    {
+        // A note named "Mina" outranks Mina Harker's alias as a link target,
+        // but the reader meets it only at chapter 20, so at chapter 3 it
+        // can't shadow her.
+        _den.Write(
+            "universes/dracula/entities/characters/mina.md",
+            "---\ntype: character\nname: Mina\nstatus: canon\nfrom: \"dracula:20\"\n---\n\nA namesake.\n");
+
+        var (exitCode, output, _) = Query("--entity", "Mina", "--at", "dracula:3", "--brief");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.StartsWith("Canon of universe 'dracula' as of dracula:3: 1 entity.\n- Mina Harker (character", output, StringComparison.Ordinal);
+
+        // Not met yet is an empty view, not an error; no such entity is an error.
+        var (lucyExit, lucy, _) = Query("--entity", "Lucy", "--at", "dracula:3", "--brief");
+        Assert.Equal(CliApp.ExitOk, lucyExit);
+        Assert.StartsWith("Canon of universe 'dracula' as of dracula:3: 0 entities.", lucy, StringComparison.Ordinal);
+        Assert.Equal(CliApp.ExitUsage, Query("--entity", "Sherlock Holmes", "--at", "dracula:3").ExitCode);
+    }
+
+    [Fact]
+    public void TypeNarrowsTheEntitiesThatEntityMatchesAmong()
+    {
+        // A place named "Mina" outranks Mina Harker's alias as a link target,
+        // but asked for a character, the place can't take the match.
+        _den.Write(
+            "universes/dracula/entities/locations/mina.md",
+            "---\ntype: location\nname: Mina\nstatus: canon\n---\n\nA village.\n");
+
+        var (exitCode, output, _) = Query("--entity", "Mina", "--type", "character", "--brief");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.StartsWith("Canon of universe 'dracula' at the end of the story: 1 entity.\n- Mina Harker (character", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -310,7 +349,7 @@ public sealed class QueryCommandTests : IDisposable
 
         Assert.Equal(CliApp.ExitUsage, exitCode);
         Assert.Empty(output);
-        Assert.Equal("wolfden query: The den has no universe '--brief'.\n", error);
+        Assert.Equal("wolfden query: The den has no universe '--brief'. Its universes: dracula.\n", error);
     }
 
     [Fact]
@@ -341,23 +380,61 @@ public sealed class QueryCommandTests : IDisposable
     }
 
     [Fact]
+    [Trait("Scenario", "SC-CLI-10")]
     public void ADenWithSeveralUniversesNeedsOneNamed()
     {
-        using var den = TempDen.FromFiles(new Dictionary<string, string>
-        {
-            ["den.yaml"] = "format: 1\n",
-            ["universes/vael/universe.md"] = "---\nid: 01JC5CK3000000000000000001\nname: Vael\n---\n",
-            ["universes/orn/universe.md"] = "---\nid: 01JC5CK3000000000000000002\nname: Orn\n---\n",
-        });
+        using var den = SeveralUniverses();
 
         var (exitCode, _, error) = Cli.Run("query", "--den", den.Root);
         var (named, output, _) = Cli.Run("query", "vael", "--den", den.Root);
+        var (option, optionOutput, _) = Cli.Run("query", "--universe", "vael", "--den", den.Root);
 
         Assert.Equal(CliApp.ExitUsage, exitCode);
-        Assert.Equal("wolfden query: the den has 2 universes (orn, vael); name one, as in 'wolfden query orn'.\n", error);
+        Assert.Equal(
+            "wolfden query: The den has 2 universes (orn, vael); name one. Name it with '--universe <key>', or give '--at' a position whose book only one universe has.\n",
+            error);
         Assert.Equal(CliApp.ExitOk, named);
         Assert.Equal("Canon of universe 'vael' at the end of the story: 0 entities.\n", output);
+        Assert.Equal(CliApp.ExitOk, option);
+        Assert.Equal(output, optionOutput);
+        Assert.Equal(CliApp.ExitUsage, Cli.Run("query", "vael", "--universe", "vael", "--den", den.Root).ExitCode);
     }
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-10")]
+    public void APositionSettlesTheUniverseWhenItsBookIsInOnlyOne()
+    {
+        using var den = SeveralUniverses();
+
+        var (exitCode, output, _) = Cli.Run("query", "--at", "fen:1", "--den", den.Root);
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.StartsWith("Canon of universe 'vael' as of fen:1:", output, StringComparison.Ordinal);
+
+        // A book key in both universes doesn't settle it.
+        var (shared, _, sharedError) = Cli.Run("query", "--at", "common:1", "--den", den.Root);
+        Assert.Equal(CliApp.ExitUsage, shared);
+        Assert.Contains("More than one universe has a book 'common'", sharedError, StringComparison.Ordinal);
+
+        // A book key in neither is a position that doesn't resolve.
+        var (none, _, noneError) = Cli.Run("query", "--at", "lost:1", "--den", den.Root);
+        Assert.Equal(CliApp.ExitUsage, none);
+        Assert.Contains("No universe of the den has a book 'lost'", noneError, StringComparison.Ordinal);
+
+        // A canon view is of one universe: '*' doesn't fit.
+        var (all, _, allError) = Cli.Run("query", "--universe", "*", "--den", den.Root);
+        Assert.Equal(CliApp.ExitUsage, all);
+        Assert.Contains("'*' (every universe) doesn't fit here", allError, StringComparison.Ordinal);
+    }
+
+    private static TempDen SeveralUniverses() => TempDen.FromFiles(new Dictionary<string, string>
+    {
+        ["den.yaml"] = "format: 1\n",
+        ["universes/vael/universe.md"] = "---\nid: 01JC5CK3000000000000000001\nname: Vael\n---\n",
+        ["universes/orn/universe.md"] = "---\nid: 01JC5CK3000000000000000002\nname: Orn\n---\n",
+        ["universes/vael/books/fen/book.md"] = "---\nid: 01JC5CK3000000000000000003\nname: Fen\nchapters: [1, 2]\n---\n",
+        ["universes/vael/books/common/book.md"] = "---\nid: 01JC5CK3000000000000000004\nname: Common\nchapters: [1]\n---\n",
+        ["universes/orn/books/common/book.md"] = "---\nid: 01JC5CK3000000000000000005\nname: Common\nchapters: [1]\n---\n",
+    });
 
     [Fact]
     public void ADenYamlThatDoesntLoadExitsTwo()

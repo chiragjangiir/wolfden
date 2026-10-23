@@ -11,5 +11,6 @@
     <Project Path="tests/Wolfden.Cli.Tests/Wolfden.Cli.Tests.csproj" />
     <Project Path="tests/Wolfden.Core.Tests/Wolfden.Core.Tests.csproj" />
     <Project Path="tests/Wolfden.Index.Tests/Wolfden.Index.Tests.csproj" />
+    <Project Path="tests/Wolfden.Mcp.Tests/Wolfden.Mcp.Tests.csproj" />
   </Folder>
 </Solution>

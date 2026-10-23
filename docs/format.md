@@ -1185,6 +1185,10 @@ text, or a link to something that entered canon earlier but says
 something new about it, gets no warning, so read summary prose for
 reveals as well as links.
 
+Aliases (F-ENT-4) aren't positional: they hold for the whole story, so
+looking up a hidden identity's alias, as a link or a lookup by name does,
+finds the entity at any position and can confirm the reveal.
+
 ## 10. Links
 
 ### 10.1 Syntax

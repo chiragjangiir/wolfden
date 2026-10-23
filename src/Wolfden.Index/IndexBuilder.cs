@@ -83,6 +83,9 @@ public static class IndexBuilder
     /// rebuild at the last moment. Returns what the index was built from,
     /// for a file watcher to update it from (#14).
     /// </summary>
+    /// <summary>For tests: how many full rebuilds each den root (a full path) has had in this process.</summary>
+    internal static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> RebuildCounts = new(StringComparer.Ordinal);
+
     internal static IndexState Rebuild(string denRoot, Action<string>? beforeSwap)
     {
         ArgumentNullException.ThrowIfNull(denRoot);
@@ -92,6 +95,7 @@ public static class IndexBuilder
             throw new DirectoryNotFoundException($"The den folder '{root}' doesn't exist.");
         }
 
+        RebuildCounts.AddOrUpdate(root, 1, (_, n) => n + 1);
         var folder = Path.Combine(root, StateFolder);
         if (File.Exists(folder))
         {
@@ -99,20 +103,22 @@ public static class IndexBuilder
                 $"'{folder}' is a file, but Wolfden keeps its index in a folder by that name. Move or rename the file, then try again.");
         }
 
-        Directory.CreateDirectory(folder);
-        WriteGitignore(folder);
-        RemoveStaleTempFiles(folder);
-
         var target = Path.Combine(folder, IndexFileName);
-        if (Directory.Exists(target))
-        {
-            throw new IOException(
-                $"'{target}' is a folder, but it should be Wolfden's index file. Move or delete the folder (the index is rebuilt from the den's files), then try again.");
-        }
-
         var temp = Path.Combine(folder, $"{IndexFileName}.{Guid.NewGuid():N}{TempSuffix}");
         lock (IndexLock.For(root))
         {
+            // Inside the lock, so two rebuilds in this process (such as an MCP
+            // server's parallel first calls on a den with no index) don't
+            // write the folder's .gitignore at the same time.
+            Directory.CreateDirectory(folder);
+            WriteGitignore(folder);
+            RemoveStaleTempFiles(folder);
+            if (Directory.Exists(target))
+            {
+                throw new IOException(
+                    $"'{target}' is a folder, but it should be Wolfden's index file. Move or delete the folder (the index is rebuilt from the den's files), then try again.");
+            }
+
             try
             {
                 // Taken before the build reads anything, so an edit made during
@@ -224,7 +230,7 @@ public static class IndexBuilder
         var status = Check(denRoot);
         if (status != IndexStatus.Current)
         {
-            Rebuild(denRoot);
+            RebuildUnless(denRoot, () => Check(denRoot) == IndexStatus.Current);
         }
 
         return status;
@@ -321,10 +327,28 @@ public static class IndexBuilder
 
         if (status != IndexStatus.Current)
         {
-            Rebuild(denRoot);
+            RebuildUnless(denRoot, () => CheckFiles(denRoot) == IndexStatus.Current);
         }
 
         return status;
+    }
+
+    /// <summary>
+    /// Rebuilds the index unless <paramref name="isCurrent"/> says, once the
+    /// den's <see cref="IndexLock"/> is held, that it's current after all:
+    /// another caller in this process rebuilt it while this one waited for
+    /// the lock. So N calls that find the same stale index at once rebuild
+    /// it once, not N times.
+    /// </summary>
+    private static void RebuildUnless(string denRoot, Func<bool> isCurrent)
+    {
+        lock (IndexLock.For(Path.GetFullPath(denRoot)))
+        {
+            if (!isCurrent())
+            {
+                Rebuild(denRoot);
+            }
+        }
     }
 
     /// <summary>
@@ -486,9 +510,20 @@ public static class IndexBuilder
     private static void WriteGitignore(string folder)
     {
         var path = Path.Combine(folder, ".gitignore");
-        if (!File.Exists(path))
+        if (File.Exists(path))
         {
-            File.WriteAllText(path, "# Wolfden's index and local state: derived from the den's files, never committed.\n*\n");
+            return;
+        }
+
+        try
+        {
+            // CreateNew, so a rebuild in another process writing it at the same moment doesn't fail this one.
+            using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+            stream.Write("# Wolfden's index and local state: derived from the den's files, never committed.\n*\n"u8);
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            // Another process wrote it first.
         }
     }
 
