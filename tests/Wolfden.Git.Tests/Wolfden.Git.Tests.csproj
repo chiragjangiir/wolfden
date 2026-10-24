@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Wolfden.Git\Wolfden.Git.csproj" />
+  </ItemGroup>
+
+</Project>
