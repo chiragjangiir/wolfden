@@ -93,6 +93,8 @@ public partial class QuotingCorpusTests
     [InlineData("a: {b: [c, d:]}", "d:", 2)]
     [InlineData("a: [x::]", "x::", 2)]
     [InlineData("a: [\n  b,\n  c:]", "c:", 4)]
+    [InlineData("a: [x, b\n  c:]", "b c:", 3)] // a scalar over two lines: the error is on the colon's line
+    [InlineData("a: {b :}", "b :", 2)]
     public void APlainScalarEndingInAColonBeforeAFlowIndicatorIsAnError(string yaml, string scalar, int line)
     {
         // YAML 1.2 (and PyYAML) end the scalar before that colon and read it
@@ -105,6 +107,8 @@ public partial class QuotingCorpusTests
         Assert.Equal(line, error.Line);
         Assert.Contains($"'{scalar}'", error.Message, StringComparison.Ordinal);
         Assert.Contains("space after the colon", error.Message, StringComparison.Ordinal);
+        var bracket = yaml[Regex.Match(yaml, @":[\]}]").Index + 1];
+        Assert.Contains($"('{scalar[..^1].TrimEnd()}: {bracket}')", error.Message, StringComparison.Ordinal);
         Assert.False(file.CanEdit);
     }
 

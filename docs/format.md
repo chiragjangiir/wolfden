@@ -119,11 +119,13 @@ re-normalize text they aren't changing.
 using the core schema. A parse failure is an [error].
 
 Inside a flow collection (`[...]` or `{...}`), a plain scalar that ends
-with `:` right before `,`, `}`, or `]` is also an F-YAML-1 [error], such
-as `{value: drowned, from:}` or `[Voss, Orrin:]`. YAML 1.2 ends the scalar
+with `:` right before `}` or `]` is also an F-YAML-1 [error], such as
+`{value: drowned, from:}` or `[Voss, Orrin:]`. YAML 1.2 ends the scalar
 before that colon and reads the colon as a key separator, but not every
-YAML reader does, and Wolfden's reader keeps the colon in the text. The
-error says to add a space after the colon (`from: }`) for a key with an
+YAML reader does, and Wolfden's reader keeps the colon in the text. Before
+a comma (`{from:, value: drowned}`) every reader already ends the scalar
+there, so that's fine. The error is on the colon's line, and it
+says to add a space after the colon (`from: }`) for a key with an
 empty value, or to quote the text if the colon is part of it. Like
 F-YAML-3 and F-YAML-4, it marks a file that other tools read differently
 from Wolfden. Wolfden never writes this form, since it quotes such a

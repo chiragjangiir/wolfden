@@ -302,14 +302,16 @@ internal sealed class YamlBlock
 
     /// <summary>
     /// F-YAML-1: inside a flow collection, YAML 1.2 ends a plain scalar
-    /// before a <c>:</c> that runs straight into <c>,</c> <c>}</c> or
-    /// <c>]</c>, and takes the colon as a key separator: <c>{from:}</c> is
-    /// the key <c>from</c> and <c>[b:]</c> holds the pair <c>{b: null}</c>.
+    /// before a <c>:</c> that runs straight into <c>}</c> or <c>]</c>, and
+    /// takes the colon as a key separator: <c>{from:}</c> is the key
+    /// <c>from</c> and <c>[b:]</c> holds the pair <c>{b: null}</c>.
     /// YamlDotNet keeps the colon in the scalar instead (<c>from:</c>,
-    /// <c>b:</c>) when the closing bracket follows; before a comma it agrees
-    /// with YAML 1.2, and this check never fires there. Wolfden can't read
-    /// such a value the way other YAML readers do, so it's an error rather
-    /// than a silent disagreement (#134).
+    /// <c>b:</c>). Before a comma every reader, YamlDotNet included, already
+    /// ends the scalar, so the scalar never ends with that colon and the
+    /// check, which also looks at <c>,</c> in case that changes, doesn't
+    /// fire. Wolfden can't read such a value the way other YAML readers do,
+    /// so it's an error rather than a silent disagreement (#134). It's
+    /// reported on the colon's line.
     /// </summary>
     private void CheckColonBeforeFlowIndicator(string value, int start, int end)
     {
@@ -317,9 +319,10 @@ internal sealed class YamlBlock
         if (_flowDepth > 0 && value.EndsWith(':') && end > start && text[end - 1] == ':'
             && end < RegionEnd && text[end] is ',' or '}' or ']')
         {
-            Error("F-YAML-1", start,
+            var key = value[..^1].TrimEnd();
+            Error("F-YAML-1", end - 1,
                 $"'{value}' runs straight into '{text[end]}', which YAML readers don't all read the same way. " +
-                "Add a space after the colon for a key with an empty value, or quote the text if the colon is part of it.");
+                $"For a key with an empty value, put a space after the colon ('{key}: {text[end]}'), or quote the text if the colon is part of it.");
         }
     }
 
