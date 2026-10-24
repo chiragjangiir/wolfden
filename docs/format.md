@@ -118,6 +118,17 @@ re-normalize text they aren't changing.
 **F-YAML-1.** `den.yaml` and frontmatter are a single YAML 1.2 document
 using the core schema. A parse failure is an [error].
 
+Inside a flow collection (`[...]` or `{...}`), a plain scalar that ends
+with `:` right before `,`, `}`, or `]` is also an F-YAML-1 [error], such
+as `{value: drowned, from:}` or `[Voss, Orrin:]`. YAML 1.2 ends the scalar
+before that colon and reads the colon as a key separator, but not every
+YAML reader does, and Wolfden's reader keeps the colon in the text. The
+error says to add a space after the colon (`from: }`) for a key with an
+empty value, or to quote the text if the colon is part of it. Like
+F-YAML-3 and F-YAML-4, it marks a file that other tools read differently
+from Wolfden. Wolfden never writes this form, since it quotes such a
+string and writes an empty value as `~`.
+
 **F-YAML-2.** The top level MUST be a mapping. [error] Frontmatter or a
 YAML file that holds no YAML document, only blank lines and comments, or
 only a `---` marker, is an empty mapping, with no diagnostic. Missing keys
