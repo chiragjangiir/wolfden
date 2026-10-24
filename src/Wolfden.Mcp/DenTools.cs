@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Wolfden.Core.Checks;
 using Wolfden.Core.Documents;
+using Wolfden.Core.History;
 using Wolfden.Core.Structure;
 using Wolfden.Index;
 
@@ -54,6 +55,88 @@ public sealed class DenTools
     /// or <see cref="AllUniverses"/>, is refused.
     /// </summary>
     public string? PinnedUniverse { get; init; }
+
+    /// <summary>
+    /// Finds the den's history provider, for <c>get_history</c>. It's asked
+    /// on each call, so a den that becomes a repository while the server
+    /// runs gets history without a restart. By default the den has none
+    /// (<see cref="NoHistory"/>); <c>wolfden mcp</c> uses git (#19).
+    /// </summary>
+    public Func<IHistoryProvider> History { get; init; } = () => NoHistory.Instance;
+
+    /// <summary>
+    /// The checkpoints that changed one entity's file, newest first, a page
+    /// at a time, and optionally what changed in it since a checkpoint (or
+    /// since the latest one). The entity is named as in <see cref="GetEntity"/>,
+    /// without a position. A den without history isn't an error: the result
+    /// says history isn't available, and why.
+    /// </summary>
+    public GetHistoryResult GetHistory(
+        string entity, string? universe = null, int limit = 20, string? before = null, bool diff = false, string? diffFrom = null)
+    {
+        if (string.IsNullOrWhiteSpace(entity))
+        {
+            throw new DenToolException(ToolErrorCodes.BadArgument, "Name the entity in 'entity': its name, an alias, its file name, its id, or its path.");
+        }
+
+        CheckLimit(limit, 100);
+        var summary = WithIndex(index =>
+        {
+            var db = index.Context;
+            var universes = db.Containers.Where(c => c.Kind == "universe").ToDictionary(c => c.Id, c => c.Key);
+            var scopes = Scopes(db);
+            var u = ChooseUniverse(db, universe, null, allowAll: false)!;
+            var matches = Match(index, u.Id, entity.Trim(), null);
+            return matches.Count switch
+            {
+                0 => throw UnknownEntity(entity, u.Key),
+                > 1 => throw Ambiguous(entity, matches, universes, scopes),
+                _ => Summary(matches[0], universes, scopes),
+            };
+        });
+
+        try
+        {
+            var history = History();
+            // One more than the limit says whether there's another page.
+            var log = history.Log(new HistoryLogQuery(summary.Path, limit + 1, string.IsNullOrWhiteSpace(before) ? null : before.Trim()));
+            if (!log.IsAvailable)
+            {
+                return new GetHistoryResult(ToolJson.Version, summary, history.Name, false, log.Reason, 0, false, null, null, null);
+            }
+
+            var entries = log.Value.Take(limit)
+                .Select(e => new HistoryEntryView(e.Id, e.When, e.Author, e.Message, e.Changes.Select(Change).ToList()))
+                .ToList();
+            var truncated = log.Value.Count > limit;
+            HistoryDiffView? diffView = null;
+            string? note = null;
+            if (diff || !string.IsNullOrWhiteSpace(diffFrom))
+            {
+                var changes = history.Diff(new HistoryDiffQuery(string.IsNullOrWhiteSpace(diffFrom) ? null : diffFrom.Trim(), null, summary.Path));
+                if (changes.IsAvailable)
+                {
+                    diffView = new HistoryDiffView(
+                        changes.Value.From,
+                        changes.Value.To,
+                        changes.Value.Files.Select(f => new HistoryFileDiffView(Change(f.Change), f.Patch)).ToList());
+                }
+                else
+                {
+                    note = changes.Reason;
+                }
+            }
+
+            return new GetHistoryResult(
+                ToolJson.Version, summary, history.Name, true, null, entries.Count, truncated, truncated ? entries[^1].Id : null, entries, diffView, note);
+        }
+        catch (HistoryException e)
+        {
+            throw new DenToolException(ToolErrorCodes.HistoryFailed, e.Message);
+        }
+
+        static HistoryChangeView Change(HistoryFileChange c) => new(c.Kind.ToString().ToLowerInvariant(), c.Path, c.OldPath);
+    }
 
     /// <summary>
     /// Full-text search over names, aliases, leads, and section text, every

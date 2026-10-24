@@ -12,7 +12,7 @@ namespace Wolfden.Mcp.Tests;
 /// </summary>
 public sealed class McpServerTests : IAsyncLifetime
 {
-    private static readonly string[] ToolNames = ["canon_as_of", "check", "get_entity", "list_entities", "search"];
+    private static readonly string[] ToolNames = ["canon_as_of", "check", "get_entity", "get_history", "list_entities", "search"];
 
     private readonly TempDen _den = TempDen.Dracula();
     private readonly StringWriter _log = new();
@@ -86,6 +86,8 @@ public sealed class McpServerTests : IAsyncLifetime
             ("list_entities", new() { ["type"] = "location" }, "\"entities\":"),
             ("canon_as_of", new() { ["position"] = "dracula:18" }, "\"pinned\":"),
             ("check", new() { ["severity"] = "error" }, "\"loaded\":true"),
+            // This den has no history backend: that's an answer, not an error.
+            ("get_history", new() { ["entity"] = "Lucy" }, "\"available\":false"),
         };
         foreach (var (tool, args, expect) in calls)
         {

@@ -63,7 +63,7 @@ public sealed class McpHandshakeTests
 
             // A call made while the first build is held up gets the den's notes.
             var tools = await client.ListToolsAsync(cancellationToken: cancel);
-            Assert.Equal(5, tools.Count);
+            Assert.Equal(6, tools.Count);
             Assert.Contains("Lucy Westenra", await Text(client.CallToolAsync("canon_as_of", new Dictionary<string, object?> { ["position"] = "dracula:5" }, cancellationToken: cancel)), StringComparison.Ordinal);
 
             // An edit made meanwhile is in what calls see once the watcher has started.
