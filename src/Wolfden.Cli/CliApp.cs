@@ -36,6 +36,13 @@ internal static class CliApp
     /// </summary>
     internal static volatile bool RunsUntilStopped;
 
+    /// <summary>
+    /// How commands run git (<c>init --git</c>, and history in <c>mcp</c>):
+    /// the user's own git, by default. Tests give git a configuration of
+    /// their own.
+    /// </summary>
+    internal static Wolfden.Git.GitOptions Git { get; set; } = Wolfden.Git.GitOptions.Default;
+
     /// <summary>Commands that work, in the order the usage lists them.</summary>
     internal static readonly string[] Commands = ["init", "check", "index", "query", "new-id", "mcp"];
 
