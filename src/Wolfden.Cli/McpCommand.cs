@@ -1,6 +1,7 @@
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using Wolfden.Core.Structure;
+using Wolfden.Git;
 using Wolfden.Index;
 using Wolfden.Mcp;
 
@@ -36,8 +37,8 @@ internal static class McpCommand
         """
         Runs Wolfden's MCP server over standard input and output, for an AI
         client such as an editor or a desktop assistant. Its tools only read
-        the den: search, get_entity, list_entities, canon_as_of, and check.
-        It keeps the den's index up to date as files change while it runs.
+        the den: search, get_entity, list_entities, canon_as_of, check, and
+        get_history (from git, when the den is in a git repository). It keeps the den's index up to date as files change while it runs.
         If another Wolfden is already watching the den (such as 'wolfden index
         --watch'), it relies on that one, and on a check of the files before
         each call, and doesn't take over the watch. Log messages go to
@@ -127,7 +128,7 @@ internal static class McpCommand
         try
         {
             var watcher = line.Has("--no-watch") ? null : WatcherFactory ?? WolfdenMcpServer.DefaultWatcher(root);
-            WolfdenMcpServer.RunAsync(transport, new DenTools(root) { PinnedUniverse = pinned }, CliApp.Version, error, watcher, stop)
+            WolfdenMcpServer.RunAsync(transport, new DenTools(root) { PinnedUniverse = pinned, History = () => GitHistory.ForDen(root, CliApp.Git) }, CliApp.Version, error, watcher, stop)
                 .GetAwaiter().GetResult();
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested)

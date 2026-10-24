@@ -39,7 +39,8 @@ public static class WolfdenMcpServer
 
         To draft or review a chapter without spoilers, use canon_as_of with that chapter's position, or get_entity with as_of.
         Without a position, get_entity, list_entities, and search give the author's full view, including ideas and material the
-        reader meets later. Use check for continuity problems. These tools only read; they never change the den's files.
+        reader meets later. Use check for continuity problems, and get_history for the checkpoints that changed an entity and
+        what changed since. These tools only read; they never change the den's files.
         """;
 
     /// <summary>The server's options: its name and version, its instructions, and its tools over <paramref name="tools"/>.</summary>

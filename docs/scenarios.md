@@ -1122,6 +1122,28 @@ Spec: F-DEN-1, F-ID-3, design.md §7 (maintainer decision, 2026-10-23). Covered 
 `CheckUniverseTests.ABrokenDenYamlIsStillReported`,
 `CheckUniverseTests.AnUnknownUniverseOrFixWithAUniverseExitsTwo`.
 
+### SC-CLI-12. I want history from the start
+
+The writer runs `wolfden init kestrel-notes --universe the-long-dark
+--git`. Another time they run `wolfden init vael-notes --git` inside
+`writing/`, which is already a git repository. A third time, git isn't
+installed.
+
+- With git, the new folder is also a git repository, with nothing
+  committed yet, and the output says so; the den checks clean, and its
+  first checkpoint records `den.yaml` and the universe. Inside
+  `writing/`, no new repository is made: the output names the
+  repository the den is in, and its history is scoped to the den's
+  files there. Without git, the den is still made, the output says the
+  repository wasn't and how to make one later, and `init` exits 0.
+  Without `--git`, the den is a plain folder.
+
+Spec: F-LAY-1, design.md §6, §7 (maintainer decision, #57, #122). Covered by:
+`InitGitTests.WithGitTheNewDenIsARepositoryWithHistory`,
+`InitGitTests.InsideARepositoryItSaysSoAndMakesNoNewOne`,
+`InitGitTests.WithoutGitInstalledTheDenIsStillMadeAndItExplains`,
+`InitGitTests.WithoutTheFlagTheDenIsAPlainFolder`.
+
 ## WATCH: keeping the index up to date while notes change
 
 Background: `wolfden index --watch` (design.md §7, #14) keeps the index up
@@ -1515,6 +1537,28 @@ Spec: F-DEN-1, F-ID-3, design.md §7, §8 (maintainer decision, 2026-10-23). Cov
 `UniverseChoiceTests.WhenTheIndexCantBeBuiltTheScopedCheckSaysTheIdComparisonWasSkipped`,
 `UniverseChoiceTests.ABrokenPackOrDenYamlIsReportedWhenAUniverseIsGiven`.
 
+### SC-MCP-14. My assistant looks at a note's history
+
+The writer's den is a git repository. They ask the assistant what changed
+in Lucy Westenra's note, and what they've changed since the last
+checkpoint.
+
+- `get_history` with `entity: "Lucy Westenra"` lists the checkpoints that
+  changed her file, newest first, each with its id, time, author,
+  message, and files, and none that only changed other notes. With
+  `limit: 1`, the result is `truncated` and gives `next_before`; asking
+  again with `before` set to it gives the older checkpoint. `diff: true`
+  adds what changed in her file since the latest checkpoint, and
+  `diff_from` with a checkpoint's id, what changed since that one. In a
+  den without history, the result isn't an error: `available` is false
+  and `reason` says the den has no history. A `before` or `diff_from`
+  that isn't one of the checkpoints is `unknown_checkpoint`.
+
+Spec: design.md §6, §8 (#19). Covered by:
+`HistoryToolTests.TheAssistantSeesAnEntitysCheckpointsAPageAtATimeAndWhatChangedSince`,
+`HistoryToolTests.WithoutHistoryTheAnswerSaysSoAndIsntAnError`,
+`McpCommandTests.OverStdioHistoryComesFromGit`.
+
 ## STORE: Wolfden saves, moves, and deletes notes
 
 Background: the den store (design.md §6, #121) is how Wolfden writes a
@@ -1646,4 +1690,146 @@ Spec: F-BOOK-1, design.md §5, §6. Covered by:
 `HistoryProviderTests.ADenWithoutABackendHasNoHistoryCapabilities`,
 `HistoryProviderTests.EveryOperationSaysHistoryIsntAvailableWithoutThrowing`,
 `HistoryProviderTests.TheMessagesSendTheWriterNowhereTheyCantGo`,
-`HistoryProviderTests.ADenWithoutHistoryStillLoadsAndChecks`.
+`HistoryProviderTests.ADenWithoutHistoryStillLoadsAndChecks`,
+`GitHistoryTests.ADenOutsideAnyRepositoryHasNoHistory`,
+`GitHistoryTests.AGitAboveACeilingDirectoryDoesntCount`,
+`FreezeTagTests.WithoutHistoryTheBookIsStillFrozenButNotTagged`.
+
+The scenarios below have a den in a git repository, read through the git
+provider (design.md §6), which runs the writer's own `git`.
+
+### SC-HIST-2. I look back through a note's history
+
+The writer has checkpointed Mara Voss's note three times over a month,
+once on a branch they later merged, and asks for its history.
+
+- The checkpoints that changed her file are listed newest first, each
+  with its message (all of it), author, time, and the files it changed;
+  checkpoints that only changed other notes aren't. The den's whole
+  history lists every checkpoint. Asking a page at a time, with each
+  page starting after the last page's final checkpoint, lists every
+  checkpoint once, those that came in through the merge included, in
+  the same order as the whole list, even when a page ends on a
+  checkpoint from the merged branch. A starting point that isn't one of
+  the listed checkpoints is refused. Names with spaces, accents, or
+  brackets come back as they are.
+
+Spec: design.md §6 (#19). Covered by:
+`GitHistoryTests.ANotesHistoryListsTheCheckpointsThatChangedItNewestFirst`,
+`GitHistoryTests.TheLogPagesWithALimitAndABeforeRevisionThroughAMerge`,
+`GitHistoryTests.APageThatEndsOnAMergedBranchsCommitLosesNoOlderMainLineCommit`,
+`GitHistoryTests.NamesWithSpacesAndAccentsComeBackAsTheyAre`.
+
+### SC-HIST-3. I make a checkpoint at the end of a session
+
+The writer edited Mara's note, deleted Fen Harbour's, and added a new
+item, then makes a checkpoint, "End of chapter 14 session".
+
+- One commit records all three changes, and the checkpoint lists them.
+  A second checkpoint straight after has nothing to record and makes no
+  commit. A checkpoint of only Mara's note records only it, and the new
+  note that wasn't named stays as it was. The first checkpoint of a new
+  repository works too. A checkpoint needs a message, without control
+  characters other than line breaks and tabs. If the writer's
+  pre-commit hook refuses the commit, the checkpoint says git refused
+  it and why, nothing is recorded, and the new note is untracked again,
+  as it was before.
+
+Spec: design.md §6 (#19). Covered by:
+`GitHistoryTests.ACheckpointRecordsNewChangedAndDeletedNotes`,
+`GitHistoryTests.ACheckpointCanRecordOnlySomeNotes`,
+`GitHistoryTests.TheFirstCheckpointOfANewRepositoryWorks`,
+`GitHistoryTests.ACheckpointNeedsAMessage`,
+`GitHistoryTests.ACheckpointMessageCantHoldControlCharacters`,
+`GitHistoryTests.ACheckpointAHookRefusesLeavesTheNewFilesUntracked`,
+`GitHistoryTests.ACheckpointCancelledAfterGitCommittedKeepsTheNewFilesTracked`.
+
+### SC-HIST-4. My AI assistant makes a checkpoint
+
+An assistant writing through MCP makes a checkpoint of the notes it
+added.
+
+- The commit is the writer's, with their name and signing as git is set
+  up, and the message ends with a `Co-Authored-By:` line naming the
+  assistant. A co-author that isn't `Name <email>` on one line is
+  refused, and nothing is committed.
+
+Spec: design.md §6, §8 (#19, #21). Covered by:
+`GitHistoryTests.AnAgentsCheckpointRecordsItAsACoAuthor`,
+`GitHistoryTests.ACoAuthorIsANameAndAnEmailOnOneLine`.
+
+### SC-HIST-5. My den is one folder of a bigger repository
+
+The writer keeps `writing/vael-notes/` as a den inside a repository that
+also holds a README and a blog. They've staged a README change by hand,
+and edited a blog post without staging it. Their editor keeps settings
+in `.obsidian/`, and swap files next to notes.
+
+- The den's history lists only commits that changed the den's files,
+  with paths relative to the den. A checkpoint commits only the den's
+  files: the staged README change stays staged and out of it, and the
+  blog post stays as it was. Hidden files and folders (`.obsidian/`,
+  `.wolfden/`, swap files) are never committed, compared, or listed,
+  and a commit made by hand that only touched them isn't in the den's
+  history. Asking for a hidden path's history is refused.
+
+Spec: F-LAY-2, design.md §6 (maintainer decision, #57). Covered by:
+`GitHistoryTests.ADenInALargerRepositoryHasOnlyItsOwnHistory`,
+`GitHistoryTests.ACheckpointLeavesWhatTheUserStagedOutsideTheDenAsItWas`,
+`GitHistoryTests.HiddenPathsAreNeverRecordedOrReported`.
+
+### SC-HIST-6. What have I changed since my last checkpoint?
+
+The writer edited one note, deleted another, and made a new one, and
+hasn't checkpointed yet.
+
+- A diff since the latest checkpoint shows all three, the new note
+  included although git doesn't track it yet, each with a unified diff.
+  Asking for the diff doesn't stage anything: `git status` is the same
+  afterwards. A diff of one file shows only it, and a diff between two
+  checkpoints shows a moved note as a rename. A checkpoint that isn't
+  in the repository is an error that says so, and a revision is never
+  read as a git option.
+
+Spec: design.md §6 (#19). Covered by:
+`GitHistoryTests.ADiffSinceTheLatestCheckpointShowsNewChangedAndDeletedNotesAndLeavesTheIndexAlone`,
+`GitHistoryTests.ADiffBetweenTwoCheckpointsShowsARename`,
+`GitHistoryTests.ARevisionThatIsntOneIsAHistoryException`.
+
+### SC-HIST-7. I freeze a finished book
+
+The writer freezes Ember, book `ember` of universe `vael`, and later
+adds more notes. Another den in the same repository also has a book
+`ember` in a universe `vael`, and is frozen afterwards.
+
+- The tag `book/vael/ember/final` names the latest checkpoint of the
+  den. Freezing again, or freezing the other den's Ember, leaves the
+  tag where it is and says the repository already has it; Wolfden never
+  moves or replaces a tag. In a repository where nothing in the den has
+  been checkpointed yet, there's nothing to tag, and freezing says so
+  (the book is still frozen). A tag name git doesn't accept, or one
+  git would read as something else (`HEAD`, `@`, `refs/...`), is
+  refused. A tag without a message works even when the writer's git
+  signs tags.
+
+Spec: F-BOOK-1, design.md §5 (maintainer decision, #31). Covered by:
+`FreezeTagTests.TheTagIsNamedForTheUniverseAndTheBook`,
+`FreezeTagTests.FreezingTagsTheLatestCheckpointOnceAndNeverMovesTheTag`,
+`FreezeTagTests.AnotherDenInTheRepositoryWithTheSameKeysDoesntMoveTheTag`,
+`FreezeTagTests.BeforeAnyCheckpointThereIsNothingToTag`,
+`GitHistoryTests.ATagNamesTheLatestCheckpointAndIsNeverMoved`,
+`GitHistoryTests.ATagNameMustBeOneGitAccepts`,
+`GitHistoryTests.ALightweightTagWorksWhenGitSignsTags`.
+
+### SC-HIST-8. Git isn't installed
+
+The writer's den is in a repository, but this machine has no `git` on the
+PATH.
+
+- Each history operation says that git isn't installed, or can't be
+  found, so that isn't available, and how to get history; none throws.
+  A checkpoint's message adds that the edits are still saved in the
+  files.
+
+Spec: design.md §6 (maintainer decision, 2026-10-22). Covered by:
+`GitHistoryTests.WithoutGitEveryOperationSaysSoWithoutThrowing`.
