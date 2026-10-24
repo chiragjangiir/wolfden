@@ -656,9 +656,12 @@ and `wolfden check` do:
   slow build never delays the handshake. A client that waits too long
   for `server/discover` falls back to `initialize`, which the server
   refuses once it has answered the late probe (#135). If the watcher
-  can't start because of an I/O error, such as a call holding the index
-  open on Windows while the first build replaces it, the server tries
-  again a few times before going on without it. The server doesn't pin
+  can't start because of an error that can clear, such as a call holding
+  the index open on Windows while the first build replaces it, or SQLite
+  finding the index busy, the server tries again a few times before
+  going on without it. Other errors, such as `.wolfden` being a file,
+  don't clear by themselves, so it goes on without a watcher at once
+  (#137). The server doesn't pin
   an MCP protocol version: it serves both the 2026-07-28 revision and
   the `initialize` handshake, so older clients keep working.
 

@@ -1,5 +1,7 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -113,10 +115,12 @@ public static class WolfdenMcpServer
     /// when no watcher runs.
     /// </para>
     /// <para>
-    /// If the watcher can't start because of an I/O error, such as a tool
-    /// call holding the index open when the first build replaces it, it tries
-    /// again a few times (<see cref="WatcherRetryDelays"/>) before the server
-    /// goes on without one.
+    /// If the watcher can't start because of an error that can clear, such
+    /// as a tool call holding the index open when the first build replaces
+    /// it, it tries again a few times (<see cref="WatcherRetryDelays"/>)
+    /// before the server goes on without one. After an error that can't
+    /// clear by itself, such as <c>.wolfden</c> being a file, it goes on
+    /// without one at once.
     /// </para>
     /// </remarks>
     public static Task RunAsync(
@@ -128,7 +132,7 @@ public static class WolfdenMcpServer
         return RunAsync(transport, tools, version, log, watch ? DefaultWatcher(tools.Root) : null, cancellationToken);
     }
 
-    /// <summary>How long the server waits before each new try at starting a watcher whose start failed with an I/O error.</summary>
+    /// <summary>How long the server waits before each new try at starting a watcher whose start failed with an error that can clear (<see cref="CanClear"/>).</summary>
     internal static readonly IReadOnlyList<TimeSpan> WatcherRetryDelays =
         [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30)];
 
@@ -156,6 +160,9 @@ public static class WolfdenMcpServer
         await using var server = McpServer.Create(transport, Options(tools, version), logs);
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
+        // Which failed first, the server or the watcher, so a knock-on error is never reported as the cause.
+        var firstToFail = new StrongBox<int>();
+
         // Serve first: the client's first message is answered while the watcher builds the index.
         var watching = startWatcher is null
             ? Task.FromResult<DenWatcher?>(null)
@@ -179,6 +186,7 @@ public static class WolfdenMcpServer
                     catch
                     {
                         // A failure StartWatcher doesn't expect stops the server, and is reported below.
+                        Interlocked.CompareExchange(ref firstToFail.Value, WatcherFailedFirst, 0);
                         stop.Cancel();
                         throw;
                     }
@@ -197,6 +205,7 @@ public static class WolfdenMcpServer
         catch (Exception e)
         {
             failure = ExceptionDispatchInfo.Capture(e);
+            Interlocked.CompareExchange(ref firstToFail.Value, ServerFailedFirst, 0);
         }
 
         // The server has stopped, say because the client closed standard
@@ -212,8 +221,10 @@ public static class WolfdenMcpServer
         }
         catch (Exception e) when (failure is not null)
         {
-            // The server's own failure comes first.
-            throw new AggregateException(failure.SourceException, e);
+            // Both failed: the one that failed first is the cause, and comes first.
+            throw firstToFail.Value == WatcherFailedFirst
+                ? new AggregateException(e, failure.SourceException)
+                : new AggregateException(failure.SourceException, e);
         }
         finally
         {
@@ -223,11 +234,17 @@ public static class WolfdenMcpServer
         failure?.Throw();
     }
 
+    private const int ServerFailedFirst = 1;
+    private const int WatcherFailedFirst = 2;
+
     /// <summary>
     /// Starts a watcher on the den, or returns null after logging why it
-    /// couldn't. After an I/O error it tries again after each of
-    /// <paramref name="retryDelays"/> in turn, unless <paramref name="stop"/>
-    /// is cancelled meanwhile.
+    /// couldn't. After an error that can clear (<see cref="CanClear"/>) it
+    /// tries again after each of <paramref name="retryDelays"/> in turn,
+    /// unless <paramref name="stop"/> is cancelled meanwhile. Another
+    /// watcher on the den, or an error that can't clear by itself, such as
+    /// a missing den folder, <c>.wolfden</c> being a file, or the index path
+    /// being a folder, gives up at once.
     /// </summary>
     internal static DenWatcher? StartWatcher(
         string root, TextWriter log, IReadOnlyList<TimeSpan> retryDelays, Func<string, DenWatcher> create, CancellationToken stop)
@@ -247,33 +264,47 @@ public static class WolfdenMcpServer
                 Log(log, $"wolfden mcp: serving the den at '{root}', keeping its index up to date as files change.");
                 return watcher;
             }
-            catch (InvalidOperationException e)
+            catch (DenAlreadyWatchedException e)
             {
                 watcher.Dispose();
                 Log(log, $"wolfden mcp: serving the den at '{root}' without its own watcher: {e.Message} Each call checks the files first.");
                 return null;
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+            catch (Exception e) when (CanClear(e) && attempt < retryDelays.Count)
             {
                 watcher.Dispose();
-                if (attempt >= retryDelays.Count)
-                {
-                    Log(log, $"wolfden mcp: couldn't watch the den at '{root}': {e.Message} Each call checks the files first.");
-                    return null;
-                }
-
                 var delay = retryDelays[attempt];
                 Log(
                     log,
                     $"wolfden mcp: couldn't start watching the den at '{root}' yet: {e.Message} Trying again in " +
-                    $"{delay.TotalSeconds.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)} s; meanwhile each call checks the files first.");
+                    $"{delay.TotalSeconds.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)} s.");
                 if (stop.WaitHandle.WaitOne(delay))
                 {
                     return null;
                 }
             }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or SqliteException or InvalidOperationException)
+            {
+                watcher.Dispose();
+                Log(log, $"wolfden mcp: couldn't watch the den at '{root}': {e.Message} Each call checks the files first.");
+                return null;
+            }
         }
     }
+
+    /// <summary>
+    /// True for a failed start that can succeed if tried again soon: the
+    /// rebuilt index couldn't replace one a query held open
+    /// (<see cref="IndexInUseException"/>), or SQLite found the index busy
+    /// or locked. Other errors, such as a missing den folder or a file
+    /// where <c>.wolfden</c> should be, stay until the writer fixes them.
+    /// </summary>
+    internal static bool CanClear(Exception e) =>
+        e is IndexInUseException || e is SqliteException { SqliteErrorCode: SqliteBusy or SqliteLocked };
+
+    // SQLite's primary result codes for a database another connection is using (sqlite.org/rescode.html).
+    private const int SqliteBusy = 5;
+    private const int SqliteLocked = 6;
 
     private static void Log(TextWriter log, string message)
     {

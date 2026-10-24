@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Wolfden.Core.Structure;
 
 namespace Wolfden.Index;
@@ -49,6 +50,16 @@ public sealed class DenWatcher : IDisposable
 
     /// <summary>How soon a file that couldn't be read, because it was still being written, is tried again.</summary>
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>
+    /// One gate per watch lock file in this process. <see cref="IsWatching"/>
+    /// opens the file for a moment, which would make <see cref="TakeLock"/>
+    /// fail as if another watcher held it, so in this process the two take
+    /// turns. A probe from another process can still collide; TakeLock
+    /// retries for that.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, object> LockFileGates =
+        new(OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
     private readonly string _root;
     private readonly FileSystemDenStore _store;
@@ -162,8 +173,9 @@ public sealed class DenWatcher : IDisposable
     /// disposed. Returns the first build. Events that arrive during it are
     /// applied after it.
     /// </summary>
-    /// <exception cref="InvalidOperationException">It's already started, or another watcher, in this process or another, is watching the den.</exception>
-    /// <exception cref="IOException">The index couldn't be built (see <see cref="IndexBuilder.Rebuild"/>).</exception>
+    /// <exception cref="InvalidOperationException">It's already started.</exception>
+    /// <exception cref="DenAlreadyWatchedException">Another watcher, in this process or another, is watching the den.</exception>
+    /// <exception cref="IOException">The index couldn't be built (see <see cref="IndexBuilder.Rebuild(string)"/>).</exception>
     public IndexUpdate Start()
     {
         ObjectDisposedException.ThrowIf(_disposed != 0, this);
@@ -288,7 +300,11 @@ public sealed class DenWatcher : IDisposable
         try
         {
             // Opening it with sharing fails only while a watcher holds it with none.
-            using var probe = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            lock (GateFor(path))
+            {
+                using var probe = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            }
+
             return false;
         }
         catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException or UnauthorizedAccessException)
@@ -301,25 +317,34 @@ public sealed class DenWatcher : IDisposable
         }
     }
 
+    private static object GateFor(string lockPath) => LockFileGates.GetOrAdd(lockPath, _ => new object());
+
     private void TakeLock()
     {
         var folder = Path.Combine(_root, IndexBuilder.StateFolder);
         Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, LockFileName);
         for (var attempt = 1; ; attempt++)
         {
             try
             {
-                _lock = new FileStream(Path.Combine(folder, LockFileName), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                // An IsWatching probe in this process waits for this, so only
+                // a watcher, or a probe from another process, can be in the way.
+                lock (GateFor(path))
+                {
+                    _lock = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                }
+
                 return;
             }
-            catch (IOException e)
+            catch (IOException e) when (File.Exists(path))
             {
                 if (attempt >= 3)
                 {
-                    throw new InvalidOperationException($"Another Wolfden process is already watching the den at '{_root}'.", e);
+                    throw new DenAlreadyWatchedException($"Another Wolfden watcher is already watching the den at '{_root}'.", e);
                 }
 
-                // A query looking to see whether a watcher runs (IsWatching) holds the file for a moment.
+                // Another process's IsWatching probe holds the file for a moment.
                 Thread.Sleep(50);
             }
         }
@@ -556,5 +581,30 @@ public sealed class DenWatcher : IDisposable
         public void Lost() => watcher.OnLost(this);
 
         public void Broken(Exception error) => watcher.OnBroken(this, error);
+    }
+}
+
+/// <summary>
+/// A <see cref="DenWatcher"/> can't start because another watcher, in this
+/// process or another, holds the den's watch lock. That watcher keeps the
+/// index up to date, so a host can go on without its own.
+/// </summary>
+public sealed class DenAlreadyWatchedException : InvalidOperationException
+{
+    /// <summary>An exception with a message for the writer.</summary>
+    public DenAlreadyWatchedException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>An exception with no message.</summary>
+    public DenAlreadyWatchedException()
+    {
+    }
+
+    /// <summary>An exception with a message and the exception that caused it.</summary>
+    public DenAlreadyWatchedException(string message, Exception innerException)
+        : base(message, innerException)
+    {
     }
 }

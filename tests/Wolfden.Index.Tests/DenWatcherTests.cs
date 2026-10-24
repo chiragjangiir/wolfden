@@ -88,9 +88,39 @@ public sealed class DenWatcherTests
         first.Start();
         using var second = new DenWatcher(den.Root);
 
-        var e = Assert.Throws<InvalidOperationException>(() => second.Start());
+        var e = Assert.Throws<DenAlreadyWatchedException>(() => second.Start());
 
         Assert.Contains("already watching", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProbesInThisProcessNeverLookLikeAnotherWatcher()
+    {
+        // IsWatching opens the lock file for a moment. In this process it
+        // takes turns with a starting watcher, so however often calls look,
+        // the start isn't mistaken for a second watcher (#137).
+        using var den = TempDen.Starfall();
+        using var done = new CancellationTokenSource();
+        var probes = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        {
+            while (!done.IsCancellationRequested)
+            {
+                DenWatcher.IsWatching(den.Root);
+            }
+        })).ToArray();
+        try
+        {
+            for (var i = 0; i < 20; i++)
+            {
+                using var watcher = new DenWatcher(den.Root);
+                watcher.Start();
+            }
+        }
+        finally
+        {
+            done.Cancel();
+            await Task.WhenAll(probes);
+        }
     }
 
     [Fact]

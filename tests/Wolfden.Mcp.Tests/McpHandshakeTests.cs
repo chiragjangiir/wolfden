@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Pipelines;
+using System.Threading.Channels;
 using Microsoft.Data.Sqlite;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -32,20 +34,34 @@ public sealed class McpHandshakeTests
         var toClient = new Pipe();
         var cancel = TestContext.Current.CancellationToken;
 
+        // An index from before an edit, so a call finds the files changed and
+        // waits for the watcher rather than building a missing index (#137).
+        IndexBuilder.Rebuild(den.Root);
+        File.AppendAllText(Path.Combine(den.Root, LucyPath), "\nHer diary mentions a quillwhistle.\n");
+        var root = Path.GetFullPath(den.Root);
+        var builds = IndexBuilder.RebuildCounts[root];
+
         // The watcher's start is held up inside, holding the watch lock and listening, just before its first build.
-        var server = Serve(den, log, toServer, toClient, stop.Token, (watchLog, watchStop) => WolfdenMcpServer.StartWatcher(
-            den.Root,
-            watchLog,
-            [],
-            root => new DenWatcher(root)
-            {
-                BeforeFirstBuild = () =>
+        var server = Serve(
+            den,
+            log,
+            toServer,
+            toClient,
+            stop.Token,
+            (watchLog, watchStop) => WolfdenMcpServer.StartWatcher(
+                den.Root,
+                watchLog,
+                [],
+                r => new DenWatcher(r)
                 {
-                    holding.Set();
-                    mayBuild.Wait(TimeSpan.FromSeconds(60), watchStop);
+                    BeforeFirstBuild = () =>
+                    {
+                        holding.Set();
+                        mayBuild.Wait(TimeSpan.FromSeconds(60), watchStop);
+                    },
                 },
-            },
-            watchStop));
+                watchStop),
+            watcherWait: TimeSpan.FromSeconds(60));
         try
         {
             using var connect = CancellationTokenSource.CreateLinkedTokenSource(cancel);
@@ -60,18 +76,23 @@ public sealed class McpHandshakeTests
             Assert.True(holding.Wait(TimeSpan.FromSeconds(30), cancel));
             Assert.False(mayBuild.IsSet);
             Assert.True(DenWatcher.IsWatching(den.Root));
-
-            // A call made while the first build is held up gets the den's notes.
             var tools = await client.ListToolsAsync(cancellationToken: cancel);
             Assert.Equal(5, tools.Count);
-            Assert.Contains("Lucy Westenra", await Text(client.CallToolAsync("canon_as_of", new Dictionary<string, object?> { ["position"] = "dracula:5" }, cancellationToken: cancel)), StringComparison.Ordinal);
 
-            // An edit made meanwhile is in what calls see once the watcher has started.
-            File.AppendAllText(Path.Combine(den.Root, LucyPath), "\nHer diary mentions a quillwhistle.\n");
+            // A call made while the first build is held up finds the files
+            // changed and waits for the watcher, without rebuilding the index.
+            var search = Text(client.CallToolAsync("search", new Dictionary<string, object?> { ["query"] = "quillwhistle" }, cancellationToken: cancel));
+            await Task.Delay(500, cancel);
+            Assert.False(search.IsCompleted, "The call didn't wait for the watcher.");
+            Assert.Equal(builds, IndexBuilder.RebuildCounts[root]);
+
+            // Once the watcher builds, the call sees the edit, and only the watcher rebuilt the index.
             mayBuild.Set();
+            Assert.Contains("lucy-westenra", await search, StringComparison.Ordinal);
             await WaitFor(() => log.ToString().Contains("keeping its index up to date", StringComparison.Ordinal), cancel);
             Assert.True(DenWatcher.IsWatching(den.Root));
-            Assert.Contains("lucy-westenra", await Text(client.CallToolAsync("search", new Dictionary<string, object?> { ["query"] = "quillwhistle" }, cancellationToken: cancel)), StringComparison.Ordinal);
+            Assert.Equal(builds + 1, IndexBuilder.RebuildCounts[root]);
+            Assert.Equal(IndexStatus.Current, IndexBuilder.CheckFiles(den.Root));
         }
         finally
         {
@@ -185,17 +206,181 @@ public sealed class McpHandshakeTests
         Assert.Equal("the watcher broke", error.Message);
     }
 
+    [Fact]
+    public async Task WhenAWatcherThatFailsToStartBreaksTheServerTooItsErrorComesFirst()
+    {
+        using var den = TempDen.Dracula();
+        using var log = new LockedLog();
+        var transport = new BreakingTransport();
+
+        // The watcher fails while the server reads; stopping the server then breaks its transport too.
+        var server = Serve(den, log, transport, TestContext.Current.CancellationToken, (_, _) =>
+        {
+            Assert.True(transport.Reading.Task.Wait(TimeSpan.FromSeconds(30)), "the server didn't start reading");
+            throw new FormatException("the watcher broke");
+        });
+
+        var error = await Assert.ThrowsAsync<AggregateException>(() => server.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+        Assert.Collection(
+            error.InnerExceptions,
+            e => Assert.Equal("the watcher broke", Assert.IsType<FormatException>(e).Message),
+            e => Assert.Equal("the pipe broke", Assert.IsType<IOException>(e).Message));
+    }
+
+    [Fact]
+    public async Task WhenTheServerFailsFirstItsErrorComesFirst()
+    {
+        using var den = TempDen.Dracula();
+        using var log = new LockedLog();
+        var transport = new BreakingTransport();
+
+        // The transport breaks while the watcher starts; the watcher then fails once the server stops.
+        var server = Serve(den, log, transport, TestContext.Current.CancellationToken, (_, watchStop) =>
+        {
+            Assert.True(transport.Reading.Task.Wait(TimeSpan.FromSeconds(30)), "the server didn't start reading");
+            transport.Break.TrySetResult();
+            Assert.True(watchStop.WaitHandle.WaitOne(TimeSpan.FromSeconds(30)), "the server didn't say it had stopped");
+            throw new FormatException("the watcher broke");
+        });
+
+        var error = await Assert.ThrowsAsync<AggregateException>(() => server.WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken));
+        Assert.Collection(
+            error.InnerExceptions,
+            e => Assert.Equal("the pipe broke", Assert.IsType<IOException>(e).Message),
+            e => Assert.Equal("the watcher broke", Assert.IsType<FormatException>(e).Message));
+    }
+
+    [Theory]
+    [InlineData("a file where .wolfden belongs")]
+    [InlineData("a folder where the index belongs")]
+    [InlineData("no den folder")]
+    [InlineData("a corrupt index")]
+    public void AWatcherThatCantStartForAReasonThatWontClearGivesUpAtOnce(string problem)
+    {
+        using var den = TempDen.Dracula();
+        var root = den.Root;
+        Action? beforeBuild = null;
+        switch (problem)
+        {
+            case "a file where .wolfden belongs":
+                File.WriteAllText(Path.Combine(root, IndexBuilder.StateFolder), "not a folder");
+                break;
+            case "a folder where the index belongs":
+                Directory.CreateDirectory(IndexBuilder.IndexPath(root));
+                break;
+            case "no den folder":
+                root = Path.Combine(root, "missing");
+                break;
+            default:
+                beforeBuild = () => throw new SqliteException("database disk image is malformed", 11);
+                break;
+        }
+
+        using var log = new StringWriter();
+        var tries = 0;
+
+        var watcher = WolfdenMcpServer.StartWatcher(
+            root,
+            log,
+            Enumerable.Repeat(TimeSpan.FromMilliseconds(10), 5).ToList(),
+            r =>
+            {
+                tries++;
+                return new DenWatcher(r) { BeforeFirstBuild = beforeBuild };
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(watcher);
+        Assert.Equal(1, tries);
+        Assert.Contains("couldn't watch the den", log.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Trying again", log.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(5)] // SQLITE_BUSY
+    [InlineData(6)] // SQLITE_LOCKED
+    [InlineData(0)] // the rebuilt index couldn't replace one held open
+    public void AWatcherThatCantStartForAReasonThatCanClearTriesAgain(int sqliteCode)
+    {
+        using var den = TempDen.Dracula();
+        using var log = new StringWriter();
+        var tries = 0;
+
+        using var watcher = WolfdenMcpServer.StartWatcher(
+            den.Root,
+            log,
+            Enumerable.Repeat(TimeSpan.FromMilliseconds(10), 5).ToList(),
+            r => new DenWatcher(r)
+            {
+                BeforeFirstBuild = () =>
+                {
+                    if (++tries == 1)
+                    {
+                        throw sqliteCode == 0 ? new IndexInUseException("The index is in use.") : new SqliteException("database is locked", sqliteCode);
+                    }
+                },
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(watcher);
+        Assert.Equal(2, tries);
+        var text = log.ToString();
+        Assert.Contains("Trying again in 0 s.", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("meanwhile", text, StringComparison.Ordinal);
+        Assert.Contains("keeping its index up to date", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnotherWatcherOnTheDenIsNotTriedAgain()
+    {
+        using var den = TempDen.Dracula();
+        using var first = new DenWatcher(den.Root);
+        first.Start();
+        using var log = new StringWriter();
+        var tries = 0;
+
+        var watcher = WolfdenMcpServer.StartWatcher(
+            den.Root,
+            log,
+            Enumerable.Repeat(TimeSpan.FromMilliseconds(10), 5).ToList(),
+            r =>
+            {
+                tries++;
+                return new DenWatcher(r);
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(watcher);
+        Assert.Equal(1, tries);
+        Assert.Contains("without its own watcher", log.ToString(), StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// Runs the server on a thread of its own, as in a process of its own:
     /// a server that waited for the watcher before serving mustn't hold up
     /// the client too.
     /// </summary>
     private static Task Serve(
-        TempDen den, TextWriter log, Pipe toServer, Pipe toClient, CancellationToken stop, Func<TextWriter, CancellationToken, DenWatcher?> startWatcher) =>
+        TempDen den,
+        TextWriter log,
+        Pipe toServer,
+        Pipe toClient,
+        CancellationToken stop,
+        Func<TextWriter, CancellationToken, DenWatcher?> startWatcher,
+        TimeSpan? watcherWait = null) =>
+        Serve(den, log, new StreamServerTransport(toServer.Reader.AsStream(), toClient.Writer.AsStream(), "wolfden"), stop, startWatcher, watcherWait);
+
+    private static Task Serve(
+        TempDen den,
+        TextWriter log,
+        ITransport transport,
+        CancellationToken stop,
+        Func<TextWriter, CancellationToken, DenWatcher?> startWatcher,
+        TimeSpan? watcherWait = null) =>
         Task.Run(
             () => WolfdenMcpServer.RunAsync(
-                new StreamServerTransport(toServer.Reader.AsStream(), toClient.Writer.AsStream(), "wolfden"),
-                new DenTools(den.Root),
+                transport,
+                new DenTools(den.Root) { WatcherWait = watcherWait ?? IndexBuilder.WatcherWait },
                 "0.1.0-test",
                 log,
                 startWatcher,
@@ -228,6 +413,54 @@ public sealed class McpHandshakeTests
         {
             Assert.True(waited.Elapsed < TimeSpan.FromSeconds(60), "timed out waiting");
             await Task.Delay(50, cancel);
+        }
+    }
+
+    /// <summary>
+    /// A transport with no client, whose read breaks with an I/O error, not
+    /// a cancellation, when the server stops or the test sets <see cref="Break"/>,
+    /// as a pipe can when its other end goes.
+    /// </summary>
+    private sealed class BreakingTransport : ITransport
+    {
+        private readonly BreakingReader _reader = new();
+
+        /// <summary>Set once the server waits to read.</summary>
+        public TaskCompletionSource Reading => _reader.Reading;
+
+        /// <summary>Set to break the read.</summary>
+        public TaskCompletionSource Break => _reader.Break;
+
+        public string? SessionId => null;
+
+        public ChannelReader<JsonRpcMessage> MessageReader => _reader;
+
+        public Task SendMessageAsync(JsonRpcMessage message, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        private sealed class BreakingReader : ChannelReader<JsonRpcMessage>
+        {
+            public TaskCompletionSource Reading { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public TaskCompletionSource Break { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public override bool TryRead([MaybeNullWhen(false)] out JsonRpcMessage item)
+            {
+                item = null;
+                return false;
+            }
+
+            public override async ValueTask<bool> WaitToReadAsync(CancellationToken cancellationToken = default)
+            {
+                Reading.TrySetResult();
+                using (cancellationToken.Register(() => Break.TrySetResult()))
+                {
+                    await Break.Task.ConfigureAwait(false);
+                }
+
+                throw new IOException("the pipe broke");
+            }
         }
     }
 
