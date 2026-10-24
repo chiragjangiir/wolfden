@@ -22,6 +22,9 @@ internal sealed class YamlBlock
     private readonly SourceText _source;
     private readonly List<Diagnostic> _diagnostics = [];
 
+    /// <summary>How many flow collections (<c>[...]</c>, <c>{...}</c>) enclose the node being read.</summary>
+    private int _flowDepth;
+
     private YamlBlock(SourceText source, int start, int end)
     {
         _source = source;
@@ -199,6 +202,11 @@ internal sealed class YamlBlock
                     }
                 }
 
+                if (style == YamlScalarStyle.Plain)
+                {
+                    CheckColonBeforeFlowIndicator(scalar.Value, start, end);
+                }
+
                 parser.MoveNext();
                 return new YamlScalar(scalar.Value, style, LineOf(start), start, end, lastLine);
             }
@@ -209,10 +217,13 @@ internal sealed class YamlBlock
                 var isFlow = sequenceStart.Style == SequenceStyle.Flow;
                 var items = new List<YamlNode>();
                 parser.MoveNext();
+                _flowDepth += isFlow ? 1 : 0;
                 while (parser.Current is not SequenceEnd)
                 {
                     items.Add(ReadNode(parser, depth + 1));
                 }
+
+                _flowDepth -= isFlow ? 1 : 0;
 
                 var end = CollectionEnd(isFlow, (SequenceEnd)parser.Current, items.Count > 0 ? items[^1].ContentEnd : start);
                 int? lastLine = !isFlow && items.Count > 0 ? items[^1].LastLineOffset : null;
@@ -227,6 +238,7 @@ internal sealed class YamlBlock
                 var entries = new List<YamlEntry>();
                 var seen = new HashSet<string>(StringComparer.Ordinal);
                 parser.MoveNext();
+                _flowDepth += isFlow ? 1 : 0;
                 while (parser.Current is not MappingEnd)
                 {
                     var key = ReadNode(parser, depth + 1);
@@ -245,6 +257,8 @@ internal sealed class YamlBlock
 
                     entries.Add(new YamlEntry(key, value));
                 }
+
+                _flowDepth -= isFlow ? 1 : 0;
 
                 var end = CollectionEnd(isFlow, (MappingEnd)parser.Current, entries.Count > 0 ? entries[^1].Value.ContentEnd : start);
                 int? lastLine = !isFlow && entries.Count > 0 ? entries[^1].Value.LastLineOffset : null;
@@ -284,6 +298,32 @@ internal sealed class YamlBlock
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// F-YAML-1: inside a flow collection, YAML 1.2 ends a plain scalar
+    /// before a <c>:</c> that runs straight into <c>}</c> or <c>]</c>, and
+    /// takes the colon as a key separator: <c>{from:}</c> is the key
+    /// <c>from</c> and <c>[b:]</c> holds the pair <c>{b: null}</c>.
+    /// YamlDotNet keeps the colon in the scalar instead (<c>from:</c>,
+    /// <c>b:</c>). Before a comma every reader, YamlDotNet included, already
+    /// ends the scalar, so the scalar never ends with that colon and the
+    /// check, which also looks at <c>,</c> in case that changes, doesn't
+    /// fire. Wolfden can't read such a value the way other YAML readers do,
+    /// so it's an error rather than a silent disagreement (#134). It's
+    /// reported on the colon's line.
+    /// </summary>
+    private void CheckColonBeforeFlowIndicator(string value, int start, int end)
+    {
+        var text = _source.Text;
+        if (_flowDepth > 0 && value.EndsWith(':') && end > start && text[end - 1] == ':'
+            && end < RegionEnd && text[end] is ',' or '}' or ']')
+        {
+            var key = value[..^1].TrimEnd();
+            Error("F-YAML-1", end - 1,
+                $"'{value}' runs straight into '{text[end]}', which YAML readers don't all read the same way. " +
+                $"For a key with an empty value, put a space after the colon ('{key}: {text[end]}'), or quote the text if the colon is part of it.");
+        }
     }
 
     private void CheckProperties(NodeEvent node)

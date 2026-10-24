@@ -69,6 +69,71 @@ public partial class QuotingCorpusTests
     }
 
     [Theory]
+    [MemberData(nameof(CorpusData))]
+    public void StringReadsBackAsItselfInFlowCollections(string value)
+    {
+        // A flow list item and a flow mapping value: a plain scalar there
+        // that ends in ':' would run into ',' '}' or ']' (F-YAML-1).
+        var list = MarkdownFile.Parse(TestFiles.Utf8("---\naliases: [Voss]\n---\n"))
+            .WithNewListItem(["aliases"], YamlScalarValue.String(value));
+        var map = MarkdownFile.Parse(TestFiles.Utf8("---\ndied: {value: x, from: ~}\n---\n"))
+            .WithFrontmatterValue(["died", "value"], YamlScalarValue.String(value));
+
+        var item = Assert.IsType<YamlSequence>(list.GetFrontmatterValue("aliases")).Items[1];
+        Assert.Equal(value, Assert.IsType<YamlScalar>(item).Text);
+        Assert.Equal(value, Assert.IsType<YamlScalar>(map.GetFrontmatterValue(["died", "value"])).Text);
+        Assert.DoesNotContain(list.Diagnostics, d => d.RuleId.StartsWith("F-YAML", StringComparison.Ordinal));
+        Assert.DoesNotContain(map.Diagnostics, d => d.RuleId.StartsWith("F-YAML", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-CHECK-41")]
+    [InlineData("died: {value: x, from:}", "from:", 2)]
+    [InlineData("aliases: [a, b:]", "b:", 2)]
+    [InlineData("a: {b: [c, d:]}", "d:", 2)]
+    [InlineData("a: [x::]", "x::", 2)]
+    [InlineData("a: [\n  b,\n  c:]", "c:", 4)]
+    [InlineData("a: [x, b\n  c:]", "b c:", 3)] // a scalar over two lines: the error is on the colon's line
+    [InlineData("a: {b :}", "b :", 2)]
+    public void APlainScalarEndingInAColonBeforeAFlowIndicatorIsAnError(string yaml, string scalar, int line)
+    {
+        // YAML 1.2 (and PyYAML) end the scalar before that colon and read it
+        // as a key separator; YamlDotNet keeps it in the text (#134).
+        var file = MarkdownFile.Parse(TestFiles.Utf8($"---\n{yaml}\n---\n"));
+
+        var error = Assert.Single(file.Diagnostics);
+        Assert.Equal("F-YAML-1", error.RuleId);
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Equal(line, error.Line);
+        Assert.Contains($"'{scalar}'", error.Message, StringComparison.Ordinal);
+        Assert.Contains("space after the colon", error.Message, StringComparison.Ordinal);
+        var bracket = yaml[Regex.Match(yaml, @":[\]}]").Index + 1];
+        Assert.Contains($"('{scalar[..^1].TrimEnd()}: {bracket}')", error.Message, StringComparison.Ordinal);
+        Assert.False(file.CanEdit);
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-CHECK-41")]
+    [InlineData("died: {value: x, from: }")]
+    [InlineData("died: {value: x, from: ~}")]
+    [InlineData("died: {value: x, from:\n  }")]
+    [InlineData("aliases: [b:, a]")] // YamlDotNet reads {b: null} here, as YAML 1.2 does
+    [InlineData("died: {from:, value: x}")]
+    [InlineData("aliases: [a, \"b:\"]")]
+    [InlineData("aliases: [a, 'b:']")]
+    [InlineData("aliases: [a:b, c]")]
+    [InlineData("aliases: [http://x.example, c]")]
+    [InlineData("a: b:c")]
+    [InlineData("a: \"x:\"")]
+    public void ColonsThatEveryReaderAgreesOnAreFine(string yaml)
+    {
+        var file = MarkdownFile.Parse(TestFiles.Utf8($"---\n{yaml}\n---\n"));
+
+        Assert.Empty(file.Diagnostics);
+        Assert.True(file.CanEdit);
+    }
+
+    [Theory]
     [InlineData("0x1F")]
     [InlineData("0xff")]
     [InlineData("0xDEADBEEF")]

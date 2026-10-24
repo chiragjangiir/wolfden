@@ -668,6 +668,25 @@ Spec: design.md §7 (#119). Covered by:
 `DenStructureTests.APathLookupListsEachFolderOnTheWayAboutOnce` (Core),
 `PerformanceTests.AUniverseOfManyStandaloneBooksIsCheckedAndRebuiltQuickly`.
 
+### SC-CHECK-41. An empty value typed right up against the bracket
+
+The writer types `died: {value: drowned, from:}`, meaning a death with no
+`from` yet, or ends an alias list with `[Voss, Orrin:]`. YAML readers
+don't agree on a colon that runs straight into `}` or `]`: most take
+`from` as a key with an empty value, but Wolfden's reader would keep the
+colon and read the key `from:`.
+
+- It's one F-YAML-1 error on that line that quotes `from:` and says to
+  add a space after the colon, or to quote the text if the colon is part
+  of it. The note is left out until it's fixed, and Wolfden won't edit
+  the file. With a space (`from: }`), or before a comma (`{from:, value:
+  drowned}`), every reader agrees and there's no diagnostic.
+
+Spec: F-YAML-1. Covered by:
+`QuotingCorpusTests.APlainScalarEndingInAColonBeforeAFlowIndicatorIsAnError`,
+`QuotingCorpusTests.ColonsThatEveryReaderAgreesOnAreFine`,
+`ContinuityCheckTests.AnEmptyFlowValueWithNoSpaceIsOneErrorAndTheNoteIsLeftOut`.
+
 ## RT: saving a note keeps what the writer wrote
 
 Background: the files are the writer's, and Wolfden is only one of the

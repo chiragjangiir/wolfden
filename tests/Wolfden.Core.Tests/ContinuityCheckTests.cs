@@ -201,6 +201,23 @@ public class ContinuityCheckTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-CHECK-41")]
+    public void AnEmptyFlowValueWithNoSpaceIsOneErrorAndTheNoteIsLeftOut()
+    {
+        var source = Vael();
+        Note(source, A1, "orrin-fell", Character("Orrin Fell", "fields:", "  died: {value: drowned, from:}"));
+
+        var check = DenCheck.Run(source);
+
+        var error = Assert.Single(check.Diagnostics);
+        Assert.Equal(DiagnosticSeverity.Error, error.Diagnostic.Severity);
+        Assert.Equal("F-YAML-1", error.Diagnostic.RuleId);
+        Assert.Equal(7, error.Diagnostic.Line); // after ---, id, type, name, status, fields
+        Assert.Contains("'from:'", error.Diagnostic.Message, StringComparison.Ordinal);
+        Assert.Empty(check.Catalog.Entities);
+    }
+
+    [Fact]
     public void ADenWhoseDenYamlDoesntLoadIsNotLoaded()
     {
         var check = DenCheck.Run(Vael().With("den.yaml", "format: 2\n"));
