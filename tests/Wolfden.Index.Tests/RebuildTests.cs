@@ -251,7 +251,7 @@ public sealed class RebuildTests
         using (var reader = new SqliteConnection(IndexBuilder.ConnectionString(den.IndexPath, SqliteOpenMode.ReadOnly)))
         {
             reader.Open();
-            var ex = Assert.Throws<IOException>(() => IndexBuilder.Rebuild(den.Root));
+            var ex = Assert.Throws<IndexInUseException>(() => IndexBuilder.Rebuild(den.Root));
             Assert.Contains("is in use", ex.Message, StringComparison.Ordinal);
         }
 

@@ -88,9 +88,45 @@ public sealed class DenWatcherTests
         first.Start();
         using var second = new DenWatcher(den.Root);
 
-        var e = Assert.Throws<InvalidOperationException>(() => second.Start());
+        var e = Assert.Throws<DenAlreadyWatchedException>(() => second.Start());
 
         Assert.Contains("already watching", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProbesInThisProcessNeverLookLikeAnotherWatcher()
+    {
+        // IsWatching opens the lock file for a moment. In this process it
+        // takes turns with a starting watcher, so however often calls look,
+        // the start isn't mistaken for a second watcher (#137).
+        using var den = TempDen.Starfall();
+        using var done = new CancellationTokenSource();
+        // Dedicated threads, so the spinning probes don't take the thread pool from tests running alongside.
+        var probes = Enumerable.Range(0, 3).Select(_ => Task.Factory.StartNew(
+            () =>
+            {
+                while (!done.IsCancellationRequested)
+                {
+                    DenWatcher.IsWatching(den.Root);
+                }
+            },
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default)).ToArray();
+        try
+        {
+            // Each start stops once it holds the lock, before the build, so many fit in a short test.
+            for (var i = 0; i < 300; i++)
+            {
+                using var watcher = new DenWatcher(den.Root) { BeforeFirstBuild = () => throw new TimeoutException("Held the lock.") };
+                Assert.Equal("Held the lock.", Assert.Throws<TimeoutException>(() => watcher.Start()).Message);
+            }
+        }
+        finally
+        {
+            done.Cancel();
+            await Task.WhenAll(probes);
+        }
     }
 
     [Fact]

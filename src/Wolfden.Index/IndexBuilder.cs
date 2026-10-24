@@ -71,7 +71,8 @@ public static class IndexBuilder
     /// <exception cref="DirectoryNotFoundException">The den root doesn't exist.</exception>
     /// <exception cref="IOException">
     /// The old index stayed open in a query, in this process or another
-    /// Wolfden process, so it couldn't be replaced (Windows); or
+    /// Wolfden process, so it couldn't be replaced (Windows), which is an
+    /// <see cref="IndexInUseException"/> and can clear; or
     /// <c>.wolfden</c> or <c>.wolfden/index.db</c> isn't what it should be,
     /// such as a file where the folder belongs. The message says which.
     /// </exception>
@@ -280,6 +281,9 @@ public static class IndexBuilder
         }
     }
 
+    /// <summary>For tests: how many times each den root (a full path) has started waiting for a watcher in this process.</summary>
+    internal static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> WatcherWaits = new(StringComparer.Ordinal);
+
     /// <summary>The longest <see cref="EnsureUpToDate(string)"/> waits for a running watcher to catch up before it rebuilds the index itself.</summary>
     public static readonly TimeSpan WatcherWait = TimeSpan.FromSeconds(1);
 
@@ -305,6 +309,8 @@ public static class IndexBuilder
         var status = CheckFiles(denRoot, out var current);
         if (status == IndexStatus.FilesChanged && watcherWait > TimeSpan.Zero && DenWatcher.IsWatching(denRoot))
         {
+            WatcherWaits.AddOrUpdate(Path.GetFullPath(denRoot), 1, (_, n) => n + 1);
+
             // Hashing the den again on every poll would cost more than the
             // wait saves, so poll only the fingerprint the index records,
             // until the watcher has written the one the files have now. Then
@@ -461,7 +467,7 @@ public static class IndexBuilder
             {
                 if (attempt >= 5)
                 {
-                    throw new IOException(
+                    throw new IndexInUseException(
                         $"The index '{target}' is in use, by a query in this process or by another Wolfden process, so the rebuilt index couldn't replace it. Try again when it's idle.",
                         ex);
                 }
@@ -556,5 +562,32 @@ public static class IndexBuilder
         {
             // Best effort: a leftover temporary file is removed by a later rebuild.
         }
+    }
+}
+
+/// <summary>
+/// A rebuilt index couldn't replace the old one because the old one stayed
+/// open, in a query in this process or in another Wolfden process (on
+/// Windows, an open file can't be replaced). Unlike the other I/O errors of
+/// <see cref="IndexBuilder.Rebuild(string)"/>, it clears once the index is
+/// idle, so trying again later can succeed.
+/// </summary>
+public sealed class IndexInUseException : IOException
+{
+    /// <summary>An exception with a message for the writer.</summary>
+    public IndexInUseException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>An exception with no message.</summary>
+    public IndexInUseException()
+    {
+    }
+
+    /// <summary>An exception with a message and the exception that caused it.</summary>
+    public IndexInUseException(string message, Exception innerException)
+        : base(message, innerException)
+    {
     }
 }
