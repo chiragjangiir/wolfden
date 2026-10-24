@@ -119,6 +119,25 @@ public sealed class WolfdenTools
         [Description("Check only this universe (its key) and the den-level files. Leave it out, or give '*', for the whole den.")] string? universe = null) =>
         Respond(() => _tools.Check(severity, path, limit, universe));
 
+    /// <summary>The <c>get_history</c> tool.</summary>
+    [McpServerTool(Name = "get_history", Title = "An entity's history", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]
+    [Description(
+        "The version history of one entity's file: the checkpoints (git commits) that changed it, newest first, each with its id, " +
+        "time, author, message, and the files it changed. Name the entity as for get_entity. Results come a page at a time: when " +
+        "'truncated' is true, ask again with before set to 'next_before' for older checkpoints. With diff true, the result also " +
+        "has what changed in the file since the latest checkpoint (edits not yet checkpointed); with diff_from set to a checkpoint's " +
+        "id, what changed since that checkpoint. The history follows the file's current path, so it starts where the file was last " +
+        "moved or renamed. If the den has no history (it isn't in a git repository, or git isn't installed), the result isn't an " +
+        "error: 'available' is false and 'reason' says why. History isn't a story view, so it can show material the reader meets later.")]
+    public CallToolResult GetHistory(
+        [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
+        [Description(UniverseHelp)] string? universe = null,
+        [Description("The most checkpoints to return, 1 to 100.")] int limit = 20,
+        [Description("Only checkpoints older than this one (an id from an earlier result's 'next_before'), for the next page.")] string? before = null,
+        [Description("If true, also show what changed in the file since the latest checkpoint.")] bool diff = false,
+        [Description("Show what changed in the file since this checkpoint (an id from the history), up to the file as it is now.")] string? diff_from = null) =>
+        Respond(() => _tools.GetHistory(entity, universe, limit, before, diff, diff_from));
+
     /// <summary>
     /// An error result in Wolfden's shape for one the SDK made itself. Every
     /// failure inside a tool comes back from <see cref="Respond{T}"/> as JSON

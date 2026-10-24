@@ -14,7 +14,7 @@ public class McpCommandTests
 
         Assert.Equal(CliApp.ExitOk, exitCode);
         Assert.StartsWith("usage: wolfden mcp [<den>] [--den <den>] [--universe <key>] [--no-watch]", output, StringComparison.Ordinal);
-        Assert.Contains("search, get_entity, list_entities, canon_as_of, and check", output, StringComparison.Ordinal);
+        Assert.Contains("search, get_entity, list_entities, canon_as_of, check, and\nget_history", output, StringComparison.Ordinal);
         Assert.Contains("mcp [<den>]", Cli.Run("--help").Output, StringComparison.Ordinal);
     }
 
@@ -179,7 +179,7 @@ public class McpCommandTests
             Assert.Equal("2026-07-28", client.NegotiatedProtocolVersion);
 
             var tools = await client.ListToolsAsync(cancellationToken: cancel);
-            Assert.Equal(["canon_as_of", "check", "get_entity", "list_entities", "search"], tools.Select(t => t.Name).Order(StringComparer.Ordinal));
+            Assert.Equal(["canon_as_of", "check", "get_entity", "get_history", "list_entities", "search"], tools.Select(t => t.Name).Order(StringComparer.Ordinal));
 
             var result = await client.CallToolAsync("canon_as_of", new Dictionary<string, object?> { ["position"] = "dracula:5" }, cancellationToken: cancel);
             Assert.NotEqual(true, result.IsError);
@@ -192,6 +192,34 @@ public class McpCommandTests
 
         // The server ran in the den, so it built the index there.
         Assert.True(File.Exists(Path.Combine(den.Root, ".wolfden", "index.db")));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-14")]
+    public async Task OverStdioHistoryComesFromGit()
+    {
+        using var den = TempDen.DraculaCopy();
+        TestGit.Run(den.Root, "init", "--quiet");
+        TestGit.Run(den.Root, "add", "--all");
+        TestGit.Run(den.Root, "commit", "--quiet", "-m", "Start the Dracula notes");
+        var transport = new StdioClientTransport(new StdioClientTransportOptions
+        {
+            Name = "wolfden",
+            Command = Dotnet,
+            Arguments = [Wolfden, "mcp", "--den", den.Root, "--no-watch"],
+            EnvironmentVariables = TestGit.Options.Environment.ToDictionary(),
+        });
+        var cancel = TestContext.Current.CancellationToken;
+
+        var options = new McpClientOptions { DiscoverProbeTimeout = TimeSpan.FromSeconds(30) };
+        await using var client = await McpClient.CreateAsync(transport, options, cancellationToken: cancel);
+        var result = await client.CallToolAsync("get_history", new Dictionary<string, object?> { ["entity"] = "Lucy Westenra" }, cancellationToken: cancel);
+
+        Assert.NotEqual(true, result.IsError);
+        using var json = JsonDocument.Parse(Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text);
+        Assert.Equal("git", json.RootElement.GetProperty("backend").GetString());
+        Assert.True(json.RootElement.GetProperty("available").GetBoolean());
+        Assert.Equal("Start the Dracula notes", Assert.Single(json.RootElement.GetProperty("entries").EnumerateArray()).GetProperty("message").GetString());
     }
 
     /// <summary>The built <c>wolfden</c>, next to the test binaries.</summary>

@@ -90,9 +90,21 @@ public sealed class TempDen : IDisposable
     {
         try
         {
+            // A repository's objects are read-only.
+            foreach (var git in Directory.EnumerateDirectories(Root, ".git", SearchOption.AllDirectories))
+            {
+                TestGit.MakeDeletable(git);
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        try
+        {
             Directory.Delete(Root, recursive: true);
         }
-        catch (IOException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             // Best effort; the OS cleans its temp folder.
         }

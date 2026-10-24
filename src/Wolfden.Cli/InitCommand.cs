@@ -1,15 +1,18 @@
 using System.Text;
+using System.Text.Json.Serialization;
 using Wolfden.Core.Documents;
 using Wolfden.Core.Structure;
 using Wolfden.Core.Yaml;
+using Wolfden.Git;
 
 namespace Wolfden.Cli;
 
 /// <summary>
-/// <c>wolfden init [&lt;folder&gt;] [--name &lt;name&gt;] [--universe &lt;key&gt;] [--json]</c>:
+/// <c>wolfden init [&lt;folder&gt;] [--name &lt;name&gt;] [--universe &lt;key&gt;] [--git] [--json]</c>:
 /// makes a new den (format.md §5): a <c>den.yaml</c>, and with
 /// <c>--universe</c> a first universe, so <c>wolfden check</c> passes on
-/// it with no errors or warnings.
+/// it with no errors or warnings. With <c>--git</c>, it also makes the
+/// folder a git repository (#122), unless it's already inside one.
 /// </summary>
 /// <remarks>
 /// It creates the folder if needed and never overwrites anything: a folder
@@ -18,6 +21,14 @@ namespace Wolfden.Cli;
 /// <see cref="DenLocation.FindBelow"/> says how far it looks), is refused
 /// with exit code 2. Other files already in the
 /// folder, such as a README or a <c>.git</c> folder, are left alone.
+/// <para>
+/// <c>--git</c> runs <c>git init</c> after the den is made. A folder
+/// already inside a repository is left as it is, since a den can be a
+/// subfolder of a larger repository and its history is scoped to the den's
+/// files. Without git installed, the den is still made, and the output says
+/// the repository wasn't (exit 0). If git is there but fails, the den is
+/// kept and the command exits 2.
+/// </para>
 /// </remarks>
 internal static class InitCommand
 {
@@ -25,7 +36,7 @@ internal static class InitCommand
 
     internal static readonly CommandSpec Spec = new(
         "init",
-        "usage: wolfden init [<folder>] [--name <name>] [--universe <key>] [--json]",
+        "usage: wolfden init [<folder>] [--name <name>] [--universe <key>] [--git] [--json]",
         """
         Creates a new den: a den.yaml, and with --universe a first universe.
 
@@ -35,19 +46,26 @@ internal static class InitCommand
           --universe <key>  also create universes/<key>/universe.md; the key is
                             lowercase letters, digits, and hyphens, starting
                             with a letter
+          --git             also make the folder a git repository ('git init'),
+                            so Wolfden can keep the den's history; a folder
+                            already inside a repository is left as it is
           --json            print one JSON document instead of text
 
         It never overwrites anything, and won't create a den inside another den
         or around one in the folders a few levels below.
-        Exits 0 when the den is created and 2 if it couldn't be.
+        Exits 0 when the den is created (with --git, even if git isn't
+        installed: it says so) and 2 if it couldn't be, or if git failed.
         """,
-        ["--json"],
+        ["--json", "--git"],
         ["--name", "--universe"],
         [],
         1,
         "give at most one folder.");
 
-    public static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error)
+    public static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error) => Run(args, output, error, CliApp.Git);
+
+    /// <summary>Runs the command with <paramref name="git"/> for <c>--git</c>.</summary>
+    internal static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error, GitOptions git)
     {
         if (CommandLine.Parse(Spec, args, output, error, out var line) is { } exit)
         {
@@ -115,9 +133,11 @@ internal static class InitCommand
             return Fail($"couldn't create the den at '{folder}': {e.Message}{leftNote}");
         }
 
+        var repository = line.Has("--git") ? MakeRepository(root, git) : null;
+
         if (line.Has("--json"))
         {
-            CliJson.Write(output, new InitReport(1, root, created));
+            CliJson.Write(output, new InitReport(1, root, created, repository));
         }
         else
         {
@@ -128,9 +148,21 @@ internal static class InitCommand
 
             output.WriteLine();
             output.WriteLine($"Created a den at '{root}'.");
+            if (repository is { Outcome: not InitGitReport.Failed })
+            {
+                output.WriteLine(repository.Message);
+            }
+
+            var gitHint = repository is null ? " Wolfden doesn't run git unless asked (--git); 'git init' makes the den a repository." : "";
             output.WriteLine(universe is null
-                ? "Next: add a universe (format.md §6.2), then run 'wolfden check'. Wolfden doesn't run git for you; 'git init' makes the den a repository."
-                : "Next: add series, books, and entities (format.md §5.1), then run 'wolfden check'. Wolfden doesn't run git for you; 'git init' makes the den a repository.");
+                ? $"Next: add a universe (format.md §6.2), then run 'wolfden check'.{gitHint}"
+                : $"Next: add series, books, and entities (format.md §5.1), then run 'wolfden check'.{gitHint}");
+        }
+
+        if (repository is { Outcome: InitGitReport.Failed })
+        {
+            error.WriteLine($"wolfden init: {repository.Message}");
+            return CliApp.ExitUsage;
         }
 
         return CliApp.ExitOk;
@@ -140,6 +172,44 @@ internal static class InitCommand
             error.WriteLine($"wolfden init: {message}");
             return CliApp.ExitUsage;
         }
+    }
+
+    /// <summary>
+    /// <c>--git</c>: makes the new den's folder a git repository, unless it's
+    /// already inside one (#122). Nothing here undoes the den.
+    /// </summary>
+    private static InitGitReport MakeRepository(string root, GitOptions git)
+    {
+        var location = GitRepository.Locate(root, git);
+        switch (location.Kind)
+        {
+            case GitLocationKind.InRepository:
+                return new InitGitReport(
+                    InitGitReport.AlreadyInRepository,
+                    location.Root,
+                    $"It's already inside the git repository at '{location.Root}', so no new repository was made. " +
+                    "Wolfden keeps the den's history there, for the den's files only.");
+            case GitLocationKind.GitNotInstalled:
+                return NotInstalled();
+            case GitLocationKind.Unusable:
+                return new InitGitReport(
+                    InitGitReport.Failed, null, $"the den was created, but git couldn't tell whether its folder is in a repository: {location.Problem}");
+        }
+
+        var made = GitRepository.Create(root, git);
+        return made.Kind switch
+        {
+            GitLocationKind.InRepository => new InitGitReport(
+                InitGitReport.Created, made.Root, "Made it a git repository, so Wolfden can keep the den's history. Nothing is committed yet."),
+            GitLocationKind.GitNotInstalled => NotInstalled(),
+            _ => new InitGitReport(InitGitReport.Failed, null, $"the den was created, but git couldn't make it a repository: {made.Problem}"),
+        };
+
+        static InitGitReport NotInstalled() => new(
+            InitGitReport.GitNotInstalled,
+            null,
+            "Git isn't installed, or Wolfden can't find it on the PATH, so the den wasn't made a repository. " +
+            "The den works without one; to keep its history, install git and run 'git init' in the den's folder.");
     }
 
     /// <summary>
@@ -226,5 +296,26 @@ internal static class InitCommand
     /// <param name="Version">The shape's version, 1.</param>
     /// <param name="Den">The den root's full path.</param>
     /// <param name="Created">The files created, relative to the den root, with <c>/</c>.</param>
-    internal sealed record InitReport(int Version, string Den, IReadOnlyList<string> Created);
+    /// <param name="Git">With <c>--git</c>, what happened about the repository; otherwise null, and left out.</param>
+    internal sealed record InitReport(
+        int Version, string Den, IReadOnlyList<string> Created, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] InitGitReport? Git = null);
+
+    /// <summary>What <c>--git</c> did.</summary>
+    /// <param name="Outcome">One of <see cref="Created"/>, <see cref="AlreadyInRepository"/>, <see cref="GitNotInstalled"/>, or <see cref="Failed"/>.</param>
+    /// <param name="Repository">The repository's top folder, when the den is in one.</param>
+    /// <param name="Message">What happened, in words.</param>
+    internal sealed record InitGitReport(string Outcome, string? Repository, string Message)
+    {
+        /// <summary>The folder is a new repository.</summary>
+        public const string Created = "created";
+
+        /// <summary>The folder was already inside a repository, which was left as it was.</summary>
+        public const string AlreadyInRepository = "already_in_repository";
+
+        /// <summary>Git isn't installed, so no repository was made; the den was.</summary>
+        public const string GitNotInstalled = "git_not_installed";
+
+        /// <summary>Git failed; the den was still made.</summary>
+        public const string Failed = "failed";
+    }
 }

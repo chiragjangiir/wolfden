@@ -80,6 +80,12 @@ public static class ToolErrorCodes
 
     /// <summary>A bug in Wolfden.</summary>
     public const string Internal = "internal_error";
+
+    /// <summary>The den's history backend (git) failed; the message says what it said.</summary>
+    public const string HistoryFailed = "history_failed";
+
+    /// <summary>A <c>before</c> or <c>diff_from</c> that isn't a checkpoint of the history asked for.</summary>
+    public const string UnknownCheckpoint = "unknown_checkpoint";
 }
 
 /// <summary>A tool call can't be answered. <see cref="DenTools"/> throws it, and the server turns it into an error result.</summary>
@@ -276,3 +282,44 @@ public sealed record DiagnosticView(string Path, int? Line, string Severity, str
 public sealed record CheckResult(
     int Version, string? Universe, bool Loaded, bool? SpoilerChecks, int Entities, int Errors, int Warnings, int Count, int Total, bool Truncated,
     IReadOnlyList<DiagnosticView> Diagnostics, string? Note = null);
+
+/// <summary>The result of <c>get_history</c>.</summary>
+/// <param name="Version">The shape version.</param>
+/// <param name="Entity">The entity whose file's history this is.</param>
+/// <param name="Backend">The history backend: <c>git</c>, or <c>none</c> for a den without history.</param>
+/// <param name="Available">False if the den's history can't be read; <paramref name="Reason"/> says why, and there are no entries.</param>
+/// <param name="Reason">Why history isn't available, in words for the writer, or null.</param>
+/// <param name="Count">How many entries this result holds.</param>
+/// <param name="Truncated">True if there are older entries: ask again with <c>before</c> set to <paramref name="NextBefore"/>.</param>
+/// <param name="NextBefore">The <c>before</c> value for the next, older page, or null if there's none.</param>
+/// <param name="Entries">The checkpoints that changed the entity's file, newest first.</param>
+/// <param name="Diff">With <c>diff</c> or <c>diff_from</c>, what changed in the entity's file since then, up to the file as it is now.</param>
+/// <param name="Note">Set when a diff was asked for but couldn't be made, and why (for example, nothing has been checkpointed yet).</param>
+public sealed record GetHistoryResult(
+    int Version, EntitySummary Entity, string Backend, bool Available, string? Reason, int Count, bool Truncated, string? NextBefore,
+    IReadOnlyList<HistoryEntryView>? Entries, HistoryDiffView? Diff, string? Note = null);
+
+/// <summary>One checkpoint.</summary>
+/// <param name="Id">The checkpoint's id (a git commit hash), for <c>before</c> and <c>diff_from</c>.</param>
+/// <param name="When">When it was recorded.</param>
+/// <param name="Author">Who recorded it.</param>
+/// <param name="Message">Its message, with any <c>Co-Authored-By</c> lines.</param>
+/// <param name="Changes">The den files it changed.</param>
+public sealed record HistoryEntryView(string Id, DateTimeOffset When, string Author, string Message, IReadOnlyList<HistoryChangeView> Changes);
+
+/// <summary>How a checkpoint or diff changed one den file.</summary>
+/// <param name="Kind">added, modified, deleted, or renamed.</param>
+/// <param name="Path">The file, relative to the den root, after the change.</param>
+/// <param name="OldPath">For a rename, where it was before.</param>
+public sealed record HistoryChangeView(string Kind, string Path, string? OldPath);
+
+/// <summary>What changed between a checkpoint and the files as they are now.</summary>
+/// <param name="From">The checkpoint compared from.</param>
+/// <param name="To">The checkpoint compared to, or null for the files as they are now.</param>
+/// <param name="Files">Each file that differs, with its unified diff. Empty when nothing changed.</param>
+public sealed record HistoryDiffView(string From, string? To, IReadOnlyList<HistoryFileDiffView> Files);
+
+/// <summary>How one file differs.</summary>
+/// <param name="Change">How it changed.</param>
+/// <param name="Patch">The change as a unified diff.</param>
+public sealed record HistoryFileDiffView(HistoryChangeView Change, string Patch);

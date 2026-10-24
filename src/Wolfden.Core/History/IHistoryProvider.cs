@@ -151,15 +151,20 @@ public sealed class HistoryResult<T>
 /// <param name="Path">A den-relative file or folder to limit the log to, or null for the whole den.</param>
 /// <param name="Limit">The most entries to return, or null for all.</param>
 /// <param name="Before">
-/// Only entries older than this revision, or null to start from the
-/// newest. For the next page, pass the <see cref="HistoryEntry.Id"/> of the
-/// last entry of the page before.
+/// Only the entries after this one in the same log, or null to start from
+/// the newest. For the next page, pass the <see cref="HistoryEntry.Id"/> of
+/// the last entry of the page before, with the same <c>Path</c>. A revision
+/// that isn't an entry of this log is refused.
 /// </param>
 /// <remarks>
-/// For git (#19), the next page is <c>git log &lt;before&gt; --skip=1</c>
-/// with the same path filter, not <c>git log &lt;before&gt;^</c>: the
-/// <c>^</c> form follows only the first parent of a merge, so the commits
-/// that came in through the merge's other parents would never be listed.
+/// A history with merges isn't a line, so "older than" means "after it in
+/// the same listing", not "its ancestors". For git (#19), each page walks
+/// the same log from HEAD with the same path filter, skips the entries up
+/// to and including <c>Before</c>, and takes <c>Limit</c> more. Neither
+/// <c>git log &lt;before&gt;</c> (with or without <c>--skip=1</c>) nor
+/// <c>git log &lt;before&gt;^</c> will do: both list only the cursor's
+/// ancestors, so when a page ends on a commit from a merged branch, the
+/// main line's older commits that aren't its ancestors are never listed.
 /// </remarks>
 public sealed record HistoryLogQuery(string? Path = null, int? Limit = null, string? Before = null);
 
@@ -231,7 +236,7 @@ public sealed record HistoryFileDiff(HistoryFileChange Change, string Patch);
 public sealed record HistoryTag(string Name, string Id);
 
 /// <summary>A history backend that can do an operation but failed while doing it, such as a git command that exited with an error.</summary>
-public sealed class HistoryException : IOException
+public class HistoryException : IOException
 {
     /// <summary>A failure, said for the writer in <paramref name="message"/>.</summary>
     public HistoryException(string message)
@@ -244,4 +249,22 @@ public sealed class HistoryException : IOException
         : base(message, inner)
     {
     }
+}
+
+/// <summary>
+/// A revision the caller gave isn't one the history has: it doesn't name a
+/// checkpoint, or, as a log's <see cref="HistoryLogQuery.Before"/>, it isn't
+/// an entry of that log. The caller's mistake, not the backend's failure.
+/// </summary>
+public sealed class HistoryRevisionException : HistoryException
+{
+    /// <summary>A revision that isn't one, said for the writer in <paramref name="message"/>.</summary>
+    public HistoryRevisionException(string revision, string message)
+        : base(message)
+    {
+        Revision = revision;
+    }
+
+    /// <summary>The revision as the caller gave it.</summary>
+    public string Revision { get; }
 }

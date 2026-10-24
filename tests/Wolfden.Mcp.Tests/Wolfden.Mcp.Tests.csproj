@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Wolfden.Mcp\Wolfden.Mcp.csproj" />
+    <ProjectReference Include="..\..\src\Wolfden.Git\Wolfden.Git.csproj" />
   </ItemGroup>
 
 </Project>
