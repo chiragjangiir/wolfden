@@ -1551,8 +1551,8 @@ checkpoint.
   adds what changed in her file since the latest checkpoint, and
   `diff_from` with a checkpoint's id, what changed since that one. In a
   den without history, the result isn't an error: `available` is false
-  and `reason` says the den has no history. A checkpoint id the
-  repository doesn't have is `history_failed`.
+  and `reason` says the den has no history. A `before` or `diff_from`
+  that isn't one of the checkpoints is `unknown_checkpoint`.
 
 Spec: design.md §6, §8 (#19). Covered by:
 `HistoryToolTests.TheAssistantSeesAnEntitysCheckpointsAPageAtATimeAndWhatChangedSince`,
@@ -1692,6 +1692,7 @@ Spec: F-BOOK-1, design.md §5, §6. Covered by:
 `HistoryProviderTests.TheMessagesSendTheWriterNowhereTheyCantGo`,
 `HistoryProviderTests.ADenWithoutHistoryStillLoadsAndChecks`,
 `GitHistoryTests.ADenOutsideAnyRepositoryHasNoHistory`,
+`GitHistoryTests.AGitAboveACeilingDirectoryDoesntCount`,
 `FreezeTagTests.WithoutHistoryTheBookIsStillFrozenButNotTagged`.
 
 The scenarios below have a den in a git repository, read through the git
@@ -1706,14 +1707,17 @@ once on a branch they later merged, and asks for its history.
   with its message (all of it), author, time, and the files it changed;
   checkpoints that only changed other notes aren't. The den's whole
   history lists every checkpoint. Asking a page at a time, with each
-  page starting before the last page's oldest checkpoint, lists every
+  page starting after the last page's final checkpoint, lists every
   checkpoint once, those that came in through the merge included, in
-  the same order as the whole list. Names with spaces, accents, or
+  the same order as the whole list, even when a page ends on a
+  checkpoint from the merged branch. A starting point that isn't one of
+  the listed checkpoints is refused. Names with spaces, accents, or
   brackets come back as they are.
 
 Spec: design.md §6 (#19). Covered by:
 `GitHistoryTests.ANotesHistoryListsTheCheckpointsThatChangedItNewestFirst`,
 `GitHistoryTests.TheLogPagesWithALimitAndABeforeRevisionThroughAMerge`,
+`GitHistoryTests.APageThatEndsOnAMergedBranchsCommitLosesNoOlderMainLineCommit`,
 `GitHistoryTests.NamesWithSpacesAndAccentsComeBackAsTheyAre`.
 
 ### SC-HIST-3. I make a checkpoint at the end of a session
@@ -1725,13 +1729,19 @@ item, then makes a checkpoint, "End of chapter 14 session".
   A second checkpoint straight after has nothing to record and makes no
   commit. A checkpoint of only Mara's note records only it, and the new
   note that wasn't named stays as it was. The first checkpoint of a new
-  repository works too. A checkpoint needs a message.
+  repository works too. A checkpoint needs a message, without control
+  characters other than line breaks and tabs. If the writer's
+  pre-commit hook refuses the commit, the checkpoint says git refused
+  it and why, nothing is recorded, and the new note is untracked again,
+  as it was before.
 
 Spec: design.md §6 (#19). Covered by:
 `GitHistoryTests.ACheckpointRecordsNewChangedAndDeletedNotes`,
 `GitHistoryTests.ACheckpointCanRecordOnlySomeNotes`,
 `GitHistoryTests.TheFirstCheckpointOfANewRepositoryWorks`,
-`GitHistoryTests.ACheckpointNeedsAMessage`.
+`GitHistoryTests.ACheckpointNeedsAMessage`,
+`GitHistoryTests.ACheckpointMessageCantHoldControlCharacters`,
+`GitHistoryTests.ACheckpointAHookRefusesLeavesTheNewFilesUntracked`.
 
 ### SC-HIST-4. My AI assistant makes a checkpoint
 
@@ -1794,14 +1804,21 @@ adds more notes. Another den in the same repository also has a book
 - The tag `book/vael/ember/final` names the latest checkpoint of the
   den. Freezing again, or freezing the other den's Ember, leaves the
   tag where it is and says the repository already has it; Wolfden never
-  moves or replaces a tag. A tag name git doesn't accept is refused.
+  moves or replaces a tag. In a repository where nothing in the den has
+  been checkpointed yet, there's nothing to tag, and freezing says so
+  (the book is still frozen). A tag name git doesn't accept, or one
+  git would read as something else (`HEAD`, `@`, `refs/...`), is
+  refused. A tag without a message works even when the writer's git
+  signs tags.
 
 Spec: F-BOOK-1, design.md §5 (maintainer decision, #31). Covered by:
 `FreezeTagTests.TheTagIsNamedForTheUniverseAndTheBook`,
 `FreezeTagTests.FreezingTagsTheLatestCheckpointOnceAndNeverMovesTheTag`,
 `FreezeTagTests.AnotherDenInTheRepositoryWithTheSameKeysDoesntMoveTheTag`,
+`FreezeTagTests.BeforeAnyCheckpointThereIsNothingToTag`,
 `GitHistoryTests.ATagNamesTheLatestCheckpointAndIsNeverMoved`,
-`GitHistoryTests.ATagNameMustBeOneGitAccepts`.
+`GitHistoryTests.ATagNameMustBeOneGitAccepts`,
+`GitHistoryTests.ALightweightTagWorksWhenGitSignsTags`.
 
 ### SC-HIST-8. Git isn't installed
 

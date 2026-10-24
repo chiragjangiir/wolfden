@@ -395,14 +395,28 @@ The den store and the history provider are interfaces in `Wolfden.Core`
   refuses the repository, every history operation says so instead.
   A checkpoint is `git commit --only -- <den paths>`: new den files are
   first marked with `git add --intent-to-add`, which records no content,
-  and whatever else the user staged stays staged. A checkpoint with
-  nothing to record makes no commit. A diff against the files as they
+  and whatever else the user staged stays staged. A checkpoint records
+  each den file as it is on disk, so a den file the user staged in part
+  (`git add -p`) goes in whole, and a den file the user stopped tracking
+  with `git rm --cached` is tracked again. A checkpoint with nothing to
+  record makes no commit. If git refuses the commit (a hook, signing, or
+  a merge in progress), the checkpoint says so and takes its
+  intent-to-add marks off again, so the user's index is as it was. A
+  diff against the files as they
   are now includes new files git doesn't track yet (not ignored ones),
   through a temporary index, so it never changes the user's index. The
   log of a file follows its current path, not back through renames
-  (`--follow` can't be paged), and revisions from callers are resolved
-  to commit hashes first, so one can't be read as an option. Tests run
-  git with a configuration of their own, never the developer's.
+  (`--follow` can't be paged). The log pages by position: each page
+  walks the same log from HEAD with the same path filter and starts
+  after the `before` entry, since a history with merges isn't a line
+  and the cursor's ancestors alone would miss main-line commits. A
+  `before` that isn't an entry of that log is refused. Revisions from
+  callers are resolved to commit hashes first, so one can't be read as
+  an option. "Not a repository" is told from "repository refused" by
+  looking for a `.git` above the den, stopping at
+  `GIT_CEILING_DIRECTORIES` as git does. Wolfden needs git 2.31 or
+  later (`--diff-merges`). Tests run git with a configuration of their
+  own, never the developer's.
 
 **A den inside a larger repository.** The den is the folder that holds
 `den.yaml`, and it can be a subfolder of a larger git repository. History
@@ -682,8 +696,8 @@ and `wolfden check` do:
   it adds what changed in the file since the latest checkpoint, and with
   `diff_from`, since that checkpoint. A den without history isn't an
   error: `available` is false, and `reason` says why in the writer's
-  words. A git failure, or a checkpoint the repository doesn't have, is
-  `history_failed`. `wolfden mcp` looks for the den's repository on each
+  words. A `before` or `diff_from` that isn't a checkpoint of that
+  history is `unknown_checkpoint`; a git failure is `history_failed`. `wolfden mcp` looks for the den's repository on each
   call, so a den made a repository while it runs gets history.
 - **Serve first, watcher in the background.** The server answers the
   client before the watcher's first build of the index is done, so a
