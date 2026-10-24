@@ -101,19 +101,25 @@ public sealed class DenWatcherTests
         // the start isn't mistaken for a second watcher (#137).
         using var den = TempDen.Starfall();
         using var done = new CancellationTokenSource();
-        var probes = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
-        {
-            while (!done.IsCancellationRequested)
+        // Dedicated threads, so the spinning probes don't take the thread pool from tests running alongside.
+        var probes = Enumerable.Range(0, 3).Select(_ => Task.Factory.StartNew(
+            () =>
             {
-                DenWatcher.IsWatching(den.Root);
-            }
-        })).ToArray();
+                while (!done.IsCancellationRequested)
+                {
+                    DenWatcher.IsWatching(den.Root);
+                }
+            },
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default)).ToArray();
         try
         {
-            for (var i = 0; i < 20; i++)
+            // Each start stops once it holds the lock, before the build, so many fit in a short test.
+            for (var i = 0; i < 300; i++)
             {
-                using var watcher = new DenWatcher(den.Root);
-                watcher.Start();
+                using var watcher = new DenWatcher(den.Root) { BeforeFirstBuild = () => throw new TimeoutException("Held the lock.") };
+                Assert.Equal("Held the lock.", Assert.Throws<TimeoutException>(() => watcher.Start()).Message);
             }
         }
         finally

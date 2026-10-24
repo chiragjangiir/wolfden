@@ -300,7 +300,7 @@ public static class WolfdenMcpServer
     /// where <c>.wolfden</c> should be, stay until the writer fixes them.
     /// </summary>
     internal static bool CanClear(Exception e) =>
-        e is IndexInUseException || e is SqliteException { SqliteErrorCode: SqliteBusy or SqliteLocked };
+        e is IndexInUseException || e is SqliteException s && (s.SqliteErrorCode & 0xFF) is SqliteBusy or SqliteLocked;
 
     // SQLite's primary result codes for a database another connection is using (sqlite.org/rescode.html).
     private const int SqliteBusy = 5;

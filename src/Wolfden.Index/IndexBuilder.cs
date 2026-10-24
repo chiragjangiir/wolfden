@@ -281,6 +281,9 @@ public static class IndexBuilder
         }
     }
 
+    /// <summary>For tests: how many times each den root (a full path) has started waiting for a watcher in this process.</summary>
+    internal static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> WatcherWaits = new(StringComparer.Ordinal);
+
     /// <summary>The longest <see cref="EnsureUpToDate(string)"/> waits for a running watcher to catch up before it rebuilds the index itself.</summary>
     public static readonly TimeSpan WatcherWait = TimeSpan.FromSeconds(1);
 
@@ -306,6 +309,8 @@ public static class IndexBuilder
         var status = CheckFiles(denRoot, out var current);
         if (status == IndexStatus.FilesChanged && watcherWait > TimeSpan.Zero && DenWatcher.IsWatching(denRoot))
         {
+            WatcherWaits.AddOrUpdate(Path.GetFullPath(denRoot), 1, (_, n) => n + 1);
+
             // Hashing the den again on every poll would cost more than the
             // wait saves, so poll only the fingerprint the index records,
             // until the watcher has written the one the files have now. Then

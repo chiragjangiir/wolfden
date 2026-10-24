@@ -40,6 +40,7 @@ public sealed class McpHandshakeTests
         File.AppendAllText(Path.Combine(den.Root, LucyPath), "\nHer diary mentions a quillwhistle.\n");
         var root = Path.GetFullPath(den.Root);
         var builds = IndexBuilder.RebuildCounts[root];
+        var watcherStarts = 0;
 
         // The watcher's start is held up inside, holding the watch lock and listening, just before its first build.
         var server = Serve(
@@ -51,11 +52,14 @@ public sealed class McpHandshakeTests
             (watchLog, watchStop) => WolfdenMcpServer.StartWatcher(
                 den.Root,
                 watchLog,
-                [],
+
+                // One quick retry, in case the call's look at the index keeps the first build from replacing it (Windows).
+                [TimeSpan.FromMilliseconds(200)],
                 r => new DenWatcher(r)
                 {
                     BeforeFirstBuild = () =>
                     {
+                        Interlocked.Increment(ref watcherStarts);
                         holding.Set();
                         mayBuild.Wait(TimeSpan.FromSeconds(60), watchStop);
                     },
@@ -82,7 +86,8 @@ public sealed class McpHandshakeTests
             // A call made while the first build is held up finds the files
             // changed and waits for the watcher, without rebuilding the index.
             var search = Text(client.CallToolAsync("search", new Dictionary<string, object?> { ["query"] = "quillwhistle" }, cancellationToken: cancel));
-            await Task.Delay(500, cancel);
+            await WaitFor(() => IndexBuilder.WatcherWaits.GetValueOrDefault(root) > 0, cancel);
+            await Task.Delay(200, cancel);
             Assert.False(search.IsCompleted, "The call didn't wait for the watcher.");
             Assert.Equal(builds, IndexBuilder.RebuildCounts[root]);
 
@@ -91,7 +96,7 @@ public sealed class McpHandshakeTests
             Assert.Contains("lucy-westenra", await search, StringComparison.Ordinal);
             await WaitFor(() => log.ToString().Contains("keeping its index up to date", StringComparison.Ordinal), cancel);
             Assert.True(DenWatcher.IsWatching(den.Root));
-            Assert.Equal(builds + 1, IndexBuilder.RebuildCounts[root]);
+            Assert.Equal(builds + watcherStarts, IndexBuilder.RebuildCounts[root]);
             Assert.Equal(IndexStatus.Current, IndexBuilder.CheckFiles(den.Root));
         }
         finally
@@ -254,7 +259,7 @@ public sealed class McpHandshakeTests
     [InlineData("a file where .wolfden belongs")]
     [InlineData("a folder where the index belongs")]
     [InlineData("no den folder")]
-    [InlineData("a corrupt index")]
+    [InlineData("SQLite reporting a malformed database")]
     public void AWatcherThatCantStartForAReasonThatWontClearGivesUpAtOnce(string problem)
     {
         using var den = TempDen.Dracula();
@@ -299,6 +304,7 @@ public sealed class McpHandshakeTests
     [Theory]
     [InlineData(5)] // SQLITE_BUSY
     [InlineData(6)] // SQLITE_LOCKED
+    [InlineData(517)] // SQLITE_BUSY_SNAPSHOT, an extended code of SQLITE_BUSY
     [InlineData(0)] // the rebuilt index couldn't replace one held open
     public void AWatcherThatCantStartForAReasonThatCanClearTriesAgain(int sqliteCode)
     {
