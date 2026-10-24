@@ -64,7 +64,7 @@ public static class GitRepository
 
         // Git's messages depend on the language it's set to, so tell "not a
         // repository" from "refused to use one" by looking for one instead.
-        return HasGitAbove(folder)
+        return HasGitAbove(folder, options)
             ? new GitLocation(GitLocationKind.Unusable, Problem: run.Said)
             : new GitLocation(GitLocationKind.NotARepository);
     }
@@ -92,10 +92,29 @@ public static class GitRepository
         return new GitLocation(GitLocationKind.InRepository, Path.GetFullPath(folder));
     }
 
-    private static bool HasGitAbove(string folder)
+    /// <summary>
+    /// True if there's a <c>.git</c> in <paramref name="folder"/> or a folder
+    /// above it that git would look in: like git, it doesn't go up into a
+    /// folder named in <c>GIT_CEILING_DIRECTORIES</c>.
+    /// </summary>
+    private static bool HasGitAbove(string folder, GitOptions options)
     {
+        var ceilingList = options.Environment.TryGetValue("GIT_CEILING_DIRECTORIES", out var set)
+            ? set
+            : Environment.GetEnvironmentVariable("GIT_CEILING_DIRECTORIES");
+        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var ceilings = (ceilingList ?? "")
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(Path.IsPathFullyQualified)
+            .Select(c => Path.TrimEndingDirectorySeparator(Path.GetFullPath(c)))
+            .ToList();
         for (var dir = new DirectoryInfo(Path.GetFullPath(folder)); dir is not null; dir = dir.Parent)
         {
+            if (dir.FullName != Path.GetFullPath(folder) && ceilings.Any(c => string.Equals(c, Path.TrimEndingDirectorySeparator(dir.FullName), comparison)))
+            {
+                return false;
+            }
+
             var git = Path.Combine(dir.FullName, ".git");
             if (Directory.Exists(git) || File.Exists(git))
             {

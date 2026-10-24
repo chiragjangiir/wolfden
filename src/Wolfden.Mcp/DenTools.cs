@@ -130,6 +130,11 @@ public sealed class DenTools
             return new GetHistoryResult(
                 ToolJson.Version, summary, history.Name, true, null, entries.Count, truncated, truncated ? entries[^1].Id : null, entries, diffView, note);
         }
+        catch (HistoryRevisionException e)
+        {
+            // The caller's before or diff_from, not a failure of git.
+            throw new DenToolException(ToolErrorCodes.UnknownCheckpoint, e.Message);
+        }
         catch (HistoryException e)
         {
             throw new DenToolException(ToolErrorCodes.HistoryFailed, e.Message);

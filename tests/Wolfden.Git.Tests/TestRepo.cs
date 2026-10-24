@@ -83,11 +83,24 @@ public sealed class TestRepo : IDisposable
         return Git("rev-parse", "HEAD").Trim();
     }
 
+    /// <summary>Like <see cref="CommitAll"/>, with the author and commit dates set to <paramref name="minutes"/> past a fixed time, so the log's order is known.</summary>
+    public string CommitAt(string message, int minutes)
+    {
+        var date = new DateTimeOffset(2026, 1, 1, 9, 0, 0, TimeSpan.Zero).AddMinutes(minutes).ToString("yyyy-MM-ddTHH:mm:sszzz", System.Globalization.CultureInfo.InvariantCulture);
+        var dates = new Dictionary<string, string?> { ["GIT_AUTHOR_DATE"] = date, ["GIT_COMMITTER_DATE"] = date };
+        Git("add", "--all");
+        RunGit(Root, dates, "commit", "--quiet", "-m", message);
+        return Git("rev-parse", "HEAD").Trim();
+    }
+
     /// <summary>Runs git in the repository's top folder and returns its output; a failure fails the test.</summary>
     public string Git(params string[] args) => RunGit(Root, args);
 
     /// <summary>Runs git in <paramref name="folder"/> with the tests' configuration and returns its output; a failure fails the test.</summary>
-    public static string RunGit(string folder, params string[] args)
+    public static string RunGit(string folder, params string[] args) => RunGit(folder, null, args);
+
+    /// <summary>Runs git in <paramref name="folder"/> with the tests' configuration and <paramref name="environment"/>, and returns its output.</summary>
+    public static string RunGit(string folder, IReadOnlyDictionary<string, string?>? environment, params string[] args)
     {
         var start = new ProcessStartInfo("git")
         {
@@ -105,7 +118,7 @@ public sealed class TestRepo : IDisposable
             start.ArgumentList.Add(arg);
         }
 
-        foreach (var (name, value) in Options.Environment)
+        foreach (var (name, value) in Options.Environment.Concat(environment ?? new Dictionary<string, string?>()))
         {
             if (value is null)
             {

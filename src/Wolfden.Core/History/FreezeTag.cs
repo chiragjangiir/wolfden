@@ -13,6 +13,9 @@ public enum FreezeTagOutcome
 
     /// <summary>The repository already has a tag with the name, so none was made: a tag is never moved or replaced.</summary>
     AlreadyTagged,
+
+    /// <summary>The den has history, but nothing in it has been checkpointed yet, so there was nothing to tag.</summary>
+    NothingCheckpointed,
 }
 
 /// <summary>The outcome of adding a freeze tag.</summary>
@@ -90,6 +93,7 @@ public static class FreezeTag
         var tagged = history.Tag(new TagRequest(name, at, $"Freeze book '{bookKey}' of universe '{universeKey}'."), cancellationToken);
         return tagged.IsAvailable
             ? new FreezeTagResult(FreezeTagOutcome.Tagged, name, tagged.Value, $"{frozen} Tagged its snapshot '{name}'.")
-            : new FreezeTagResult(FreezeTagOutcome.NoHistory, name, null, $"{frozen} No tag was added: {tagged.Reason}");
+            // The backend can tag, so an unavailable tag means there's no checkpoint to name yet.
+            : new FreezeTagResult(FreezeTagOutcome.NothingCheckpointed, name, null, $"{frozen} No tag was added: {tagged.Reason}");
     }
 }

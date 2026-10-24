@@ -81,8 +81,11 @@ public static class ToolErrorCodes
     /// <summary>A bug in Wolfden.</summary>
     public const string Internal = "internal_error";
 
-    /// <summary>The den's history backend (git) failed, or was given a checkpoint it doesn't have; the message says what it said.</summary>
+    /// <summary>The den's history backend (git) failed; the message says what it said.</summary>
     public const string HistoryFailed = "history_failed";
+
+    /// <summary>A <c>before</c> or <c>diff_from</c> that isn't a checkpoint of the history asked for.</summary>
+    public const string UnknownCheckpoint = "unknown_checkpoint";
 }
 
 /// <summary>A tool call can't be answered. <see cref="DenTools"/> throws it, and the server turns it into an error result.</summary>

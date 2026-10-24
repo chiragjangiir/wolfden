@@ -59,6 +59,20 @@ public sealed class FreezeTagTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-HIST-7")]
+    public void BeforeAnyCheckpointThereIsNothingToTag()
+    {
+        using var repo = TestRepo.Create();
+
+        var result = FreezeTag.Add(repo.History, "vael", "ember", cancellationToken: Token);
+
+        Assert.Equal(FreezeTagOutcome.NothingCheckpointed, result.Outcome);
+        Assert.Null(result.Tag);
+        Assert.Contains("Nothing in the den has been checkpointed yet", result.Message, StringComparison.Ordinal);
+        Assert.Equal("", repo.Git("tag", "--list"));
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-HIST-1")]
     public void WithoutHistoryTheBookIsStillFrozenButNotTagged()
     {

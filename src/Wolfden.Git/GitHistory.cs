@@ -120,40 +120,43 @@ public sealed partial class GitHistory : IHistoryProvider
         }
 
         var specs = Pathspecs(query.Path is null ? null : [query.Path]);
-        string start;
-        string? before = null;
-        if (query.Before is null)
+        var head = Head(cancellationToken);
+        var skip = 0;
+        if (query.Before is not null)
         {
-            if (Head(cancellationToken) is not { } head)
+            var before = Resolve(query.Before, cancellationToken);
+            if (head is null)
             {
-                // Nothing has been committed yet.
-                return HistoryResult<IReadOnlyList<HistoryEntry>>.Done([]);
+                throw NotInLog(query.Before);
             }
 
-            start = head;
-        }
-        else
-        {
-            start = before = Resolve(query.Before, cancellationToken);
+            // Every page walks the same log, from HEAD with the same path
+            // filter, and starts after 'before' in it. 'git log <before>'
+            // would list only its ancestors: after a page that ends on a
+            // merged branch's commit, the main line's older commits would
+            // be lost.
+            var ids = Git(["log", "--format=%H", head, "--", .. specs], cancellationToken)
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var at = Array.IndexOf(ids, before);
+            if (at < 0)
+            {
+                throw NotInLog(query.Before);
+            }
+
+            skip = at + 1;
         }
 
-        // The page older than 'before' is 'git log <before>' less 'before'
-        // itself; '<before>^' would follow only the first parent of a merge.
-        // 'before' is dropped by id rather than with --skip=1, so a revision
-        // that didn't change the path doesn't cost an older entry.
-        int? count = query.Limit is { } limit ? Math.Min(limit, int.MaxValue - 1) + (before is null ? 0 : 1) : null;
-        var entries = ReadLog(start, count, specs, cancellationToken);
-        if (before is not null && entries.Count > 0 && entries[0].Id == before)
+        if (head is null)
         {
-            entries.RemoveAt(0);
+            // Nothing has been committed yet.
+            return HistoryResult<IReadOnlyList<HistoryEntry>>.Done([]);
         }
 
-        if (query.Limit is { } most && entries.Count > most)
-        {
-            entries.RemoveRange(most, entries.Count - most);
-        }
+        return HistoryResult<IReadOnlyList<HistoryEntry>>.Done(ReadLog(head, query.Limit, specs, cancellationToken, skip));
 
-        return HistoryResult<IReadOnlyList<HistoryEntry>>.Done(entries);
+        static HistoryRevisionException NotInLog(string revision) => new(
+            revision,
+            $"'{revision}' isn't one of the checkpoints in this history. For the next page, pass the id of the last entry of the page before, with the same path.");
     }
 
     /// <inheritdoc />
@@ -206,6 +209,11 @@ public sealed partial class GitHistory : IHistoryProvider
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Message, nameof(request));
+        if (request.Message.Any(c => char.IsControl(c) && c is not ('\n' or '\r' or '\t')))
+        {
+            throw new ArgumentException("A checkpoint's message can't hold control characters other than line breaks and tabs.", nameof(request));
+        }
+
         foreach (var coAuthor in request.CoAuthors ?? [])
         {
             if (!CoAuthorPattern().IsMatch(coAuthor))
@@ -245,11 +253,56 @@ public sealed partial class GitHistory : IHistoryProvider
             }
         }
 
-        Git(["commit", "--only", "--quiet", "--file=-", "--", .. specs], cancellationToken, input: message.ToString());
+        GitRun commit;
+        try
+        {
+            commit = Run(["commit", "--only", "--quiet", "--file=-", "--", .. specs], cancellationToken, input: message.ToString());
+        }
+        catch (OperationCanceledException)
+        {
+            Unmark(untracked);
+            throw;
+        }
+
+        if (!commit.Succeeded)
+        {
+            // Put the new files back as they were: untracked, not marked.
+            Unmark(untracked);
+            throw new HistoryException(
+                $"Git refused the checkpoint, so nothing was recorded ({commit.Said}). A pre-commit or commit-msg hook, commit signing, " +
+                "or a merge or rebase in progress can do this. The den's files and what was staged are as they were.");
+        }
+
         var id = Head(cancellationToken) ?? throw new HistoryException("Git made the checkpoint, but the repository has no commit afterwards.");
         var entry = ReadLog(id, 1, Pathspecs(null), cancellationToken).SingleOrDefault()
             ?? throw new HistoryException($"Git made the checkpoint {id}, but it doesn't change the den.");
         return HistoryResult<HistoryEntry?>.Done(entry);
+    }
+
+    /// <summary>
+    /// Takes the intent-to-add marks off <paramref name="untracked"/> (git's
+    /// <c>-z</c> list of files that were untracked), after a checkpoint that
+    /// didn't commit, so they're untracked again. Best effort: a failure here
+    /// mustn't hide why the checkpoint failed.
+    /// </summary>
+    private void Unmark(string untracked)
+    {
+        if (untracked.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            Run(
+                // --force: the entries hold no content, and the files stay where they are.
+                ["--literal-pathspecs", "rm", "--cached", "--force", "--quiet", "--ignore-unmatch", "--pathspec-from-file=-", "--pathspec-file-nul"],
+                CancellationToken.None,
+                input: untracked);
+        }
+        catch (HistoryException)
+        {
+        }
     }
 
     /// <inheritdoc />
@@ -288,7 +341,9 @@ public sealed partial class GitHistory : IHistoryProvider
 
         if (request.Message is null)
         {
-            Git(["tag", request.Name, at], cancellationToken);
+            // A lightweight tag can't be signed: with tag.gpgSign, git would
+            // make an annotated tag and ask an editor for its message.
+            Git(["-c", "tag.gpgSign=false", "tag", request.Name, at], cancellationToken);
         }
         else
         {
@@ -347,19 +402,21 @@ public sealed partial class GitHistory : IHistoryProvider
     {
         if (revision.Length == 0 || revision.StartsWith('-') || revision.Any(char.IsControl) || revision.Contains(' ', StringComparison.Ordinal))
         {
-            throw new HistoryException($"'{revision}' isn't a checkpoint: give an id from the history, or a tag's name.");
+            throw new HistoryRevisionException(revision, $"'{revision}' isn't a checkpoint: give an id from the history, or a tag's name.");
         }
 
         var run = Run(["rev-parse", "--verify", "--quiet", revision + "^{commit}"], cancellationToken);
         return run.Succeeded
             ? run.Output.Trim()
-            : throw new HistoryException($"There's no checkpoint '{revision}' in the repository: give an id from the history, or a tag's name.");
+            : throw new HistoryRevisionException(revision, $"There's no checkpoint '{revision}' in the repository: give an id from the history, or a tag's name.");
     }
 
     private void CheckTagName(string name, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        if (name.StartsWith('-') || !Run(["check-ref-format", $"refs/tags/{name}"], cancellationToken).Succeeded)
+        // 'HEAD', '@', and 'refs/...' are valid under refs/tags/, but would be read as something else.
+        if (name.StartsWith('-') || name is "HEAD" or "@" || name.StartsWith("refs/", StringComparison.Ordinal)
+            || !Run(["check-ref-format", $"refs/tags/{name}"], cancellationToken).Succeeded)
         {
             throw new ArgumentException($"'{name}' can't be a git tag's name.", nameof(name));
         }
@@ -383,13 +440,18 @@ public sealed partial class GitHistory : IHistoryProvider
     }
 
     /// <summary>The log from <paramref name="start"/> of the commits that change <paramref name="specs"/>, newest first.</summary>
-    private List<HistoryEntry> ReadLog(string start, int? count, IReadOnlyList<string> specs, CancellationToken cancellationToken)
+    private List<HistoryEntry> ReadLog(string start, int? count, IReadOnlyList<string> specs, CancellationToken cancellationToken, int skip = 0)
     {
         List<string> args =
         [
             "--no-optional-locks", "log", "--no-color", "--no-show-signature", "--encoding=UTF-8", "--relative", "-z", "--name-status", "-M",
             "--diff-merges=first-parent", LogFormat,
         ];
+        if (skip > 0)
+        {
+            args.Add(string.Create(CultureInfo.InvariantCulture, $"--skip={skip}"));
+        }
+
         if (count is { } n)
         {
             args.Add(string.Create(CultureInfo.InvariantCulture, $"--max-count={n}"));
@@ -587,7 +649,25 @@ public sealed partial class GitHistory : IHistoryProvider
         IReadOnlyList<string> args, CancellationToken cancellationToken, string? input = null, IReadOnlyDictionary<string, string?>? environment = null)
     {
         var run = Run(args, cancellationToken, input, environment);
-        return run.Succeeded ? run.Output : throw Failed(args.First(a => !a.StartsWith('-')), run);
+        return run.Succeeded ? run.Output : throw Failed(CommandName(args), run);
+    }
+
+    /// <summary>The git command in <paramref name="args"/>: the first argument that isn't an option, or the value of <c>-c</c>.</summary>
+    private static string CommandName(IReadOnlyList<string> args)
+    {
+        for (var i = 0; i < args.Count; i++)
+        {
+            if (args[i] == "-c")
+            {
+                i++;
+            }
+            else if (!args[i].StartsWith('-'))
+            {
+                return args[i];
+            }
+        }
+
+        return "command";
     }
 
     private GitRun Run(

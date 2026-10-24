@@ -85,7 +85,8 @@ public sealed class HistoryToolTests : IDisposable
         Assert.Contains("\n+Not checkpointed yet.\n", sincePatch, StringComparison.Ordinal);
 
         var bad = Assert.Throws<DenToolException>(() => tools.GetHistory("Lucy", before: "not-a-checkpoint"));
-        Assert.Equal(ToolErrorCodes.HistoryFailed, bad.Code);
+        Assert.Equal(ToolErrorCodes.UnknownCheckpoint, bad.Code);
+        Assert.Equal(ToolErrorCodes.UnknownCheckpoint, Assert.Throws<DenToolException>(() => tools.GetHistory("Lucy", diffFrom: "--output=x")).Code);
     }
 
     [Fact]

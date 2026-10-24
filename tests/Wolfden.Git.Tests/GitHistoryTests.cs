@@ -84,6 +84,129 @@ public sealed class GitHistoryTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-HIST-2")]
+    public void APageThatEndsOnAMergedBranchsCommitLosesNoOlderMainLineCommit()
+    {
+        // A (main), then B (main) and C (side, from A, newer than B), then the
+        // merge: the log is merge, C, B, A, and B isn't an ancestor of C.
+        using var repo = TestRepo.Create();
+        repo.WriteDen(Mara, "a\n");
+        var a = repo.CommitAt("A", 1);
+        repo.Git("checkout", "--quiet", "-b", "side");
+        repo.WriteDen(Fen, "c\n");
+        var c = repo.CommitAt("C", 3);
+        repo.Git("checkout", "--quiet", "main");
+        repo.WriteDen(Mara, "b\n");
+        var b = repo.CommitAt("B", 2);
+        repo.Git("merge", "--quiet", "--no-ff", "-m", "merge side", "side");
+        var merge = repo.Git("rev-parse", "HEAD").Trim();
+
+        var history = repo.History;
+        Assert.Equal([merge, c, b, a], history.Log(new HistoryLogQuery(), Token).Value.Select(e => e.Id));
+
+        var first = history.Log(new HistoryLogQuery(Limit: 2), Token).Value;
+        Assert.Equal([merge, c], first.Select(e => e.Id));
+        var second = history.Log(new HistoryLogQuery(Limit: 2, Before: c), Token).Value;
+        Assert.Equal([b, a], second.Select(e => e.Id));
+
+        for (var limit = 1; limit <= 4; limit++)
+        {
+            Assert.Equal([merge, c, b, a], Pages(history, limit));
+        }
+
+        // A revision that isn't an entry of this log isn't a cursor for it.
+        Assert.Throws<HistoryRevisionException>(() => history.Log(new HistoryLogQuery(Mara, Limit: 1, Before: c), Token));
+    }
+
+    private static List<string> Pages(IHistoryProvider history, int limit)
+    {
+        var ids = new List<string>();
+        string? before = null;
+        for (var pages = 0; pages < 10; pages++)
+        {
+            var page = history.Log(new HistoryLogQuery(Limit: limit, Before: before), Token).Value;
+            if (page.Count == 0)
+            {
+                break;
+            }
+
+            ids.AddRange(page.Select(e => e.Id));
+            before = page[^1].Id;
+        }
+
+        return ids;
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-3")]
+    public void ACheckpointAHookRefusesLeavesTheNewFilesUntracked()
+    {
+        using var repo = TestRepo.Create();
+        repo.CommitAll("start");
+        var hook = Path.Combine(repo.Root, ".git", "hooks", "pre-commit");
+        Directory.CreateDirectory(Path.GetDirectoryName(hook)!);
+        File.WriteAllText(hook, "#!/bin/sh\necho 'not today' >&2\nexit 1\n");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(hook, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        repo.WriteDen(Mara, "# Mara Voss\n");
+        var status = repo.Git("status", "--porcelain", "--untracked-files=all");
+
+        var refused = Assert.Throws<HistoryException>(() => repo.History.Checkpoint(new CheckpointRequest("Add Mara"), Token));
+
+        Assert.StartsWith("Git refused the checkpoint, so nothing was recorded (", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("not today", refused.Message, StringComparison.Ordinal);
+        Assert.Equal($"?? {Mara}\n", status);
+        Assert.Equal(status, repo.Git("status", "--porcelain", "--untracked-files=all"));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-3")]
+    public void ACheckpointMessageCantHoldControlCharacters()
+    {
+        using var repo = TestRepo.Create();
+        repo.WriteDen(Mara, "# Mara Voss\n");
+        Assert.Throws<ArgumentException>(() => repo.History.Checkpoint(new CheckpointRequest("Add\u0001 Mara"), Token));
+        Assert.NotNull(repo.History.Checkpoint(new CheckpointRequest("Add Mara\r\n\n\tand more"), Token).Value);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-7")]
+    public void ALightweightTagWorksWhenGitSignsTags()
+    {
+        using var repo = TestRepo.Create();
+        var start = repo.CommitAll("start");
+        repo.Git("config", "tag.gpgSign", "true");
+
+        Assert.Equal(new HistoryTag("a-snapshot", start), repo.History.Tag(new TagRequest("a-snapshot"), Token).Value);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-1")]
+    public void AGitAboveACeilingDirectoryDoesntCount()
+    {
+        // A broken .git that git doesn't look at, because of GIT_CEILING_DIRECTORIES.
+        var outer = TestRepo.NewFolder();
+        try
+        {
+            File.WriteAllText(Path.Combine(outer, ".git"), "gitdir: nowhere\n");
+            var den = Path.Combine(outer, "den");
+            Directory.CreateDirectory(den);
+            var env = new Dictionary<string, string?>(TestRepo.Options.Environment) { ["GIT_CEILING_DIRECTORIES"] = outer };
+            var options = TestRepo.Options with { Environment = env };
+
+            Assert.Equal(GitLocationKind.NotARepository, GitRepository.Locate(den, options, Token).Kind);
+            Assert.Equal(GitLocationKind.Unusable, GitRepository.Locate(outer, options, Token).Kind);
+        }
+        finally
+        {
+            TestRepo.DeleteFolder(outer);
+        }
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-HIST-3")]
     public void ACheckpointRecordsNewChangedAndDeletedNotes()
     {
@@ -361,6 +484,9 @@ public sealed class GitHistoryTests
     [InlineData("-f")]
     [InlineData("two words")]
     [InlineData("book..final")]
+    [InlineData("HEAD")]
+    [InlineData("@")]
+    [InlineData("refs/heads/main")]
     [Trait("Scenario", "SC-HIST-7")]
     public void ATagNameMustBeOneGitAccepts(string name)
     {
@@ -377,8 +503,10 @@ public sealed class GitHistoryTests
         repo.CommitAll("start");
         var history = repo.History;
 
-        Assert.Contains("no checkpoint 'nope'", Assert.Throws<HistoryException>(() => history.Log(new HistoryLogQuery(Before: "nope"), Token)).Message, StringComparison.Ordinal);
-        Assert.Throws<HistoryException>(() => history.Diff(new HistoryDiffQuery("--output=x"), Token));
+        var nope = Assert.Throws<HistoryRevisionException>(() => history.Log(new HistoryLogQuery(Before: "nope"), Token));
+        Assert.Contains("no checkpoint 'nope'", nope.Message, StringComparison.Ordinal);
+        Assert.Equal("nope", nope.Revision);
+        Assert.Throws<HistoryRevisionException>(() => history.Diff(new HistoryDiffQuery("--output=x"), Token));
         Assert.False(File.Exists(Path.Combine(repo.DenRoot, "x")));
     }
 
