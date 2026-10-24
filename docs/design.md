@@ -697,8 +697,9 @@ and `wolfden check` do:
   `diff_from`, since that checkpoint. A den without history isn't an
   error: `available` is false, and `reason` says why in the writer's
   words. A `before` or `diff_from` that isn't a checkpoint of that
-  history is `unknown_checkpoint`; a git failure is `history_failed`. `wolfden mcp` looks for the den's repository on each
-  call, so a den made a repository while it runs gets history.
+  history is `unknown_checkpoint`; a git failure is `history_failed`.
+  `wolfden mcp` looks for the den's repository on each call, so a den
+  made a repository while it runs gets history.
 - **Serve first, watcher in the background.** The server answers the
   client before the watcher's first build of the index is done, so a
   slow build never delays the handshake. A client that waits too long

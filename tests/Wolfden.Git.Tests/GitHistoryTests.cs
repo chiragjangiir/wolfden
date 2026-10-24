@@ -164,6 +164,53 @@ public sealed class GitHistoryTests
 
     [Fact]
     [Trait("Scenario", "SC-HIST-3")]
+    public async Task ACheckpointCancelledAfterGitCommittedKeepsTheNewFilesTracked()
+    {
+        using var repo = TestRepo.Create();
+        repo.CommitAll("start");
+        // The commit is made before the post-commit hook runs. The hook says
+        // it has started (hooks run in the repository's top folder), then
+        // holds git up until the checkpoint is cancelled.
+        WriteHook(repo, "post-commit", "#!/bin/sh\n: > .git/wolfden-test-committed\nsleep 60\n");
+        repo.WriteDen(Mara, "# Mara Voss\n");
+        var started = Path.Combine(repo.Root, ".git", "wolfden-test-committed");
+
+        using var cancel = new CancellationTokenSource();
+        var watch = Task.Run(
+            async () =>
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(50);
+                while (!File.Exists(started) && DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(50, Token);
+                }
+
+                await cancel.CancelAsync();
+            },
+            Token);
+
+        Assert.ThrowsAny<OperationCanceledException>(() => repo.History.Checkpoint(new CheckpointRequest("Add Mara"), cancel.Token));
+        await watch;
+        Assert.True(File.Exists(started), "The post-commit hook never ran.");
+
+        Assert.Equal("Add Mara\n", repo.Git("log", "-1", "--format=%s"));
+        Assert.Equal($"{Mara}\n", repo.Git("show", "--name-only", "--format=", "HEAD"));
+        Assert.Equal("", repo.Git("status", "--porcelain", "--untracked-files=all"));
+    }
+
+    private static void WriteHook(TestRepo repo, string name, string script)
+    {
+        var hook = Path.Combine(repo.Root, ".git", "hooks", name);
+        Directory.CreateDirectory(Path.GetDirectoryName(hook)!);
+        File.WriteAllText(hook, script);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(hook, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-3")]
     public void ACheckpointMessageCantHoldControlCharacters()
     {
         using var repo = TestRepo.Create();

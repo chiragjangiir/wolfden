@@ -129,8 +129,11 @@ internal static class GitProcess
         }
 
         process.WaitForExit();
-        Task.WaitAll(output, error);
+
+        // Once git is stopped, don't wait for its output: a child it started,
+        // such as a hook's 'sleep', can hold the pipes open after it's gone.
         cancellationToken.ThrowIfCancellationRequested();
+        Task.WaitAll(output, error);
         return new GitRun(process.ExitCode, output.Result, error.Result);
     }
 

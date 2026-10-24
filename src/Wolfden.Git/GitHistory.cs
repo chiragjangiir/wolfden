@@ -260,7 +260,14 @@ public sealed partial class GitHistory : IHistoryProvider
         }
         catch (OperationCanceledException)
         {
-            Unmark(untracked);
+            // Git may have made the commit before it was stopped (say, in a
+            // slow post-commit hook). Then the checkpoint was recorded, and
+            // taking the marks off would stage the new files' deletion.
+            if (Head(CancellationToken.None) == head)
+            {
+                Unmark(untracked);
+            }
+
             throw;
         }
 

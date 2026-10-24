@@ -1741,7 +1741,8 @@ Spec: design.md §6 (#19). Covered by:
 `GitHistoryTests.TheFirstCheckpointOfANewRepositoryWorks`,
 `GitHistoryTests.ACheckpointNeedsAMessage`,
 `GitHistoryTests.ACheckpointMessageCantHoldControlCharacters`,
-`GitHistoryTests.ACheckpointAHookRefusesLeavesTheNewFilesUntracked`.
+`GitHistoryTests.ACheckpointAHookRefusesLeavesTheNewFilesUntracked`,
+`GitHistoryTests.ACheckpointCancelledAfterGitCommittedKeepsTheNewFilesTracked`.
 
 ### SC-HIST-4. My AI assistant makes a checkpoint
 
