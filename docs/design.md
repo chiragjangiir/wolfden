@@ -316,8 +316,13 @@ Timeline entries are `event` entities with two independent axes:
 When a book is done, **freezing** it marks it `status: final` (format.md
 F-BOOK-1). That is the freeze: after it, edits to that book's scope are
 refused unless explicitly unfrozen. When the den has git history (§6),
-freezing also adds a tag (`book/ember/final`) as an extra snapshot. This
-replaces hand-made `_FINAL` copies.
+freezing also adds a tag as an extra snapshot. This replaces hand-made
+`_FINAL` copies. **Decided (#31):** the tag is
+`book/<universe>/<book>/final` (`book/vael/ember/final`), since book keys
+are unique only within a universe (format.md F-KEY-5). Tags belong to the
+whole repository, so if the tag is already there (from an earlier freeze,
+or another den in the same repository), freezing says so and leaves it
+where it is: Wolfden never moves or replaces a tag.
 
 ## 6. History and versioning
 
@@ -379,6 +384,25 @@ The den store and the history provider are interfaces in `Wolfden.Core`
   cancelled. `NoHistory` is the provider of a den without a backend.
   Freezing adds its tag only when the provider has the `Tag` capability.
   `Wolfden.Git` implements the interface (#19).
+- **The git provider** (#19; v0 behaviour, not a recorded decision,
+  apart from the git CLI). **Decided (2026-10-22):** Wolfden runs the
+  user's own `git` command, not a library, so their configuration
+  applies: commit signing, hooks, credentials, and `safe.directory`. Git
+  runs in the den's folder, with that folder as the pathspec and hidden
+  paths excluded, so paths in and out are den-relative and nothing
+  outside the den is listed, compared, or committed. A den outside any
+  repository has no history (`NoHistory`); when git isn't installed, or
+  refuses the repository, every history operation says so instead.
+  A checkpoint is `git commit --only -- <den paths>`: new den files are
+  first marked with `git add --intent-to-add`, which records no content,
+  and whatever else the user staged stays staged. A checkpoint with
+  nothing to record makes no commit. A diff against the files as they
+  are now includes new files git doesn't track yet (not ignored ones),
+  through a temporary index, so it never changes the user's index. The
+  log of a file follows its current path, not back through renames
+  (`--follow` can't be paged), and revisions from callers are resolved
+  to commit hashes first, so one can't be read as an option. Tests run
+  git with a configuration of their own, never the developer's.
 
 **A den inside a larger repository.** The den is the folder that holds
 `den.yaml`, and it can be a subfolder of a larger git repository. History
@@ -497,7 +521,7 @@ commands, and `wolfden <command> --help` describes each one:
 
 | Command | What it does |
 |---|---|
-| `wolfden init [<folder>] [--name <name>] [--universe <key>]` | Creates a den: a `den.yaml`, and with `--universe` a first universe with an id. It never overwrites anything, and refuses a folder inside another den or one that holds a den up to four folder levels below it (format.md F-LAY-1; the downward search skips hidden folders and folder links, and stops after 2,000 folders). The new den passes `check` with no warnings. |
+| `wolfden init [<folder>] [--name <name>] [--universe <key>] [--git]` | Creates a den: a `den.yaml`, and with `--universe` a first universe with an id. It never overwrites anything, and refuses a folder inside another den or one that holds a den up to four folder levels below it (format.md F-LAY-1; the downward search skips hidden folders and folder links, and stops after 2,000 folders). The new den passes `check` with no warnings. By default the den is a plain folder; `--git` also runs `git init` in it (maintainer decision, #57, #122), unless the folder is already inside a repository, which it then names and leaves as it is (§6, "A den inside a larger repository"). Without git installed, the den is still made, and `init` says the repository wasn't (exit 0); if git fails, the den is kept and `init` exits 2. |
 | `wolfden check [<den>] [--universe <key>] [--fix]` | The continuity lint above. It reads the files directly, not the index. It checks the whole den, every universe included, since it validates files rather than a story view; `--universe` checks only that universe's files and the den-level ones (see "Which universe" below), and `*` means the whole den. Without `--fix` it never writes. `--fix` first gives every container and entity file that loads without an `id` a new one (format.md F-ID-2, F-ID-6), skipping files in a final book (F-BOOK-1), and then checks the den as it is after the fix. |
 | `wolfden index [<den>] [--watch]` | Rebuilds `.wolfden/index.db` from the files and says what it holds. `--watch` then keeps it up to date as files change (#14), printing one line for each batch of changes it applies (with `--json`, one JSON object per line), until Ctrl+C. Only one watcher runs per den; a second exits 2. |
 | `wolfden query [<universe>] [--universe <key>] [--at <position>]` | Canon as of a position (format.md F-VIEW-1), from the index, of one universe (see "Which universe" below; `*` is refused, since a view is of one universe). `--series` or `--book` narrows the view, `--type` (any type an enabled pack defines) and `--entity` (matched as a link is, F-LINK-6, among the entities in the view, so one the reader meets later can't shadow one they've met) pick entities out of it, `--pinned` gives pinned canon (F-VIEW-2), and `--brief` lists one line per entity. |
@@ -585,7 +609,7 @@ library the API uses. `wolfden mcp` runs it over stdio (§7). Tool surface:
 | `list_entities` | shipped (#20) | By universe, type, status, series, or book |
 | `canon_as_of` | shipped (#20) | Canon at a position, with an optional series or book filter |
 | `check` | shipped (#20) | Run continuity checks and return findings |
-| `get_history` | planned (#19) | Commit history and diffs for an entity |
+| `get_history` | shipped (#19) | Commit history and diffs for an entity |
 | `create_entity` | planned (#21) | From a type template |
 | `update_fields` / `append_section` | planned (#21) | Structured edits that keep everything else intact |
 | `add_idea` | planned (#21) | Record undecided material with `status: idea` |
@@ -651,6 +675,16 @@ and `wolfden check` do:
 - **Fresh answers.** Each call checks the files hash first and rebuilds
   the index if it differs, waiting briefly for the watcher the server
   hosts (§7). `check` reads the files, not the index.
+- **History** (#19). `get_history` names an entity as `get_entity`
+  does, without a position, since history isn't a story view, and gives
+  the checkpoints that changed its file, newest first, a page at a time:
+  `limit`, then `before` set to the result's `next_before`. With `diff`
+  it adds what changed in the file since the latest checkpoint, and with
+  `diff_from`, since that checkpoint. A den without history isn't an
+  error: `available` is false, and `reason` says why in the writer's
+  words. A git failure, or a checkpoint the repository doesn't have, is
+  `history_failed`. `wolfden mcp` looks for the den's repository on each
+  call, so a den made a repository while it runs gets history.
 - **Serve first, watcher in the background.** The server answers the
   client before the watcher's first build of the index is done, so a
   slow build never delays the handshake. A client that waits too long

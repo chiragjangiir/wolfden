@@ -163,6 +163,7 @@ public sealed class GitHistoryTests
     }
 
     [Theory]
+    [Trait("Scenario", "SC-HIST-3")]
     [InlineData("")]
     [InlineData("  ")]
     public void ACheckpointNeedsAMessage(string message)
@@ -175,6 +176,7 @@ public sealed class GitHistoryTests
     [InlineData("Claude")]
     [InlineData("<noreply@anthropic.com>")]
     [InlineData("Claude <noreply@anthropic.com>\nSigned-off-by: Someone <x@example.com>")]
+    [Trait("Scenario", "SC-HIST-4")]
     public void ACoAuthorIsANameAndAnEmailOnOneLine(string coAuthor)
     {
         using var repo = TestRepo.Create();
@@ -311,6 +313,7 @@ public sealed class GitHistoryTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-HIST-2")]
     public void NamesWithSpacesAndAccentsComeBackAsTheyAre()
     {
         using var repo = TestRepo.Create();
@@ -358,6 +361,7 @@ public sealed class GitHistoryTests
     [InlineData("-f")]
     [InlineData("two words")]
     [InlineData("book..final")]
+    [Trait("Scenario", "SC-HIST-7")]
     public void ATagNameMustBeOneGitAccepts(string name)
     {
         using var repo = TestRepo.Create();
@@ -366,6 +370,7 @@ public sealed class GitHistoryTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-HIST-6")]
     public void ARevisionThatIsntOneIsAHistoryException()
     {
         using var repo = TestRepo.Create();
