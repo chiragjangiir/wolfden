@@ -172,8 +172,8 @@ internal static class GitProcess
                 throw new GitNotFoundException($"couldn't run '{options.Executable}': {e.Message}", e);
             }
 
-            var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
-            var error = process.StandardError.ReadToEndAsync(CancellationToken.None);
+            var output = new Capture(process.StandardOutput);
+            var error = new Capture(process.StandardError);
 
             // Written on the side, so a git that doesn't read its input yet
             // (a commit reads its message after the pre-commit hook) can't
@@ -203,45 +203,134 @@ internal static class GitProcess
                 if (stoppable)
                 {
                     Stop(process);
-                    Abandon(output, error, writing);
+
+                    // Kill returns before git has gone (on Windows, at
+                    // least); wait a little, so the caller can clean up a
+                    // temporary index git was writing.
+                    process.WaitForExit(KillWait);
+                    Abandon(output.Completion, error.Completion, writing);
                     throw new GitTimeoutException(CommandName(argList), timeout, null);
                 }
 
                 // Never stopped part way: it finishes on its own, and the
                 // task says what it did then. The task owns the process now.
                 handedOff = true;
-                var stillRunning = Task.Run(
-                    () =>
-                    {
-                        using (process)
-                        {
-                            process.WaitForExit();
-                            Task.WaitAll(output, error, writing);
-                            return new GitRun(process.ExitCode, output.Result, error.Result);
-                        }
-                    },
-                    CancellationToken.None);
+                var stillRunning = FinishAsync(process, output, error, writing);
                 Abandon(stillRunning);
                 throw new GitTimeoutException(CommandName(argList), timeout, stillRunning);
             }
 
             if (stoppable && cancellationToken.IsCancellationRequested)
             {
-                // Once git is stopped, don't wait for its output: a child it
-                // started, such as a hook's 'sleep', can hold the pipes open
-                // after it's gone.
-                Abandon(output, error, writing);
+                // Cancelled: git was stopped, or it had just finished, in
+                // which case what it did is thrown away. A Stoppable command
+                // changed nothing of the user's, so that loses nothing.
+                Abandon(output.Completion, error.Completion, writing);
                 cancellationToken.ThrowIfCancellationRequested();
             }
 
-            Task.WaitAll(output, error, writing);
-            return new GitRun(process.ExitCode, output.Result, error.Result);
+            return Collect(process, output, error, writing, stoppable ? cancellationToken : CancellationToken.None);
         }
         finally
         {
             if (!handedOff)
             {
                 process.Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// How long to wait for git's output to end after git has exited. A
+    /// child a hook or filter started in the background (a post-commit
+    /// <c>git push &amp;</c>, say) can keep the pipes open long after git is
+    /// gone. By the time git exits, everything it wrote is in the pipe, so
+    /// this only needs to be long enough to drain that.
+    /// </summary>
+    private static readonly TimeSpan PipeGrace = TimeSpan.FromSeconds(1);
+
+    /// <summary>How long to wait for git to go after it's been killed.</summary>
+    private static readonly TimeSpan KillWait = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// What git did, once it has exited: its exit code, and its output as
+    /// far as it got within <see cref="PipeGrace"/>. Output a child still
+    /// holds open is left unread; the exit code is what counts.
+    /// </summary>
+    private static GitRun Collect(Process process, Capture output, Capture error, Task writing, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!Task.WaitAll([output.Completion, error.Completion, writing], (int)PipeGrace.TotalMilliseconds, cancellationToken))
+            {
+                Abandon(output.Completion, error.Completion, writing);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Abandon(output.Completion, error.Completion, writing);
+            throw;
+        }
+        catch (AggregateException)
+        {
+            // A read failed; what was read before it still counts.
+        }
+
+        return new GitRun(process.ExitCode, output.Text, error.Text);
+    }
+
+    /// <summary>Waits, without holding a thread, for a git left running to exit, then says what it did.</summary>
+    private static async Task<GitRun> FinishAsync(Process process, Capture output, Capture error, Task writing)
+    {
+        using (process)
+        {
+            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            var pipes = Task.WhenAll(output.Completion, error.Completion, writing);
+            if (await Task.WhenAny(pipes, Task.Delay(PipeGrace)).ConfigureAwait(false) != pipes)
+            {
+                Abandon(output.Completion, error.Completion, writing);
+            }
+
+            return new GitRun(process.ExitCode, output.Text, error.Text);
+        }
+    }
+
+    /// <summary>
+    /// Reads a stream to its end on the side, keeping what it has read so far
+    /// where <see cref="Text"/> can take it at any time, so output can be
+    /// used even when the stream never ends.
+    /// </summary>
+    private sealed class Capture
+    {
+        private readonly StringBuilder _text = new();
+
+        public Capture(StreamReader reader) => Completion = Task.Run(() => PumpAsync(reader), CancellationToken.None);
+
+        /// <summary>Completes at the end of the stream, or faults if reading fails (as when git's process is disposed first).</summary>
+        public Task Completion { get; }
+
+        /// <summary>What has been read so far.</summary>
+        public string Text
+        {
+            get
+            {
+                lock (_text)
+                {
+                    return _text.ToString();
+                }
+            }
+        }
+
+        private async Task PumpAsync(StreamReader reader)
+        {
+            var buffer = new char[8192];
+            int read;
+            while ((read = await reader.ReadAsync(buffer, CancellationToken.None).ConfigureAwait(false)) > 0)
+            {
+                lock (_text)
+                {
+                    _text.Append(buffer, 0, read);
+                }
             }
         }
     }
