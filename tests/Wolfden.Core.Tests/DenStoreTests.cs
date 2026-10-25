@@ -148,7 +148,11 @@ public sealed class DenStoreTests : IDisposable
                 byte[] seen;
                 try
                 {
-                    seen = File.ReadAllBytes(Full(Mara));
+                    // Shared for delete too, as an editor's reader would be, so
+                    // the reader rarely keeps the store from replacing the file.
+                    using var stream = new FileStream(Full(Mara), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                    var buffer = new byte[stream.Length];
+                    seen = buffer[..stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false)];
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException)
                 {
@@ -656,12 +660,17 @@ public sealed class DenStoreTests : IDisposable
             // Counted, not timed: the write flushes to disk, which a busy
             // CI machine can make take longer than all the retries would.
             using var retries = new RetryCounter(_root);
+            var watch = Stopwatch.StartNew();
             var e = Assert.Throws<DenStoreException>(() => store.WriteFile(Mara, Bytes("x"), DenWriteMode.Replace));
+            watch.Stop();
 
             Assert.Equal(DenStoreError.AccessDenied, e.Error);
             Assert.Equal($"'{Mara}' can't be written: the file is read-only.", e.Message);
             Assert.IsType<UnauthorizedAccessException>(e.InnerException);
             Assert.True(retries.Count == 0, $"It was tried {retries.Count + 1} times: a read-only file isn't worth trying again.");
+
+            // A backstop for waits the counter can't see (it counts only Run's retries), far above any disk flush.
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"It took {watch.ElapsedMilliseconds} ms.");
         }
         finally
         {

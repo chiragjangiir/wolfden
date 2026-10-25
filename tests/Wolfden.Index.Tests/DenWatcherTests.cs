@@ -380,10 +380,17 @@ public sealed class DenWatcherTests
 
         Assert.Equal("couldn't update the index: The index is locked. Trying again with a rebuild in 20 ms.", WaitFor(failures, _ => true).Message);
         Assert.Equal("couldn't update the index: The index is locked. Trying again with a rebuild in 40 ms.", WaitFor(failures, _ => true).Message);
-        var update = WaitFor(updates, _ => true);
-        Assert.Equal(IndexUpdateKind.Rebuilt, update.Kind);
+        var update = WaitFor(updates, u => u.Kind == IndexUpdateKind.Rebuilt);
         Assert.Equal("the index wasn't known to be up to date", update.Reason);
-        Assert.Equal(IndexStatus.Current, IndexBuilder.CheckFiles(den.Root));
+
+        // The edit is in the index once the watcher has caught up: at once
+        // if the rebuild read it, else after the edit's own batch.
+        var deadline = DateTime.UtcNow + Timeout;
+        while (IndexBuilder.CheckFiles(den.Root) != IndexStatus.Current)
+        {
+            Assert.True(DateTime.UtcNow < deadline, $"The index wasn't current within {Timeout.TotalSeconds} s.");
+            Thread.Sleep(50);
+        }
     }
 
     [Fact]
