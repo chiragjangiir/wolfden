@@ -31,7 +31,9 @@ public sealed class StarvedPoolTests
         var text = "# Mara Voss\n\n" + string.Join("\n", Enumerable.Range(1, 6000).Select(i => $"She crossed the fen on night {i}.")) + "\n";
         repo.WriteDen(Mara, text);
 
-        using var release = new ManualResetEventSlim();
+        // Not disposed: blockers still queued when the test ends wait on it
+        // later, and a disposed event would throw on a pool thread.
+        var release = new ManualResetEventSlim();
         var blockers = Environment.ProcessorCount * 4 + 64;
         for (var i = 0; i < blockers; i++)
         {
