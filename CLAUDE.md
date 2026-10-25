@@ -34,8 +34,8 @@ fiction. See `README.md` for the pitch. Design docs live in `docs/`.
   sections, custom sections). Genre bundles of types are called **packs**.
 - **AI integration:** an MCP server is a first-class feature, not an add-on.
 - **Stack:** ASP.NET Core (.NET 10 LTS) backend. React, TypeScript, Vite and
-  TanStack Query frontend (no Redux unless a real need appears). LibGit2Sharp
-  or the `git` CLI for git operations. Docker comes later, for self-hosting.
+  TanStack Query frontend (no Redux unless a real need appears). The `git`
+  CLI for git operations (#19). Docker comes later, for self-hosting.
 
 ## Rules
 
