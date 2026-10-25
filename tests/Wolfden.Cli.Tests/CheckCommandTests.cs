@@ -313,7 +313,21 @@ public class CheckCommandTests
         var (exitCode, output, _) = Check("--help");
 
         Assert.Equal(CliApp.ExitOk, exitCode);
-        Assert.StartsWith("usage: wolfden check [<den>] [--den <den>] [--universe <key>] [--fix] [--json]\n\n", output, StringComparison.Ordinal);
+        Assert.StartsWith("usage: wolfden check [<den>] [--den <den>] [--universe <key>] [--no-index] [--fix] [--json]\n\n", output, StringComparison.Ordinal);
+
+        // Every option's description, and each line it wraps onto, starts in the same column.
+        var optionLines = output.Split('\n')
+            .Where(l => l.StartsWith("  -", StringComparison.Ordinal) || l.StartsWith("  <", StringComparison.Ordinal) || l.StartsWith("      ", StringComparison.Ordinal))
+            .ToList();
+        Assert.Contains(optionLines, l => l.StartsWith("  --no-index", StringComparison.Ordinal));
+        Assert.Single(optionLines.Select(DescriptionColumn).Distinct());
+
+        // A wrapped line's text starts after its indent; an option line's after the gap of two or more spaces that follows the option.
+        static int DescriptionColumn(string line)
+        {
+            var gap = line.StartsWith("      ", StringComparison.Ordinal) ? 0 : line.IndexOf("  ", 2, StringComparison.Ordinal);
+            return line.Length - line[gap..].TrimStart().Length;
+        }
     }
 
     [Fact]

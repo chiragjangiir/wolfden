@@ -167,10 +167,11 @@ public sealed partial class DenTools
             }
 
             // Filters apply after the search, so ask for more when there are
-            // any; one more than the limit says whether the hits were cut off.
+            // any; one more than the cap says whether the raw hits were cut off,
+            // and one more than the limit whether the filtered ones were.
             var filtered = (universeId is not null && universes.Count > 1) || type is not null || canonOnly;
-            var fetch = filtered ? Math.Max(limit * 20, 1000) : limit + 1;
-            var hits = index.Search(query, fetch);
+            var cap = filtered ? Math.Max(limit * 20, 1000) : limit;
+            var hits = index.Search(query, cap + 1);
             var paths = hits.Select(h => h.EntityPath).Distinct().ToList();
             var entities = db.Entities.Where(e => paths.Contains(e.Path)).ToList().ToDictionary(e => e.Path, StringComparer.Ordinal);
             var scopes = Scopes(db);
@@ -184,8 +185,8 @@ public sealed partial class DenTools
                 .Select(x => new SearchHitView(
                     Summary(x.Entity, universes, scopes), x.Hit.SectionName, x.Hit.SectionLine, x.Hit.Snippet, x.Hit.Status, x.Hit.IsInCanon, x.Hit.InComment))
                 .ToList();
-            // Filtered hits that reached the raw cap may have more beyond it.
-            var truncated = views.Count > limit || (filtered && hits.Count == fetch);
+            // Raw hits past the cap may hold more that pass the filters.
+            var truncated = views.Count > limit || hits.Count > cap;
             views = views.Take(limit).ToList();
             return new SearchResult(ToolJson.Version, query, views.Count, truncated, views);
         });

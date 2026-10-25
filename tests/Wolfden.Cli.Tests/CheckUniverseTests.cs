@@ -91,4 +91,46 @@ public sealed class CheckUniverseTests : IDisposable
         Assert.Equal(CliApp.ExitUsage, fix);
         Assert.StartsWith("wolfden check: '--fix' adds ids across the whole den", fixError, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void AnUnknownUniverseOrABrokenDenYamlLeavesTheIndexAlone()
+    {
+        // The key is checked before the index is brought up to date, which hashes the whole den (#130).
+        var (unknown, _, _) = Cli.Run("check", _den.Root, "--universe", "nowhere");
+        Assert.Equal(CliApp.ExitUsage, unknown);
+        Assert.False(Directory.Exists(Path.Combine(_den.Root, ".wolfden")));
+
+        // An index built from a den.yaml that doesn't load has nothing to compare with, so none is built.
+        _den.Write("den.yaml", "format: 1\nname: [broken\n");
+        var (broken, _, _) = Cli.Run("check", _den.Root, "--universe", "vael");
+        Assert.Equal(CliApp.ExitUsage, broken);
+        Assert.False(Directory.Exists(Path.Combine(_den.Root, ".wolfden")));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-11")]
+    public void NoIndexLeavesTheIndexAloneAndSaysIdsWerentCompared()
+    {
+        _den.Write("universes/orn/entities/characters/a.md", "---\nid: 01JC5CK3000000000000000011\ntype: character\nname: A\n---\n\nA copy.\n");
+
+        var (exitCode, output, _) = Cli.Run("check", _den.Root, "--universe", "orn", "--no-index", "--json");
+
+        Assert.NotEqual(CliApp.ExitUsage, exitCode);
+        Assert.False(Directory.Exists(Path.Combine(_den.Root, ".wolfden")));
+        using var json = System.Text.Json.JsonDocument.Parse(output);
+        Assert.DoesNotContain(
+            json.RootElement.GetProperty("diagnostics").EnumerateArray(), d => d.GetProperty("rule").GetString() == "F-ID-3");
+        Assert.Equal(
+            "Ids shared with notes in other universes (F-ID-3) weren't checked: the check was asked not to use the index. Check the whole den to find them.",
+            json.RootElement.GetProperty("note").GetString());
+
+        // An unknown universe is still an unknown universe.
+        var (unknown, _, error) = Cli.Run("check", _den.Root, "--universe", "nowhere", "--no-index");
+        Assert.Equal(CliApp.ExitUsage, unknown);
+        Assert.StartsWith("wolfden check: the den has no universe 'nowhere'.", error, StringComparison.Ordinal);
+
+        // A check of the whole den never uses the index, so --no-index changes nothing there.
+        Assert.Equal(Cli.Run("check", _den.Root), Cli.Run("check", _den.Root, "--no-index"));
+        Assert.False(Directory.Exists(Path.Combine(_den.Root, ".wolfden")));
+    }
 }
