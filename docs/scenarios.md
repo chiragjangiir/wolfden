@@ -1624,13 +1624,21 @@ pinned species.
   with the rule, and the file is unchanged. An `id` edit is refused
   (F-ID-4); renaming the entity or changing an alias is refused until
   links can follow (F-RT-5). The change to the pinned species is made,
-  and `pinned_canon` says it touched pinned canon.
+  and `pinned_canon` says it touched pinned canon, as it does for a
+  status change on the Count, whose pinned facts take his status. An
+  edit that changes nothing writes nothing, not even a missing id. An
+  alias that's another note's name or slug says what links by it now
+  reach; an alias with control characters, or a slug Windows can't
+  hold (`nul`), is refused, and a name like "Con" gets `con-2`.
 
 Spec: format.md §1.3, F-ID-4, F-RT-2, F-RT-5, F-PIN-1, types.md F-TPL-7
 (maintainer decisions, 2026-10-22 and 2026-10-23). Covered by:
 `WriteToolTests.FieldEditsKeepTheRestAndSayWhatTheyMean`,
 `WriteToolTests.AnEditThatWouldLeaveAnErrorIsRefusedAndNothingIsWritten`,
 `WriteToolTests.AnEditOfPinnedCanonIsMadeButFlagged`,
+`WriteToolTests.AStatusChangeOnAnEntityWithPinnedFactsIsFlagged`,
+`WriteToolTests.AnEditThatChangesNothingAddsNoId`,
+`WriteToolTests.BadNamesAndAliasesAreRefusedAndAnAliasThatCollidesSaysSo`,
 `McpServerTests.OverTheWireAWriteTakesItsChangesAsJsonAndAStaleHashIsRefused`,
 `WriteEditTests.InTemplateOrderANewTopLevelKeyGoesInItsPlace`,
 `WriteEditTests.AWholeTemporalListIsWrittenOneEntryPerLine`.
@@ -1645,12 +1653,16 @@ then it fills the Overview of a character it just created.
   Appearance goes before Voice, in the character type's section order,
   and the subsection goes at the end of Arc with `from=dracula:7` as its
   section comment. A template's empty section is filled, prompt comment
-  kept, never repeated. Status or positions for a section that's
-  already there are refused, as is a parent that isn't there.
+  kept, never repeated. Text added to a section with subsections goes
+  before them. A note saved on Windows keeps its CRLF line endings and
+  byte order mark. Status or positions for a section that's already
+  there are refused, as is a parent that isn't there.
 
 Spec: format.md §9.2, types.md F-TPL-5, F-TPL-8. Covered by:
 `WriteToolTests.TextGoesIntoASectionOrANewOneInItsPlace`,
 `WriteToolTests.ATemplateSectionIsFilledNotRepeated`,
+`WriteToolTests.TextAddedToASectionGoesBeforeItsSubsections`,
+`WriteToolTests.ANoteSavedOnWindowsKeepsItsLineEndingsAndByteOrderMark`,
 `WriteEditTests.ASectionGoesBeforeAnotherWithItsComment`.
 
 ### SC-MCP-18. My assistant banks an idea
@@ -1676,13 +1688,23 @@ renames Swales's Voice to Dialect.
 - The heading changes, and both links now name Dialect, with their
   spacing and label kept, in the same change; a link to another of his
   sections is left alone. The result lists both files with their new
-  hashes, and `check` finds no heading that doesn't match. If a note in
-  a final book links to the section, nothing is renamed (`frozen`).
+  hashes, and `check` finds no heading that doesn't match. A link in a
+  block scalar, or in a quoted value with an escape, is spliced in, so
+  the value keeps its style. If a note in a final book links to the
+  section, nothing is renamed (`frozen`); if a write fails part way,
+  what was written is put back. A new name that would move existing
+  links (a later section's name, or an earlier one's while links name
+  this one) is refused, and a note with errors that links to the
+  section is named in the result for the writer to fix by hand.
 
 Spec: format.md F-RT-5, F-LINK-9, F-BOOK-1 (maintainer decision,
 2026-10-23). Covered by:
 `WriteToolTests.RenamingASectionRewritesTheLinksToIt`,
-`WriteToolTests.ALinkInAFrozenBookStopsTheRename`.
+`WriteToolTests.ALinkInAFrozenBookStopsTheRename`,
+`WriteToolTests.ARenameThatFailsPartWayPutsBackWhatItWrote`,
+`WriteToolTests.ALinkInAFrontmatterValueIsSplicedSoTheValueKeepsItsStyle`,
+`WriteToolTests.ANameThatWouldMoveExistingLinksIsRefused`,
+`WriteToolTests.AFileWithErrorsThatLinksToTheSectionIsNamed`.
 
 ### SC-MCP-20. My assistant takes the last POV off a chapter
 
@@ -1694,11 +1716,16 @@ The book's `chapter_defaults` give every chapter Mina's POV, and chapter
   `book.md` says `pov: []`, and the result says chapter 1 now has no
   POV, and that without its own value it would inherit Mina's from the
   book's `chapter_defaults`. Clearing the field goes back to that
-  default; clearing a field the chapter doesn't set is refused.
+  default; clearing a field the chapter doesn't set is refused. An item
+  can go in at a given place, and come out by its text, compared
+  ignoring case and spacing: `[[Mina]]` doesn't match
+  `[[mina-harker]]`. A field named like the chapter's own keys (`key`)
+  is refused (types.md F-CHAP-1).
 
 Spec: format.md F-RT-6, types.md F-CHAP-5 (maintainer decisions,
 2026-10-23). Covered by:
-`WriteToolTests.RemovingAChaptersLastPovSaysWhatItNoLongerInherits`.
+`WriteToolTests.RemovingAChaptersLastPovSaysWhatItNoLongerInherits`,
+`WriteToolTests.ChapterListItemsGoInAtAnIndexAndComeOutByValue`.
 
 ### SC-MCP-21. My assistant tries to edit a finished book
 
@@ -1720,10 +1747,14 @@ checkpoint.
   whose message ends with the assistant's `Co-Authored-By` line; a
   second straight after has nothing to record. In a den without
   history, the result says so and that the edits are still saved in
-  the files. A co-author that isn't `Name <email>` is refused.
+  the files. A co-author that isn't `Name <email>` on one line is
+  refused. With `paths`, only those files are recorded, and the new
+  location stays uncommitted; a `paths` list with nothing in it is
+  refused rather than read as the whole den.
 
 Spec: design.md §6, §8 (maintainer decision, 2026-10-22). Covered by:
 `HistoryToolTests.WritesWaitForACheckpointThatNamesTheAgentAsCoAuthor`,
+`HistoryToolTests.ACheckpointOfSomePathsRecordsOnlyThem`,
 `WriteToolTests.WithoutHistoryACheckpointSaysSoAndTheEditsStay`.
 
 ### SC-MCP-23. My pinned assistant creates a note

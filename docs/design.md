@@ -755,7 +755,10 @@ store, so an edit changes only what it means to (format.md §12):
   (`stale_file`) if the file has changed since; the file is compared
   again just before it's written. Each result gives the new hash, so
   edits can follow one another without reading again. Writes are made
-  one at a time within the server.
+  one at a time within the server. Between processes a small window
+  remains, as with the den store (§6): another program can save the
+  file after that last comparison and before the write replaces it.
+  Closing it would need a lock every editor honours.
 - **Frozen and pinned** (maintainer decision, 2026-10-22). Nothing in
   a final book's scope is written (`frozen`): its entities, `book.md`,
   or outline (format.md F-BOOK-1). Edits to pinned canon are made, and
@@ -768,8 +771,9 @@ store, so an edit changes only what it means to (format.md §12):
 - **Ids** (maintainer decision, 2026-10-23). `create_entity` gives a
   new id that no file in the den uses, checked through the index even
   in a session pinned to one universe. `update_fields` refuses an `id`
-  edit (F-ID-4). An edited file without an id gets one in the same
-  write (F-ID-6).
+  edit (F-ID-4). An edited entity or `book.md` without an id gets one
+  in the same write (F-ID-6), unless the edit changes nothing, which
+  writes nothing. Files a rename rewrites only for their links don't.
 - **Effects, not just bytes** (maintainer decision, 2026-10-23). A
   result's `effects` say what the edit means where that depends on
   more than the file: a chapter left with `pov: []` "now has no POV",
@@ -788,7 +792,17 @@ store, so an edit changes only what it means to (format.md §12):
 - **Renames** (maintainer decision, 2026-10-23). `rename_section`
   rewrites every link that reaches the section by heading, in any file
   (F-RT-5), as one change: if any of those files is in a final book,
-  nothing is renamed. Renaming an entity, or changing or removing an
+  nothing is renamed, and if a write fails part way, the files already
+  written are put back, newest first, and the result names any that
+  couldn't be. A link written verbatim in a frontmatter value is
+  spliced in place, so the value keeps its style; one the YAML escapes
+  is written anew. A new name that would change where existing links
+  go is refused: one that a later section has (its links would reach
+  the renamed one first, F-LINK-9), or an earlier one has while links
+  name the section. Files the den leaves out for errors can't be
+  edited, so an entity or container file whose text looks like it
+  links to the section is named in `effects` for the writer to fix by
+  hand (outlines with errors aren't searched). Renaming an entity, or changing or removing an
   alias, needs the same rewrite for names (F-RT-5), so `update_fields`
   refuses them for now (`unsupported_edit`); aliases can be added.
   Moving and copying entities come later (#89, #129).
