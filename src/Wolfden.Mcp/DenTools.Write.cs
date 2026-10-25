@@ -142,7 +142,7 @@ public sealed partial class DenTools
             var added = new List<string>();
             var facts = EntityFacts.For(catalog, new Bookkeeping(catalog.Universe.Den.BookkeepingSections));
             var held = facts.Fields.SelectMany(f => f.Entries.Where(e => e.Pinned).Select(e => $"fields.{f.Name}"))
-                .Concat(facts.Sections.Where(s => s.Pinned && s.Section.Parent is null).Select(s => $"section '{s.Section.Name}'"))
+                .Concat(facts.Sections.Where(s => s.Pinned && (s.Section.Parent is null || !facts[s.Section.Parent].Pinned)).Select(s => $"section '{s.Section.Name}'"))
                 .Distinct().ToList();
             foreach (var op in ops)
             {
@@ -902,11 +902,24 @@ public sealed partial class DenTools
                 written.Add(path);
             }
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        catch (Exception e)
         {
-            // One change or none (format.md F-RT-5): put back what was written, newest first.
+            // One change or none (format.md F-RT-5): put back what was written, newest first,
+            // whatever stopped the writes, cancellation included.
             var failed = files.Keys.Except(written).Order(StringComparer.Ordinal).First();
-            var stuck = RollBack(written, originals, created);
+            var stuck = RollBack(written, files, originals, created);
+            if (e is not (IOException or UnauthorizedAccessException))
+            {
+                if (stuck.Count > 0)
+                {
+                    throw new DenToolException(
+                        ToolErrorCodes.WriteFailed,
+                        $"Writing stopped ({e.GetType().Name}: {e.Message}), and some files written before it couldn't be put back, and hold the edit: {string.Join(", ", stuck)}. Check them, or restore them from history.");
+                }
+
+                throw;
+            }
+
             var code = e is DenStoreException { Error: DenStoreError.AlreadyExists } ? ToolErrorCodes.AlreadyExists : ToolErrorCodes.WriteFailed;
             var said = e is DenStoreException ? e.Message : $"Couldn't write {failed}: {e.Message}";
             throw new DenToolException(
@@ -917,16 +930,28 @@ public sealed partial class DenTools
         }
     }
 
-    /// <summary>Puts back the files in <paramref name="written"/>, newest first: each to its original, or a created one deleted. Returns the ones that couldn't be.</summary>
-    private List<string> RollBack(List<string> written, IReadOnlyDictionary<string, byte[]>? originals, string? created)
+    /// <summary>
+    /// Puts back the files in <paramref name="written"/>, newest first: each
+    /// to its original, or a created one deleted, but only if it still holds
+    /// what was written (<paramref name="files"/>), so a save made meanwhile
+    /// by another program is never overwritten. Returns the ones that couldn't be.
+    /// </summary>
+    private List<string> RollBack(List<string> written, IReadOnlyDictionary<string, byte[]> files, IReadOnlyDictionary<string, byte[]>? originals, string? created)
     {
         var stuck = new List<string>();
         foreach (var path in Enumerable.Reverse(written))
         {
             try
             {
-                if (path == created)
+                if (Store.TryReadFile(path) is not { } now || !now.AsSpan().SequenceEqual(files[path]))
                 {
+                    // Changed since it was written: someone else's edit now, so leave it.
+                    stuck.Add(path);
+                }
+                else if (path == created)
+                {
+                    // Only a single-file write creates a file, and it's the one that failed if any did,
+                    // so this isn't reached today; it's kept so a multi-file create rolls back too.
                     Store.DeleteFile(path);
                 }
                 else if (originals is not null && originals.TryGetValue(path, out var original))
@@ -1182,7 +1207,24 @@ public sealed partial class DenTools
     private IEnumerable<string> AliasEffects(CatalogEntity entity, string alias)
     {
         var normalized = LinkText.Normalize(alias);
-        var others = WithIndex(index =>
+        List<(string Name, string Path, string? Tier)> others;
+        try
+        {
+            others = AliasMatches(entity, normalized);
+        }
+        catch (DenToolException)
+        {
+            // The write is saved already; a failure to read the index only loses this note.
+            return [$"Whether another note also goes by '{alias}' couldn't be checked: the index couldn't be read. Call search or check to see."];
+        }
+
+        return others.Select(o => o.Tier == "alias"
+            ? $"'{alias}' is also an alias of '{o.Name}' ({o.Path}), so a link [[{alias}]] is ambiguous between them unless one is in a nearer scope (F-LINK-7)."
+            : $"'{alias}' is also the {o.Tier} of '{o.Name}' ({o.Path}), so a link [[{alias}]] still reaches '{o.Name}': a {o.Tier} matches before an alias (F-LINK-6).").ToList();
+    }
+
+    private List<(string Name, string Path, string? Tier)> AliasMatches(CatalogEntity entity, string normalized) =>
+        WithIndex(index =>
         {
             var db = index.Context;
             var universe = db.Containers.Single(c => c.Kind == "universe" && c.Key == entity.Universe.Key).Id;
@@ -1193,13 +1235,6 @@ public sealed partial class DenTools
                 .Where(x => x.Tier is not null)
                 .ToList();
         });
-        foreach (var (name, path, tier) in others)
-        {
-            yield return tier == "alias"
-                ? $"'{alias}' is also an alias of '{name}' ({path}), so a link [[{alias}]] is ambiguous between them unless one is in a nearer scope (F-LINK-7)."
-                : $"'{alias}' is also the {tier} of '{name}' ({path}), so a link [[{alias}]] still reaches '{name}': a {tier} matches before an alias (F-LINK-6).";
-        }
-    }
 
     /// <summary>What a frontmatter edit means beyond its bytes.</summary>
     private static IEnumerable<string> FieldEffects(CatalogEntity before, CatalogEntity after, IReadOnlyList<string> touched)

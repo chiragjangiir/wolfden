@@ -794,7 +794,10 @@ store, so an edit changes only what it means to (format.md §12):
   (F-RT-5), as one change: if any of those files is in a final book,
   nothing is renamed, and if a write fails part way, the files already
   written are put back, newest first, and the result names any that
-  couldn't be. A link written verbatim in a frontmatter value is
+  couldn't be, or that another program changed meanwhile (those are
+  left as they are). The files are written one after another, so a
+  reader, such as the watcher or an editor, can briefly see some
+  rewritten and others not; the next batch the watcher reads settles it. A link written verbatim in a frontmatter value is
   spliced in place, so the value keeps its style; one the YAML escapes
   is written anew. A new name that would change where existing links
   go is refused: one that a later section has (its links would reach

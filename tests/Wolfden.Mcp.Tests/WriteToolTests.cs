@@ -324,6 +324,54 @@ public sealed class WriteToolTests : IDisposable
 
     [Fact]
     [Trait("Scenario", "SC-MCP-19")]
+    public void ARenameStoppedByAnyFailureIsPutBackThenRethrown()
+    {
+        const string Note = "universes/dracula/entities/notes/whitby-dialect.md";
+        _den.Write(Note, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z1\ntype: note\nname: Whitby dialect\nstatus: draft\n---\n\nSee [[mr-swales#Voice]].\n");
+        var before = _den.Read(Swales);
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+        var tools = new DenTools(_den.Root) { Store = new FailingStore(_den.Root, Note, () => new OperationCanceledException("stopped")) };
+
+        Assert.Throws<OperationCanceledException>(() => tools.RenameSection("Mr. Swales", "Voice", "Dialect", hash));
+
+        Assert.Equal(before, _den.Read(Swales));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-19")]
+    public void ARollbackLeavesAFileSomeoneElseSavedMeanwhile()
+    {
+        const string Note = "universes/dracula/entities/notes/whitby-dialect.md";
+        _den.Write(Note, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z1\ntype: note\nname: Whitby dialect\nstatus: draft\n---\n\nSee [[mr-swales#Voice]].\n");
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+        var theirs = "";
+        var tools = new DenTools(_den.Root)
+        {
+            // The writer saves Swales in an editor just after Wolfden wrote it.
+            Store = new FailingStore(_den.Root, Note, before: () => _den.Write(Swales, theirs = _den.Read(Swales) + "\nSaved in an editor.\n")),
+        };
+
+        var failed = Assert.Throws<DenToolException>(() => tools.RenameSection("Mr. Swales", "Voice", "Dialect", hash));
+
+        Assert.Equal(ToolErrorCodes.WriteFailed, failed.Code);
+        Assert.Contains($"couldn't be put back, and hold the edit: {Swales}", failed.Message, StringComparison.Ordinal);
+        Assert.Equal(theirs, _den.Read(Swales));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-16")]
+    public void APinnedSubsectionUnderAnUnpinnedSectionIsCounted()
+    {
+        _den.Write(Swales, _den.Read(Swales) + "\n### The verdict\n<!-- wolfden: pin=true -->\nDied of fright.\n");
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        var result = Tools.UpdateFields("Mr. Swales", hash, Json("""[{"op": "set", "path": "status", "value": "draft"}]"""));
+
+        Assert.Contains(result.PinnedCanon, p => p.Contains("section 'The verdict'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-19")]
     public void ALinkInAFrontmatterValueIsSplicedSoTheValueKeepsItsStyle()
     {
         const string Note = "universes/dracula/entities/notes/whitby-dialect.md";
@@ -476,7 +524,7 @@ public sealed class WriteToolTests : IDisposable
     }
 
     /// <summary>A den store on disk whose writes to one path fail, as a full disk or a locked file would.</summary>
-    private sealed class FailingStore(string root, string failing) : Core.Structure.IDenStore
+    private sealed class FailingStore(string root, string failing, Func<Exception>? failure = null, Action? before = null) : Core.Structure.IDenStore
     {
         private readonly Core.Structure.FileSystemDenStore _disk = new(root);
 
@@ -500,7 +548,8 @@ public sealed class WriteToolTests : IDisposable
         {
             if (path == failing)
             {
-                throw new Core.Structure.DenStoreException(Core.Structure.DenStoreError.AccessDenied, path, $"'{path}' is read-only.");
+                before?.Invoke();
+                throw failure?.Invoke() ?? new Core.Structure.DenStoreException(Core.Structure.DenStoreError.AccessDenied, path, $"'{path}' is read-only.");
             }
 
             _disk.WriteFile(path, bytes, mode);
