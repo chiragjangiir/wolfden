@@ -168,16 +168,30 @@ public sealed class DenStoreTests : IDisposable
         });
         reader.Start();
 
+        // Write until the reader has read alongside the writes for a while,
+        // not for a fixed time: on a busy machine the reader's thread can
+        // start late, or get little time.
+        const int Writes = 60;
+        const int ReadsDuringWrites = 20;
         var watch = Stopwatch.StartNew();
-        for (var i = 0; i < 60; i++)
+        var readsBefore = Volatile.Read(ref reads);
+        var written = 0;
+        try
         {
-            store.WriteFile(Mara, i % 2 == 0 ? b : a, DenWriteMode.Replace);
+            while (written < Writes || Volatile.Read(ref reads) - readsBefore < ReadsDuringWrites)
+            {
+                Assert.True(watch.Elapsed < TimeSpan.FromSeconds(60), $"The reader read {Volatile.Read(ref reads) - readsBefore} times in {written} writes.");
+                store.WriteFile(Mara, written % 2 == 0 ? b : a, DenWriteMode.Replace);
+                written++;
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref stop, 1);
+            reader.Join();
         }
 
-        Volatile.Write(ref stop, 1);
-        reader.Join();
         Assert.Empty(torn);
-        Assert.True(reads > 0, $"The reader never read the file in {watch.ElapsedMilliseconds} ms.");
     }
 
     [Fact]
@@ -639,13 +653,15 @@ public sealed class DenStoreTests : IDisposable
         File.SetAttributes(Full(Mara), FileAttributes.ReadOnly);
         try
         {
-            var watch = Stopwatch.StartNew();
+            // Counted, not timed: the write flushes to disk, which a busy
+            // CI machine can make take longer than all the retries would.
+            using var retries = new RetryCounter(_root);
             var e = Assert.Throws<DenStoreException>(() => store.WriteFile(Mara, Bytes("x"), DenWriteMode.Replace));
 
             Assert.Equal(DenStoreError.AccessDenied, e.Error);
             Assert.Equal($"'{Mara}' can't be written: the file is read-only.", e.Message);
             Assert.IsType<UnauthorizedAccessException>(e.InnerException);
-            Assert.True(watch.ElapsedMilliseconds < 200, $"It took {watch.ElapsedMilliseconds} ms: a read-only file isn't worth trying again.");
+            Assert.True(retries.Count == 0, $"It was tried {retries.Count + 1} times: a read-only file isn't worth trying again.");
         }
         finally
         {
@@ -663,11 +679,16 @@ public sealed class DenStoreTests : IDisposable
 
         var store = Store();
         using var held = new FileStream(Full(Mara), FileMode.Open, FileAccess.Read, FileShare.None);
+        using var retries = new RetryCounter(_root);
 
         var write = Assert.Throws<DenStoreException>(() => store.WriteFile(Mara, Bytes("x"), DenWriteMode.Replace));
         var delete = Assert.Throws<DenStoreException>(() => store.DeleteFile(Mara));
         var move = Assert.Throws<DenStoreException>(() => store.MoveFile(Mara, $"{Characters}/mara.md"));
 
+        // A file in use may be let go in a moment, so each is tried again
+        // first. This also shows the counter sees retries, so the read-only
+        // test's count of none means something.
+        Assert.Equal(3 * (FileSystemDenStore.Attempts - 1), retries.Count);
         Assert.All([write, delete, move], e => Assert.Equal(DenStoreError.InUse, e.Error));
         Assert.Equal($"'{Mara}' can't be written: another program has it open. Close it there and try again.", write.Message);
         Assert.IsType<UnauthorizedAccessException>(write.InnerException);
@@ -823,6 +844,31 @@ public sealed class DenStoreTests : IDisposable
         }
 
         throw new TimeoutException("Nothing matching within 30 s.");
+    }
+
+    /// <summary>Counts the store's retries (<see cref="FileSystemDenStore.Retrying"/>) of paths in one den, while it's alive.</summary>
+    private sealed class RetryCounter : IDisposable
+    {
+        private readonly string _root;
+        private int _count;
+
+        public RetryCounter(string root)
+        {
+            _root = Path.GetFullPath(root) + Path.DirectorySeparatorChar;
+            FileSystemDenStore.Retrying += OnRetrying;
+        }
+
+        public int Count => Volatile.Read(ref _count);
+
+        public void Dispose() => FileSystemDenStore.Retrying -= OnRetrying;
+
+        private void OnRetrying(string full)
+        {
+            if (full.StartsWith(_root, StringComparison.OrdinalIgnoreCase))
+            {
+                Interlocked.Increment(ref _count);
+            }
+        }
     }
 
     private sealed class Recorder(BlockingCollection<DenChange> changes) : IDenChangeObserver

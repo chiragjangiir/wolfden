@@ -41,7 +41,8 @@ public sealed class FileSystemDenStore : IDenStore, IDenChangeFeed
     /// <summary>How the temporary files of atomic writes start, so they can be told apart. They're hidden (F-LAY-2).</summary>
     public const string TempPrefix = ".wolfden-write-";
 
-    private const int Attempts = 6;
+    /// <summary>How many times a write is tried while another program holds the file (see <see cref="Run"/>).</summary>
+    internal const int Attempts = 6;
 
     private static readonly bool CaseInsensitiveSystem = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
 
@@ -60,6 +61,15 @@ public sealed class FileSystemDenStore : IDenStore, IDenChangeFeed
 
     /// <summary>Called with the temporary file's full path once it's written, before it replaces the file. Tests use it to fail a write part way.</summary>
     internal Action<string>? BeforeReplace { get; init; }
+
+    /// <summary>
+    /// A test seam: raised with the full path of the file or folder about
+    /// to be tried again (see <see cref="Run"/>), so tests can count
+    /// retries instead of timing them. Handlers run on the writing thread
+    /// and should only record the call; a test filters by its own path,
+    /// since tests run in parallel.
+    /// </summary>
+    internal static event Action<string>? Retrying;
 
     /// <summary>Moves a folder: <see cref="Directory.Move"/>. Tests replace it to fail a step of a rename.</summary>
     internal Action<string, string> DirectoryMove { get; init; } = Directory.Move;
@@ -586,6 +596,7 @@ public sealed class FileSystemDenStore : IDenStore, IDenChangeFeed
             }
             catch (Exception e) when (attempt < Attempts && OperatingSystem.IsWindows() && IsBusy(e) && !IsReadOnlyFile(full))
             {
+                Retrying?.Invoke(full);
                 Thread.Sleep(20 * attempt);
             }
             catch (UnauthorizedAccessException e)
