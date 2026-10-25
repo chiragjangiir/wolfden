@@ -250,31 +250,45 @@ internal sealed class LinkScanner(Bookkeeping bookkeeping, List<LinkOccurrence> 
         var source = file.SourceForReading!;
         foreach (var scalar in Strings(node))
         {
-            var text = scalar.Text;
-            var searchFrom = scalar.Start;
-            foreach (var raw in LinkSyntax.Scan(text, 0, text.Length, null))
+            foreach (var found in ScalarLinkPlaces(source, scalar))
             {
-                var linkText = text.Substring(raw.Offset, raw.Length);
-                var end = Math.Min(scalar.ContentEnd, source.Text.Length);
-                var at = searchFrom < end ? source.Text.IndexOf(linkText, searchFrom, end - searchFrom, StringComparison.Ordinal) : -1;
-                var offset = at >= 0 ? at : scalar.Start;
-                if (at >= 0)
-                {
-                    searchFrom = at + linkText.Length;
-                }
-
-                var line = source.LineIndexOf(offset);
-                var found = new FoundLink(raw, offset, line + 1, offset - source.Lines[line].Start + 1);
                 if (!Empty(path, found))
                 {
-                    yield return found.ToWikiLink(text);
+                    yield return found.ToWikiLink(scalar.Text);
                 }
             }
         }
     }
 
+    /// <summary>
+    /// The links in one YAML string, each with where it's written in the
+    /// file: the line and column of its text, or of the string's start when
+    /// the YAML escapes or folds it. <see cref="FoundLink.Link"/>'s offsets
+    /// are in the string's value (<see cref="YamlScalar.Text"/>), not the file.
+    /// Links with an empty target are included.
+    /// </summary>
+    internal static IEnumerable<FoundLink> ScalarLinkPlaces(Text.SourceText source, YamlScalar scalar)
+    {
+        var text = scalar.Text;
+        var searchFrom = scalar.Start;
+        foreach (var raw in LinkSyntax.Scan(text, 0, text.Length, null))
+        {
+            var linkText = text.Substring(raw.Offset, raw.Length);
+            var end = Math.Min(scalar.ContentEnd, source.Text.Length);
+            var at = searchFrom < end ? source.Text.IndexOf(linkText, searchFrom, end - searchFrom, StringComparison.Ordinal) : -1;
+            var offset = at >= 0 ? at : scalar.Start;
+            if (at >= 0)
+            {
+                searchFrom = at + linkText.Length;
+            }
+
+            var line = source.LineIndexOf(offset);
+            yield return new FoundLink(raw, offset, line + 1, offset - source.Lines[line].Start + 1);
+        }
+    }
+
     /// <summary>Every non-null scalar value under a node, in file order. Mapping keys aren't strings under it.</summary>
-    private static IEnumerable<YamlScalar> Strings(YamlNode node)
+    internal static IEnumerable<YamlScalar> Strings(YamlNode node)
     {
         switch (node)
         {

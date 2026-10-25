@@ -138,6 +138,161 @@ public sealed class WolfdenTools
         [Description("Show what changed in the file since this checkpoint (an id from the history), up to the file as it is now.")] string? diff_from = null) =>
         Respond(() => _tools.GetHistory(entity, universe, limit, before, diff, diff_from));
 
+    private const string WriteHelp =
+        " The edit goes to the den's files only (nothing is committed until checkpoint), and is checked as the den would read it: " +
+        "an edit that would leave an error is refused (invalid_edit), and nothing is written. Nothing in a final (frozen) book can be " +
+        "changed (frozen). The result gives the file's new hash, what the edit means where that depends on more than the text written " +
+        "('effects'), any pinned canon it touched ('pinned_canon': check those with the writer), and warnings about the file.";
+
+    private const string HashHelp =
+        "The hash of the file your edit is based on: 'hash' from get_entity, or from your last write's result. If the file has changed " +
+        "since (say, the writer edited it), the write is refused with stale_file: read it again.";
+
+    /// <summary>The <c>create_entity</c> tool.</summary>
+    [McpServerTool(Name = "create_entity", Title = "Create an entity", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
+    [Description(
+        "Creates a new entity (a character, location, event, item, faction, thread, note, idea, or other type an enabled pack defines) " +
+        "from its type's template, with a new id. It's filed in the universe, or in the series or book given, under " +
+        "entities/<type folder>/<slug>.md; the slug is made from the name unless given, and gets -2, -3 if that file is taken. " +
+        "Values you give (aliases, status, from, fields) replace the template's; the status defaults to the template's, or draft. " +
+        "The template's sections come with it, empty: fill them with append_section." + WriteHelp)]
+    public CallToolResult CreateEntity(
+        [Description("The type key, such as 'character'.")] string type,
+        [Description("The entity's name.")] string name,
+        [Description(UniverseHelp)] string? universe = null,
+        [Description("File it in this series (its key).")] string? series = null,
+        [Description("File it in this book (its key).")] string? book = null,
+        [Description("The file name without .md: lowercase letters and digits with single hyphens. Leave it out to make one from the name.")] string? slug = null,
+        [Description("Other names links can use.")] string[]? aliases = null,
+        [Description("idea, undecided, candidate, draft, canon, or retconned.")] string? status = null,
+        [Description("Where the reader first meets it, as a position such as 'dracula:5'. Leave it out for the start of where it's filed.")] string? from = null,
+        [Description("Field values, as an object from field name to value, such as {\"born\": \"1873\", \"occupation\": [\"solicitor\"]}. A value that changes over time is a list of entries: [{\"value\": \"x\", \"from\": \"dracula:3\"}].")] JsonElement? fields = null,
+        [Description("Text for the lead, before the first section.")] string? text = null) =>
+        Respond(() => _tools.CreateEntity(type, name, universe, series, book, slug, aliases, status, from, fields, text));
+
+    /// <summary>The <c>update_fields</c> tool.</summary>
+    [McpServerTool(Name = "update_fields", Title = "Change an entity's fields", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]
+    [Description(
+        "Changes an entity's frontmatter, keeping everything else as written. 'changes' is a list, made in order and saved together " +
+        "or not at all. Each change is {\"op\": \"set\", \"path\": ..., \"value\": ...}, {\"op\": \"add\", \"path\": ..., \"value\": ..., \"index\": n} " +
+        "(add an item to a list: an alias, or an entry of a field that changes over time; at the end without index), or " +
+        "{\"op\": \"remove\", \"path\": ...} (a key or list item). A path is dotted: 'status', 'from', 'aliases', 'fields.born', " +
+        "'fields.rank.1.from' (item numbers from 0). An entry is {\"value\": x, \"from\": \"book:chapter\", \"until\": ..., \"status\": ..., \"pin\": true}. " +
+        "The id never changes. The name, and existing aliases, can't be changed here, since links that matched the old text would break; " +
+        "aliases can be added." + WriteHelp)]
+    public CallToolResult UpdateFields(
+        [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
+        [Description(HashHelp)] string expected_hash,
+        [Description("The changes, in order: a list of {op, path, value, index}.")] JsonElement changes,
+        [Description(UniverseHelp)] string? universe = null) =>
+        Respond(() => _tools.UpdateFields(entity, expected_hash, changes, universe));
+
+    /// <summary>The <c>append_section</c> tool.</summary>
+    [McpServerTool(Name = "append_section", Title = "Add to a section", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
+    [Description(
+        "Adds text to the end of an entity's section's own text, after what's there and before any subsections it has (template prompts " +
+        "in HTML comments stay), or adds the section " +
+        "if the entity has none of that name. With new_section true it adds another section of that name even if there is one, such as a " +
+        "new 'Appearance' from a later chapter: give it a 'from' where it takes over. A new section can carry 'from', 'until', 'status', " +
+        "and 'pin', written as its section comment; a standard section of the type goes in the type's order, any other at the end, " +
+        "and with 'under' it's a subsection at the end of that section. To keep reveals in place, put a later fact in a subsection with " +
+        "its own 'from'." + WriteHelp)]
+    public CallToolResult AppendSection(
+        [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
+        [Description("The section's name (heading text).")] string section,
+        [Description("The markdown text to add.")] string text,
+        [Description(HashHelp)] string expected_hash,
+        [Description(UniverseHelp)] string? universe = null,
+        [Description("Add it as a subsection of this section.")] string? under = null,
+        [Description("When several sections have the name, the line of the heading you mean (from get_entity).")] int? section_line = null,
+        [Description("If true, add a new section even if one has this name.")] bool new_section = false,
+        [Description("For a new section: where it enters canon, a position such as 'dracula:7'.")] string? from = null,
+        [Description("For a new section: where it stops holding (exclusive).")] string? until = null,
+        [Description("For a new section: idea, undecided, candidate, draft, canon, or retconned.")] string? status = null,
+        [Description("For a new section: true to pin it as hard canon.")] bool? pin = null) =>
+        Respond(() => _tools.AppendSection(entity, section, text, expected_hash, universe, under, section_line, new_section, from, until, status, pin));
+
+    /// <summary>The <c>add_idea</c> tool.</summary>
+    [McpServerTool(Name = "add_idea", Title = "Record an idea", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
+    [Description(
+        "Records undecided material with status idea, so canon views leave it out until the writer settles it. With 'entity', it adds a " +
+        "new section to that entity (named by 'section', 'Idea' by default) marked status=idea, and needs expected_hash. Without it, it " +
+        "creates a new entity with status idea, named 'name', of 'type' (by default 'idea', for an idea that isn't yet a thing of any " +
+        "one type; a character who might exist is a 'character'), with the text in its lead." + WriteHelp)]
+    public CallToolResult AddIdea(
+        [Description("The idea, in markdown.")] string text,
+        [Description("Add the idea to this existing entity.")] string? entity = null,
+        [Description("With entity: the new section's name.")] string? section = null,
+        [Description("With entity: " + HashHelp)] string? expected_hash = null,
+        [Description("Without entity: the new idea's name.")] string? name = null,
+        [Description("Without entity: its type, 'idea' by default.")] string? type = null,
+        [Description(UniverseHelp)] string? universe = null,
+        [Description("Without entity: file it in this series.")] string? series = null,
+        [Description("Without entity: file it in this book.")] string? book = null,
+        [Description("Without entity: field values, such as {\"about\": [\"[[count-dracula]]\"]}.")] JsonElement? fields = null) =>
+        Respond(() => _tools.AddIdea(text, entity, section, expected_hash, name, type, universe, series, book, fields));
+
+    /// <summary>The <c>rename_section</c> tool.</summary>
+    [McpServerTool(Name = "rename_section", Title = "Rename a section", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]
+    [Description(
+        "Renames a section of an entity, and in the same change rewrites every link to it by heading ([[entity#Old name]]) in any " +
+        "file of the den, so they name the new heading. If a file that links to it is in a final (frozen) book, nothing is renamed. " +
+        "The result lists every file written, with its new hash." + WriteHelp)]
+    public CallToolResult RenameSection(
+        [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
+        [Description("The section's current name.")] string section,
+        [Description("The new name: one line, and without [, ], |, or # if links name the section.")] string new_name,
+        [Description(HashHelp)] string expected_hash,
+        [Description(UniverseHelp)] string? universe = null,
+        [Description("When several sections have the name, the line of the heading you mean.")] int? section_line = null) =>
+        Respond(() => _tools.RenameSection(entity, section, new_name, expected_hash, universe, section_line));
+
+    /// <summary>The <c>get_chapter</c> tool.</summary>
+    [McpServerTool(Name = "get_chapter", Title = "Read a book's chapters", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]
+    [Description(
+        "A book's chapters, or one chapter, with each chapter field (such as pov, narration, tense, when): its effective value, " +
+        "whether that's the chapter's own or inherited from a chapter_defaults (of the book, series, or universe), and what it would " +
+        "inherit without its own value. A list field set to [] means 'none here' and stops inheritance. Also gives the hash of the " +
+        "book's book.md, for update_chapter_fields.")]
+    public CallToolResult GetChapter(
+        [Description("The book's key.")] string book,
+        [Description("The chapter's key; leave it out for every chapter.")] string? chapter = null,
+        [Description(UniverseHelp)] string? universe = null) =>
+        Respond(() => _tools.GetChapter(book, chapter, universe));
+
+    /// <summary>The <c>update_chapter_fields</c> tool.</summary>
+    [McpServerTool(Name = "update_chapter_fields", Title = "Change a chapter's fields", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]
+    [Description(
+        "Changes a chapter's own fields in book.md. 'changes' is a list of {\"op\": \"set\", \"field\": \"tense\", \"value\": \"present\"}, " +
+        "{\"op\": \"add\", \"field\": \"pov\", \"value\": \"[[mina-harker]]\"}, {\"op\": \"remove\", \"field\": \"pov\", \"item\": 0} (or \"value\": the " +
+        "item's text, compared ignoring case and spacing; a link matches only if it's written the same way, so [[Mina]] doesn't match " +
+        "[[mina-harker]]: use 'item' from get_chapter if unsure), and {\"op\": \"clear\", \"field\": \"pov\"}. Removing a list's last item leaves [], 'none here', which stops the chapter " +
+        "inheriting the field; 'clear' removes the chapter's own value so it inherits from chapter_defaults again. The result says " +
+        "what each field's effective value is now, and what the chapter would inherit, so check with the writer which they meant." + WriteHelp)]
+    public CallToolResult UpdateChapterFields(
+        [Description("The book's key.")] string book,
+        [Description("The chapter's key.")] string chapter,
+        [Description("The hash of book.md your edit is based on: 'hash' from get_chapter, or from your last write's result.")] string expected_hash,
+        [Description("The changes, in order: a list of {op, field, value, index, item}.")] JsonElement changes,
+        [Description(UniverseHelp)] string? universe = null) =>
+        Respond(() => _tools.UpdateChapterFields(book, chapter, expected_hash, changes, universe));
+
+    /// <summary>The <c>checkpoint</c> tool.</summary>
+    [McpServerTool(Name = "checkpoint", Title = "Make a checkpoint", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
+    [Description(
+        "Records the den's files as they are now as a checkpoint (a git commit) with a message, naming you as a co-author. Writes are " +
+        "saved to the files straight away; a checkpoint is what makes them part of the history, so make one at the end of a session " +
+        "of edits, not after each one. Only the den's files are recorded: all of them that changed, unless 'paths' names some, so a " +
+        "checkpoint can include edits the writer made elsewhere. The result lists the recorded files your writes in this session " +
+        "saved since they were last recorded ('written_by_session') apart from those that changed some other way " +
+        "('changed_outside_session'); a file you wrote that was changed after, say in the writer's editor, is in both. Tell the writer " +
+        "about the second list. If nothing changed since the last checkpoint, nothing is recorded. If the den has no history, the result says so ('available' false) and the edits are still saved in the files.")]
+    public CallToolResult Checkpoint(
+        [Description("What the checkpoint is, such as 'End of chapter 14 session: Lucy's timeline'.")] string message,
+        [Description("You, as 'Name <email>' on one line, such as 'Claude <noreply@anthropic.com>'.")] string co_author,
+        [Description("Only these files or folders, relative to the den root. Leave it out for the whole den.")] string[]? paths = null) =>
+        Respond(() => _tools.Checkpoint(message, co_author, paths));
+
     /// <summary>
     /// An error result in Wolfden's shape for one the SDK made itself. Every
     /// failure inside a tool comes back from <see cref="Respond{T}"/> as JSON

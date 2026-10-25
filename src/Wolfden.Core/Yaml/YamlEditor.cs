@@ -43,8 +43,27 @@ internal static partial class YamlEditor
     /// </summary>
     /// <exception cref="InvalidOperationException">Something on the path isn't a mapping or list, or a list has no such item.</exception>
     /// <exception cref="NotSupportedException">The edit needs a layout the editor doesn't handle in place.</exception>
-    public static List<TextEdit> SetScalar(SourceText source, YamlBlock block, IReadOnlyList<string> path, YamlScalarValue value) =>
-        SetValue(source, block, path, new ScalarNew(value));
+    /// <param name="templateOrder">True for an entity or container file's frontmatter, where a new top-level key from the
+    /// template order (types.md F-TPL-7) goes in its place in that order rather than after the existing keys.</param>
+    public static List<TextEdit> SetScalar(SourceText source, YamlBlock block, IReadOnlyList<string> path, YamlScalarValue value, bool templateOrder = false) =>
+        SetValue(source, block, path, new ScalarNew(value), templateOrder);
+
+    /// <summary>
+    /// Edits that set <paramref name="path"/> to <paramref name="value"/>, a
+    /// scalar, list, or mapping, creating missing keys. A list or mapping is
+    /// written in flow style on the key's line (<c>aliases: [a, b]</c>,
+    /// <c>died: { value: x, from: "a1:3" }</c>), except a non-empty list of
+    /// mappings under a block key, such as a temporal list, which gets a
+    /// <c>- { ... }</c> line per item as format.md §7.3 writes them. The
+    /// value at the path must be missing, null, or a scalar: a collection is
+    /// replaced by setting it to null first.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Something on the path isn't a mapping or list, or a list has no such item.</exception>
+    /// <exception cref="NotSupportedException">The edit needs a layout the editor doesn't handle in place.</exception>
+    public static List<TextEdit> SetAny(SourceText source, YamlBlock block, IReadOnlyList<string> path, YamlValue value, bool templateOrder = false) =>
+        value is YamlScalarValue scalar
+            ? SetScalar(source, block, path, scalar, templateOrder)
+            : SetValue(source, block, path, new AnyNew(value, source.Newline), templateOrder);
 
     /// <summary>
     /// Edits that add <paramref name="item"/> to the list at
@@ -57,7 +76,7 @@ internal static partial class YamlEditor
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="index"/> is past the end of the list.</exception>
     /// <exception cref="InvalidOperationException">The value at the path isn't a list.</exception>
     /// <exception cref="NotSupportedException">The list's layout can't take a new item without moving a comment.</exception>
-    public static List<TextEdit> AddItem(SourceText source, YamlBlock block, IReadOnlyList<string> path, YamlValue item, int? index)
+    public static List<TextEdit> AddItem(SourceText source, YamlBlock block, IReadOnlyList<string> path, YamlValue item, int? index, bool templateOrder = false)
     {
         CheckPath(path);
         var node = Find(block.Root, path);
@@ -91,7 +110,7 @@ internal static partial class YamlEditor
             throw new NotSupportedException($"'{Join(path, path.Count)}' at line {node.Line} is an empty list item. Replace the item instead.");
         }
 
-        return SetValue(source, block, path, new ListNew(item));
+        return SetValue(source, block, path, new ListNew(item), templateOrder);
     }
 
     /// <summary>
@@ -257,7 +276,7 @@ internal static partial class YamlEditor
         return -1;
     }
 
-    private static List<TextEdit> SetValue(SourceText source, YamlBlock block, IReadOnlyList<string> path, NewValue value)
+    private static List<TextEdit> SetValue(SourceText source, YamlBlock block, IReadOnlyList<string> path, NewValue value, bool templateOrder)
     {
         CheckPath(path);
         var nl = source.Newline;
@@ -316,7 +335,7 @@ internal static partial class YamlEditor
                 CheckNewKeys(path, i);
                 return mapping.IsFlow
                     ? FlowInsert(source, mapping, FlowChain(path, i, value), mapping.Entries.Count)
-                    : [InsertEntry(source, mapping, path, i, unit, value, nl)];
+                    : [templateOrder && i == 0 && TemplateRank(path[0]) is { } rank ? InsertTopLevelInOrder(source, mapping, path, rank, unit, value, nl) : InsertEntry(source, mapping, path, i, unit, value, nl)];
             }
 
             if (last)
@@ -398,6 +417,44 @@ internal static partial class YamlEditor
         return lastLine.TerminatorLength > 0
             ? new TextEdit(lastLine.EndIncludingTerminator, 0, pad + text + nl)
             : new TextEdit(lastLine.End, 0, nl + pad + text);
+    }
+
+    /// <summary>The top-level keys of an entity file in template order (types.md F-TPL-7).</summary>
+    private static readonly string[] TemplateOrder = ["id", "type", "name", "aliases", "status", "from", "fields"];
+
+    private static int? TemplateRank(string key) => Array.IndexOf(TemplateOrder, key) is var i and >= 0 ? i : null;
+
+    /// <summary>
+    /// A new top-level key that has a place in the template order (types.md
+    /// F-TPL-7, format.md F-RT-4): right after the nearest key before it in
+    /// that order that the file has, with the comment lines indented under
+    /// that key; or, if there's none, just before the first key from that
+    /// order; or, if the file has no key from it, after the existing keys.
+    /// </summary>
+    private static TextEdit InsertTopLevelInOrder(SourceText source, YamlMapping mapping, IReadOnlyList<string> path, int rank, int unit, NewValue value, string nl)
+    {
+        var ranked = mapping.Entries.Select((e, i) => (Index: i, Rank: e.KeyText is { } k ? TemplateRank(k) : null)).Where(x => x.Rank is not null).ToList();
+        var after = ranked.LastOrDefault(x => x.Rank < rank);
+        var before = ranked.FirstOrDefault(x => x.Rank > rank);
+        if (ranked.Count == 0 || (after.Rank is null && before.Rank is null))
+        {
+            return InsertEntry(source, mapping, path, 0, unit, value, nl);
+        }
+
+        var first = mapping.Entries[0].Key;
+        var indent = Column(source, first.Start);
+        var text = new string(' ', indent) + Chain(path, 0, indent, unit, value, nl);
+        if (after.Rank is not null)
+        {
+            var entry = mapping.Entries[after.Index];
+            var line = source.Lines[OwnedEnd(source, LastLineOfEntry(source, entry), Column(source, entry.Key.Start))];
+            return line.TerminatorLength > 0
+                ? new TextEdit(line.EndIncludingTerminator, 0, text + nl)
+                : new TextEdit(line.End, 0, nl + text);
+        }
+
+        var keyLine = source.Lines[source.LineIndexOf(mapping.Entries[before.Index].Key.Start)];
+        return new TextEdit(keyLine.Start, 0, text + nl);
     }
 
     private static List<TextEdit> ReplaceValue(SourceText source, YamlEntry entry, NewValue value, bool flow, int unit)
@@ -868,6 +925,24 @@ internal static partial class YamlEditor
         public override bool Matches(YamlNode? node) => value.Matches(node);
 
         public override string? Inline(bool flow, YamlScalarStyle? existing) => value.Render(existing, flow);
+    }
+
+    /// <summary>
+    /// A new list or mapping (<see cref="SetAny"/>): flow on the key's line,
+    /// or, for a non-empty list of mappings under a block key, one
+    /// <c>- { ... }</c> line per item.
+    /// </summary>
+    private sealed class AnyNew(YamlValue value, string newline) : NewValue
+    {
+        private bool IsListOfMappings => value is YamlSequenceValue { Items.Count: > 0 } list && list.Items.All(i => i is YamlMappingValue);
+
+        public override bool Matches(YamlNode? node) => value.MatchesAsWritten(node);
+
+        public override string? Inline(bool flow, YamlScalarStyle? existing) =>
+            !flow && IsListOfMappings ? null : value.RenderFlow(null, null);
+
+        public override string Lines(int keyIndent, int unit) =>
+            string.Join(newline, ((YamlSequenceValue)value).Items.Select(i => new string(' ', keyIndent + unit) + "- " + i.RenderFlow(null, null)));
     }
 
     /// <summary>

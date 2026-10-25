@@ -86,6 +86,33 @@ public static class ToolErrorCodes
 
     /// <summary>A <c>before</c> or <c>diff_from</c> that isn't a checkpoint of the history asked for.</summary>
     public const string UnknownCheckpoint = "unknown_checkpoint";
+
+    /// <summary>A write's <c>expected_hash</c> isn't the file's hash now: it changed since it was read. Read it again.</summary>
+    public const string StaleFile = "stale_file";
+
+    /// <summary>A write would change something frozen: an entity, outline, or <c>book.md</c> in a final book (format.md F-BOOK-1).</summary>
+    public const string Frozen = "frozen";
+
+    /// <summary>A write would leave a file with an error, so the den would leave it out (format.md §1.3); the message lists the errors.</summary>
+    public const string InvalidEdit = "invalid_edit";
+
+    /// <summary>The edit can't be made in place without changing other text, or isn't one the write tools make.</summary>
+    public const string UnsupportedEdit = "unsupported_edit";
+
+    /// <summary>The entity has no section with that name (under that parent, or at that line).</summary>
+    public const string UnknownSection = "unknown_section";
+
+    /// <summary>More than one section has that name; the message lists them, to pick one by its line.</summary>
+    public const string AmbiguousSection = "ambiguous_section";
+
+    /// <summary>The book has no chapter with that key.</summary>
+    public const string UnknownChapter = "unknown_chapter";
+
+    /// <summary>A file of that name is already there, or an id is already used in the den.</summary>
+    public const string AlreadyExists = "already_exists";
+
+    /// <summary>The den's files couldn't be written; the message says what the system said.</summary>
+    public const string WriteFailed = "write_failed";
 }
 
 /// <summary>A tool call can't be answered. <see cref="DenTools"/> throws it, and the server turns it into an error result.</summary>
@@ -193,9 +220,11 @@ public sealed record PinnedFacts(IReadOnlyList<FieldView> Fields, IReadOnlyList<
 /// <param name="Pinned">Pinned canon, ahead of the rest; also listed in place in <paramref name="Fields"/> and <paramref name="Sections"/>.</param>
 /// <param name="Fields">Field values, in frontmatter order.</param>
 /// <param name="Sections">Sections, in file order.</param>
+/// <param name="Hash">From <c>get_entity</c>, the SHA-256 of the file's bytes, in lowercase hex: the <c>expected_hash</c> a write tool takes.</param>
 public sealed record EntityView(
     string Key, string? Id, string Name, string Type, string Status, string Universe, string ScopeKind, string ScopeKey, string Path, string? From,
-    IReadOnlyList<string>? Aliases, string? Lead, PinnedFacts? Pinned, IReadOnlyList<FieldView>? Fields, IReadOnlyList<SectionView>? Sections);
+    IReadOnlyList<string>? Aliases, string? Lead, PinnedFacts? Pinned, IReadOnlyList<FieldView>? Fields, IReadOnlyList<SectionView>? Sections,
+    string? Hash = null);
 
 /// <summary>The pinned canon of one entity in a canon view.</summary>
 /// <param name="Key">The entity's key.</param>
@@ -323,3 +352,75 @@ public sealed record HistoryDiffView(string From, string? To, IReadOnlyList<Hist
 /// <param name="Change">How it changed.</param>
 /// <param name="Patch">The change as a unified diff.</param>
 public sealed record HistoryFileDiffView(HistoryChangeView Change, string Patch);
+
+/// <summary>A file a write tool wrote.</summary>
+/// <param name="Path">The file, relative to the den root.</param>
+/// <param name="Hash">The SHA-256 of its new bytes, in lowercase hex: the <c>expected_hash</c> for the next write to it.</param>
+/// <param name="Created">True for a file the write made.</param>
+public sealed record WrittenFileView(string Path, string Hash, bool Created = false);
+
+/// <summary>
+/// The result of a write tool (<c>create_entity</c>, <c>update_fields</c>,
+/// <c>append_section</c>, <c>add_idea</c>, <c>rename_section</c>,
+/// <c>update_chapter_fields</c>). Writes go to the files only: nothing is
+/// committed until <c>checkpoint</c>.
+/// </summary>
+/// <param name="Version">The shape version.</param>
+/// <param name="Changed">False if the edit asked for what the file already says, so nothing was written.</param>
+/// <param name="Path">The file the edit was for, relative to the den root.</param>
+/// <param name="Hash">The SHA-256 of that file's bytes now, in lowercase hex: the <c>expected_hash</c> for the next write to it.</param>
+/// <param name="Entity">The entity as it is now, for writes to an entity.</param>
+/// <param name="Effects">What the edit means, in words, where that depends on more than the bytes written: a chapter that now has no POV and the default it no longer inherits, a type's default that now shows, an entity that left canon.</param>
+/// <param name="PinnedCanon">The pinned facts (hard canon, format.md F-PIN-1) the edit changed, added, or removed. Empty if none. Check such an edit with the writer.</param>
+/// <param name="Warnings">Warnings about the file as it is now, as <c>check</c> reports them. Errors are never written: such an edit is refused.</param>
+/// <param name="Files">Every file written, when there's more than one (a section rename rewrites links in other files).</param>
+/// <param name="Chapter">For <c>update_chapter_fields</c>, the chapter as it is now.</param>
+/// <param name="IdAdded">The id given to a file that had none (format.md F-ID-6), or null.</param>
+public sealed record WriteResult(
+    int Version, bool Changed, string Path, string Hash, EntitySummary? Entity, IReadOnlyList<string> Effects, IReadOnlyList<string> PinnedCanon,
+    IReadOnlyList<DiagnosticView> Warnings, IReadOnlyList<WrittenFileView>? Files = null, ChapterView? Chapter = null, string? IdAdded = null);
+
+/// <summary>One chapter field of a chapter: its own value, and what it inherits (types.md F-CHAP-5).</summary>
+/// <param name="Name">The field name, such as <c>pov</c>.</param>
+/// <param name="Value">The effective value, as JSON, or null when nothing sets it.</param>
+/// <param name="From">Where the effective value comes from: <c>chapter</c> (its own), <c>book</c>, <c>series</c>, or <c>universe</c> (that container's <c>chapter_defaults</c>), or null when nothing sets it.</param>
+/// <param name="FromKey">The key of the container whose <c>chapter_defaults</c> gives it, or null.</param>
+/// <param name="None">True for a list field set to an empty list, "none here", which stops inheritance.</param>
+/// <param name="Own">The chapter's own value as JSON, or null if it doesn't set the field (and inherits).</param>
+/// <param name="Default">What the chapter would inherit without its own value, as JSON, or null if nothing above sets it.</param>
+/// <param name="DefaultFrom">Where that default comes from: <c>book</c>, <c>series</c>, or <c>universe</c>, or null.</param>
+public sealed record ChapterFieldView(
+    string Name, JsonElement? Value, string? From, string? FromKey, bool None, JsonElement? Own, JsonElement? Default, string? DefaultFrom);
+
+/// <summary>A chapter and its fields.</summary>
+/// <param name="Book">The book's key.</param>
+/// <param name="Key">The chapter key, which positions name (<c>book:key</c>).</param>
+/// <param name="Number">The display number, or null.</param>
+/// <param name="Title">The title, or null.</param>
+/// <param name="Line">The chapter's line in <c>book.md</c>.</param>
+/// <param name="Fields">Each chapter field the chapter sets or inherits, in name order.</param>
+public sealed record ChapterView(string Book, string Key, long? Number, string? Title, int Line, IReadOnlyList<ChapterFieldView> Fields);
+
+/// <summary>The result of <c>get_chapter</c>.</summary>
+/// <param name="Version">The shape version.</param>
+/// <param name="Universe">The universe's key.</param>
+/// <param name="Book">The book's key.</param>
+/// <param name="Path">The book's <c>book.md</c>, relative to the den root.</param>
+/// <param name="Hash">The SHA-256 of <c>book.md</c>'s bytes, in lowercase hex: the <c>expected_hash</c> for <c>update_chapter_fields</c>.</param>
+/// <param name="Final">True if the book is final (frozen, format.md F-BOOK-1), so it can't be edited.</param>
+/// <param name="Count">How many chapters this result holds.</param>
+/// <param name="Chapters">The chapter asked for, or every chapter, in book order.</param>
+public sealed record GetChapterResult(int Version, string Universe, string Book, string Path, string Hash, bool Final, int Count, IReadOnlyList<ChapterView> Chapters);
+
+/// <summary>The result of <c>checkpoint</c>.</summary>
+/// <param name="Version">The shape version.</param>
+/// <param name="Backend">The history backend: <c>git</c>, or <c>none</c> for a den without history.</param>
+/// <param name="Available">False if the den has no history to record into; <paramref name="Reason"/> says why. The edits are still saved in the files.</param>
+/// <param name="Reason">Why a checkpoint isn't available, in words for the writer, or null.</param>
+/// <param name="Recorded">True if a checkpoint was recorded; false if nothing changed since the last one.</param>
+/// <param name="Checkpoint">The checkpoint recorded, or null.</param>
+/// <param name="WrittenBySession">Of the files recorded, the ones this session's write tools saved since the last checkpoint that recorded them.</param>
+/// <param name="ChangedOutsideSession">Of the files recorded, the ones that changed some other way, such as in the writer's editor: tell the writer they're in the checkpoint too.</param>
+public sealed record CheckpointResult(
+    int Version, string Backend, bool Available, string? Reason, bool Recorded, HistoryEntryView? Checkpoint,
+    IReadOnlyList<string>? WrittenBySession = null, IReadOnlyList<string>? ChangedOutsideSession = null);
