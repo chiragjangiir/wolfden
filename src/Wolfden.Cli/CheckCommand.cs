@@ -58,7 +58,7 @@ internal static class CheckCommand
                               (nothing is written under .wolfden/), so ids
                               aren't compared with other universes' notes;
                               a check of the whole den never uses the index
-          --fix             first add a new id to every container and entity
+          --fix               first add a new id to every container and entity
                               file that has none (F-ID-2); nothing else changes.
                               Files in a final book and files with errors are
                               left alone.

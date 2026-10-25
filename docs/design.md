@@ -698,11 +698,17 @@ and `wolfden check` do:
   its own words; the server wraps that as `bad_argument` in the same
   shape. In every result, `count` is how many items it holds, `truncated`
   says whether `limit` cut the list short, and `list_entities` and
-  `check` also give the `total` that matched. `canon_as_of` is never cut
-  short.
+  `check` also give the `total` that matched. A `search` with a filter
+  (`universe` in a den with several, `type`, or `canon_only`) filters a
+  capped set of raw hits (1,000, or 20 times `limit` if that's more), so
+  its `truncated` is also true when there were raw hits past that cap,
+  which may hold more matches. `canon_as_of` is never cut short.
 - **Fresh answers.** Each call checks the files hash first and rebuilds
   the index if it differs, waiting briefly for the watcher the server
-  hosts (§7). `check` reads the files, not the index.
+  hosts (§7). `check` reads the files, not the index, except that a
+  check of one universe takes the other universes' ids from the index
+  (brought up to date first) to find ids shared across universes
+  (F-ID-3, §7 "Which universe").
 - **History** (#19). `get_history` names an entity as `get_entity`
   does, without a position, since history isn't a story view, and gives
   the checkpoints that changed its file, newest first, a page at a time:
