@@ -357,9 +357,14 @@ public sealed class DenWatcherTests
         {
             FirstPause = TimeSpan.FromMilliseconds(20),
             MaxPause = TimeSpan.FromSeconds(1),
-            BeforeApply = _ =>
+            // Only the edit's batch and the rebuilds after it fail. A new
+            // watch can start with a batch of its own (on Windows, events
+            // for the freshly copied den's folders, which change nothing).
+            // Had that one failed, the rebuild could read Mara before the
+            // edit and report Rebuilt while the edit was still on its way.
+            BeforeApply = batch =>
             {
-                if (Interlocked.Decrement(ref fails) >= 0)
+                if ((batch.Paths.Contains(Mara) || batch.Overflowed) && Interlocked.Decrement(ref fails) >= 0)
                 {
                     throw new IOException("The index is locked.");
                 }
