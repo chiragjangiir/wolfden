@@ -49,6 +49,18 @@ public static class GitRepository
         {
             return new GitLocation(GitLocationKind.GitNotInstalled, Problem: e.Message);
         }
+        catch (GitTimeoutException e)
+        {
+            return new GitLocation(GitLocationKind.Unusable, Problem: $"{e.Message}, so Wolfden stopped it");
+        }
+
+        if (run.Succeeded && !run.OutputComplete)
+        {
+            // Without all of it, "no top folder" can't be told from "cut short".
+            return new GitLocation(
+                GitLocationKind.Unusable,
+                Problem: "git rev-parse finished, but its output was still open when Wolfden stopped waiting, so Wolfden couldn't tell where the repository is");
+        }
 
         if (run.Succeeded)
         {
@@ -78,7 +90,8 @@ public static class GitRepository
         try
         {
             // The user's defaults apply: the branch name, templates, and hooks.
-            var run = GitProcess.Run(options, folder, ["init", "--quiet"], cancellationToken: cancellationToken);
+            // Never stopped part way, which would leave a half-made repository.
+            var run = GitProcess.Run(options, folder, ["init", "--quiet"], cancellationToken: cancellationToken, kind: GitCallKind.MustFinish);
             if (!run.Succeeded)
             {
                 return new GitLocation(GitLocationKind.Unusable, Problem: run.Said);
@@ -87,6 +100,12 @@ public static class GitRepository
         catch (GitNotFoundException e)
         {
             return new GitLocation(GitLocationKind.GitNotInstalled, Problem: e.Message);
+        }
+        catch (GitTimeoutException e)
+        {
+            return new GitLocation(
+                GitLocationKind.Unusable,
+                Problem: $"{e.Message}. Wolfden left it running, since stopping it part way would leave a half-made repository");
         }
 
         return new GitLocation(GitLocationKind.InRepository, Path.GetFullPath(folder));

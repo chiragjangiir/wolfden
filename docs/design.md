@@ -381,7 +381,8 @@ The den store and the history provider are interfaces in `Wolfden.Core`
   staged as it was. Tags belong to the whole repository, not the den.
   The log pages with a limit and a `before` revision, a diff without a
   `from` starts at the latest checkpoint, and every operation can be
-  cancelled. `NoHistory` is the provider of a den without a backend.
+  cancelled, up to a step that can't be stopped part way without harm,
+  such as git writing a commit. `NoHistory` is the provider of a den without a backend.
   Freezing adds its tag only when the provider has the `Tag` capability.
   `Wolfden.Git` implements the interface (#19).
 - **The git provider** (#19; v0 behaviour, not a recorded decision,
@@ -401,8 +402,16 @@ The den store and the history provider are interfaces in `Wolfden.Core`
   with `git rm --cached` is tracked again. A checkpoint with nothing to
   record makes no commit. If git refuses the commit (a hook, signing, or
   a merge in progress), the checkpoint says so and takes its
-  intent-to-add marks off again, so the user's index is as it was. A
-  diff against the files as they
+  intent-to-add marks off again, so the user's index is as it was.
+  Every git command has a time limit, since git can wait outside the
+  terminal on a signing passphrase, a hook, or a credential helper
+  (#143): a command that only reads is stopped after a minute, but one
+  that writes the user's index or refs is never stopped once started,
+  since that would leave `.git/index.lock` behind (#145). After two
+  minutes Wolfden stops waiting, leaves git running, and says so; if git
+  then ends without committing, the marks come off. Cancelling a
+  checkpoint works up to its commit. Wolfden never deletes git's lock
+  files. A diff against the files as they
   are now includes new files git doesn't track yet (not ignored ones),
   through a temporary index, so it never changes the user's index. The
   log of a file follows its current path, not back through renames

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -40,6 +41,23 @@ namespace Wolfden.Git;
 /// <b>Revisions</b> from callers are resolved to commit hashes first
 /// (<c>git rev-parse --verify</c>), and one that starts with <c>-</c> is
 /// refused, so a revision can never be read as an option.
+/// </para>
+/// <para>
+/// <b>Cancelling and time limits</b> (#143, #145). A git command that only
+/// reads is stopped when it's cancelled or runs past
+/// <see cref="GitOptions.ReadTimeout"/>. One that writes the user's index
+/// or refs (marking new files, the commit, a tag) is never stopped once
+/// started, since git stopped part way leaves <c>.git/index.lock</c>
+/// behind and locks the whole repository. A checkpoint can be cancelled
+/// only up to its commit; the commit runs to the end, and a checkpoint it
+/// records is returned. Past <see cref="GitOptions.WriteTimeout"/>,
+/// Wolfden stops waiting, leaves git running, and throws a
+/// <see cref="HistoryException"/> that says so; if git then ends without
+/// committing, the new files' marks are taken off. Wolfden never deletes
+/// git's lock files. Checkpoints in one repository take turns within this
+/// process, and that late rollback waits its turn, so it can't take marks
+/// off files a newer checkpoint is committing; another process
+/// checkpointing the same repository at that moment isn't covered.
 /// </para>
 /// <para>
 /// <b>Known v0 limit:</b> the log of a file is the log of its current path.
@@ -222,6 +240,22 @@ public sealed partial class GitHistory : IHistoryProvider
             }
         }
 
+        // One checkpoint at a time in a repository, and none while a rollback
+        // from one Wolfden stopped waiting for is still to run (UnmarkWhenDone).
+        var gate = Gate();
+        gate.Wait(cancellationToken);
+        try
+        {
+            return CheckpointInGate(request, cancellationToken);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private HistoryResult<HistoryEntry?> CheckpointInGate(CheckpointRequest request, CancellationToken cancellationToken)
+    {
         var specs = Pathspecs(request.Paths);
         var head = Head(cancellationToken);
 
@@ -233,10 +267,26 @@ public sealed partial class GitHistory : IHistoryProvider
         {
             // Exactly the files listed, taken literally: 'git add' with an
             // exclude pathspec skips a file named inside an untracked folder.
-            Git(
-                ["--literal-pathspecs", "add", "--intent-to-add", "--pathspec-from-file=-", "--pathspec-file-nul"],
-                cancellationToken,
-                input: untracked);
+            GitRun marked;
+            try
+            {
+                marked = Start(
+                    ["--literal-pathspecs", "add", "--intent-to-add", "--pathspec-from-file=-", "--pathspec-file-nul"],
+                    cancellationToken,
+                    input: untracked,
+                    kind: GitCallKind.MustFinish);
+            }
+            catch (GitTimeoutException e) when (e.StillRunning is { } running)
+            {
+                // No commit follows, so once git has marked them, take the marks off.
+                UnmarkWhenDone(running, head, untracked, onlyIfFailed: false);
+                throw TimedOut(e);
+            }
+
+            if (!marked.Succeeded)
+            {
+                throw Failed("add", marked);
+            }
         }
         else if (!HasChanges(head, specs, cancellationToken))
         {
@@ -253,22 +303,33 @@ public sealed partial class GitHistory : IHistoryProvider
             }
         }
 
+        // The last point a checkpoint can be cancelled. The commit itself
+        // can't be (#145): git stopped part way would leave index.lock
+        // behind, which locks the whole repository and keeps the marks from
+        // being taken off.
+        if (cancellationToken.IsCancellationRequested)
+        {
+            Unmark(untracked);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
         GitRun commit;
         try
         {
-            commit = Run(["commit", "--only", "--quiet", "--file=-", "--", .. specs], cancellationToken, input: message.ToString());
+            commit = Start(
+                ["commit", "--only", "--quiet", "--file=-", "--", .. specs], CancellationToken.None, input: message.ToString(), kind: GitCallKind.MustFinish);
         }
-        catch (OperationCanceledException)
+        catch (GitTimeoutException e) when (e.StillRunning is { } running)
         {
-            // Git may have made the commit before it was stopped (say, in a
-            // slow post-commit hook). Then the checkpoint was recorded, and
-            // taking the marks off would stage the new files' deletion.
-            if (Head(CancellationToken.None) == head)
-            {
-                Unmark(untracked);
-            }
-
-            throw;
+            // Git may yet make the commit. If it doesn't, put the new files
+            // back as they were once it's done; if it does, taking the marks
+            // off would stage the new files' deletion.
+            UnmarkWhenDone(running, head, untracked, onlyIfFailed: true);
+            throw new HistoryException(
+                $"Git hasn't finished the checkpoint after {GitProcess.Describe(e.Timeout)}. Wolfden stopped waiting but left git running, " +
+                "since stopping it part way would leave the repository locked. When git finishes, it may still record the checkpoint, " +
+                $"so look at the history before trying again. {LikelyCauses} If git ends without recording it, what was staged is put back as it was.",
+                e);
         }
 
         if (!commit.Succeeded)
@@ -280,11 +341,46 @@ public sealed partial class GitHistory : IHistoryProvider
                 "or a merge or rebase in progress can do this. The den's files and what was staged are as they were.");
         }
 
-        var id = Head(cancellationToken) ?? throw new HistoryException("Git made the checkpoint, but the repository has no commit afterwards.");
-        var entry = ReadLog(id, 1, Pathspecs(null), cancellationToken).SingleOrDefault()
-            ?? throw new HistoryException($"Git made the checkpoint {id}, but it doesn't change the den.");
-        return HistoryResult<HistoryEntry?>.Done(entry);
+        // The checkpoint is recorded, so the caller hears about it even if
+        // it was cancelled while git was committing.
+        string? id;
+        HistoryEntry? entry;
+        try
+        {
+            id = Head(CancellationToken.None);
+            entry = id is null ? null : ReadLog(id, 1, Pathspecs(null), CancellationToken.None).SingleOrDefault();
+        }
+        catch (HistoryException e)
+        {
+            var why = e.InnerException is GitTimeoutException timedOut ? timedOut.Message : e.Message.TrimEnd('.');
+            throw new HistoryException(
+                $"Git recorded the checkpoint, but Wolfden couldn't read it back ({why}). It's in the history, so don't make it again.", e);
+        }
+
+        if (id is null)
+        {
+            throw new HistoryException("Git made the checkpoint, but the repository has no commit afterwards.");
+        }
+
+        return HistoryResult<HistoryEntry?>.Done(entry ?? throw new HistoryException($"Git made the checkpoint {id}, but it doesn't change the den."));
     }
+
+    /// <summary>What a git that writes may be waiting on, for a message (#143).</summary>
+    private const string LikelyCauses =
+        "Git may be waiting on signing (a passphrase prompt), a slow or stuck hook, a credential prompt, " +
+        "or its automatic maintenance, which on Windows runs before git returns.";
+
+    /// <summary>
+    /// Checkpoints in one repository, from any <see cref="GitHistory"/> in
+    /// this process, take turns (#145 review, L4). It never shrinks, on
+    /// purpose: it holds one small semaphore per repository a process has
+    /// checkpointed, which is a handful, and removing one safely while
+    /// another thread may be about to wait on it isn't worth the risk.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+    private SemaphoreSlim Gate() => Gates.GetOrAdd(Path.TrimEndingDirectorySeparator(RepositoryRoot), _ => new SemaphoreSlim(1, 1));
 
     /// <summary>
     /// Takes the intent-to-add marks off <paramref name="untracked"/> (git's
@@ -305,11 +401,60 @@ public sealed partial class GitHistory : IHistoryProvider
                 // --force: the entries hold no content, and the files stay where they are.
                 ["--literal-pathspecs", "rm", "--cached", "--force", "--quiet", "--ignore-unmatch", "--pathspec-from-file=-", "--pathspec-file-nul"],
                 CancellationToken.None,
-                input: untracked);
+                input: untracked,
+                kind: GitCallKind.MustFinish);
         }
         catch (HistoryException)
         {
         }
+    }
+
+    /// <summary>
+    /// Once <paramref name="running"/> (a git command Wolfden stopped waiting
+    /// for) has exited, takes the marks off <paramref name="untracked"/> if no
+    /// checkpoint was made: HEAD is still <paramref name="head"/>, and, with
+    /// <paramref name="onlyIfFailed"/>, git failed. Lock files are never
+    /// touched: until git exits, it holds them.
+    /// </summary>
+    private void UnmarkWhenDone(Task<GitRun> running, string? head, string untracked, bool onlyIfFailed)
+    {
+        if (untracked.Length == 0)
+        {
+            return;
+        }
+
+        _ = running.ContinueWith(
+            done =>
+            {
+                if (onlyIfFailed && done.Result.Succeeded)
+                {
+                    return;
+                }
+
+                // Not while another checkpoint is under way: it may have
+                // marked the same files, and taking its marks off would leave
+                // them out of its commit without a word.
+                var gate = Gate();
+                gate.Wait();
+                try
+                {
+                    if (Head(CancellationToken.None) == head)
+                    {
+                        Unmark(untracked);
+                    }
+                }
+                catch (HistoryException)
+                {
+                    // Best effort, with no one left to tell.
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnRanToCompletion,
+            TaskScheduler.Default);
     }
 
     /// <inheritdoc />
@@ -346,15 +491,24 @@ public sealed partial class GitHistory : IHistoryProvider
             at = Resolve(request.At, cancellationToken);
         }
 
-        if (request.Message is null)
+        // A lightweight tag can't be signed: with tag.gpgSign, git would
+        // make an annotated tag and ask an editor for its message.
+        string[] args = request.Message is null
+            ? ["-c", "tag.gpgSign=false", "tag", request.Name, at]
+            : ["tag", "--file=-", request.Name, at];
+        GitRun made;
+        try
         {
-            // A lightweight tag can't be signed: with tag.gpgSign, git would
-            // make an annotated tag and ask an editor for its message.
-            Git(["-c", "tag.gpgSign=false", "tag", request.Name, at], cancellationToken);
+            made = Start(args, cancellationToken, input: request.Message is null ? null : request.Message.ReplaceLineEndings("\n") + "\n", kind: GitCallKind.MustFinish);
         }
-        else
+        catch (GitTimeoutException e)
         {
-            Git(["tag", "--file=-", request.Name, at], cancellationToken, input: request.Message.ReplaceLineEndings("\n") + "\n");
+            throw TimedOut(e, $"Git may still make the tag '{request.Name}' when it finishes, so check whether it exists before trying again.");
+        }
+
+        if (!made.Succeeded)
+        {
+            throw Failed("tag", made);
         }
 
         return HistoryResult<HistoryTag>.Done(new HistoryTag(request.Name, at));
@@ -401,7 +555,16 @@ public sealed partial class GitHistory : IHistoryProvider
     private string? Head(CancellationToken cancellationToken)
     {
         var run = Run(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], cancellationToken);
-        return run.Succeeded ? run.Output.Trim() : null;
+        return run.Succeeded ? CommitId(run) : null;
+    }
+
+    /// <summary>The commit hash a successful <c>rev-parse --verify</c> printed; anything else is git's output gone wrong, never a hash to use.</summary>
+    private static string CommitId(GitRun run)
+    {
+        var id = OutputOf(run, "rev-parse").Trim();
+        return id.Length >= 40 && id.All(char.IsAsciiHexDigitLower)
+            ? id
+            : throw new HistoryException($"git rev-parse didn't give a commit id (it gave '{id}').");
     }
 
     /// <summary>A caller's revision as a commit hash.</summary>
@@ -414,7 +577,7 @@ public sealed partial class GitHistory : IHistoryProvider
 
         var run = Run(["rev-parse", "--verify", "--quiet", revision + "^{commit}"], cancellationToken);
         return run.Succeeded
-            ? run.Output.Trim()
+            ? CommitId(run)
             : throw new HistoryRevisionException(revision, $"There's no checkpoint '{revision}' in the repository: give an id from the history, or a tag's name.");
     }
 
@@ -653,36 +816,56 @@ public sealed partial class GitHistory : IHistoryProvider
 
     /// <summary>Runs git in the den's folder and returns its output, or throws a <see cref="HistoryException"/> if it fails.</summary>
     private string Git(
-        IReadOnlyList<string> args, CancellationToken cancellationToken, string? input = null, IReadOnlyDictionary<string, string?>? environment = null)
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken,
+        string? input = null,
+        IReadOnlyDictionary<string, string?>? environment = null,
+        GitCallKind kind = GitCallKind.Stoppable)
     {
-        var run = Run(args, cancellationToken, input, environment);
-        return run.Succeeded ? run.Output : throw Failed(CommandName(args), run);
+        var run = Run(args, cancellationToken, input, environment, kind);
+        return run.Succeeded ? OutputOf(run, GitProcess.CommandName(args)) : throw Failed(GitProcess.CommandName(args), run);
     }
 
-    /// <summary>The git command in <paramref name="args"/>: the first argument that isn't an option, or the value of <c>-c</c>.</summary>
-    private static string CommandName(IReadOnlyList<string> args)
-    {
-        for (var i = 0; i < args.Count; i++)
-        {
-            if (args[i] == "-c")
-            {
-                i++;
-            }
-            else if (!args[i].StartsWith('-'))
-            {
-                return args[i];
-            }
-        }
+    /// <summary>
+    /// What git printed, or a <see cref="HistoryException"/> if it may be cut
+    /// short: a process git started held its output open past the time
+    /// limit. Every caller that uses git's output takes it through here.
+    /// </summary>
+    internal static string OutputOf(GitRun run, string command) => run.OutputComplete
+        ? run.Output
+        : throw new HistoryException(
+            $"git {command} finished, but its output was still open when Wolfden stopped waiting, so what Wolfden read may be cut short " +
+            "and wasn't used. A process git started, from a hook, a filter, or an alias, may be holding it open.");
 
-        return "command";
-    }
-
+    /// <summary>Runs git in the den's folder, or throws a <see cref="HistoryException"/> if it can't be run or doesn't finish in time.</summary>
     private GitRun Run(
-        IReadOnlyList<string> args, CancellationToken cancellationToken, string? input = null, IReadOnlyDictionary<string, string?>? environment = null)
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken,
+        string? input = null,
+        IReadOnlyDictionary<string, string?>? environment = null,
+        GitCallKind kind = GitCallKind.Stoppable)
     {
         try
         {
-            return GitProcess.Run(_options, DenRoot, args, input, environment, cancellationToken);
+            return Start(args, cancellationToken, input, environment, kind);
+        }
+        catch (GitTimeoutException e)
+        {
+            throw TimedOut(e);
+        }
+    }
+
+    /// <summary>Like <see cref="Run"/>, but a <see cref="GitTimeoutException"/> is left for the caller.</summary>
+    private GitRun Start(
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken,
+        string? input = null,
+        IReadOnlyDictionary<string, string?>? environment = null,
+        GitCallKind kind = GitCallKind.Stoppable)
+    {
+        try
+        {
+            return GitProcess.Run(_options, DenRoot, args, input, environment, cancellationToken, kind);
         }
         catch (GitNotFoundException e)
         {
@@ -691,6 +874,19 @@ public sealed partial class GitHistory : IHistoryProvider
     }
 
     private static HistoryException Failed(string command, GitRun run) => new($"git {command} failed: {run.Said}");
+
+    /// <summary>What to tell the writer when git didn't finish in time (#143).</summary>
+    /// <param name="e">The timeout.</param>
+    /// <param name="retry">For a git left running, what to do before trying again, if a plain retry could clash with what git does when it finishes.</param>
+    private static HistoryException TimedOut(GitTimeoutException e, string? retry = null) => e.StillRunning is null
+        ? new HistoryException(
+            $"{e.Message}, so Wolfden stopped it, and nothing was changed. Git may be waiting on a credential helper or a filter " +
+            "(such as Git LFS), or the repository may be very large.",
+            e)
+        : new HistoryException(
+            $"{e.Message}. Wolfden stopped waiting but left git running, since stopping it part way would leave the repository locked. " +
+            $"{LikelyCauses} Answer or close the prompt, or end that git process. {retry ?? "Then try again."}",
+            e);
 
     private static void Delete(string file)
     {

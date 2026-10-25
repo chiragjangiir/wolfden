@@ -72,6 +72,18 @@ public sealed class TestRepo : IDisposable
     /// <summary>Writes a file at a repository-relative path.</summary>
     public void WriteRepo(string path, string text) => WriteFile(Root, path, text);
 
+    /// <summary>Writes an executable git hook, such as <c>pre-commit</c>. Hooks run in the repository's top folder.</summary>
+    public void WriteHook(string name, string script)
+    {
+        var hook = Path.Combine(Root, ".git", "hooks", name);
+        Directory.CreateDirectory(Path.GetDirectoryName(hook)!);
+        File.WriteAllText(hook, script.ReplaceLineEndings("\n"), new UTF8Encoding(false));
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(hook, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
     /// <summary>Deletes a file at a den-relative path.</summary>
     public void DeleteDen(string path) => File.Delete(Path.Combine(DenRoot, path.Replace('/', Path.DirectorySeparatorChar)));
 
