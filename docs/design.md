@@ -545,7 +545,7 @@ commands, and `wolfden <command> --help` describes each one:
 | Command | What it does |
 |---|---|
 | `wolfden init [<folder>] [--name <name>] [--universe <key>] [--git]` | Creates a den: a `den.yaml`, and with `--universe` a first universe with an id. It never overwrites anything, and refuses a folder inside another den or one that holds a den up to four folder levels below it (format.md F-LAY-1; the downward search skips hidden folders and folder links, and stops after 2,000 folders). The new den passes `check` with no warnings. By default the den is a plain folder; `--git` also runs `git init` in it (maintainer decision, #57, #122), unless the folder is already inside a repository, which it then names and leaves as it is (§6, "A den inside a larger repository"). Without git installed, the den is still made, and `init` says the repository wasn't (exit 0); if git fails, the den is kept and `init` exits 2. |
-| `wolfden check [<den>] [--universe <key>] [--fix]` | The continuity lint above. It reads the files directly, not the index. It checks the whole den, every universe included, since it validates files rather than a story view; `--universe` checks only that universe's files and the den-level ones (see "Which universe" below), and `*` means the whole den. Without `--fix` it never writes. `--fix` first gives every container and entity file that loads without an `id` a new one (format.md F-ID-2, F-ID-6), skipping files in a final book (F-BOOK-1), and then checks the den as it is after the fix. |
+| `wolfden check [<den>] [--universe <key>] [--no-index] [--fix]` | The continuity lint above. It reads the files directly, not the index. It checks the whole den, every universe included, since it validates files rather than a story view; `--universe` checks only that universe's files and the den-level ones (see "Which universe" below), and `*` means the whole den. Without `--fix` it never writes the den's own files; `--universe` writes only the index (derived data, `.wolfden/`), and `--no-index` keeps it from doing even that. `--fix` first gives every container and entity file that loads without an `id` a new one (format.md F-ID-2, F-ID-6), skipping files in a final book (F-BOOK-1), and then checks the den as it is after the fix. |
 | `wolfden index [<den>] [--watch]` | Rebuilds `.wolfden/index.db` from the files and says what it holds. `--watch` then keeps it up to date as files change (#14), printing one line for each batch of changes it applies (with `--json`, one JSON object per line), until Ctrl+C. Only one watcher runs per den; a second exits 2. |
 | `wolfden query [<universe>] [--universe <key>] [--at <position>]` | Canon as of a position (format.md F-VIEW-1), from the index, of one universe (see "Which universe" below; `*` is refused, since a view is of one universe). `--series` or `--book` narrows the view, `--type` (any type an enabled pack defines) and `--entity` (matched as a link is, F-LINK-6, among the entities in the view, so one the reader meets later can't shadow one they've met) pick entities out of it, `--pinned` gives pinned canon (F-VIEW-2), and `--brief` lists one line per entity. |
 | `wolfden new-id [<count>]` | Prints new ids for files made by hand (format.md F-ID-5). |
@@ -576,12 +576,17 @@ They share one surface:
   decision, 2026-10-23): the ids the other universes' notes use come
   from the index, in one query, after the index is brought up to date
   (hashing the whole den, which costs more than the check of one
-  universe, but a stale index could miss a duplicate). An id shared with
+  universe, but a stale index could miss a duplicate). The universe key
+  is checked first, from `den.yaml` and the container files, so an
+  unknown key is reported without that wait and leaves the index alone
+  (#130). An id shared with
   a note in another universe is a duplicate in the scoped check as in
   the whole den: the same F-ID-3 warning, naming the other copy, and the
-  same broken links. If the index can't be built, say because
-  `den.yaml` doesn't load, the rest of the check runs and a note says
-  the id comparison was skipped. The one remaining difference from a
+  same broken links. If the index can't be built, or `den.yaml` doesn't
+  load (then no index is built), the rest of the check runs and a note
+  says the id comparison was skipped. `--no-index` skips it on purpose,
+  with the same note, for a check that writes nothing at all, not even
+  the index. The one remaining difference from a
   whole-den check: a broken link that only another universe's note
   matches is reported without the hint that names that note. `--fix`
   works on the whole den, so it doesn't go with `--universe`.
@@ -693,11 +698,17 @@ and `wolfden check` do:
   its own words; the server wraps that as `bad_argument` in the same
   shape. In every result, `count` is how many items it holds, `truncated`
   says whether `limit` cut the list short, and `list_entities` and
-  `check` also give the `total` that matched. `canon_as_of` is never cut
-  short.
+  `check` also give the `total` that matched. A `search` with a filter
+  (`universe` in a den with several, `type`, or `canon_only`) filters a
+  capped set of raw hits (1,000, or 20 times `limit` if that's more), so
+  its `truncated` is also true when there were raw hits past that cap,
+  which may hold more matches. `canon_as_of` is never cut short.
 - **Fresh answers.** Each call checks the files hash first and rebuilds
   the index if it differs, waiting briefly for the watcher the server
-  hosts (§7). `check` reads the files, not the index.
+  hosts (§7). `check` reads the files, not the index, except that a
+  check of one universe takes the other universes' ids from the index
+  (brought up to date first) to find ids shared across universes
+  (F-ID-3, §7 "Which universe").
 - **History** (#19). `get_history` names an entity as `get_entity`
   does, without a position, since history isn't a story view, and gives
   the checkpoints that changed its file, newest first, a page at a time:

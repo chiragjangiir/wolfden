@@ -5,4 +5,8 @@
     <ProjectReference Include="..\..\src\Wolfden.Git\Wolfden.Git.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="..\Wolfden.Index.Tests\IndexBuildCounter.cs" Link="IndexBuildCounter.cs" />
+  </ItemGroup>
+
 </Project>

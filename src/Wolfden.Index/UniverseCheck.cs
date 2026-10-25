@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Wolfden.Core.Checks;
+using Wolfden.Core.Structure;
 
 namespace Wolfden.Index;
 
@@ -23,28 +24,64 @@ public sealed record UniverseCheck(DenCheck Check, string? SkippedNote)
     /// running watcher), which costs more than the check of one universe
     /// alone, but a stale index could miss a duplicate.
     /// </summary>
-    public static UniverseCheck Run(string root, string universeKey, TimeSpan watcherWait)
+    /// <remarks>
+    /// It reads the den's structure first, and leaves the index alone when
+    /// <c>den.yaml</c> doesn't load (the note says so) or the den has no
+    /// universe <paramref name="universeKey"/>. The caller reports an
+    /// unknown universe from <see cref="DenCheck.Structure"/> without having
+    /// waited for the whole den to be hashed (#130).
+    /// </remarks>
+    public static UniverseCheck Run(string root, string universeKey, TimeSpan watcherWait) =>
+        Run(root, universeKey, watcherWait, useIndex: true);
+
+    /// <summary>
+    /// <see cref="Run(string, string, TimeSpan)"/>, or with
+    /// <paramref name="useIndex"/> false, without the index at all, so
+    /// nothing is written under <c>.wolfden/</c>: ids aren't compared with
+    /// the other universes' notes, and the note says so.
+    /// </summary>
+    public static UniverseCheck Run(string root, string universeKey, TimeSpan watcherWait, bool useIndex)
     {
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(universeKey);
         IReadOnlyDictionary<string, IReadOnlyList<string>>? ids = null;
         string? skipped = null;
-        try
+
+        // Only den.yaml, packs, and container files: far less than hashing the den.
+        var structure = DenStructure.Load(root);
+        if (!structure.IsLoaded)
         {
-            IndexBuilder.EnsureUpToDate(root, watcherWait);
-            using var index = DenIndex.Open(root);
-            if (index.Context.Dens.Single().IsLoaded)
-            {
-                ids = index.IdsOutside(universeKey);
-            }
-            else
-            {
-                skipped = "den.yaml doesn't load, so the index has no notes to compare ids with.";
-            }
+            skipped = NotLoaded;
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or SqliteException)
+        else if (structure.FindUniverse(universeKey) is null)
         {
-            skipped = $"the index couldn't be read or rebuilt ({e.Message}).";
+            // The caller reports the unknown universe. Checking the den-level files alone is cheap.
+            return new UniverseCheck(DenCheck.Run(root, universeKey), null);
+        }
+        else if (!useIndex)
+        {
+            skipped = "the check was asked not to use the index.";
+        }
+        else
+        {
+            try
+            {
+                IndexBuilder.EnsureUpToDate(root, watcherWait);
+                using var index = DenIndex.Open(root);
+                if (index.Context.Dens.Single().IsLoaded)
+                {
+                    ids = index.IdsOutside(universeKey);
+                }
+                else
+                {
+                    // den.yaml changed after it was read above.
+                    skipped = NotLoaded;
+                }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or SqliteException)
+            {
+                skipped = $"the index couldn't be read or rebuilt ({e.Message}).";
+            }
         }
 
         var check = DenCheck.Run(root, universeKey, ids);
@@ -52,4 +89,6 @@ public sealed record UniverseCheck(DenCheck Check, string? SkippedNote)
             check,
             skipped is null ? null : $"Ids shared with notes in other universes (F-ID-3) weren't checked: {skipped} Check the whole den to find them.");
     }
+
+    private const string NotLoaded = "den.yaml doesn't load, so the index has no notes to compare ids with.";
 }

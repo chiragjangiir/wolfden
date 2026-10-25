@@ -6,6 +6,7 @@ using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using Wolfden.Index;
+using Wolfden.Index.Tests;
 
 namespace Wolfden.Mcp.Tests;
 
@@ -39,7 +40,7 @@ public sealed class McpHandshakeTests
         IndexBuilder.Rebuild(den.Root);
         File.AppendAllText(Path.Combine(den.Root, LucyPath), "\nHer diary mentions a quillwhistle.\n");
         var root = Path.GetFullPath(den.Root);
-        var builds = IndexBuilder.RebuildCounts[root];
+        using var builds = new IndexBuildCounter(root);
         var watcherStarts = 0;
 
         // The watcher's start is held up inside, holding the watch lock and listening, just before its first build.
@@ -86,17 +87,17 @@ public sealed class McpHandshakeTests
             // A call made while the first build is held up finds the files
             // changed and waits for the watcher, without rebuilding the index.
             var search = Text(client.CallToolAsync("search", new Dictionary<string, object?> { ["query"] = "quillwhistle" }, cancellationToken: cancel));
-            await WaitFor(() => IndexBuilder.WatcherWaits.GetValueOrDefault(root) > 0, cancel);
+            await WaitFor(() => builds.WatcherWaits > 0, cancel);
             await Task.Delay(200, cancel);
             Assert.False(search.IsCompleted, "The call didn't wait for the watcher.");
-            Assert.Equal(builds, IndexBuilder.RebuildCounts[root]);
+            Assert.Equal(0, builds.Rebuilds);
 
             // Once the watcher builds, the call sees the edit, and only the watcher rebuilt the index.
             mayBuild.Set();
             Assert.Contains("lucy-westenra", await search, StringComparison.Ordinal);
             await WaitFor(() => log.ToString().Contains("keeping its index up to date", StringComparison.Ordinal), cancel);
             Assert.True(DenWatcher.IsWatching(den.Root));
-            Assert.Equal(builds + watcherStarts, IndexBuilder.RebuildCounts[root]);
+            Assert.Equal(watcherStarts, builds.Rebuilds);
             Assert.Equal(IndexStatus.Current, IndexBuilder.CheckFiles(den.Root));
         }
         finally

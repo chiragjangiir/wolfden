@@ -1131,15 +1131,21 @@ run `wolfden check --universe vael`.
   the `vael` copy), and links to it break, as in a whole-den check: the
   other universes' ids come from the index. A broken `den.yaml` is still
   reported, with a note that ids weren't compared across universes,
-  since the index can't be built. Without `--universe`, or with
-  `--universe '*'`, it checks the whole den. A universe the den doesn't
-  have, or `--fix` with `--universe`, exits 2.
+  since there are no notes to compare with; no index is built. Without
+  `--universe`, or with `--universe '*'`, it checks the whole den. A
+  universe the den doesn't have, or `--fix` with `--universe`, exits 2;
+  an unknown universe is reported before the index is brought up to
+  date, and leaves `.wolfden/` alone. With `--no-index`, nothing is
+  written under `.wolfden/`: ids aren't compared across universes, and
+  the same note says so.
 
-Spec: F-DEN-1, F-ID-3, design.md §7 (maintainer decision, 2026-10-23). Covered by:
+Spec: F-DEN-1, F-ID-3, design.md §7 (maintainer decision, 2026-10-23; #130). Covered by:
 `CheckUniverseTests.WithAUniverseOnlyItsFindingsAreReported`,
 `CheckUniverseTests.AnIdSharedWithAnotherUniverseIsFound`,
 `CheckUniverseTests.ABrokenDenYamlIsStillReported`,
-`CheckUniverseTests.AnUnknownUniverseOrFixWithAUniverseExitsTwo`.
+`CheckUniverseTests.AnUnknownUniverseOrFixWithAUniverseExitsTwo`,
+`CheckUniverseTests.AnUnknownUniverseOrABrokenDenYamlLeavesTheIndexAlone`,
+`CheckUniverseTests.NoIndexLeavesTheIndexAloneAndSaysIdsWerentCompared`.
 
 ### SC-CLI-12. I want history from the start
 

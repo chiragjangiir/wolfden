@@ -24,7 +24,9 @@ namespace Wolfden.Cli;
 /// it is after the fix. Without <c>--fix</c>, check never writes the den's
 /// own files. <c>--universe</c> brings the index (<c>.wolfden/</c>, derived
 /// data) up to date first, to compare ids with the other universes' notes
-/// without reading them.
+/// without reading them; <c>--no-index</c> leaves the index alone and skips
+/// that comparison, with a note that says so. A check of the whole den
+/// never touches the index.
 /// </para>
 /// <para>
 /// Exit codes: 0 when the den has no errors (warnings alone don't fail it,
@@ -37,7 +39,7 @@ internal static class CheckCommand
 {
     internal static readonly CommandSpec Spec = new(
         "check",
-        "usage: wolfden check [<den>] [--den <den>] [--universe <key>] [--fix] [--json]",
+        "usage: wolfden check [<den>] [--den <den>] [--universe <key>] [--no-index] [--fix] [--json]",
         """
         Checks a den for errors and continuity problems: broken links, positions
         that don't resolve, missing ids, values that don't fit their fields,
@@ -52,6 +54,10 @@ internal static class CheckCommand
                               against the other universes' notes through the
                               index, which it brings up to date first; '*'
                               means the whole den
+          --no-index          with --universe, don't build or read the index
+                              (nothing is written under .wolfden/), so ids
+                              aren't compared with other universes' notes;
+                              a check of the whole den never uses the index
           --fix               first add a new id to every container and entity
                               file that has none (F-ID-2); nothing else changes.
                               Files in a final book and files with errors are
@@ -61,7 +67,7 @@ internal static class CheckCommand
         Exits 0 if the den has no errors (warnings alone pass), 1 if it has at
         least one, and 2 if it couldn't be checked.
         """,
-        ["--json", "--fix"],
+        ["--json", "--fix", "--no-index"],
         ["--den", "--universe"],
         [],
         1,
@@ -117,7 +123,7 @@ internal static class CheckCommand
             else
             {
                 // The other universes' ids come from the index, so a duplicate across universes is found (F-ID-3).
-                (check, note) = UniverseCheck.Run(path, universe, IndexBuilder.WatcherWait);
+                (check, note) = UniverseCheck.Run(path, universe, IndexBuilder.WatcherWait, useIndex: !line.Has("--no-index"));
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)

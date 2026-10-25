@@ -54,6 +54,22 @@ public static class IndexBuilder
     /// <summary>SQLite's side files, which belong to one database file and must not outlive it.</summary>
     private static readonly string[] SideFiles = ["-journal", "-wal", "-shm"];
 
+    /// <summary>
+    /// A test seam: raised with the den root (a full path) at the start of
+    /// every full rebuild that gets past its argument checks, so tests can
+    /// count rebuilds. Handlers run on the rebuilding thread and should only
+    /// record the call; a test filters by its own den's root, since tests
+    /// run in parallel.
+    /// </summary>
+    internal static event Action<string>? Rebuilding;
+
+    /// <summary>
+    /// A test seam: raised with the den root (a full path) when
+    /// <see cref="EnsureUpToDate(string, TimeSpan)"/> starts waiting for a
+    /// running watcher. The same rules as <see cref="Rebuilding"/>.
+    /// </summary>
+    internal static event Action<string>? WaitingForWatcher;
+
     /// <summary>The index file's full path for the den at <paramref name="denRoot"/>.</summary>
     public static string IndexPath(string denRoot)
     {
@@ -84,9 +100,6 @@ public static class IndexBuilder
     /// rebuild at the last moment. Returns what the index was built from,
     /// for a file watcher to update it from (#14).
     /// </summary>
-    /// <summary>For tests: how many full rebuilds each den root (a full path) has had in this process.</summary>
-    internal static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> RebuildCounts = new(StringComparer.Ordinal);
-
     internal static IndexState Rebuild(string denRoot, Action<string>? beforeSwap)
     {
         ArgumentNullException.ThrowIfNull(denRoot);
@@ -96,7 +109,7 @@ public static class IndexBuilder
             throw new DirectoryNotFoundException($"The den folder '{root}' doesn't exist.");
         }
 
-        RebuildCounts.AddOrUpdate(root, 1, (_, n) => n + 1);
+        Rebuilding?.Invoke(root);
         var folder = Path.Combine(root, StateFolder);
         if (File.Exists(folder))
         {
@@ -281,9 +294,6 @@ public static class IndexBuilder
         }
     }
 
-    /// <summary>For tests: how many times each den root (a full path) has started waiting for a watcher in this process.</summary>
-    internal static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> WatcherWaits = new(StringComparer.Ordinal);
-
     /// <summary>The longest <see cref="EnsureUpToDate(string)"/> waits for a running watcher to catch up before it rebuilds the index itself.</summary>
     public static readonly TimeSpan WatcherWait = TimeSpan.FromSeconds(1);
 
@@ -309,7 +319,7 @@ public static class IndexBuilder
         var status = CheckFiles(denRoot, out var current);
         if (status == IndexStatus.FilesChanged && watcherWait > TimeSpan.Zero && DenWatcher.IsWatching(denRoot))
         {
-            WatcherWaits.AddOrUpdate(Path.GetFullPath(denRoot), 1, (_, n) => n + 1);
+            WaitingForWatcher?.Invoke(Path.GetFullPath(denRoot));
 
             // Hashing the den again on every poll would cost more than the
             // wait saves, so poll only the fingerprint the index records,
