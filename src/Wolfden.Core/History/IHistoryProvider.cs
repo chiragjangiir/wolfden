@@ -49,7 +49,10 @@ namespace Wolfden.Core.History;
 /// </para>
 /// <para>
 /// <b>Cancellation.</b> A backend that runs a process, such as git, stops
-/// it when the token is cancelled and throws <see cref="OperationCanceledException"/>.
+/// it when the token is cancelled and throws <see cref="OperationCanceledException"/>,
+/// except a step that can't be stopped part way without harm, such as
+/// git writing a commit: that runs to the end, and a checkpoint it records
+/// is returned.
 /// </para>
 /// </remarks>
 public interface IHistoryProvider
