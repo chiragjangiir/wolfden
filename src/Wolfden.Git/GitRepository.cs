@@ -54,6 +54,14 @@ public static class GitRepository
             return new GitLocation(GitLocationKind.Unusable, Problem: $"{e.Message}, so Wolfden stopped it");
         }
 
+        if (run.Succeeded && !run.OutputComplete)
+        {
+            // Without all of it, "no top folder" can't be told from "cut short".
+            return new GitLocation(
+                GitLocationKind.Unusable,
+                Problem: "git rev-parse finished, but its output was still open when Wolfden stopped waiting, so Wolfden couldn't tell where the repository is");
+        }
+
         if (run.Succeeded)
         {
             var top = run.Output.TrimEnd('\n', '\r');

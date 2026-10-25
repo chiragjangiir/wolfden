@@ -370,7 +370,13 @@ public sealed partial class GitHistory : IHistoryProvider
         "Git may be waiting on signing (a passphrase prompt), a slow or stuck hook, a credential prompt, " +
         "or its automatic maintenance, which on Windows runs before git returns.";
 
-    /// <summary>Checkpoints in one repository, from any <see cref="GitHistory"/> in this process, take turns (#145 review, L4).</summary>
+    /// <summary>
+    /// Checkpoints in one repository, from any <see cref="GitHistory"/> in
+    /// this process, take turns (#145 review, L4). It never shrinks, on
+    /// purpose: it holds one small semaphore per repository a process has
+    /// checkpointed, which is a handful, and removing one safely while
+    /// another thread may be about to wait on it isn't worth the risk.
+    /// </summary>
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(
         OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
@@ -549,7 +555,16 @@ public sealed partial class GitHistory : IHistoryProvider
     private string? Head(CancellationToken cancellationToken)
     {
         var run = Run(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], cancellationToken);
-        return run.Succeeded ? run.Output.Trim() : null;
+        return run.Succeeded ? CommitId(run) : null;
+    }
+
+    /// <summary>The commit hash a successful <c>rev-parse --verify</c> printed; anything else is git's output gone wrong, never a hash to use.</summary>
+    private static string CommitId(GitRun run)
+    {
+        var id = OutputOf(run, "rev-parse").Trim();
+        return id.Length >= 40 && id.All(char.IsAsciiHexDigitLower)
+            ? id
+            : throw new HistoryException($"git rev-parse didn't give a commit id (it gave '{id}').");
     }
 
     /// <summary>A caller's revision as a commit hash.</summary>
@@ -562,7 +577,7 @@ public sealed partial class GitHistory : IHistoryProvider
 
         var run = Run(["rev-parse", "--verify", "--quiet", revision + "^{commit}"], cancellationToken);
         return run.Succeeded
-            ? run.Output.Trim()
+            ? CommitId(run)
             : throw new HistoryRevisionException(revision, $"There's no checkpoint '{revision}' in the repository: give an id from the history, or a tag's name.");
     }
 
@@ -808,8 +823,19 @@ public sealed partial class GitHistory : IHistoryProvider
         GitCallKind kind = GitCallKind.Stoppable)
     {
         var run = Run(args, cancellationToken, input, environment, kind);
-        return run.Succeeded ? run.Output : throw Failed(GitProcess.CommandName(args), run);
+        return run.Succeeded ? OutputOf(run, GitProcess.CommandName(args)) : throw Failed(GitProcess.CommandName(args), run);
     }
+
+    /// <summary>
+    /// What git printed, or a <see cref="HistoryException"/> if it may be cut
+    /// short: a process git started held its output open past the time
+    /// limit. Every caller that uses git's output takes it through here.
+    /// </summary>
+    internal static string OutputOf(GitRun run, string command) => run.OutputComplete
+        ? run.Output
+        : throw new HistoryException(
+            $"git {command} finished, but its output was still open when Wolfden stopped waiting, so what Wolfden read may be cut short " +
+            "and wasn't used. A process git started, from a hook, a filter, or an alias, may be holding it open.");
 
     /// <summary>Runs git in the den's folder, or throws a <see cref="HistoryException"/> if it can't be run or doesn't finish in time.</summary>
     private GitRun Run(
