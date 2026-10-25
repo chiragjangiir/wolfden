@@ -633,10 +633,13 @@ library the API uses. `wolfden mcp` runs it over stdio (§7). Tool surface:
 | `canon_as_of` | shipped (#20) | Canon at a position, with an optional series or book filter |
 | `check` | shipped (#20) | Run continuity checks and return findings |
 | `get_history` | shipped (#19) | Commit history and diffs for an entity |
-| `create_entity` | planned (#21) | From a type template |
-| `update_fields` / `append_section` | planned (#21) | Structured edits that keep everything else intact |
-| `add_idea` | planned (#21) | Record undecided material with `status: idea` |
-| `checkpoint` | planned (#21) | Commit with a message |
+| `get_chapter` | shipped (#21) | A book's chapters with each chapter field's own, effective, and inherited value, and `book.md`'s hash |
+| `create_entity` | shipped (#21) | From a type template |
+| `update_fields` / `append_section` | shipped (#21) | Structured edits that keep everything else intact |
+| `add_idea` | shipped (#21) | Record undecided material with `status: idea` |
+| `rename_section` | shipped (#21) | Rename a section and rewrite the links to it, den-wide (format.md F-RT-5) |
+| `update_chapter_fields` | shipped (#21) | Set, add to, remove from, or clear a chapter's own fields |
+| `checkpoint` | shipped (#21) | Commit with a message, naming the agent as co-author |
 
 Writes go through the same validation as the UI. An agent can't save a file
 the parser would reject.
@@ -709,6 +712,9 @@ and `wolfden check` do:
   history is `unknown_checkpoint`; a git failure is `history_failed`.
   `wolfden mcp` looks for the den's repository on each call, so a den
   made a repository while it runs gets history.
+- **Hashes.** `get_entity` gives the SHA-256 of the entity's file as
+  the index read it (`hash`), and `get_chapter` the hash of `book.md`:
+  the `expected_hash` the write tools take.
 - **Serve first, watcher in the background.** The server answers the
   client before the watcher's first build of the index is done, so a
   slow build never delays the handshake. A client that waits too long
@@ -722,6 +728,59 @@ and `wolfden check` do:
   (#137). The server doesn't pin
   an MCP protocol version: it serves both the 2026-07-28 revision and
   the `initialize` handshake, so older clients keep working.
+
+**The write tools (#21; v0 behaviour, apart from the maintainer
+decisions marked).** They reuse the document edit API and the den
+store, so an edit changes only what it means to (format.md §12):
+
+- **Checked as the den reads it.** Before anything is saved, each file
+  is read as a load of the den would read it (`DenWriteCheck`): an edit
+  that would leave an error is refused (`invalid_edit`, with the
+  errors), so an agent can't save a file the parser would reject. The
+  result lists the file's warnings, from the same checks as `check`
+  for that file's own fields.
+- **Stale files** (maintainer decision, 2026-10-23). Every edit of an
+  existing file takes the hash it was based on, and is refused
+  (`stale_file`) if the file has changed since; the file is compared
+  again just before it's written. Each result gives the new hash, so
+  edits can follow one another without reading again. Writes are made
+  one at a time within the server.
+- **Frozen and pinned** (maintainer decision, 2026-10-22). Nothing in
+  a final book's scope is written (`frozen`): its entities, `book.md`,
+  or outline (format.md F-BOOK-1). Edits to pinned canon are made, and
+  `pinned_canon` in the result lists each pinned fact touched.
+- **Files only; commits by `checkpoint`** (maintainer decision,
+  2026-10-22). Writes go to the working tree. `checkpoint` records the
+  den's files (or the paths given) as one commit through the history
+  provider, with the agent's `co_author` as a `Co-Authored-By` line
+  (§6). A den without history isn't an error: `available` is false.
+- **Ids** (maintainer decision, 2026-10-23). `create_entity` gives a
+  new id that no file in the den uses, checked through the index even
+  in a session pinned to one universe. `update_fields` refuses an `id`
+  edit (F-ID-4). An edited file without an id gets one in the same
+  write (F-ID-6).
+- **Effects, not just bytes** (maintainer decision, 2026-10-23). A
+  result's `effects` say what the edit means where that depends on
+  more than the file: a chapter left with `pov: []` "now has no POV",
+  with what it would inherit from `chapter_defaults` without its own
+  value; a field whose type default now shows; an entity whose status
+  takes it out of canon views; a new standard section that hands over
+  from, or overlaps, an earlier one. `update_chapter_fields`'s `clear`
+  goes back to inheriting (format.md F-RT-6, types.md F-CHAP-5).
+- **Creating** follows types.md F-TPL-6: the path from the type's
+  folder, a slug made from the name (`-2`, `-3` when it's taken; a
+  slug asked for that's taken is `already_exists`), and frontmatter in
+  template order with the caller's values in place of the template's.
+  `update_fields` puts a new top-level key in template order too
+  (F-TPL-7); `append_section` puts a new standard section in the
+  type's section order and a custom one at the end (F-TPL-8).
+- **Renames** (maintainer decision, 2026-10-23). `rename_section`
+  rewrites every link that reaches the section by heading, in any file
+  (F-RT-5), as one change: if any of those files is in a final book,
+  nothing is renamed. Renaming an entity, or changing or removing an
+  alias, needs the same rewrite for names (F-RT-5), so `update_fields`
+  refuses them for now (`unsupported_edit`); aliases can be added.
+  Moving and copying entities come later (#89, #129).
 
 ## 9. Architecture
 

@@ -125,6 +125,27 @@ public static partial class LinkSyntax
         return count % 2 == 1;
     }
 
+    /// <summary>
+    /// <paramref name="linkText"/>, a whole link such as <c>[[mara-voss#Old|Voss]]</c>,
+    /// with its heading replaced by <paramref name="heading"/>. The spacing
+    /// around the old heading, the target, and the label stay as written.
+    /// Null if it isn't one link with a heading.
+    /// </summary>
+    internal static string? WithHeading(string linkText, string heading)
+    {
+        var m = LinkPattern().Match(linkText);
+        if (!m.Success || m.Index != 0 || m.Length != linkText.Length || !m.Groups["h"].Success)
+        {
+            return null;
+        }
+
+        var group = m.Groups["h"];
+        var value = group.Value;
+        var start = group.Index + (value.Length - value.TrimStart().Length);
+        var end = group.Index + value.TrimEnd().Length;
+        return end <= start ? null : string.Concat(linkText.AsSpan(0, start), heading, linkText.AsSpan(end));
+    }
+
     private static bool IsEmbed(string text, int index, int floor) =>
         index - 1 >= floor && text[index - 1] == '!' && !IsEscaped(text, index - 1, floor);
 

@@ -1326,9 +1326,10 @@ Spec: design.md §7 (#116). Covered by:
 ## MCP: an AI assistant reads the den
 
 Background: `wolfden mcp` (design.md §8, #20) runs an MCP server over
-stdio, so an AI assistant can read the den with five tools: `search`,
-`get_entity`, `list_entities`, `canon_as_of`, and `check`. They only
-read. Without a story position, a tool gives the author's full view;
+stdio, so an AI assistant can read the den with `search`, `get_entity`,
+`list_entities`, `canon_as_of`, `get_chapter`, `check`, and
+`get_history`, and write to it with the write tools (#21, SC-MCP-15 on).
+Without a story position, a reading tool gives the author's full view;
 with one, it gives canon as the reader knows it there. Pinned canon comes
 first. The examples use the Dracula sample, whose book is `dracula`.
 
@@ -1478,7 +1479,8 @@ Spec: F-DEN-1. Covered by:
 The writer adds `wolfden mcp --den <folder>` to their AI client's MCP
 settings.
 
-- The client starts the server, sees the five read-only tools with
+- The client starts the server, sees its tools, the reading ones
+  marked read-only, with
   descriptions that explain dens, scopes, and positions, and can call
   each one, several at once even before the den has an index. The
   server doesn't make the client wait for its first index build
@@ -1494,7 +1496,7 @@ Spec: design.md §7, §8, §9. Covered by:
 `McpCommandTests.AServerThatFailsAfterStartingIsExitThree`,
 `McpCommandTests.WithoutADenItDoesntStart`,
 `ParallelCallTests.ParallelFirstCallsOnADenWithNoIndexAllSucceed`,
-`McpServerTests.TheClientSeesTheServerAndItsReadOnlyTools`,
+`McpServerTests.TheClientSeesTheServerAndItsTools`,
 `McpServerTests.EachToolAnswersWithJson`,
 `McpHandshakeTests.TheServerAnswersWhileTheWatchersFirstBuildIsHeldUp`.
 
@@ -1577,6 +1579,158 @@ Spec: design.md §6, §8 (#19). Covered by:
 `HistoryToolTests.TheAssistantSeesAnEntitysCheckpointsAPageAtATimeAndWhatChangedSince`,
 `HistoryToolTests.WithoutHistoryTheAnswerSaysSoAndIsntAnError`,
 `McpCommandTests.OverStdioHistoryComesFromGit`.
+
+The scenarios below are about the write tools (design.md §8, #21). Each
+edit of an existing note takes the hash the assistant read it with
+(`expected_hash`, from `get_entity` or `get_chapter`), and every write
+goes to the files only, until a checkpoint.
+
+### SC-MCP-15. My assistant adds a character
+
+The writer asks the assistant to add Sister Agatha, the nun who writes to
+Mina from Buda-Pesth, to the book, from chapter 8.
+
+- `create_entity` makes `entities/characters/sister-agatha.md` in the
+  book from the character template: a new id that no note in the den
+  uses, `type`, `name`, the alias and fields given, `status: draft`
+  written out, `from`, the template's other fields, and its sections
+  with their prompts. The note passes `check`. A second Sister Agatha
+  gets `sister-agatha-2.md`; a slug asked for that's taken is refused
+  (`already_exists`), and so is a type no pack defines (`unknown_type`).
+  A name with nothing to make a slug from uses the type key.
+
+Spec: types.md F-TPL-6, F-TPL-7, F-ID-6. Covered by:
+`WriteToolTests.ANewEntityComesFromItsTemplateWithAnIdNoFileUses`,
+`WriteToolTests.ASlugIsMadeFromTheNameAsTheTemplateRuleSays`.
+
+### SC-MCP-16. My assistant changes a note's fields
+
+The assistant adds an alias to Mr. Swales, gives him an occupation, and
+marks him an idea; then it tries to save a status that isn't one, and a
+scene position. Later it moves when the reader learns the Count's
+pinned species.
+
+- `update_fields` makes each change in place, keeping every other line
+  as written, with the new alias in template order, and says that
+  Swales is now out of canon views. The old hash is now `stale_file`;
+  the result's hash works. An edit that would leave an error
+  (`status: maybe`, `from: dracula:7.2`) is refused as `invalid_edit`
+  with the rule, and the file is unchanged. An `id` edit is refused
+  (F-ID-4); renaming the entity or changing an alias is refused until
+  links can follow (F-RT-5). The change to the pinned species is made,
+  and `pinned_canon` says it touched pinned canon.
+
+Spec: format.md §1.3, F-ID-4, F-RT-2, F-RT-5, F-PIN-1, types.md F-TPL-7
+(maintainer decisions, 2026-10-22 and 2026-10-23). Covered by:
+`WriteToolTests.FieldEditsKeepTheRestAndSayWhatTheyMean`,
+`WriteToolTests.AnEditThatWouldLeaveAnErrorIsRefusedAndNothingIsWritten`,
+`WriteToolTests.AnEditOfPinnedCanonIsMadeButFlagged`,
+`McpServerTests.OverTheWireAWriteTakesItsChangesAsJsonAndAStaleHashIsRefused`,
+`WriteEditTests.InTemplateOrderANewTopLevelKeyGoesInItsPlace`,
+`WriteEditTests.AWholeTemporalListIsWrittenOneEntryPerLine`.
+
+### SC-MCP-17. My assistant writes into a note's sections
+
+The assistant adds a line to Swales's Voice, an Appearance he didn't
+have, and a subsection under his Arc that the reader meets at chapter 7;
+then it fills the Overview of a character it just created.
+
+- `append_section` adds the text after what's in the section. The new
+  Appearance goes before Voice, in the character type's section order,
+  and the subsection goes at the end of Arc with `from=dracula:7` as its
+  section comment. A template's empty section is filled, prompt comment
+  kept, never repeated. Status or positions for a section that's
+  already there are refused, as is a parent that isn't there.
+
+Spec: format.md §9.2, types.md F-TPL-5, F-TPL-8. Covered by:
+`WriteToolTests.TextGoesIntoASectionOrANewOneInItsPlace`,
+`WriteToolTests.ATemplateSectionIsFilledNotRepeated`,
+`WriteEditTests.ASectionGoesBeforeAnotherWithItsComment`.
+
+### SC-MCP-18. My assistant banks an idea
+
+The writer muses that the Count might keep a diary, and that Swales might
+have seen the dog leap ashore.
+
+- `add_idea` makes an `idea` entity, "The Count's diary", with `status:
+  idea`, `about` linking the Count, and the text in its lead. With an
+  entity named, it adds a section marked `status=idea` to Swales
+  instead. Canon views leave both out.
+
+Spec: format.md §9.3, types.md §9.1. Covered by:
+`WriteToolTests.AnIdeaIsRecordedOutOfCanon`,
+`WriteEditTests.TextGoesAtTheEndOfTheLead`.
+
+### SC-MCP-19. My assistant renames a section
+
+A note on Whitby dialect links `[[mr-swales#Voice]]` in a field and
+`[[Mr. Swales # voice |how he talks]]` in its text. The assistant
+renames Swales's Voice to Dialect.
+
+- The heading changes, and both links now name Dialect, with their
+  spacing and label kept, in the same change; a link to another of his
+  sections is left alone. The result lists both files with their new
+  hashes, and `check` finds no heading that doesn't match. If a note in
+  a final book links to the section, nothing is renamed (`frozen`).
+
+Spec: format.md F-RT-5, F-LINK-9, F-BOOK-1 (maintainer decision,
+2026-10-23). Covered by:
+`WriteToolTests.RenamingASectionRewritesTheLinksToIt`,
+`WriteToolTests.ALinkInAFrozenBookStopsTheRename`.
+
+### SC-MCP-20. My assistant takes the last POV off a chapter
+
+The book's `chapter_defaults` give every chapter Mina's POV, and chapter
+1 has its own, Jonathan's. The assistant removes it.
+
+- `get_chapter` shows chapter 1's `pov` as its own, with Mina's as the
+  default from the book. After `update_chapter_fields` removes the item,
+  `book.md` says `pov: []`, and the result says chapter 1 now has no
+  POV, and that without its own value it would inherit Mina's from the
+  book's `chapter_defaults`. Clearing the field goes back to that
+  default; clearing a field the chapter doesn't set is refused.
+
+Spec: format.md F-RT-6, types.md F-CHAP-5 (maintainer decisions,
+2026-10-23). Covered by:
+`WriteToolTests.RemovingAChaptersLastPovSaysWhatItNoLongerInherits`.
+
+### SC-MCP-21. My assistant tries to edit a finished book
+
+The writer has frozen the book (`status: final`).
+
+- Adding to Swales, creating a character in the book, and changing a
+  chapter's fields are each refused as `frozen`, and nothing changes.
+  The universe isn't frozen, so a new location there is made.
+
+Spec: format.md F-BOOK-1 (maintainer decision, 2026-10-22). Covered by:
+`WriteToolTests.NothingInAFinalBookIsWritten`.
+
+### SC-MCP-22. My assistant checkpoints a session's edits
+
+After adding Whitby Abbey and a line about Lucy, the assistant makes a
+checkpoint.
+
+- The edits weren't commits. `checkpoint` records both in one commit
+  whose message ends with the assistant's `Co-Authored-By` line; a
+  second straight after has nothing to record. In a den without
+  history, the result says so and that the edits are still saved in
+  the files. A co-author that isn't `Name <email>` is refused.
+
+Spec: design.md §6, §8 (maintainer decision, 2026-10-22). Covered by:
+`HistoryToolTests.WritesWaitForACheckpointThatNamesTheAgentAsCoAuthor`,
+`WriteToolTests.WithoutHistoryACheckpointSaysSoAndTheEditsStay`.
+
+### SC-MCP-23. My pinned assistant creates a note
+
+The server is pinned to universe `drift`, and the new id it draws first
+happens to be one a note in `starfall` uses.
+
+- The id is drawn again, so the new note's id is unused anywhere in the
+  den, though the session can't read `starfall`. It can't create a
+  note in `starfall` either (`bad_argument`).
+
+Spec: F-ID-3 (maintainer decision, 2026-10-23). Covered by:
+`WriteToolTests.APinnedSessionChecksNewIdsAcrossTheWholeDen`.
 
 ## STORE: Wolfden saves, moves, and deletes notes
 
@@ -1775,7 +1929,8 @@ added.
 
 Spec: design.md §6, §8 (#19, #21). Covered by:
 `GitHistoryTests.AnAgentsCheckpointRecordsItAsACoAuthor`,
-`GitHistoryTests.ACoAuthorIsANameAndAnEmailOnOneLine`.
+`GitHistoryTests.ACoAuthorIsANameAndAnEmailOnOneLine`,
+`HistoryToolTests.WritesWaitForACheckpointThatNamesTheAgentAsCoAuthor`.
 
 ### SC-HIST-5. My den is one folder of a bigger repository
 

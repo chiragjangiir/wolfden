@@ -169,12 +169,17 @@ public sealed partial class MarkdownFile : DenFile
     /// <exception cref="InvalidOperationException">The file can't be edited, something on the path isn't a mapping or list, or a list has no such item.</exception>
     /// <exception cref="NotSupportedException">The edit can't be made in place without reformatting, such as filling an empty list item.</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
-    public MarkdownFile WithFrontmatterValue(IReadOnlyList<string> path, YamlScalarValue value)
+    /// <param name="path">The path to set.</param>
+    /// <param name="value">The value.</param>
+    /// <param name="inTemplateOrder">True to put a new top-level key from the template order (<c>aliases</c>,
+    /// <c>status</c>, <c>from</c>, <c>fields</c>, types.md F-TPL-7) in its place in that order, as the write tools
+    /// do, rather than after the existing keys.</param>
+    public MarkdownFile WithFrontmatterValue(IReadOnlyList<string> path, YamlScalarValue value, bool inTemplateOrder = false)
     {
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(value);
         return EditFrontmatter(
-            block => YamlEditor.SetScalar(Source!, block, path, value),
+            block => YamlEditor.SetScalar(Source!, block, path, value, inTemplateOrder),
             (before, after) => YamlTreeCheck.SameExcept(before, after, path, value),
             addFrontmatter: true,
             $"Setting '{string.Join('.', path)}'");
@@ -201,16 +206,68 @@ public sealed partial class MarkdownFile : DenFile
     /// <exception cref="InvalidOperationException">The file can't be edited, or the value at the path isn't a list.</exception>
     /// <exception cref="NotSupportedException">The item can't be added without moving a comment or reformatting.</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
-    public MarkdownFile WithNewListItem(IReadOnlyList<string> path, YamlValue item, int? index = null)
+    /// <param name="path">The list's path.</param>
+    /// <param name="item">The new item.</param>
+    /// <param name="index">The item it goes before, or null for the end.</param>
+    /// <param name="inTemplateOrder">For a new list at a missing top-level key, as for <see cref="WithFrontmatterValue(IReadOnlyList{string}, YamlScalarValue, bool)"/>.</param>
+    public MarkdownFile WithNewListItem(IReadOnlyList<string> path, YamlValue item, int? index = null, bool inTemplateOrder = false)
     {
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(item);
         var at = index ?? (GetFrontmatterValue(path) as YamlSequence)?.Items.Count ?? 0;
         return EditFrontmatter(
-            block => YamlEditor.AddItem(Source!, block, path, item, index),
+            block => YamlEditor.AddItem(Source!, block, path, item, index, inTemplateOrder),
             (before, after) => YamlTreeCheck.SameExcept(before, after, path, (b, a) => YamlTreeCheck.AddedItem(b, a, at, item)),
             addFrontmatter: true,
             $"Adding an item to '{string.Join('.', path)}'");
+    }
+
+    /// <summary>
+    /// Sets the value at <paramref name="path"/> (paths as in
+    /// <see cref="WithFrontmatterValue(IReadOnlyList{string}, YamlScalarValue)"/>)
+    /// to a scalar, a list, or a mapping, such as a field's whole value.
+    /// A scalar is set as that overload sets it. A list or mapping is written
+    /// in flow style on the key's line (<c>aliases: [Lucy]</c>,
+    /// <c>died: { value: x, from: "dracula:7" }</c>), except a list of
+    /// mappings under a block key, such as a temporal list, which gets one
+    /// <c>- { ... }</c> line per item, as format.md §7.3 writes them. A list
+    /// or mapping already at the path is replaced whole, with any comments
+    /// inside it. Setting a value that's already there changes nothing
+    /// (F-RT-3).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The file can't be edited, something on the path isn't a mapping or list, or a list has no such item.</exception>
+    /// <exception cref="NotSupportedException">The edit can't be made in place without reformatting.</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public MarkdownFile WithFrontmatterValue(IReadOnlyList<string> path, YamlValue value, bool inTemplateOrder = false)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(value);
+        if (value is YamlScalarValue scalar)
+        {
+            return WithFrontmatterValue(path, scalar, inTemplateOrder);
+        }
+
+        var current = GetFrontmatterValue(path);
+        if (value.MatchesAsWritten(current))
+        {
+            return this;
+        }
+
+        // A collection is replaced in two steps: emptied, then filled.
+        var start = current is YamlMapping or YamlSequence ? WithFrontmatterValue(path, YamlScalarValue.Null) : this;
+        var what = $"Setting '{string.Join('.', path)}'";
+        var result = start.EditFrontmatter(
+            block => YamlEditor.SetAny(start.Source!, block, path, value, inTemplateOrder),
+            (_, _) => true,
+            addFrontmatter: true,
+            what);
+        if (result.Body != Body || !result.CanEdit
+            || !YamlTreeCheck.SameExcept(_frontmatter?.Root, result._frontmatter?.Root, path, (_, edited) => value.MatchesAsWritten(edited)))
+        {
+            throw new EditVerificationException($"{what} didn't read back as written, or changed another value, so the edit was refused.");
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -571,6 +628,206 @@ public sealed partial class MarkdownFile : DenFile
         if (TrimBlankLines(result.Slice(added.HeadingEnd, added.OwnEnd)) != string.Join(nl, SplitLines(body)))
         {
             throw new EditVerificationException($"The text of '{name}' didn't read back as written, so the edit was refused.");
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Adds a section just before <paramref name="before"/>, or at the end of
+    /// the file if it's null: a heading of <paramref name="level"/>, then a
+    /// section comment (<c>&lt;!-- wolfden: <paramref name="comment"/> --&gt;</c>,
+    /// format.md §9.2) if one is given, then its text. A blank line separates
+    /// it from the text before it and from the heading after it. Where it
+    /// lands decides what holds it: a level-3 section added before a level-2
+    /// one becomes a subsection of the section before that.
+    /// </summary>
+    /// <param name="name">The heading text.</param>
+    /// <param name="body">The section's text.</param>
+    /// <param name="level">2 for a section, 3 to 6 for a subsection.</param>
+    /// <param name="before">The section the new one goes in front of, or null for the end of the file.</param>
+    /// <param name="comment">The section comment's attributes, such as <c>status=idea from=dracula:5</c>, or null for none.</param>
+    /// <exception cref="ArgumentException">The name, comment, or text wouldn't read back as one new section in that
+    /// place with nothing else changed, or <paramref name="before"/> belongs to a different file.</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public MarkdownFile WithNewSection(string name, string body, int level, Section? before, string? comment = null)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(body);
+        ArgumentOutOfRangeException.ThrowIfLessThan(level, 2);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(level, 6);
+        EnsureEditable();
+        CheckSectionName(name);
+        if (before is not null)
+        {
+            CheckOwnSection(before, nameof(before));
+        }
+
+        string? commentLine = null;
+        if (comment is not null)
+        {
+            var attributes = comment.Trim();
+            if (attributes.Length == 0 || attributes.Contains('\n') || attributes.Contains('\r') || attributes.Contains("-->", StringComparison.Ordinal))
+            {
+                throw new ArgumentException("A section comment's attributes are one line of key=value pairs.", nameof(comment));
+            }
+
+            commentLine = "<!-- wolfden: " + attributes + " -->";
+        }
+
+        var source = Source!;
+        var nl = source.Newline;
+        var text = source.Text;
+        var bodyLines = SplitLines(body);
+        var lines = new List<string> { new string('#', level) + " " + name };
+        if (commentLine is not null)
+        {
+            lines.Add(commentLine);
+        }
+
+        lines.AddRange(bodyLines);
+        var block = string.Join(nl, lines);
+
+        TextEdit edit;
+        int index;
+        if (before is null)
+        {
+            index = Sections.Count;
+            if (text.Length == 0)
+            {
+                edit = new TextEdit(0, 0, block + nl);
+            }
+            else if (!source.EndsWithNewline)
+            {
+                edit = new TextEdit(text.Length, 0, nl + nl + block);
+            }
+            else
+            {
+                var lastLine = source.LineText(source.Lines.Count - 2);
+                edit = new TextEdit(text.Length, 0, (IsBlank(lastLine) ? "" : nl) + block + nl);
+            }
+        }
+        else
+        {
+            index = before.Index;
+            var line = source.LineIndexOf(before.HeadingStart);
+            var blankBefore = line == 0 || IsBlank(source.LineText(line - 1)) || source.Lines[line - 1].EndIncludingTerminator <= _bodyStart;
+            edit = new TextEdit(before.HeadingStart, 0, (blankBefore ? "" : nl) + block + nl + nl);
+        }
+
+        var result = Reparse([edit]);
+        if (result.FrontmatterText != FrontmatterText)
+        {
+            throw new EditVerificationException("Adding a section changed the frontmatter, so the edit was refused.");
+        }
+
+        if (TrimBlankLines(result.Lead) != TrimBlankLines(Lead) || result.Title != Title)
+        {
+            throw new ArgumentException($"'{name}' would read as part of the text before the sections, not as a new section.", nameof(name));
+        }
+
+        var expected = Shapes().ToList();
+        expected.Insert(index, new SectionShape(name, level, commentLine, string.Join(nl, bodyLines)));
+        if (!expected.SequenceEqual(result.Shapes()))
+        {
+            throw new ArgumentException($"'{name}', its comment, and its text wouldn't read back as one new section there with nothing else changed.", nameof(name));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Adds text at the end of the lead (format.md F-SEC-2), after what's
+    /// there and before the first section, with a blank line before it and
+    /// one before the heading after it. The title and every section are
+    /// kept as written.
+    /// </summary>
+    /// <exception cref="ArgumentException">The text would add or change a heading or section comment.</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public MarkdownFile WithTextAddedToLead(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        EnsureEditable();
+        var lines = SplitLines(text);
+        if (lines.Length == 0)
+        {
+            return this;
+        }
+
+        var source = Source!;
+        var nl = source.Newline;
+        var all = source.Text;
+        var block = string.Join(nl, lines);
+        TextEdit edit;
+        if (_leadEnd >= all.Length)
+        {
+            if (all.Length == 0 || all.Length == _bodyStart)
+            {
+                edit = new TextEdit(all.Length, 0, block + nl);
+            }
+            else if (!source.EndsWithNewline)
+            {
+                edit = new TextEdit(all.Length, 0, nl + nl + block);
+            }
+            else
+            {
+                var lastLine = source.LineText(source.Lines.Count - 2);
+                edit = new TextEdit(all.Length, 0, (IsBlank(lastLine) ? "" : nl) + block + nl);
+            }
+        }
+        else
+        {
+            var line = source.LineIndexOf(_leadEnd);
+            var blankBefore = _leadEnd == _bodyStart || line == 0 || IsBlank(source.LineText(line - 1));
+            edit = new TextEdit(_leadEnd, 0, (blankBefore ? "" : nl) + block + nl + nl);
+        }
+
+        var result = Reparse([edit]);
+        if (result.FrontmatterText != FrontmatterText)
+        {
+            throw new EditVerificationException("Adding to the lead changed the frontmatter, so the edit was refused.");
+        }
+
+        if (result.Title != Title || !Shapes().SequenceEqual(result.Shapes()))
+        {
+            throw new ArgumentException("The text would add or change a heading or section comment, so it can't go in the lead.", nameof(text));
+        }
+
+        if (!TrimBlankLines(result.Lead).EndsWith(block, StringComparison.Ordinal))
+        {
+            throw new EditVerificationException("The text added to the lead didn't read back as written, so the edit was refused.");
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Replaces ranges of the body's text, such as the heading part of links
+    /// rewritten after a section rename (format.md F-RT-5). Each range must
+    /// lie in the body. The frontmatter, the title, and every section's
+    /// level and section comment must read the same afterwards.
+    /// </summary>
+    /// <exception cref="ArgumentException">A range isn't in the body, or the result would change the file's outline.</exception>
+    internal MarkdownFile WithBodyTextReplaced(IReadOnlyList<(int Start, int Length, string Text)> replacements)
+    {
+        ArgumentNullException.ThrowIfNull(replacements);
+        EnsureEditable();
+        if (replacements.Count == 0)
+        {
+            return this;
+        }
+
+        var all = Source!.Text;
+        if (replacements.Any(r => r.Start < _bodyStart || r.Length < 0 || r.Start + r.Length > all.Length))
+        {
+            throw new ArgumentException("A replacement lies outside the body.", nameof(replacements));
+        }
+
+        var result = Reparse(replacements.Select(r => new TextEdit(r.Start, r.Length, r.Text)));
+        if (result.FrontmatterText != FrontmatterText || result.Title != Title || result.Sections.Count != Sections.Count
+            || result.Sections.Zip(Sections).Any(p => p.First.HeadingLevel != p.Second.HeadingLevel || p.First.Comment?.Text != p.Second.Comment?.Text))
+        {
+            throw new ArgumentException("The replacements would change the file's headings or section comments.", nameof(replacements));
         }
 
         return result;

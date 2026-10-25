@@ -29,7 +29,7 @@ namespace Wolfden.Mcp;
 /// <see cref="ToolErrorCodes"/>.
 /// </para>
 /// </remarks>
-public sealed class DenTools
+public sealed partial class DenTools
 {
     private static readonly string[] Statuses = ["idea", "undecided", "candidate", "draft", "canon", "retconned"];
 
@@ -225,7 +225,8 @@ public sealed class DenTools
                     throw Ambiguous(entity, matches, universes, scopes);
                 }
 
-                return new GetEntityResult(ToolJson.Version, "full", null, true, null, FullView(db, matches[0], universes, scopes));
+                return new GetEntityResult(
+                    ToolJson.Version, "full", null, true, null, FullView(db, matches[0], universes, scopes) with { Hash = FileHash(db, matches[0]) });
             }
 
             // With a position, the name is matched, tier by tier, among the
@@ -257,6 +258,7 @@ public sealed class DenTools
                 ToolJson.Version, "canon_as_of", asOf, true, null,
                 CanonEntityView(inView, u.Key, includeContent: true) with
                 {
+                    Hash = FileHash(db, met[0]),
                     Pinned = new PinnedFacts(
                         pinnedEntity?.Fields.Select(CanonField).ToList() ?? [],
                         pinnedEntity?.Sections.Select(CanonSection).ToList() ?? []),
@@ -655,6 +657,9 @@ public sealed class DenTools
             matches.Select(m => Summary(m, universes, scopes)).ToList());
 
     private static Dictionary<int, ContainerRecord> Scopes(IndexDbContext db) => db.Containers.ToDictionary(c => c.Id);
+
+    /// <summary>The SHA-256 of an entity's file as the index read it: the <c>expected_hash</c> a write takes.</summary>
+    private static string? FileHash(IndexDbContext db, EntityRecord e) => db.Files.Where(f => f.Id == e.FileId).Select(f => f.Hash).SingleOrDefault();
 
     private static EntitySummary Summary(EntityRecord e, Dictionary<int, string> universes, Dictionary<int, ContainerRecord> scopes) => new(
         e.Key, e.Ulid, e.Name, e.Type, e.Status, universes[e.UniverseId], scopes[e.ScopeId].Kind, scopes[e.ScopeId].Key, e.Path, e.FromText);

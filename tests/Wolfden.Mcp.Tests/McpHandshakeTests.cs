@@ -81,7 +81,7 @@ public sealed class McpHandshakeTests
             Assert.False(mayBuild.IsSet);
             Assert.True(DenWatcher.IsWatching(den.Root));
             var tools = await client.ListToolsAsync(cancellationToken: cancel);
-            Assert.Equal(6, tools.Count);
+            Assert.Equal(14, tools.Count);
 
             // A call made while the first build is held up finds the files
             // changed and waits for the watcher, without rebuilding the index.

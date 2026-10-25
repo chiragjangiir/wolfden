@@ -179,7 +179,7 @@ public class McpCommandTests
             Assert.Equal("2026-07-28", client.NegotiatedProtocolVersion);
 
             var tools = await client.ListToolsAsync(cancellationToken: cancel);
-            Assert.Equal(["canon_as_of", "check", "get_entity", "get_history", "list_entities", "search"], tools.Select(t => t.Name).Order(StringComparer.Ordinal));
+            Assert.Equal(["add_idea", "append_section", "canon_as_of", "check", "checkpoint", "create_entity", "get_chapter", "get_entity", "get_history", "list_entities", "rename_section", "search", "update_chapter_fields", "update_fields"], tools.Select(t => t.Name).Order(StringComparer.Ordinal));
 
             var result = await client.CallToolAsync("canon_as_of", new Dictionary<string, object?> { ["position"] = "dracula:5" }, cancellationToken: cancel);
             Assert.NotEqual(true, result.IsError);

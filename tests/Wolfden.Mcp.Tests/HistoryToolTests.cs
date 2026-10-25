@@ -106,6 +106,36 @@ public sealed class HistoryToolTests : IDisposable
         Assert.Equal(ToolErrorCodes.BadArgument, Assert.Throws<DenToolException>(() => tools.GetHistory("Lucy", limit: 0)).Code);
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-MCP-22")]
+    [Trait("Scenario", "SC-HIST-4")]
+    public void WritesWaitForACheckpointThatNamesTheAgentAsCoAuthor()
+    {
+        RunGit("init", "--quiet");
+        var start = Commit("Start the Dracula notes");
+        var tools = new DenTools(_den.Root) { History = () => GitHistory.ForDen(_den.Root, Git) };
+
+        var made = tools.CreateEntity("location", "Whitby Abbey");
+        var lucy = tools.GetEntity("Lucy Westenra").Entity!;
+        tools.AppendSection("Lucy Westenra", "Overview", "She loves the view from the East Cliff.", lucy.Hash!);
+
+        // Writes aren't commits.
+        Assert.Equal(start, RunGit("rev-parse", "HEAD").Trim());
+
+        var result = tools.Checkpoint("Whitby notes", "Claude <noreply@anthropic.com>");
+
+        Assert.True(result.Available);
+        Assert.True(result.Recorded);
+        Assert.EndsWith("Co-Authored-By: Claude <noreply@anthropic.com>", result.Checkpoint!.Message.TrimEnd(), StringComparison.Ordinal);
+        Assert.Equal([LucyFile, made.Path], result.Checkpoint.Changes.Select(c => c.Path).Order(StringComparer.Ordinal));
+        Assert.Contains("Co-Authored-By: Claude <noreply@anthropic.com>", RunGit("log", "-1", "--format=%B"), StringComparison.Ordinal);
+
+        // Nothing new: nothing recorded.
+        var again = tools.Checkpoint("Again", "Claude <noreply@anthropic.com>");
+        Assert.True(again.Available);
+        Assert.False(again.Recorded);
+    }
+
     public void Dispose()
     {
         var git = Path.Combine(_den.Root, ".git");

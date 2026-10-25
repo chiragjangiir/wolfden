@@ -12,7 +12,10 @@ namespace Wolfden.Mcp.Tests;
 /// </summary>
 public sealed class McpServerTests : IAsyncLifetime
 {
-    private static readonly string[] ToolNames = ["canon_as_of", "check", "get_entity", "get_history", "list_entities", "search"];
+    private static readonly string[] ReadToolNames = ["canon_as_of", "check", "get_chapter", "get_entity", "get_history", "list_entities", "search"];
+
+    private static readonly string[] WriteToolNames =
+        ["add_idea", "append_section", "checkpoint", "create_entity", "rename_section", "update_chapter_fields", "update_fields"];
 
     private readonly TempDen _den = TempDen.Dracula();
     private readonly StringWriter _log = new();
@@ -55,16 +58,17 @@ public sealed class McpServerTests : IAsyncLifetime
 
     [Fact]
     [Trait("Scenario", "SC-MCP-10")]
-    public async Task TheClientSeesTheServerAndItsReadOnlyTools()
+    public async Task TheClientSeesTheServerAndItsTools()
     {
         Assert.Equal("wolfden", Client.ServerInfo!.Name);
         Assert.Contains("story position", Client.ServerInstructions!, StringComparison.Ordinal);
+        Assert.Contains("checkpoint", Client.ServerInstructions!, StringComparison.Ordinal);
 
         var tools = await Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal(ToolNames, tools.Select(t => t.Name).Order(StringComparer.Ordinal));
+        Assert.Equal(ReadToolNames.Concat(WriteToolNames).Order(StringComparer.Ordinal), tools.Select(t => t.Name).Order(StringComparer.Ordinal));
         Assert.All(tools, t =>
         {
-            Assert.True(t.ProtocolTool.Annotations?.ReadOnlyHint);
+            Assert.Equal(ReadToolNames.Contains(t.Name), t.ProtocolTool.Annotations?.ReadOnlyHint);
             Assert.False(string.IsNullOrWhiteSpace(t.Description));
         });
 
@@ -88,6 +92,7 @@ public sealed class McpServerTests : IAsyncLifetime
             ("check", new() { ["severity"] = "error" }, "\"loaded\":true"),
             // This den has no history backend: that's an answer, not an error.
             ("get_history", new() { ["entity"] = "Lucy" }, "\"available\":false"),
+            ("get_chapter", new() { ["book"] = "dracula", ["chapter"] = "5" }, "\"hash\":"),
         };
         foreach (var (tool, args, expect) in calls)
         {
@@ -98,6 +103,27 @@ public sealed class McpServerTests : IAsyncLifetime
             using var json = JsonDocument.Parse(text);
             Assert.Equal(1, json.RootElement.GetProperty("version").GetInt32());
         }
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-16")]
+    public async Task OverTheWireAWriteTakesItsChangesAsJsonAndAStaleHashIsRefused()
+    {
+        using var read = JsonDocument.Parse(Text(await Call("get_entity", new() { ["entity"] = "Mr. Swales" })));
+        var hash = read.RootElement.GetProperty("entity").GetProperty("hash").GetString();
+        var changes = JsonDocument.Parse("""[{"op": "add", "path": "aliases", "value": "old Swales"}]""").RootElement;
+
+        var result = await Call("update_fields", new() { ["entity"] = "Mr. Swales", ["expected_hash"] = hash, ["changes"] = changes });
+
+        Assert.NotEqual(true, result.IsError);
+        using var json = JsonDocument.Parse(Text(result));
+        Assert.True(json.RootElement.GetProperty("changed").GetBoolean());
+        Assert.NotEqual(hash, json.RootElement.GetProperty("hash").GetString());
+        Assert.Contains("aliases: [old Swales]", _den.Read("universes/dracula/books/dracula/entities/characters/mr-swales.md"), StringComparison.Ordinal);
+
+        var stale = await Call("update_fields", new() { ["entity"] = "Mr. Swales", ["expected_hash"] = hash, ["changes"] = changes });
+        Assert.True(stale.IsError);
+        Assert.Contains("\"code\":\"stale_file\"", Text(stale), StringComparison.Ordinal);
     }
 
     [Fact]

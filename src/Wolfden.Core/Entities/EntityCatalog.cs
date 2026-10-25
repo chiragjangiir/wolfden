@@ -190,6 +190,29 @@ public sealed partial class EntityCatalog
         return null;
     }
 
+    /// <summary>
+    /// Reads one entity file from <paramref name="bytes"/> as a load of the
+    /// den would, without reading anything else: the same checks, so the
+    /// same errors (F-GEN-2) and the same warnings that depend only on the
+    /// file. A writer checks a file it's about to save with this, so it never
+    /// saves one the den would leave out (format.md §1.3). Checks that span
+    /// files, such as duplicate ids (F-ID-3), aren't made.
+    /// </summary>
+    /// <param name="structure">The den's structure.</param>
+    /// <param name="path">Where the file is or would be: under a loaded container's <c>entities/</c> folder (<see cref="EntityFileScope"/>).</param>
+    /// <param name="bytes">The file's contents.</param>
+    /// <exception cref="ArgumentException"><paramref name="path"/> isn't where an entity file goes.</exception>
+    public static EntityFileRead ReadEntityFile(DenStructure structure, string path, byte[] bytes)
+    {
+        ArgumentNullException.ThrowIfNull(structure);
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(bytes);
+        var scope = EntityFileScope(structure, path) ?? throw new ArgumentException($"'{path}' isn't under the entities folder of a container that loaded.", nameof(path));
+        var diagnostics = new List<Diagnostic>();
+        var entity = Read(path, bytes, scope, diagnostics, []);
+        return new EntityFileRead(entity, diagnostics.OrderBy(d => d.Line ?? 0).ToList());
+    }
+
     private void LoadEntities(IDenSource source)
     {
         for (var i = 0; i < _containers.Count; i++)
@@ -531,6 +554,11 @@ public sealed partial class EntityCatalog
     [GeneratedRegex("^[a-z][a-z0-9_]{0,63}\\z", RegexOptions.CultureInvariant)]
     private static partial Regex FieldName();
 }
+
+/// <summary>What reading one entity file on its own gave (<see cref="EntityCatalog.ReadEntityFile"/>).</summary>
+/// <param name="Entity">The entity, or null if the file has errors.</param>
+/// <param name="Diagnostics">The file's diagnostics, errors and warnings, by line.</param>
+public sealed record EntityFileRead(CatalogEntity? Entity, IReadOnlyList<Diagnostic> Diagnostics);
 
 /// <summary>An entity file left out for errors (F-GEN-2), kept for broken-link hints.</summary>
 /// <param name="Path">The file's path.</param>

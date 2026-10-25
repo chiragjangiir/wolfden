@@ -191,6 +191,21 @@ internal static class YamlTreeCheck
             return false;
         }
 
+        if (!hadKey)
+        {
+            // A new key goes at the end of its mapping, or, at the top of
+            // frontmatter, in its place in the template order (types.md
+            // F-TPL-7): the other entries keep their order around it.
+            var added = edited.Entries.ToList().FindIndex(e => e.KeyText == target);
+            if (added < 0 || !Check(null, edited.Entries[added].Value, path, index + 1, changed))
+            {
+                return false;
+            }
+
+            var rest = edited.Entries.Where((_, i) => i != added).ToList();
+            return old.Entries.Zip(rest).All(p => Same(p.First.Key, p.Second.Key) && Same(p.First.Value, p.Second.Value));
+        }
+
         for (var i = 0; i < old.Entries.Count; i++)
         {
             var (a, b) = (old.Entries[i], edited.Entries[i]);
