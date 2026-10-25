@@ -48,12 +48,16 @@ public sealed partial class DenTools
     private readonly Lock _writeLock = new();
 
     /// <summary>
-    /// The den files this session's writes saved since the last checkpoint
-    /// that recorded them, so <see cref="Checkpoint"/> can tell them from
-    /// files changed some other way. A file a failed write put back as it
-    /// was isn't here. Guarded by <see cref="_writeLock"/>.
+    /// The den files this session's writes saved since a checkpoint last
+    /// recorded them, each with the bytes the session last wrote, so
+    /// <see cref="Checkpoint"/> can tell the session's edits from changes
+    /// made some other way. A file a failed write put back as it was isn't
+    /// here. Paths compare as the file system does (ignoring case on
+    /// Windows and macOS, as git's paths may differ in case there).
+    /// Guarded by <see cref="_writeLock"/>.
     /// </summary>
-    private readonly HashSet<string> _sessionWritten = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, byte[]> _sessionWritten =
+        new(OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private IDenStore? _store;
 
     /// <summary>The den store writes go through; by default the den's folder on disk.</summary>
@@ -456,6 +460,22 @@ public sealed partial class DenTools
             var history = History();
             try
             {
+                // Before recording: forget the session's writes that are recorded already (the
+                // writer committed them elsewhere), and note what each tracked file holds now,
+                // which is what the checkpoint records.
+                var onDisk = new Dictionary<string, byte[]?>(_sessionWritten.Comparer);
+                foreach (var (path, bytes) in _sessionWritten.ToList())
+                {
+                    if (history.HoldsAtLatest(path, bytes) is { IsAvailable: true, Value: true })
+                    {
+                        _sessionWritten.Remove(path);
+                    }
+                    else
+                    {
+                        onDisk[path] = Store.TryReadFile(path);
+                    }
+                }
+
                 var result = history.Checkpoint(new CheckpointRequest(message.Trim(), given, [coAuthor.Trim()]));
                 if (!result.IsAvailable)
                 {
@@ -469,9 +489,28 @@ public sealed partial class DenTools
 
                 // Which of the recorded files this session's writes saved, and which changed some
                 // other way (the writer's editor, another tool), so the agent can tell the writer
-                // (maintainer decision, 2026-10-25). Committed files start afresh.
-                var ours = e.Changes.Where(c => _sessionWritten.Contains(c.Path) || (c.OldPath is { } old && _sessionWritten.Contains(old))).ToList();
-                var theirs = e.Changes.Except(ours).ToList();
+                // (maintainer decision, 2026-10-25). A file the session wrote and something else
+                // changed after is in both lists. Committed files start afresh.
+                var ours = new List<string>();
+                var theirs = new List<string>();
+                foreach (var change in e.Changes)
+                {
+                    var tracked = _sessionWritten.ContainsKey(change.Path) ? change.Path
+                        : change.OldPath is { } was && _sessionWritten.ContainsKey(was) ? was : null;
+                    if (tracked is null)
+                    {
+                        theirs.Add(change.Path);
+                        continue;
+                    }
+
+                    ours.Add(change.Path);
+                    var now = change.Path == tracked ? onDisk.GetValueOrDefault(tracked) : Store.TryReadFile(change.Path);
+                    if (now is null || !now.AsSpan().SequenceEqual(_sessionWritten[tracked]))
+                    {
+                        theirs.Add(change.Path);
+                    }
+                }
+
                 foreach (var change in e.Changes)
                 {
                     _sessionWritten.Remove(change.Path);
@@ -484,8 +523,8 @@ public sealed partial class DenTools
                 return new CheckpointResult(
                     ToolJson.Version, history.Name, true, null, true,
                     new HistoryEntryView(e.Id, e.When, e.Author, e.Message, e.Changes.Select(c => new HistoryChangeView(c.Kind.ToString().ToLowerInvariant(), c.Path, c.OldPath)).ToList()),
-                    ours.Select(c => c.Path).Order(StringComparer.Ordinal).ToList(),
-                    theirs.Select(c => c.Path).Order(StringComparer.Ordinal).ToList());
+                    ours.Order(StringComparer.Ordinal).ToList(),
+                    theirs.Order(StringComparer.Ordinal).ToList());
             }
             catch (ArgumentException e)
             {
@@ -929,7 +968,12 @@ public sealed partial class DenTools
                 written.Add(path);
             }
 
-            _sessionWritten.UnionWith(written);
+            // A store that failed after replacing a file would leave it written but not
+            // listed here; FileSystemDenStore's write is one move, so it can't.
+            foreach (var path in written)
+            {
+                _sessionWritten[path] = files[path];
+            }
         }
         catch (Exception e)
         {
@@ -939,7 +983,10 @@ public sealed partial class DenTools
             var stuck = RollBack(written, files, originals, created);
 
             // A file put back is as the session found it; one that still holds the edit is the session's.
-            _sessionWritten.UnionWith(stuck.Where(p => Store.TryReadFile(p) is { } now && now.AsSpan().SequenceEqual(files[p])));
+            foreach (var path in stuck.Where(p => Store.TryReadFile(p) is { } now && now.AsSpan().SequenceEqual(files[p])))
+            {
+                _sessionWritten[path] = files[path];
+            }
             if (e is not (IOException or UnauthorizedAccessException))
             {
                 if (stuck.Count > 0)

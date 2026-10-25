@@ -284,7 +284,8 @@ public sealed class WolfdenTools
         "saved to the files straight away; a checkpoint is what makes them part of the history, so make one at the end of a session " +
         "of edits, not after each one. Only the den's files are recorded: all of them that changed, unless 'paths' names some, so a " +
         "checkpoint can include edits the writer made elsewhere. The result lists the recorded files your writes in this session " +
-        "saved ('written_by_session') apart from those that changed some other way ('changed_outside_session'): tell the writer " +
+        "saved since they were last recorded ('written_by_session') apart from those that changed some other way " +
+        "('changed_outside_session'); a file you wrote that was changed after, say in the writer's editor, is in both. Tell the writer " +
         "about the second list. If nothing changed since the last checkpoint, nothing is recorded. If the den has no history, the result says so ('available' false) and the edits are still saved in the files.")]
     public CallToolResult Checkpoint(
         [Description("What the checkpoint is, such as 'End of chapter 14 session: Lucy's timeline'.")] string message,

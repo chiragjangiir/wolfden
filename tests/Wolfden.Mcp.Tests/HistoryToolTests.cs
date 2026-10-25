@@ -184,6 +184,64 @@ public sealed class HistoryToolTests : IDisposable
         Assert.Equal([LucyFile], next.ChangedOutsideSession);
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-MCP-22")]
+    public void ASessionWriteTheWriterCommittedElsewhereIsntTheSessionsAnyMore()
+    {
+        RunGit("init", "--quiet");
+        Commit("Start the Dracula notes");
+        var tools = new DenTools(_den.Root) { History = () => GitHistory.ForDen(_den.Root, Git) };
+        var lucy = tools.GetEntity("Lucy Westenra").Entity!;
+        tools.AppendSection("Lucy Westenra", "Overview", "She loves the view from the East Cliff.", lucy.Hash!);
+
+        // The writer commits in their own git client, then edits Lucy by hand.
+        Commit("Committed by hand");
+        _den.Write(LucyFile, _den.Read(LucyFile) + "\nA hand edit.\n");
+
+        var result = tools.Checkpoint("After the hand edit", "Claude <noreply@anthropic.com>");
+
+        Assert.Empty(result.WrittenBySession!);
+        Assert.Equal([LucyFile], result.ChangedOutsideSession);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-22")]
+    public void AFileEditedByTheSessionAndTheWriterIsInBothLists()
+    {
+        RunGit("init", "--quiet");
+        Commit("Start the Dracula notes");
+        var tools = new DenTools(_den.Root) { History = () => GitHistory.ForDen(_den.Root, Git) };
+        var lucy = tools.GetEntity("Lucy Westenra").Entity!;
+        tools.AppendSection("Lucy Westenra", "Overview", "She loves the view from the East Cliff.", lucy.Hash!);
+        _den.Write(LucyFile, _den.Read(LucyFile) + "\nThe writer's line too.\n");
+
+        var result = tools.Checkpoint("Both", "Claude <noreply@anthropic.com>");
+
+        Assert.Equal([LucyFile], result.WrittenBySession);
+        Assert.Equal([LucyFile], result.ChangedOutsideSession);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-22")]
+    public void AFileAFailedWritePutBackIsntTheSessions()
+    {
+        const string Swales = "universes/dracula/books/dracula/entities/characters/mr-swales.md";
+        const string Note = "universes/dracula/entities/notes/whitby-dialect.md";
+        _den.Write(Note, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z1\ntype: note\nname: Whitby dialect\nstatus: draft\n---\n\nSee [[mr-swales#Voice]].\n");
+        RunGit("init", "--quiet");
+        Commit("Start the Dracula notes");
+        var hash = new DenTools(_den.Root).GetEntity("Mr. Swales").Entity!.Hash!;
+        var tools = new DenTools(_den.Root) { History = () => GitHistory.ForDen(_den.Root, Git), Store = new WriteToolTests.FailingStore(_den.Root, Note) };
+        Assert.Throws<DenToolException>(() => tools.RenameSection("Mr. Swales", "Voice", "Dialect", hash));
+
+        // Swales was written, then put back; the writer then edits it by hand.
+        _den.Write(Swales, _den.Read(Swales) + "\nA hand edit.\n");
+        var result = tools.Checkpoint("Hand edit", "Claude <noreply@anthropic.com>");
+
+        Assert.Empty(result.WrittenBySession!);
+        Assert.Equal([Swales], result.ChangedOutsideSession);
+    }
+
     public void Dispose()
     {
         var git = Path.Combine(_den.Root, ".git");

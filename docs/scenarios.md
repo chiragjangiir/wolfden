@@ -1760,12 +1760,20 @@ checkpoint.
   `changed_outside_session`, so the assistant can say "Mina's note
   changed outside this session". After the checkpoint, the session
   starts afresh: a later checkpoint lists only what was written since.
+  If the writer adds a line to Lucy after the assistant's edit, Lucy is
+  in both lists. If the writer commits the assistant's edit in their
+  own git client and then edits Lucy by hand, Lucy is only under
+  `changed_outside_session`. A note a failed write put back isn't the
+  session's.
 
 Spec: design.md §6, §8 (maintainer decisions, 2026-10-22 and
 2026-10-25). Covered by:
 `HistoryToolTests.WritesWaitForACheckpointThatNamesTheAgentAsCoAuthor`,
 `HistoryToolTests.ACheckpointOfSomePathsRecordsOnlyThem`,
 `HistoryToolTests.ACheckpointSaysWhichFilesTheSessionWroteAndWhichChangedOutsideIt`,
+`HistoryToolTests.ASessionWriteTheWriterCommittedElsewhereIsntTheSessionsAnyMore`,
+`HistoryToolTests.AFileEditedByTheSessionAndTheWriterIsInBothLists`,
+`HistoryToolTests.AFileAFailedWritePutBackIsntTheSessions`,
 `WriteToolTests.WithoutHistoryACheckpointSaysSoAndTheEditsStay`.
 
 ### SC-MCP-23. My pinned assistant creates a note

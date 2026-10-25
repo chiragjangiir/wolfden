@@ -770,12 +770,19 @@ store, so an edit changes only what it means to (format.md §12):
   (§6). A den without history isn't an error: `available` is false.
   **Decided (2026-10-25):** by default a checkpoint records the whole
   den, so it can hold edits the writer made elsewhere, and its result
-  tells them apart: `written_by_session` lists the recorded files this
-  server's write tools saved since a checkpoint last recorded them, and
-  `changed_outside_session` the rest, for the agent to tell the writer.
-  A file a failed write put back as it was doesn't count as the
-  session's; one the session wrote and the writer then edited too
-  does. With `paths`, only the files named are recorded and listed.
+  tells them apart. The server remembers the bytes its write tools last
+  saved to each file. `written_by_session` lists the recorded files it
+  wrote that weren't recorded since (a write the writer already
+  committed some other way, which the latest commit holds byte for
+  byte, is forgotten), and `changed_outside_session` lists the recorded
+  files that hold anything else: ones the session never wrote, and
+  ones it wrote that were changed after, which are in both lists, so
+  the writer's edits are always surfaced. A file a failed write put
+  back as it was doesn't count as the session's. With `paths`, only the
+  files named are recorded and listed. Paths compare as the file
+  system does, ignoring case on Windows and macOS. The comparison with
+  the latest commit is the history provider's `HoldsAtLatest` (for
+  git, the blob at HEAD against `git hash-object --path` of the bytes).
 - **Ids** (maintainer decision, 2026-10-23). `create_entity` gives a
   new id that no file in the den uses, checked through the index even
   in a session pinned to one universe. `update_fields` refuses an `id`

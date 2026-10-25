@@ -524,7 +524,7 @@ public sealed class WriteToolTests : IDisposable
     }
 
     /// <summary>A den store on disk whose writes to one path fail, as a full disk or a locked file would.</summary>
-    private sealed class FailingStore(string root, string failing, Func<Exception>? failure = null, Action? before = null) : Core.Structure.IDenStore
+    internal sealed class FailingStore(string root, string failing, Func<Exception>? failure = null, Action? before = null) : Core.Structure.IDenStore
     {
         private readonly Core.Structure.FileSystemDenStore _disk = new(root);
 

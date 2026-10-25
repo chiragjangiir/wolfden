@@ -84,6 +84,17 @@ public interface IHistoryProvider
 
     /// <summary>The repository's tags whose names start with <paramref name="prefix"/>, or every tag if it's null, in ASCII order of name.</summary>
     HistoryResult<IReadOnlyList<HistoryTag>> Tags(string? prefix = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// True if the latest recorded state (for git, HEAD) already holds the
+    /// den file at <paramref name="path"/> with exactly <paramref name="content"/>,
+    /// as the backend would record those bytes; false if it holds something
+    /// else, or no such file. The MCP <c>checkpoint</c> uses it to tell a
+    /// file it wrote that's been recorded since from one still to record.
+    /// A backend without it says it isn't available.
+    /// </summary>
+    HistoryResult<bool> HoldsAtLatest(string path, byte[] content, CancellationToken cancellationToken = default) =>
+        HistoryResult<bool>.Unavailable("This history backend can't compare a file with its latest recorded state.");
 }
 
 /// <summary>What a history backend can do for a den.</summary>

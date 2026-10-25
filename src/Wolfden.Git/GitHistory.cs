@@ -539,6 +539,32 @@ public sealed partial class GitHistory : IHistoryProvider
         return HistoryResult<IReadOnlyList<HistoryTag>>.Done(tags);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Compares git's object ids: the blob HEAD has at the path, and the one
+    /// <c>git hash-object --path</c> makes of the bytes, with the same
+    /// attributes and filters (line endings, say) a commit would apply.
+    /// </remarks>
+    public HistoryResult<bool> HoldsAtLatest(string path, byte[] content, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        var spec = CheckPath(path);
+        if (Head(cancellationToken) is not { } head)
+        {
+            return HistoryResult<bool>.Done(false);
+        }
+
+        var at = Run(["rev-parse", "--verify", "--quiet", $"{head}:./{spec}"], cancellationToken);
+        if (!at.Succeeded)
+        {
+            return HistoryResult<bool>.Done(false);
+        }
+
+        var recorded = OutputOf(at, "rev-parse").Trim();
+        var mine = Git(["hash-object", "--stdin", $"--path={spec}"], cancellationToken, input: Encoding.UTF8.GetString(content)).Trim();
+        return HistoryResult<bool>.Done(recorded.Length > 0 && recorded == mine);
+    }
+
     /// <summary>The newest commit that changed the den, or null if none has.</summary>
     private string? LatestCheckpoint(CancellationToken cancellationToken)
     {
