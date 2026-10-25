@@ -9,10 +9,11 @@ public sealed class ParallelRebuildTests
         using var den = TempDen.Dracula();
         var root = Path.GetFullPath(den.Root);
         var cancel = TestContext.Current.CancellationToken;
+        using var builds = new IndexBuildCounter(root);
 
         await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => IndexBuilder.EnsureUpToDate(root, TimeSpan.Zero), cancel)));
 
-        Assert.Equal(1, IndexBuilder.RebuildCounts[root]);
+        Assert.Equal(1, builds.Rebuilds);
         Assert.Equal(IndexStatus.Current, IndexBuilder.CheckFiles(root));
     }
 
@@ -24,10 +25,10 @@ public sealed class ParallelRebuildTests
         var cancel = TestContext.Current.CancellationToken;
         IndexBuilder.Rebuild(root);
         den.Write("universes/dracula/entities/locations/new-place.md", "---\ntype: location\nname: New Place\n---\n\nSomewhere.\n");
-        var before = IndexBuilder.RebuildCounts[root];
+        using var builds = new IndexBuildCounter(root);
 
         await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => IndexBuilder.EnsureUpToDate(root, TimeSpan.Zero), cancel)));
 
-        Assert.Equal(before + 1, IndexBuilder.RebuildCounts[root]);
+        Assert.Equal(1, builds.Rebuilds);
     }
 }
