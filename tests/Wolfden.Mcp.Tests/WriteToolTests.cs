@@ -303,9 +303,215 @@ public sealed class WriteToolTests : IDisposable
         Assert.Equal(ToolErrorCodes.BadArgument, Assert.Throws<DenToolException>(() => tools.CreateEntity("note", "X", universe: "starfall")).Code);
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-MCP-19")]
+    public void ARenameThatFailsPartWayPutsBackWhatItWrote()
+    {
+        const string Note = "universes/dracula/entities/notes/whitby-dialect.md";
+        _den.Write(Note, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z1\ntype: note\nname: Whitby dialect\nstatus: draft\n---\n\nSee [[mr-swales#Voice]].\n");
+        var before = (Swales: _den.Read(Swales), Note: _den.Read(Note));
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        // Swales's file sorts first, so it's written before the note's write fails.
+        var tools = new DenTools(_den.Root) { Store = new FailingStore(_den.Root, Note) };
+        var failed = Assert.Throws<DenToolException>(() => tools.RenameSection("Mr. Swales", "Voice", "Dialect", hash));
+
+        Assert.Equal(ToolErrorCodes.WriteFailed, failed.Code);
+        Assert.Contains("were put back as they were", failed.Message, StringComparison.Ordinal);
+        Assert.Equal(before.Swales, _den.Read(Swales));
+        Assert.Equal(before.Note, _den.Read(Note));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-19")]
+    public void ALinkInAFrontmatterValueIsSplicedSoTheValueKeepsItsStyle()
+    {
+        const string Note = "universes/dracula/entities/notes/whitby-dialect.md";
+        _den.Write(Note,
+            "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z1\ntype: note\nname: Whitby dialect\nstatus: draft\nfields:\n" +
+            "  x_summary: |\n    Read [[mr-swales#Voice]] aloud.\n    Then again.\n" +
+            "  x_motto: \"Caf\\u00e9 talk, see [[mr-swales#Voice]]\"\n---\n\n# Whitby dialect\n");
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        Tools.RenameSection("Mr. Swales", "Voice", "Dialect", hash);
+
+        var text = _den.Read(Note);
+        Assert.Contains("  x_summary: |\n    Read [[mr-swales#Dialect]] aloud.\n    Then again.\n", text, StringComparison.Ordinal);
+        Assert.Contains("  x_motto: \"Caf\\u00e9 talk, see [[mr-swales#Dialect]]\"\n", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-19")]
+    public void ANameThatWouldMoveExistingLinksIsRefused()
+    {
+        const string Note = "universes/dracula/entities/notes/whitby-dialect.md";
+        _den.Write(Note, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z1\ntype: note\nname: Whitby dialect\nstatus: draft\n---\n\nSee [[mr-swales#Arc]] and [[mr-swales#Voice]].\n");
+        var before = _den.Read(Swales);
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        // Voice comes before Arc: renamed Arc, it would take the links to Arc.
+        var later = Assert.Throws<DenToolException>(() => Tools.RenameSection("Mr. Swales", "Voice", "Arc", hash));
+        Assert.Equal(ToolErrorCodes.BadArgument, later.Code);
+        Assert.Contains("F-LINK-9", later.Message, StringComparison.Ordinal);
+
+        // Arc renamed Overview: its links would reach the earlier Overview.
+        var earlier = Assert.Throws<DenToolException>(() => Tools.RenameSection("Mr. Swales", "Arc", "Overview", hash));
+        Assert.Equal(ToolErrorCodes.BadArgument, earlier.Code);
+        Assert.Equal(before, _den.Read(Swales));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-19")]
+    public void AFileWithErrorsThatLinksToTheSectionIsNamed()
+    {
+        const string Broken = "universes/dracula/entities/notes/broken.md";
+        _den.Write(Broken, "---\ntype: note\nname: Broken\nstatus: maybe\n---\n\nSee [[Mr. Swales#Voice]].\n");
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        var result = Tools.RenameSection("Mr. Swales", "Voice", "Dialect", hash);
+
+        Assert.Contains(result.Effects, e => e.Contains(Broken, StringComparison.Ordinal) && e.Contains("by hand", StringComparison.Ordinal));
+        Assert.Contains("[[Mr. Swales#Voice]]", _den.Read(Broken), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-16")]
+    public void AStatusChangeOnAnEntityWithPinnedFactsIsFlagged()
+    {
+        var hash = Tools.GetEntity("Count Dracula").Entity!.Hash!;
+
+        var result = Tools.UpdateFields("Count Dracula", hash, Json("""[{"op": "set", "path": "status", "value": "draft"}]"""));
+
+        Assert.Contains(result.PinnedCanon, p => p.Contains("'status'", StringComparison.Ordinal) && p.Contains("fields.species", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-16")]
+    public void AnEditThatChangesNothingAddsNoId()
+    {
+        _den.Write(Swales, _den.Read(Swales).Replace("id: 01M4TF5F0EKGGWD5FNVBAEY8X7\n", "", StringComparison.Ordinal));
+        var before = _den.Read(Swales);
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        var same = Tools.UpdateFields("Mr. Swales", hash, Json("""[{"op": "set", "path": "status", "value": "canon"}]"""));
+        Assert.False(same.Changed);
+        Assert.Null(same.IdAdded);
+        Assert.Equal(before, _den.Read(Swales));
+
+        // A real change adds one (F-ID-6).
+        var changed = Tools.UpdateFields("Mr. Swales", hash, Json("""[{"op": "set", "path": "status", "value": "draft"}]"""));
+        Assert.NotNull(changed.IdAdded);
+        Assert.StartsWith($"---\nid: {changed.IdAdded}\n", _den.Read(Swales), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-17")]
+    public void ANoteSavedOnWindowsKeepsItsLineEndingsAndByteOrderMark()
+    {
+        var path = Path.Combine(_den.Root, Swales.Replace('/', Path.DirectorySeparatorChar));
+        var crlf = _den.Read(Swales).ReplaceLineEndings("\r\n");
+        File.WriteAllText(path, crlf, new System.Text.UTF8Encoding(true));
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        var result = Tools.AppendSection("Mr. Swales", "Voice", "He calls them lies.", hash);
+        var fields = Tools.UpdateFields("Mr. Swales", result.Hash, Json("""[{"op": "add", "path": "aliases", "value": "old Swales"}]"""));
+
+        var bytes = File.ReadAllBytes(path);
+        Assert.Equal([0xEF, 0xBB, 0xBF], bytes[..3]);
+        var text = System.Text.Encoding.UTF8.GetString(bytes[3..]);
+        Assert.DoesNotContain("\n", text.Replace("\r\n", "", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.Contains("hears it.\r\n\r\nHe calls them lies.\r\n", text, StringComparison.Ordinal);
+        Assert.Contains("name: Mr. Swales\r\naliases: [old Swales]\r\n", text, StringComparison.Ordinal);
+        Assert.True(fields.Changed);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-17")]
+    public void TextAddedToASectionGoesBeforeItsSubsections()
+    {
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+        var sub = Tools.AppendSection("Mr. Swales", "Afterwards", "The coroner's verdict.", hash, under: "Arc");
+
+        Tools.AppendSection("Mr. Swales", "Arc", "Mina is shaken.", sub.Hash);
+
+        Assert.EndsWith("look of horror on his face.\n\nMina is shaken.\n\n### Afterwards\nThe coroner's verdict.\n", _den.Read(Swales), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-20")]
+    public void ChapterListItemsGoInAtAnIndexAndComeOutByValue()
+    {
+        var chapter = Tools.GetChapter("dracula", "6");
+
+        var added = Tools.UpdateChapterFields("dracula", "6", chapter.Hash, Json("""[{"op": "add", "field": "pov", "value": "[[lucy-westenra]]", "index": 1}]"""));
+        Assert.Contains("pov: [\"[[mina-harker]]\", \"[[lucy-westenra]]\", \"[[john-seward]]\"]", _den.Read(BookFile), StringComparison.Ordinal);
+
+        var removed = Tools.UpdateChapterFields("dracula", "6", added.Hash, Json("""[{"op": "remove", "field": "pov", "value": "[[John-Seward]]"}]"""));
+        Assert.Contains("pov: [\"[[mina-harker]]\", \"[[lucy-westenra]]\"]\n", _den.Read(BookFile), StringComparison.Ordinal);
+        Assert.Equal(ToolErrorCodes.BadArgument, Assert.Throws<DenToolException>(() => Tools.UpdateChapterFields("dracula", "6", removed.Hash, Json("""[{"op": "remove", "field": "pov", "value": "[[Mina]]"}]"""))).Code);
+        Assert.Equal(ToolErrorCodes.BadArgument, Assert.Throws<DenToolException>(() => Tools.UpdateChapterFields("dracula", "6", removed.Hash, Json("""[{"op": "set", "field": "key", "value": "6b"}]"""))).Code);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-16")]
+    public void BadNamesAndAliasesAreRefusedAndAnAliasThatCollidesSaysSo()
+    {
+        var con = Tools.CreateEntity("location", "Con");
+        Assert.Equal("universes/dracula/entities/locations/con-2.md", con.Path);
+        Assert.Equal(ToolErrorCodes.BadArgument, Assert.Throws<DenToolException>(() => Tools.CreateEntity("location", "X", slug: "nul")).Code);
+        Assert.Equal(ToolErrorCodes.BadArgument, Assert.Throws<DenToolException>(() => Tools.CreateEntity("location", "Y", aliases: ["bad\u0007alias"])).Code);
+
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+        Assert.Equal(ToolErrorCodes.BadArgument, Assert.Throws<DenToolException>(() => Tools.UpdateFields("Mr. Swales", hash, Json("""[{"op": "add", "path": "aliases", "value": "a\u0001b"}]"""))).Code);
+        var collide = Tools.UpdateFields("Mr. Swales", hash, Json("""[{"op": "add", "path": "aliases", "value": "Renfield"}]"""));
+        Assert.Contains(collide.Effects, e => e.Contains("also the slug of 'R. M. Renfield'", StringComparison.Ordinal));
+        Assert.Equal(ToolErrorCodes.BadArgument, Assert.Throws<DenToolException>(() => Tools.Checkpoint("x", "Claude\u0007 <noreply@anthropic.com>")).Code);
+        Assert.Equal(ToolErrorCodes.BadArgument, Assert.Throws<DenToolException>(() => Tools.Checkpoint("x", "Claude <noreply@anthropic.com>", ["  "])).Code);
+    }
+
     private static JsonElement Json(string json)
     {
         using var document = JsonDocument.Parse(json);
         return document.RootElement.Clone();
+    }
+
+    /// <summary>A den store on disk whose writes to one path fail, as a full disk or a locked file would.</summary>
+    private sealed class FailingStore(string root, string failing) : Core.Structure.IDenStore
+    {
+        private readonly Core.Structure.FileSystemDenStore _disk = new(root);
+
+        public bool IsReadOnly => false;
+
+        public bool FileExists(string path) => _disk.FileExists(path);
+
+        public byte[] ReadFile(string path) => _disk.ReadFile(path);
+
+        public byte[]? TryReadFile(string path) => _disk.TryReadFile(path);
+
+        public byte[]? TryReadListedFile(string path) => _disk.TryReadListedFile(path);
+
+        public IEnumerable<string> GetDirectories(string path) => _disk.GetDirectories(path);
+
+        public IEnumerable<string> GetFiles(string path) => _disk.GetFiles(path);
+
+        public bool FolderExists(string path) => _disk.FolderExists(path);
+
+        public void WriteFile(string path, byte[] bytes, Core.Structure.DenWriteMode mode = Core.Structure.DenWriteMode.CreateOrReplace)
+        {
+            if (path == failing)
+            {
+                throw new Core.Structure.DenStoreException(Core.Structure.DenStoreError.AccessDenied, path, $"'{path}' is read-only.");
+            }
+
+            _disk.WriteFile(path, bytes, mode);
+        }
+
+        public void DeleteFile(string path) => _disk.DeleteFile(path);
+
+        public void MoveFile(string from, string to) => _disk.MoveFile(from, to);
+
+        public void MoveFolder(string from, string to) => _disk.MoveFolder(from, to);
+
+        public void DeleteFolder(string path) => _disk.DeleteFolder(path);
     }
 }

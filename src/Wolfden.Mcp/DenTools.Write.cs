@@ -139,12 +139,33 @@ public sealed partial class DenTools
         return EditEntity(entity, universe, hash, (file, catalog, pinned) =>
         {
             var touched = new List<string>();
+            var added = new List<string>();
+            var facts = EntityFacts.For(catalog, new Bookkeeping(catalog.Universe.Den.BookkeepingSections));
+            var held = facts.Fields.SelectMany(f => f.Entries.Where(e => e.Pinned).Select(e => $"fields.{f.Name}"))
+                .Concat(facts.Sections.Where(s => s.Pinned && s.Section.Parent is null).Select(s => $"section '{s.Section.Name}'"))
+                .Distinct().ToList();
             foreach (var op in ops)
             {
                 var path = op.Path!;
                 CheckFrontmatterPath(path, op.Op);
                 touched.Add(path.Count > 1 && path[0] == "fields" ? path[1] : path[0]);
                 pinned.AddRange(PinnedTouched(file, path, op.Op, op.Value));
+                if (path[0] is "status" or "from" or "type" && held.Count > 0)
+                {
+                    // Its pinned facts take the entity's status (F-STAT-3), start no earlier than it does, and are read by its type.
+                    pinned.Add($"'{path[0]}' changes the entity that holds pinned canon ({string.Join(", ", held)}), so it changes how those facts are read");
+                }
+
+                if (path[0] == "aliases")
+                {
+                    if (op.RawValue is not { ValueKind: JsonValueKind.String } alias || string.IsNullOrWhiteSpace(alias.GetString()) || alias.GetString()!.Any(char.IsControl))
+                    {
+                        throw new DenToolException(ToolErrorCodes.BadArgument, "An alias is one line of text, not empty (F-ENT-4).");
+                    }
+
+                    added.Add(alias.GetString()!.Trim());
+                }
+
                 file = Apply(op.Op switch
                 {
                     "set" => () => file.WithFrontmatterValue(path, op.Value!, inTemplateOrder: true),
@@ -153,7 +174,8 @@ public sealed partial class DenTools
                 });
             }
 
-            return (file, (Func<CatalogEntity, CatalogEntity, IEnumerable<string>>)((before, after) => FieldEffects(before, after, touched)));
+            return (file, (Func<CatalogEntity, CatalogEntity, IEnumerable<string>>)((before, after) =>
+                FieldEffects(before, after, touched).Concat(added.SelectMany(a => AliasEffects(after, a))).ToList()));
         });
     }
 
@@ -205,7 +227,10 @@ public sealed partial class DenTools
             var den = Snapshot();
             var structure = DenStructure.Load(den);
             var catalog = EntityCatalog.Load(structure, den);
-            var target = catalog.FindByPath(path) ?? throw Gone(path);
+            var target = catalog.FindByPath(path) ?? throw (den.FileExists(path)
+                ? new DenToolException(
+                    ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. Call check with path '{path}' to see them.")
+                : Gone(path));
             CheckHash(path, target.File.ToBytes(), hash);
             CheckNotFrozen(target);
             var found = FindSection(target.File, section, null, sectionLine);
@@ -252,7 +277,14 @@ public sealed partial class DenTools
             };
             if (target.File.Sections.FirstOrDefault(s => s.Index < found.Index && LinkText.Matches(s.Name, newName)) is { } earlier)
             {
-                effects.Add($"An earlier section, '{earlier.Name}' at line {earlier.Line}, already has that name, so links to '{newName}' now reach that one first (F-LINK-9).");
+                effects.Add($"An earlier section, '{earlier.Name}' at line {earlier.Line}, already has that name, so a link to '{newName}' reaches that one first (F-LINK-9).");
+            }
+
+            if (plan.SkippedPaths.Count > 0)
+            {
+                effects.Add(
+                    $"These files have errors, so the den leaves them out and they weren't edited, but their text links to '{found.Name}': " +
+                    $"{string.Join(", ", plan.SkippedPaths)}. Once they're fixed, change those links to '{newName}' by hand.");
             }
 
             if (target.Definition is { } type && type.IsStandardSection(found.Name) != type.IsStandardSection(newName))
@@ -354,14 +386,16 @@ public sealed partial class DenTools
                 });
             }
 
-            var idAdded = target.Id is null ? AddId(ref file) : null;
-            var bytes = file.ToBytes();
-            if (bytes.AsSpan().SequenceEqual(original))
+            if (file.ToBytes().AsSpan().SequenceEqual(original))
             {
+                // A write that changes nothing never adds an id (F-ID-6).
                 return new WriteResult(
                     ToolJson.Version, false, path, HashOf(original), null, ["Nothing changed: book.md already says that."], [], [],
                     Chapter: ChapterOf(ch));
             }
+
+            var idAdded = target.Id is null ? AddId(ref file) : null;
+            var bytes = file.ToBytes();
 
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal) { [path] = bytes };
             var check = Check(den, structure, files);
@@ -394,17 +428,19 @@ public sealed partial class DenTools
             throw new DenToolException(ToolErrorCodes.BadArgument, "A checkpoint's message can't hold control characters other than line breaks and tabs.");
         }
 
-        if (string.IsNullOrWhiteSpace(coAuthor) || !CoAuthorPattern().IsMatch(coAuthor.Trim()))
+        if (string.IsNullOrWhiteSpace(coAuthor) || coAuthor.Any(char.IsControl) || !CoAuthorPattern().IsMatch(coAuthor.Trim()))
         {
             throw new DenToolException(
                 ToolErrorCodes.BadArgument,
                 "Give yourself as the co-author in 'co_author', as 'Name <email>' on one line, such as 'Claude <noreply@anthropic.com>'; the checkpoint records you with a Co-Authored-By line.");
         }
 
-        var given = paths?.Select(p => p.Replace('\\', '/').Trim().Trim('/')).Where(p => p.Length > 0).ToList();
-        if (given is { Count: 0 })
+        var given = paths?.Select(p => (p ?? "").Replace('\\', '/').Trim().Trim('/')).ToList();
+        if (given is not null && (given.Count == 0 || given.Any(p => p.Length == 0)))
         {
-            given = null;
+            // An empty list mustn't quietly become the whole den.
+            throw new DenToolException(
+                ToolErrorCodes.BadArgument, "'paths' names files or folders relative to the den root, none empty. Leave it out to checkpoint the whole den.");
         }
 
         lock (_writeLock)
@@ -705,17 +741,14 @@ public sealed partial class DenTools
             CheckNotFrozen(before);
             var pinned = new List<string>();
             var (file, effects) = edit(before.File, before, pinned);
-            string? idAdded = null;
-            if (before.Id is null)
+            if (file.ToBytes().AsSpan().SequenceEqual(original))
             {
-                idAdded = AddId(ref file, ids);
-            }
-
-            var bytes = file.ToBytes();
-            if (bytes.AsSpan().SequenceEqual(original))
-            {
+                // A write that changes nothing never adds an id (F-ID-6).
                 return Unchanged(path, original, before);
             }
+
+            var idAdded = before.Id is null ? AddId(ref file, ids) : null;
+            var bytes = file.ToBytes();
 
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal) { [path] = bytes };
             var check = Check(den, structure, files);
@@ -817,6 +850,9 @@ public sealed partial class DenTools
                 $"{entity.Path} is in book '{book.Key}', which is final (frozen), so it can't be edited until the book is unfrozen (F-BOOK-1).");
         }
 
+        // A backstop: `status: final` on an entity is an F-ENT-5 error, so such a
+        // file never loads and never gets here. It's kept so that if the format
+        // ever lets an entity be final on its own, it's refused, not edited.
         if (entity.File.Frontmatter?["status"] is YamlScalar { Text: "final" })
         {
             throw new DenToolException(ToolErrorCodes.Frozen, $"{entity.Path} is marked final, so it can't be edited.");
@@ -866,18 +902,50 @@ public sealed partial class DenTools
                 written.Add(path);
             }
         }
-        catch (DenStoreException e)
-        {
-            var code = e.Error == DenStoreError.AlreadyExists ? ToolErrorCodes.AlreadyExists : ToolErrorCodes.WriteFailed;
-            throw new DenToolException(code, $"{e.Message}{Written(written)}");
-        }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            throw new DenToolException(ToolErrorCodes.WriteFailed, $"Couldn't write {files.Keys.Except(written).First()}: {e.Message}{Written(written)}");
+            // One change or none (format.md F-RT-5): put back what was written, newest first.
+            var failed = files.Keys.Except(written).Order(StringComparer.Ordinal).First();
+            var stuck = RollBack(written, originals, created);
+            var code = e is DenStoreException { Error: DenStoreError.AlreadyExists } ? ToolErrorCodes.AlreadyExists : ToolErrorCodes.WriteFailed;
+            var said = e is DenStoreException ? e.Message : $"Couldn't write {failed}: {e.Message}";
+            throw new DenToolException(
+                code,
+                said + (written.Count == 0 ? " Nothing was written."
+                    : stuck.Count == 0 ? $" The files already written ({string.Join(", ", written)}) were put back as they were, so nothing changed."
+                    : $" Some files written before it failed couldn't be put back, and hold the edit: {string.Join(", ", stuck)}. Check them, or restore them from history."));
+        }
+    }
+
+    /// <summary>Puts back the files in <paramref name="written"/>, newest first: each to its original, or a created one deleted. Returns the ones that couldn't be.</summary>
+    private List<string> RollBack(List<string> written, IReadOnlyDictionary<string, byte[]>? originals, string? created)
+    {
+        var stuck = new List<string>();
+        foreach (var path in Enumerable.Reverse(written))
+        {
+            try
+            {
+                if (path == created)
+                {
+                    Store.DeleteFile(path);
+                }
+                else if (originals is not null && originals.TryGetValue(path, out var original))
+                {
+                    Store.WriteFile(path, original, DenWriteMode.Replace);
+                }
+                else
+                {
+                    stuck.Add(path);
+                }
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                stuck.Add(path);
+            }
         }
 
-        static string Written(List<string> written) =>
-            written.Count == 0 ? " Nothing was written." : $" These files were written before it failed: {string.Join(", ", written)}.";
+        stuck.Reverse();
+        return stuck;
     }
 
     private string? AddMissingId(CatalogEntity entity, Dictionary<string, byte[]> files)
@@ -945,6 +1013,10 @@ public sealed partial class DenTools
     /// <summary>One change in a <c>changes</c> list.</summary>
     private sealed record Change(string Op, IReadOnlyList<string>? Path, string? Field, YamlValue? Value, int? Index, int? Item, JsonElement? RawValue);
 
+    /// <summary>The names types.md F-CHAP-1 reserves for a chapter item's own keys and later use.</summary>
+    private static readonly HashSet<string> ReservedChapterNames =
+        ["key", "number", "title", "id", "name", "status", "from", "until", "pin", "fields", "row", "placeholder", "scene"];
+
     private static List<Change> Changes(JsonElement changes, bool chapter)
     {
         if (changes.ValueKind == JsonValueKind.Object)
@@ -980,6 +1052,13 @@ public sealed partial class DenTools
                 if (string.IsNullOrEmpty(field) || !Regex.IsMatch(field, "^[a-z][a-z0-9_]{0,63}$"))
                 {
                     throw new DenToolException(ToolErrorCodes.BadArgument, "Each change needs a 'field': a chapter field name, such as 'pov' or 'tense'.");
+                }
+
+                if (ReservedChapterNames.Contains(field))
+                {
+                    throw new DenToolException(
+                        ToolErrorCodes.BadArgument,
+                        $"'{field}' is reserved for the chapter item's own keys (types.md F-CHAP-1), so it can't be a chapter field. The chapter's key, number, and title aren't edited here.");
                 }
             }
             else
@@ -1092,6 +1171,34 @@ public sealed partial class DenTools
         }
 
         static bool IsPinned(YamlNode node) => node is YamlMapping m && m.ContainsKey("value") && m["pin"] is YamlScalar s && s.AsBoolean() == true;
+    }
+
+    /// <summary>
+    /// What a new alias means for links: if another entity of the universe
+    /// has that text as its slug, name, or an alias, a link by it reaches
+    /// that entity first (an earlier tier, F-LINK-6), or, at the same tier,
+    /// becomes ambiguous unless scope decides it (F-LINK-7).
+    /// </summary>
+    private IEnumerable<string> AliasEffects(CatalogEntity entity, string alias)
+    {
+        var normalized = LinkText.Normalize(alias);
+        var others = WithIndex(index =>
+        {
+            var db = index.Context;
+            var universe = db.Containers.Single(c => c.Kind == "universe" && c.Key == entity.Universe.Key).Id;
+            var withAlias = db.Aliases.Where(a => a.AliasNormalized == normalized).Select(a => a.EntityId).ToList();
+            return db.Entities.Where(e => e.UniverseId == universe && e.Path != entity.Path).ToList()
+                .Select(e => (e.Name, e.Path, Tier: e.Slug is not null && LinkText.Normalize(e.Slug) == normalized ? "slug"
+                    : e.NameNormalized == normalized ? "name" : withAlias.Contains(e.Id) ? "alias" : null))
+                .Where(x => x.Tier is not null)
+                .ToList();
+        });
+        foreach (var (name, path, tier) in others)
+        {
+            yield return tier == "alias"
+                ? $"'{alias}' is also an alias of '{name}' ({path}), so a link [[{alias}]] is ambiguous between them unless one is in a nearer scope (F-LINK-7)."
+                : $"'{alias}' is also the {tier} of '{name}' ({path}), so a link [[{alias}]] still reaches '{name}': a {tier} matches before an alias (F-LINK-6).";
+        }
     }
 
     /// <summary>What a frontmatter edit means beyond its bytes.</summary>

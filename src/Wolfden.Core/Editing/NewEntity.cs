@@ -113,7 +113,10 @@ public static class NewEntity
         ArgumentNullException.ThrowIfNull(folder);
         ArgumentNullException.ThrowIfNull(slug);
         var name = slug + ".md";
-        return den.GetFiles(folder).Any(f => string.Equals(f, name, StringComparison.OrdinalIgnoreCase))
+
+        // A name no OS-portable den can hold, such as Windows's 'con.md', counts as taken.
+        return DenPaths.Problem($"{folder}/{name}") is not null
+            || den.GetFiles(folder).Any(f => string.Equals(f, name, StringComparison.OrdinalIgnoreCase))
             || den.GetDirectories(folder).Any(f => string.Equals(f, name, StringComparison.OrdinalIgnoreCase));
     }
 
@@ -161,6 +164,11 @@ public static class NewEntity
             throw new ArgumentException("A name is one line of text, not empty.", nameof(request));
         }
 
+        if (request.Aliases?.Any(a => string.IsNullOrWhiteSpace(a) || a.Any(char.IsControl)) == true)
+        {
+            throw new ArgumentException("Each alias is one line of text, not empty (F-ENT-4).", nameof(request));
+        }
+
         if (!Keys.IsId(id))
         {
             throw new ArgumentException($"'{id}' isn't a valid id.", nameof(id));
@@ -173,6 +181,11 @@ public static class NewEntity
             if (!Keys.IsKey(asked))
             {
                 throw new ArgumentException($"'{asked}' isn't a valid slug: lowercase letters and digits, with single hyphens between words, up to 64 characters.", nameof(request));
+            }
+
+            if (DenPaths.Problem($"{folder}/{asked}.md") is { } problem)
+            {
+                throw new ArgumentException($"'{asked}' can't be a file name: {problem}.", nameof(request));
             }
 
             if (IsTaken(den, folder, asked))

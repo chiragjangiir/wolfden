@@ -15,8 +15,15 @@ namespace Wolfden.Core.Editing;
 /// <param name="Originals">What each of those files held when the plan was made, to check that nothing changed them before they're written.</param>
 /// <param name="LinksRewritten">How many links were rewritten, in all files.</param>
 /// <param name="FrozenPaths">Files that link to the section but are in a final book (F-BOOK-1), so they can't be rewritten; when there are any, the rename mustn't be made.</param>
+/// <param name="SkippedPaths">
+/// Files the den leaves out for errors (F-GEN-2) whose text holds what looks
+/// like a link to the section (its heading, and a target that is the entity's
+/// id, slug, name, or an alias). They can't be edited safely, so they aren't
+/// rewritten, and the writer should be told.
+/// </param>
 public sealed record SectionRenamePlan(
-    IReadOnlyDictionary<string, byte[]> Files, IReadOnlyDictionary<string, byte[]> Originals, int LinksRewritten, IReadOnlyList<string> FrozenPaths);
+    IReadOnlyDictionary<string, byte[]> Files, IReadOnlyDictionary<string, byte[]> Originals, int LinksRewritten, IReadOnlyList<string> FrozenPaths,
+    IReadOnlyList<string> SkippedPaths);
 
 /// <summary>
 /// Renames a section and rewrites, in the same change, every link to it by
@@ -60,6 +67,29 @@ public static class SectionRename
         {
             throw new ArgumentException(
                 $"{targeting.Count} link(s) name '{section.Name}', and a link can't name a heading with [, ], |, or # in it, so they couldn't follow the rename. Choose a name without them.",
+                nameof(newName));
+        }
+
+        // Links that reach another section of the new name would reach this
+        // one instead if it comes first (F-LINK-9); links rewritten to the new
+        // name would reach an earlier section of that name. Either changes
+        // where existing links go, so the rename is refused.
+        var taken = links.LinksTo(entity)
+            .Where(l => l.TargetSection is { } other && !ReferenceEquals(other, section) && other.Index > section.Index
+                && l.Occurrence.Link.Heading is { } h && LinkText.Matches(h, newName))
+            .ToList();
+        if (taken.Count > 0)
+        {
+            throw new ArgumentException(
+                $"{taken.Count} link(s) name a later section, '{taken[0].TargetSection!.Name}' at line {taken[0].TargetSection!.Line}, which comes after '{section.Name}'. " +
+                $"Renamed, '{section.Name}' would come first with that name and take those links (F-LINK-9). Choose another name.",
+                nameof(newName));
+        }
+
+        if (targeting.Count > 0 && entity.File.Sections.FirstOrDefault(s => s.Index < section.Index && LinkText.Matches(s.Name, newName)) is { } earlier)
+        {
+            throw new ArgumentException(
+                $"An earlier section, '{earlier.Name}' at line {earlier.Line}, already has that name, so the {targeting.Count} link(s) to '{section.Name}' would reach it instead once rewritten (F-LINK-9). Choose another name.",
                 nameof(newName));
         }
 
@@ -121,7 +151,41 @@ public static class SectionRename
             files[path] = edited.ToBytes();
         }
 
-        return new SectionRenamePlan(files, originals, rewritten, frozen);
+        return new SectionRenamePlan(files, originals, rewritten, frozen, Skipped(links, den, entity, section.Name));
+    }
+
+    /// <summary>
+    /// The files of the entity's universe that the den leaves out for errors
+    /// and whose text holds what looks like a link to the section: a heading
+    /// matching it, and a target that is the entity's id, slug, name, or an
+    /// alias. Their links can't be resolved, so they're found by their text.
+    /// </summary>
+    private static List<string> Skipped(LinkIndex links, IDenSource den, CatalogEntity entity, string oldName)
+    {
+        var keys = new[] { entity.Slug, entity.Name }.Concat(entity.Aliases).Where(k => k is not null).Select(k => LinkText.Normalize(k!)).ToHashSet(StringComparer.Ordinal);
+        var universe = $"{entity.Universe.Path}/";
+        var broken = links.Catalog.Diagnostics.Concat(links.Catalog.Structure.Diagnostics)
+            .Where(d => d.Diagnostic.Severity == DiagnosticSeverity.Error && d.Path.StartsWith(universe, StringComparison.Ordinal) && d.Path.EndsWith(".md", StringComparison.Ordinal))
+            .Select(d => d.Path)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal);
+        var result = new List<string>();
+        foreach (var path in broken)
+        {
+            if (den.TryReadFile(path) is not { } bytes)
+            {
+                continue;
+            }
+
+            var text = System.Text.Encoding.UTF8.GetString(bytes);
+            if (LinkSyntax.Scan(text, 0, text.Length, null).Any(l => l.Heading is { } h && LinkText.Matches(h, oldName)
+                && (l.Target == entity.Id || keys.Contains(LinkText.Normalize(l.Target)))))
+            {
+                result.Add(path);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>Rewrites the heading of each link at <paramref name="places"/> (line, column, target) whose heading matches <paramref name="oldName"/>.</summary>
@@ -151,7 +215,12 @@ public static class SectionRename
 
         if (file.Frontmatter is { } frontmatter && file.SourceForReading is { } source)
         {
-            var edits = new List<(IReadOnlyList<string> Path, string Value)>();
+            // A link written verbatim in the source is spliced in place, so the
+            // value keeps its style (a block scalar, quotes, escapes elsewhere in
+            // it). A value whose link the YAML escapes or folds is written anew.
+            var splices = new List<(int Start, int Length, string Text)>();
+            var spliced = new List<(IReadOnlyList<string> Path, string Value)>();
+            var rewritten = new List<(IReadOnlyList<string> Path, string Value)>();
             foreach (var key in new[] { "fields", "chapter_defaults", "chapters" })
             {
                 if (frontmatter[key] is { } node)
@@ -159,25 +228,47 @@ public static class SectionRename
                     foreach (var (path, scalar) in Scalars([key], node))
                     {
                         var value = scalar.Text;
+                        var verbatim = true;
+                        var here = new List<(int Start, int Length, string Text)>();
                         var changes = LinkScanner.ScalarLinkPlaces(source, scalar).Where(l => Matches(l, places, oldName)).ToList();
                         foreach (var link in changes.OrderByDescending(l => l.Link.Offset))
                         {
-                            if (LinkSyntax.WithHeading(value.Substring(link.Link.Offset, link.Link.Length), newName) is { } replaced)
+                            var linkText = value.Substring(link.Link.Offset, link.Link.Length);
+                            if (LinkSyntax.WithHeading(linkText, newName) is { } replaced)
                             {
                                 value = string.Concat(value.AsSpan(0, link.Link.Offset), replaced, value.AsSpan(link.Link.Offset + link.Link.Length));
                                 count++;
+                                if (link.Offset + linkText.Length <= source.Text.Length && string.CompareOrdinal(source.Text, link.Offset, linkText, 0, linkText.Length) == 0)
+                                {
+                                    here.Add((link.Offset, linkText.Length, replaced));
+                                }
+                                else
+                                {
+                                    verbatim = false;
+                                }
                             }
                         }
 
-                        if (value != scalar.Text)
+                        if (value == scalar.Text)
                         {
-                            edits.Add((path, value));
+                            continue;
+                        }
+
+                        if (verbatim && !NeedsQuoting(scalar, newName))
+                        {
+                            splices.AddRange(here);
+                            spliced.Add((path, value));
+                        }
+                        else
+                        {
+                            rewritten.Add((path, value));
                         }
                     }
                 }
             }
 
-            foreach (var (path, value) in edits)
+            result = result.WithFrontmatterTextReplaced(splices, spliced);
+            foreach (var (path, value) in rewritten)
             {
                 result = result.WithFrontmatterValue(path, YamlScalarValue.String(value));
             }
@@ -185,6 +276,15 @@ public static class SectionRename
 
         return (result, count);
     }
+
+    /// <summary>True if splicing a heading of <paramref name="name"/> into <paramref name="scalar"/> as written could change how YAML reads it, so the value is written anew instead.</summary>
+    private static bool NeedsQuoting(YamlScalar scalar, string name) => scalar.Style switch
+    {
+        YamlScalarStyle.Literal or YamlScalarStyle.Folded => false,
+        YamlScalarStyle.DoubleQuoted => name.IndexOfAny(['"', '\\']) >= 0,
+        YamlScalarStyle.SingleQuoted => name.Contains('\''),
+        _ => name.IndexOfAny([':', ',', '"', '\'', '{', '}', '\\']) >= 0,
+    };
 
     private static bool Matches(FoundLink link, HashSet<(int Line, int Column, string Target)> places, string oldName) =>
         link.Link.Heading is { } heading && places.Contains((link.Line, link.Column, link.Link.Target)) && LinkText.Matches(heading, oldName);

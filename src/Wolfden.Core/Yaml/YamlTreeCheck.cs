@@ -13,8 +13,8 @@ internal static class YamlTreeCheck
     /// same keys in the same order, new keys only at the end of their
     /// mapping, and every other node identical in text and style.
     /// </summary>
-    public static bool SameExcept(YamlNode? before, YamlNode? after, IReadOnlyList<string> path, YamlScalarValue value) =>
-        SameExcept(before, after, path, (_, edited) => value.MatchesAsWritten(edited));
+    public static bool SameExcept(YamlNode? before, YamlNode? after, IReadOnlyList<string> path, YamlScalarValue value, bool newKeyInPlace = false) =>
+        SameExcept(before, after, path, (_, edited) => value.MatchesAsWritten(edited), newKeyInPlace);
 
     /// <summary>
     /// True if <paramref name="after"/> equals <paramref name="before"/>
@@ -23,8 +23,8 @@ internal static class YamlTreeCheck
     /// runs through mappings by key and lists by item number; keys missing
     /// before must have been added at the end of their mapping.
     /// </summary>
-    public static bool SameExcept(YamlNode? before, YamlNode? after, IReadOnlyList<string> path, Func<YamlNode?, YamlNode?, bool> changed) =>
-        Check(before, after, path, 0, changed);
+    public static bool SameExcept(YamlNode? before, YamlNode? after, IReadOnlyList<string> path, Func<YamlNode?, YamlNode?, bool> changed, bool newKeyInPlace = false) =>
+        Check(before, after, path, 0, changed, newKeyInPlace);
 
     /// <summary>
     /// True if <paramref name="after"/> is the list at <paramref name="before"/>
@@ -141,7 +141,7 @@ internal static class YamlTreeCheck
         }
     }
 
-    private static bool Check(YamlNode? before, YamlNode? after, IReadOnlyList<string> path, int index, Func<YamlNode?, YamlNode?, bool> changed)
+    private static bool Check(YamlNode? before, YamlNode? after, IReadOnlyList<string> path, int index, Func<YamlNode?, YamlNode?, bool> changed, bool newKeyInPlace = false)
     {
         if (index == path.Count)
         {
@@ -154,7 +154,7 @@ internal static class YamlTreeCheck
         {
             return after is YamlMapping { Entries.Count: 1 } created
                 && created.Entries[0].KeyText == path[index]
-                && Check(null, created.Entries[0].Value, path, index + 1, changed);
+                && Check(null, created.Entries[0].Value, path, index + 1, changed, newKeyInPlace);
         }
 
         if (before is YamlSequence list)
@@ -168,7 +168,7 @@ internal static class YamlTreeCheck
             for (var i = 0; i < list.Items.Count; i++)
             {
                 var ok = i == k
-                    ? Check(list.Items[i], editedList.Items[i], path, index + 1, changed)
+                    ? Check(list.Items[i], editedList.Items[i], path, index + 1, changed, newKeyInPlace)
                     : Same(list.Items[i], editedList.Items[i]);
                 if (!ok)
                 {
@@ -191,13 +191,13 @@ internal static class YamlTreeCheck
             return false;
         }
 
-        if (!hadKey)
+        if (!hadKey && newKeyInPlace && index == 0)
         {
             // A new key goes at the end of its mapping, or, at the top of
             // frontmatter, in its place in the template order (types.md
             // F-TPL-7): the other entries keep their order around it.
             var added = edited.Entries.ToList().FindIndex(e => e.KeyText == target);
-            if (added < 0 || !Check(null, edited.Entries[added].Value, path, index + 1, changed))
+            if (added < 0 || !Check(null, edited.Entries[added].Value, path, index + 1, changed, newKeyInPlace))
             {
                 return false;
             }
@@ -215,7 +215,7 @@ internal static class YamlTreeCheck
             }
 
             var ok = a.KeyText == target
-                ? Check(a.Value, b.Value, path, index + 1, changed)
+                ? Check(a.Value, b.Value, path, index + 1, changed, newKeyInPlace)
                 : Same(a.Value, b.Value);
             if (!ok)
             {
@@ -223,7 +223,38 @@ internal static class YamlTreeCheck
             }
         }
 
-        return hadKey || (edited.Entries[^1].KeyText == target && Check(null, edited.Entries[^1].Value, path, index + 1, changed));
+        return hadKey || (edited.Entries[^1].KeyText == target && Check(null, edited.Entries[^1].Value, path, index + 1, changed, newKeyInPlace));
+    }
+
+    /// <summary>
+    /// True if <paramref name="after"/> is <paramref name="before"/> with the
+    /// scalars at the paths in <paramref name="changed"/> (segments joined by
+    /// <c>/</c>) now reading as the text given, in the same style, and every
+    /// other node identical.
+    /// </summary>
+    public static bool SameExceptScalars(YamlNode? before, YamlNode? after, IReadOnlyDictionary<string, string> changed) =>
+        SameExceptScalars(before, after, changed, "");
+
+    private static bool SameExceptScalars(YamlNode? before, YamlNode? after, IReadOnlyDictionary<string, string> changed, string path)
+    {
+        if (changed.TryGetValue(path, out var text))
+        {
+            return before is YamlScalar a && after is YamlScalar b && a.Style == b.Style && b.Text == text;
+        }
+
+        switch (before)
+        {
+            case YamlSequence list when after is YamlSequence edited && list.IsFlow == edited.IsFlow && list.Items.Count == edited.Items.Count:
+                return list.Items.Zip(edited.Items).Select((p, i) => SameExceptScalars(p.First, p.Second, changed, Join(path, i.ToString(System.Globalization.CultureInfo.InvariantCulture)))).All(ok => ok);
+            case YamlMapping map when after is YamlMapping edited && map.IsFlow == edited.IsFlow && map.Entries.Count == edited.Entries.Count:
+                return map.Entries.Zip(edited.Entries).All(p => Same(p.First.Key, p.Second.Key) && SameExceptScalars(p.First.Value, p.Second.Value, changed, Join(path, p.First.KeyText ?? "")));
+            case YamlSequence or YamlMapping:
+                return false;
+            default:
+                return Same(before, after);
+        }
+
+        static string Join(string path, string segment) => path.Length == 0 ? segment : path + "/" + segment;
     }
 
     /// <summary>

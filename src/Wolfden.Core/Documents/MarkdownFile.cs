@@ -180,7 +180,7 @@ public sealed partial class MarkdownFile : DenFile
         ArgumentNullException.ThrowIfNull(value);
         return EditFrontmatter(
             block => YamlEditor.SetScalar(Source!, block, path, value, inTemplateOrder),
-            (before, after) => YamlTreeCheck.SameExcept(before, after, path, value),
+            (before, after) => YamlTreeCheck.SameExcept(before, after, path, value, inTemplateOrder),
             addFrontmatter: true,
             $"Setting '{string.Join('.', path)}'");
     }
@@ -217,7 +217,7 @@ public sealed partial class MarkdownFile : DenFile
         var at = index ?? (GetFrontmatterValue(path) as YamlSequence)?.Items.Count ?? 0;
         return EditFrontmatter(
             block => YamlEditor.AddItem(Source!, block, path, item, index, inTemplateOrder),
-            (before, after) => YamlTreeCheck.SameExcept(before, after, path, (b, a) => YamlTreeCheck.AddedItem(b, a, at, item)),
+            (before, after) => YamlTreeCheck.SameExcept(before, after, path, (b, a) => YamlTreeCheck.AddedItem(b, a, at, item), inTemplateOrder),
             addFrontmatter: true,
             $"Adding an item to '{string.Join('.', path)}'");
     }
@@ -262,7 +262,7 @@ public sealed partial class MarkdownFile : DenFile
             addFrontmatter: true,
             what);
         if (result.Body != Body || !result.CanEdit
-            || !YamlTreeCheck.SameExcept(_frontmatter?.Root, result._frontmatter?.Root, path, (_, edited) => value.MatchesAsWritten(edited)))
+            || !YamlTreeCheck.SameExcept(_frontmatter?.Root, result._frontmatter?.Root, path, (_, edited) => value.MatchesAsWritten(edited), inTemplateOrder))
         {
             throw new EditVerificationException($"{what} didn't read back as written, or changed another value, so the edit was refused.");
         }
@@ -828,6 +828,40 @@ public sealed partial class MarkdownFile : DenFile
             || result.Sections.Zip(Sections).Any(p => p.First.HeadingLevel != p.Second.HeadingLevel || p.First.Comment?.Text != p.Second.Comment?.Text))
         {
             throw new ArgumentException("The replacements would change the file's headings or section comments.", nameof(replacements));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Replaces ranges of the frontmatter's text that lie inside string
+    /// values, such as a link written verbatim in a field, splicing the new
+    /// text in so the value keeps its style (a block scalar stays a block
+    /// scalar). <paramref name="expected"/> gives what each changed value
+    /// must then read as; every other value must read the same.
+    /// </summary>
+    /// <exception cref="ArgumentException">A range isn't in the frontmatter, or the values wouldn't read back as expected.</exception>
+    internal MarkdownFile WithFrontmatterTextReplaced(
+        IReadOnlyList<(int Start, int Length, string Text)> replacements, IReadOnlyList<(IReadOnlyList<string> Path, string Value)> expected)
+    {
+        ArgumentNullException.ThrowIfNull(replacements);
+        ArgumentNullException.ThrowIfNull(expected);
+        EnsureEditable();
+        if (replacements.Count == 0)
+        {
+            return this;
+        }
+
+        if (_frontmatter is null || replacements.Any(r => r.Start < 0 || r.Length < 0 || r.Start + r.Length > _frontmatterEnd))
+        {
+            throw new ArgumentException("A replacement lies outside the frontmatter.", nameof(replacements));
+        }
+
+        var result = Reparse(replacements.Select(r => new TextEdit(r.Start, r.Length, r.Text)));
+        var changed = expected.ToDictionary(e => string.Join('/', e.Path), e => e.Value, StringComparer.Ordinal);
+        if (result.Body != Body || !result.CanEdit || !YamlTreeCheck.SameExceptScalars(_frontmatter.Root, result._frontmatter?.Root, changed))
+        {
+            throw new ArgumentException("The frontmatter wouldn't read back with only those values changed.", nameof(replacements));
         }
 
         return result;

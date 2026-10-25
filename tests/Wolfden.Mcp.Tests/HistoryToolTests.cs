@@ -136,6 +136,23 @@ public sealed class HistoryToolTests : IDisposable
         Assert.False(again.Recorded);
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-MCP-22")]
+    public void ACheckpointOfSomePathsRecordsOnlyThem()
+    {
+        RunGit("init", "--quiet");
+        Commit("Start the Dracula notes");
+        var tools = new DenTools(_den.Root) { History = () => GitHistory.ForDen(_den.Root, Git) };
+        var abbey = tools.CreateEntity("location", "Whitby Abbey");
+        var lucy = tools.GetEntity("Lucy Westenra").Entity!;
+        tools.AppendSection("Lucy Westenra", "Overview", "She loves the view from the East Cliff.", lucy.Hash!);
+
+        var result = tools.Checkpoint("Lucy only", "Claude <noreply@anthropic.com>", [LucyFile]);
+
+        Assert.Equal([LucyFile], result.Checkpoint!.Changes.Select(c => c.Path));
+        Assert.Contains(abbey.Path, RunGit("status", "--porcelain", "--untracked-files=all"), StringComparison.Ordinal);
+    }
+
     public void Dispose()
     {
         var git = Path.Combine(_den.Root, ".git");

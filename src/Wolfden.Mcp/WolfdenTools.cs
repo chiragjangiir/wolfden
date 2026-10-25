@@ -190,7 +190,8 @@ public sealed class WolfdenTools
     /// <summary>The <c>append_section</c> tool.</summary>
     [McpServerTool(Name = "append_section", Title = "Add to a section", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
     [Description(
-        "Adds text to the end of an entity's section, after what's there (template prompts in HTML comments stay), or adds the section " +
+        "Adds text to the end of an entity's section's own text, after what's there and before any subsections it has (template prompts " +
+        "in HTML comments stay), or adds the section " +
         "if the entity has none of that name. With new_section true it adds another section of that name even if there is one, such as a " +
         "new 'Appearance' from a later chapter: give it a 'from' where it takes over. A new section can carry 'from', 'until', 'status', " +
         "and 'pin', written as its section comment; a standard section of the type goes in the type's order, any other at the end, " +
@@ -264,7 +265,8 @@ public sealed class WolfdenTools
     [Description(
         "Changes a chapter's own fields in book.md. 'changes' is a list of {\"op\": \"set\", \"field\": \"tense\", \"value\": \"present\"}, " +
         "{\"op\": \"add\", \"field\": \"pov\", \"value\": \"[[mina-harker]]\"}, {\"op\": \"remove\", \"field\": \"pov\", \"item\": 0} (or \"value\": the " +
-        "item), and {\"op\": \"clear\", \"field\": \"pov\"}. Removing a list's last item leaves [], 'none here', which stops the chapter " +
+        "item's text, compared ignoring case and spacing; a link matches only if it's written the same way, so [[Mina]] doesn't match " +
+        "[[mina-harker]]: use 'item' from get_chapter if unsure), and {\"op\": \"clear\", \"field\": \"pov\"}. Removing a list's last item leaves [], 'none here', which stops the chapter " +
         "inheriting the field; 'clear' removes the chapter's own value so it inherits from chapter_defaults again. The result says " +
         "what each field's effective value is now, and what the chapter would inherit, so check with the writer which they meant." + WriteHelp)]
     public CallToolResult UpdateChapterFields(
