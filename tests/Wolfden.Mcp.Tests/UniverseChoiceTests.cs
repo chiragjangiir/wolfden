@@ -169,6 +169,17 @@ public sealed class UniverseChoiceTests : IDisposable
     }
 
     [Fact]
+    public void CheckingAnUnknownUniverseLeavesTheIndexAlone()
+    {
+        // The key is checked before the index is brought up to date, which hashes the whole den (#130).
+        var e = Assert.Throws<DenToolException>(() => _tools.Check(universe: "nowhere"));
+
+        Assert.Equal(ToolErrorCodes.UnknownUniverse, e.Code);
+        Assert.Equal("The den has no universe 'nowhere'. Its universes: drift, starfall.", e.Message);
+        Assert.False(Directory.Exists(Path.Combine(_den.Root, ".wolfden")));
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-MCP-13")]
     public void TheWholeDenIsTheUnionOfItsUniversesAndTheDenLevel()
     {

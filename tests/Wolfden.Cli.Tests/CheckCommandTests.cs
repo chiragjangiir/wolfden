@@ -313,7 +313,7 @@ public class CheckCommandTests
         var (exitCode, output, _) = Check("--help");
 
         Assert.Equal(CliApp.ExitOk, exitCode);
-        Assert.StartsWith("usage: wolfden check [<den>] [--den <den>] [--universe <key>] [--fix] [--json]\n\n", output, StringComparison.Ordinal);
+        Assert.StartsWith("usage: wolfden check [<den>] [--den <den>] [--universe <key>] [--no-index] [--fix] [--json]\n\n", output, StringComparison.Ordinal);
     }
 
     [Fact]
