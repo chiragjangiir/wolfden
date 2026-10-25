@@ -282,8 +282,10 @@ public sealed class WolfdenTools
     [Description(
         "Records the den's files as they are now as a checkpoint (a git commit) with a message, naming you as a co-author. Writes are " +
         "saved to the files straight away; a checkpoint is what makes them part of the history, so make one at the end of a session " +
-        "of edits, not after each one. Only the den's files are recorded. If nothing changed since the last checkpoint, nothing is " +
-        "recorded. If the den has no history, the result says so ('available' false) and the edits are still saved in the files.")]
+        "of edits, not after each one. Only the den's files are recorded: all of them that changed, unless 'paths' names some, so a " +
+        "checkpoint can include edits the writer made elsewhere. The result lists the recorded files your writes in this session " +
+        "saved ('written_by_session') apart from those that changed some other way ('changed_outside_session'): tell the writer " +
+        "about the second list. If nothing changed since the last checkpoint, nothing is recorded. If the den has no history, the result says so ('available' false) and the edits are still saved in the files.")]
     public CallToolResult Checkpoint(
         [Description("What the checkpoint is, such as 'End of chapter 14 session: Lucy's timeline'.")] string message,
         [Description("You, as 'Name <email>' on one line, such as 'Claude <noreply@anthropic.com>'.")] string co_author,

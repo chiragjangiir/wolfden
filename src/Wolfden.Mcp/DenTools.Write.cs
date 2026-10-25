@@ -46,6 +46,14 @@ namespace Wolfden.Mcp;
 public sealed partial class DenTools
 {
     private readonly Lock _writeLock = new();
+
+    /// <summary>
+    /// The den files this session's writes saved since the last checkpoint
+    /// that recorded them, so <see cref="Checkpoint"/> can tell them from
+    /// files changed some other way. A file a failed write put back as it
+    /// was isn't here. Guarded by <see cref="_writeLock"/>.
+    /// </summary>
+    private readonly HashSet<string> _sessionWritten = new(StringComparer.Ordinal);
     private IDenStore? _store;
 
     /// <summary>The den store writes go through; by default the den's folder on disk.</summary>
@@ -454,11 +462,30 @@ public sealed partial class DenTools
                     return new CheckpointResult(ToolJson.Version, history.Name, false, result.Reason, false, null);
                 }
 
-                return result.Value is { } e
-                    ? new CheckpointResult(
-                        ToolJson.Version, history.Name, true, null, true,
-                        new HistoryEntryView(e.Id, e.When, e.Author, e.Message, e.Changes.Select(c => new HistoryChangeView(c.Kind.ToString().ToLowerInvariant(), c.Path, c.OldPath)).ToList()))
-                    : new CheckpointResult(ToolJson.Version, history.Name, true, null, false, null);
+                if (result.Value is not { } e)
+                {
+                    return new CheckpointResult(ToolJson.Version, history.Name, true, null, false, null);
+                }
+
+                // Which of the recorded files this session's writes saved, and which changed some
+                // other way (the writer's editor, another tool), so the agent can tell the writer
+                // (maintainer decision, 2026-10-25). Committed files start afresh.
+                var ours = e.Changes.Where(c => _sessionWritten.Contains(c.Path) || (c.OldPath is { } old && _sessionWritten.Contains(old))).ToList();
+                var theirs = e.Changes.Except(ours).ToList();
+                foreach (var change in e.Changes)
+                {
+                    _sessionWritten.Remove(change.Path);
+                    if (change.OldPath is { } old)
+                    {
+                        _sessionWritten.Remove(old);
+                    }
+                }
+
+                return new CheckpointResult(
+                    ToolJson.Version, history.Name, true, null, true,
+                    new HistoryEntryView(e.Id, e.When, e.Author, e.Message, e.Changes.Select(c => new HistoryChangeView(c.Kind.ToString().ToLowerInvariant(), c.Path, c.OldPath)).ToList()),
+                    ours.Select(c => c.Path).Order(StringComparer.Ordinal).ToList(),
+                    theirs.Select(c => c.Path).Order(StringComparer.Ordinal).ToList());
             }
             catch (ArgumentException e)
             {
@@ -901,6 +928,8 @@ public sealed partial class DenTools
                 Store.WriteFile(path, bytes, path == created ? DenWriteMode.Create : DenWriteMode.Replace);
                 written.Add(path);
             }
+
+            _sessionWritten.UnionWith(written);
         }
         catch (Exception e)
         {
@@ -908,6 +937,9 @@ public sealed partial class DenTools
             // whatever stopped the writes, cancellation included.
             var failed = files.Keys.Except(written).Order(StringComparer.Ordinal).First();
             var stuck = RollBack(written, files, originals, created);
+
+            // A file put back is as the session found it; one that still holds the edit is the session's.
+            _sessionWritten.UnionWith(stuck.Where(p => Store.TryReadFile(p) is { } now && now.AsSpan().SequenceEqual(files[p])));
             if (e is not (IOException or UnauthorizedAccessException))
             {
                 if (stuck.Count > 0)

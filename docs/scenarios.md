@@ -1754,10 +1754,18 @@ checkpoint.
   refused. With `paths`, only those files are recorded, and the new
   location stays uncommitted; a `paths` list with nothing in it is
   refused rather than read as the whole den.
+- Meanwhile the writer fixed a typo in Mina's note in their editor. The
+  checkpoint records it too, and its result lists Whitby Abbey and
+  Lucy under `written_by_session` and Mina under
+  `changed_outside_session`, so the assistant can say "Mina's note
+  changed outside this session". After the checkpoint, the session
+  starts afresh: a later checkpoint lists only what was written since.
 
-Spec: design.md §6, §8 (maintainer decision, 2026-10-22). Covered by:
+Spec: design.md §6, §8 (maintainer decisions, 2026-10-22 and
+2026-10-25). Covered by:
 `HistoryToolTests.WritesWaitForACheckpointThatNamesTheAgentAsCoAuthor`,
 `HistoryToolTests.ACheckpointOfSomePathsRecordsOnlyThem`,
+`HistoryToolTests.ACheckpointSaysWhichFilesTheSessionWroteAndWhichChangedOutsideIt`,
 `WriteToolTests.WithoutHistoryACheckpointSaysSoAndTheEditsStay`.
 
 ### SC-MCP-23. My pinned assistant creates a note

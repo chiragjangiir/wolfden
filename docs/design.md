@@ -768,6 +768,14 @@ store, so an edit changes only what it means to (format.md §12):
   den's files (or the paths given) as one commit through the history
   provider, with the agent's `co_author` as a `Co-Authored-By` line
   (§6). A den without history isn't an error: `available` is false.
+  **Decided (2026-10-25):** by default a checkpoint records the whole
+  den, so it can hold edits the writer made elsewhere, and its result
+  tells them apart: `written_by_session` lists the recorded files this
+  server's write tools saved since a checkpoint last recorded them, and
+  `changed_outside_session` the rest, for the agent to tell the writer.
+  A file a failed write put back as it was doesn't count as the
+  session's; one the session wrote and the writer then edited too
+  does. With `paths`, only the files named are recorded and listed.
 - **Ids** (maintainer decision, 2026-10-23). `create_entity` gives a
   new id that no file in the den uses, checked through the index even
   in a session pinned to one universe. `update_fields` refuses an `id`

@@ -150,7 +150,38 @@ public sealed class HistoryToolTests : IDisposable
         var result = tools.Checkpoint("Lucy only", "Claude <noreply@anthropic.com>", [LucyFile]);
 
         Assert.Equal([LucyFile], result.Checkpoint!.Changes.Select(c => c.Path));
+        Assert.Equal([LucyFile], result.WrittenBySession);
+        Assert.Empty(result.ChangedOutsideSession!);
         Assert.Contains(abbey.Path, RunGit("status", "--porcelain", "--untracked-files=all"), StringComparison.Ordinal);
+
+        // The abbey wasn't recorded, so it's still the session's next time.
+        var rest = tools.Checkpoint("The abbey", "Claude <noreply@anthropic.com>");
+        Assert.Equal([abbey.Path], rest.WrittenBySession);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-22")]
+    public void ACheckpointSaysWhichFilesTheSessionWroteAndWhichChangedOutsideIt()
+    {
+        const string MinaFile = "universes/dracula/books/dracula/entities/characters/mina-harker.md";
+        RunGit("init", "--quiet");
+        Commit("Start the Dracula notes");
+        var tools = new DenTools(_den.Root) { History = () => GitHistory.ForDen(_den.Root, Git) };
+        var abbey = tools.CreateEntity("location", "Whitby Abbey");
+        var lucy = tools.GetEntity("Lucy Westenra").Entity!;
+        tools.AppendSection("Lucy Westenra", "Overview", "She loves the view from the East Cliff.", lucy.Hash!);
+        _den.Write(MinaFile, _den.Read(MinaFile) + "\nFixed a typo in the editor.\n");
+
+        var result = tools.Checkpoint("Whitby notes", "Claude <noreply@anthropic.com>");
+
+        Assert.Equal([LucyFile, abbey.Path], result.WrittenBySession);
+        Assert.Equal([MinaFile], result.ChangedOutsideSession);
+
+        // Afresh after a checkpoint: only what's written since is the session's.
+        _den.Write(LucyFile, _den.Read(LucyFile) + "\nAnd an editor edit.\n");
+        var next = tools.Checkpoint("Lucy by hand", "Claude <noreply@anthropic.com>");
+        Assert.Empty(next.WrittenBySession!);
+        Assert.Equal([LucyFile], next.ChangedOutsideSession);
     }
 
     public void Dispose()

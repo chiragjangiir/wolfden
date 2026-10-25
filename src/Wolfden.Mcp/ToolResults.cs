@@ -419,4 +419,8 @@ public sealed record GetChapterResult(int Version, string Universe, string Book,
 /// <param name="Reason">Why a checkpoint isn't available, in words for the writer, or null.</param>
 /// <param name="Recorded">True if a checkpoint was recorded; false if nothing changed since the last one.</param>
 /// <param name="Checkpoint">The checkpoint recorded, or null.</param>
-public sealed record CheckpointResult(int Version, string Backend, bool Available, string? Reason, bool Recorded, HistoryEntryView? Checkpoint);
+/// <param name="WrittenBySession">Of the files recorded, the ones this session's write tools saved since the last checkpoint that recorded them.</param>
+/// <param name="ChangedOutsideSession">Of the files recorded, the ones that changed some other way, such as in the writer's editor: tell the writer they're in the checkpoint too.</param>
+public sealed record CheckpointResult(
+    int Version, string Backend, bool Available, string? Reason, bool Recorded, HistoryEntryView? Checkpoint,
+    IReadOnlyList<string>? WrittenBySession = null, IReadOnlyList<string>? ChangedOutsideSession = null);
