@@ -37,13 +37,13 @@ public sealed class GitTimeoutTests
         var head = repo.Git("rev-parse", "HEAD");
         repo.WriteHook("pre-commit", Waiting("hook", exitCode: 1));
         repo.WriteDen(Mara, "# Mara Voss\n");
-        var history = GitHistory.ForDen(repo.DenRoot, TestRepo.Options with { WriteTimeout = TimeSpan.FromSeconds(2) }, Token);
+        var history = GitHistory.ForDen(repo.DenRoot, TestRepo.Options with { WriteTimeout = TimeSpan.FromSeconds(5) }, Token);
         try
         {
             var stuck = Assert.Throws<HistoryException>(() => history.Checkpoint(new CheckpointRequest("Add Mara"), Token));
 
-            Assert.StartsWith("Git hasn't finished the checkpoint after 2 seconds. Wolfden stopped waiting but left git running", stuck.Message, StringComparison.Ordinal);
-            Assert.Contains("commit signing", stuck.Message, StringComparison.Ordinal);
+            Assert.StartsWith("Git hasn't finished the checkpoint after 5 seconds. Wolfden stopped waiting but left git running", stuck.Message, StringComparison.Ordinal);
+            Assert.Contains("signing (a passphrase prompt)", stuck.Message, StringComparison.Ordinal);
             Assert.Contains("hook", stuck.Message, StringComparison.Ordinal);
             await WaitFor(() => File.Exists(GitFile(repo, "wolfden-hook-started")), "the hook to start");
 
@@ -70,7 +70,7 @@ public sealed class GitTimeoutTests
         repo.CommitAll("start");
         repo.WriteHook("pre-commit", Waiting("hook", exitCode: 0));
         repo.WriteDen(Mara, "# Mara Voss\n");
-        var history = GitHistory.ForDen(repo.DenRoot, TestRepo.Options with { WriteTimeout = TimeSpan.FromSeconds(2) }, Token);
+        var history = GitHistory.ForDen(repo.DenRoot, TestRepo.Options with { WriteTimeout = TimeSpan.FromSeconds(5) }, Token);
         try
         {
             Assert.Throws<HistoryException>(() => history.Checkpoint(new CheckpointRequest("Add Mara"), Token));
@@ -124,6 +124,28 @@ public sealed class GitTimeoutTests
         Assert.Equal(repo.Git("rev-parse", "HEAD").Trim(), entry.Id);
         Assert.False(File.Exists(GitFile(repo, "index.lock")));
         Assert.Equal("", Status(repo));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-3")]
+    public void AHooksBackgroundChildDoesntHoldTheCheckpointUp()
+    {
+        using var repo = TestRepo.Create();
+        repo.CommitAll("start");
+
+        // Like a post-commit 'git push &': the child keeps git's stderr open
+        // for 30 seconds after git has exited.
+        repo.WriteHook("post-commit", "#!/bin/sh\nsleep 30 &\nexit 0\n");
+        repo.WriteDen(Mara, "# Mara Voss\n");
+        var history = GitHistory.ForDen(repo.DenRoot, TestRepo.Options with { WriteTimeout = TimeSpan.FromSeconds(5) }, Token);
+        var clock = Stopwatch.StartNew();
+
+        var entry = history.Checkpoint(new CheckpointRequest("Add Mara"), Token).Value;
+        clock.Stop();
+
+        Assert.NotNull(entry);
+        Assert.Equal("Add Mara", entry.Message);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(15), $"The checkpoint took {clock.Elapsed}, waiting on the hook's child.");
     }
 
     [Fact]

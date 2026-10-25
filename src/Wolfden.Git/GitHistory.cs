@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -53,7 +54,10 @@ namespace Wolfden.Git;
 /// Wolfden stops waiting, leaves git running, and throws a
 /// <see cref="HistoryException"/> that says so; if git then ends without
 /// committing, the new files' marks are taken off. Wolfden never deletes
-/// git's lock files.
+/// git's lock files. Checkpoints in one repository take turns within this
+/// process, and that late rollback waits its turn, so it can't take marks
+/// off files a newer checkpoint is committing; another process
+/// checkpointing the same repository at that moment isn't covered.
 /// </para>
 /// <para>
 /// <b>Known v0 limit:</b> the log of a file is the log of its current path.
@@ -236,6 +240,22 @@ public sealed partial class GitHistory : IHistoryProvider
             }
         }
 
+        // One checkpoint at a time in a repository, and none while a rollback
+        // from one Wolfden stopped waiting for is still to run (UnmarkWhenDone).
+        var gate = Gate();
+        gate.Wait(cancellationToken);
+        try
+        {
+            return CheckpointInGate(request, cancellationToken);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private HistoryResult<HistoryEntry?> CheckpointInGate(CheckpointRequest request, CancellationToken cancellationToken)
+    {
         var specs = Pathspecs(request.Paths);
         var head = Head(cancellationToken);
 
@@ -308,8 +328,7 @@ public sealed partial class GitHistory : IHistoryProvider
             throw new HistoryException(
                 $"Git hasn't finished the checkpoint after {GitProcess.Describe(e.Timeout)}. Wolfden stopped waiting but left git running, " +
                 "since stopping it part way would leave the repository locked. When git finishes, it may still record the checkpoint, " +
-                "so look at the history before trying again. Git may be waiting on commit signing (a passphrase prompt), " +
-                "a slow or stuck hook, or a credential prompt. If git ends without recording it, what was staged is put back as it was.",
+                $"so look at the history before trying again. {LikelyCauses} If git ends without recording it, what was staged is put back as it was.",
                 e);
         }
 
@@ -324,11 +343,38 @@ public sealed partial class GitHistory : IHistoryProvider
 
         // The checkpoint is recorded, so the caller hears about it even if
         // it was cancelled while git was committing.
-        var id = Head(CancellationToken.None) ?? throw new HistoryException("Git made the checkpoint, but the repository has no commit afterwards.");
-        var entry = ReadLog(id, 1, Pathspecs(null), CancellationToken.None).SingleOrDefault()
-            ?? throw new HistoryException($"Git made the checkpoint {id}, but it doesn't change the den.");
-        return HistoryResult<HistoryEntry?>.Done(entry);
+        string? id;
+        HistoryEntry? entry;
+        try
+        {
+            id = Head(CancellationToken.None);
+            entry = id is null ? null : ReadLog(id, 1, Pathspecs(null), CancellationToken.None).SingleOrDefault();
+        }
+        catch (HistoryException e)
+        {
+            var why = e.InnerException is GitTimeoutException timedOut ? timedOut.Message : e.Message.TrimEnd('.');
+            throw new HistoryException(
+                $"Git recorded the checkpoint, but Wolfden couldn't read it back ({why}). It's in the history, so don't make it again.", e);
+        }
+
+        if (id is null)
+        {
+            throw new HistoryException("Git made the checkpoint, but the repository has no commit afterwards.");
+        }
+
+        return HistoryResult<HistoryEntry?>.Done(entry ?? throw new HistoryException($"Git made the checkpoint {id}, but it doesn't change the den."));
     }
+
+    /// <summary>What a git that writes may be waiting on, for a message (#143).</summary>
+    private const string LikelyCauses =
+        "Git may be waiting on signing (a passphrase prompt), a slow or stuck hook, a credential prompt, " +
+        "or its automatic maintenance, which on Windows runs before git returns.";
+
+    /// <summary>Checkpoints in one repository, from any <see cref="GitHistory"/> in this process, take turns (#145 review, L4).</summary>
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+    private SemaphoreSlim Gate() => Gates.GetOrAdd(Path.TrimEndingDirectorySeparator(RepositoryRoot), _ => new SemaphoreSlim(1, 1));
 
     /// <summary>
     /// Takes the intent-to-add marks off <paramref name="untracked"/> (git's
@@ -379,6 +425,11 @@ public sealed partial class GitHistory : IHistoryProvider
                     return;
                 }
 
+                // Not while another checkpoint is under way: it may have
+                // marked the same files, and taking its marks off would leave
+                // them out of its commit without a word.
+                var gate = Gate();
+                gate.Wait();
                 try
                 {
                     if (Head(CancellationToken.None) == head)
@@ -389,6 +440,10 @@ public sealed partial class GitHistory : IHistoryProvider
                 catch (HistoryException)
                 {
                     // Best effort, with no one left to tell.
+                }
+                finally
+                {
+                    gate.Release();
                 }
             },
             CancellationToken.None,
@@ -430,15 +485,24 @@ public sealed partial class GitHistory : IHistoryProvider
             at = Resolve(request.At, cancellationToken);
         }
 
-        if (request.Message is null)
+        // A lightweight tag can't be signed: with tag.gpgSign, git would
+        // make an annotated tag and ask an editor for its message.
+        string[] args = request.Message is null
+            ? ["-c", "tag.gpgSign=false", "tag", request.Name, at]
+            : ["tag", "--file=-", request.Name, at];
+        GitRun made;
+        try
         {
-            // A lightweight tag can't be signed: with tag.gpgSign, git would
-            // make an annotated tag and ask an editor for its message.
-            Git(["-c", "tag.gpgSign=false", "tag", request.Name, at], cancellationToken, kind: GitCallKind.MustFinish);
+            made = Start(args, cancellationToken, input: request.Message is null ? null : request.Message.ReplaceLineEndings("\n") + "\n", kind: GitCallKind.MustFinish);
         }
-        else
+        catch (GitTimeoutException e)
         {
-            Git(["tag", "--file=-", request.Name, at], cancellationToken, input: request.Message.ReplaceLineEndings("\n") + "\n", kind: GitCallKind.MustFinish);
+            throw TimedOut(e, $"Git may still make the tag '{request.Name}' when it finishes, so check whether it exists before trying again.");
+        }
+
+        if (!made.Succeeded)
+        {
+            throw Failed("tag", made);
         }
 
         return HistoryResult<HistoryTag>.Done(new HistoryTag(request.Name, at));
@@ -786,15 +850,16 @@ public sealed partial class GitHistory : IHistoryProvider
     private static HistoryException Failed(string command, GitRun run) => new($"git {command} failed: {run.Said}");
 
     /// <summary>What to tell the writer when git didn't finish in time (#143).</summary>
-    private static HistoryException TimedOut(GitTimeoutException e) => e.StillRunning is null
+    /// <param name="e">The timeout.</param>
+    /// <param name="retry">For a git left running, what to do before trying again, if a plain retry could clash with what git does when it finishes.</param>
+    private static HistoryException TimedOut(GitTimeoutException e, string? retry = null) => e.StillRunning is null
         ? new HistoryException(
             $"{e.Message}, so Wolfden stopped it, and nothing was changed. Git may be waiting on a credential helper or a filter " +
             "(such as Git LFS), or the repository may be very large.",
             e)
         : new HistoryException(
             $"{e.Message}. Wolfden stopped waiting but left git running, since stopping it part way would leave the repository locked. " +
-            "Git may be waiting on signing (a passphrase prompt), a slow or stuck hook, or a credential prompt. " +
-            "Answer or close the prompt, or end that git process, then try again.",
+            $"{LikelyCauses} Answer or close the prompt, or end that git process. {retry ?? "Then try again."}",
             e);
 
     private static void Delete(string file)
