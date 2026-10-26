@@ -1100,50 +1100,68 @@ docs/
   `/api/hierarchy` and `/api/positions` list every chapter, with its
   title, whatever the `asOf`: the author is the one viewing, and the
   as-of view hides notes, not the table of contents.
-- **The browsing UI** (#24, #26). Three choices are maintainer
-  decisions (2026-10-26):
-  - **Layout: a sidebar tree.** On the left is a tree: universe → series
-    in story order → books → "Chapters" and entity-type groups →
-    entities. Notes filed in a universe or a series sit under that scope.
-    The page is on the right. On a narrow screen, the tree folds behind a
-    Contents button. A den with several universes has a universe
-    switcher. A server pinned with `serve --universe` shows only that
-    universe, and `/` goes straight to it, as it does for a den with one.
-  - **Story position: an always-on bar.** A bar runs across the top of
-    every page. It has a slider along every position (`/api/positions`),
-    book and chapter menus to jump, step buttons, and a "Show
-    everything" reset. The arrow keys step one chapter, and Home and End
-    go to the first chapter and to everything. It starts at "Everything",
-    meaning no `asOf`, the end of the story. The position is kept in the
-    URL as `?at=<position>` (for example `?at=dracula:9`), carried from
-    page to page, and kept by bookmarks and reloads. A change replaces
-    the history entry, so Back leaves the page rather than stepping back
-    through chapters.
+- **The browsing UI** (#24, #26). Four choices are maintainer
+  decisions (2026-10-26), the first three worded as on the issues:
+  - **Layout: a sidebar tree.** A tree on the left (universe → series →
+    books → chapters and entity types → entities), always visible, with
+    the page on the right. It collapses on narrow screens.
+  - **Story position: an always-on bar.** A bar across the top of every
+    page, with a slider along the whole story and book and chapter
+    dropdowns to jump. It starts at "Everything" (the end of the story).
+    The position carries from page to page and is kept in the URL, so a
+    bookmark or a shared link keeps it.
   - **Notes the reader hasn't met: hidden, with a peek.** At a position,
-    the tree and lists show only the entities in the view there (the
-    list `asOf` it, compared with the unfiltered list). Each group has a
-    "N more appear later" control that shows the rest greyed, each with
-    where it enters. A note out of view because of its status, not its
-    entry point, says so instead. Opening a note the reader hasn't met
-    shows a banner, such as "Readers first meet Quincey P. Morris in
-    Dracula chapter 5", with a button to go there, and nothing else of
-    the note.
+    lists and the tree show only what the reader knows by then, plus a
+    "N more appear later" control that reveals them greyed, each with
+    its entry point. Opening such a note directly shows a banner, for
+    example "Readers first meet Quincey Morris in chapter 11".
+  - **"Show it anyway"** (#26). The banner has a "Show it anyway"
+    button. It shows the note in place, greyed like the peek, and keeps
+    the current position. The note's full view (no `asOf`) is fetched
+    only on that click. The reveal lasts only while the page shows that
+    note at that position: navigation, a change of position, or a
+    reload hides it again. What it shows follows the full view, so its
+    links to other notes the reader hasn't met may resolve.
 
-  The UI routes with TanStack Router. Its URLs (v0 behaviour, not a
-  recorded decision) are `/u/<universe>` for the overview,
-  `/u/<universe>/s/<series>`, `/u/<universe>/b/<book>` (the chapters,
-  with their titles), `/u/<universe>/b/<book>/c/<chapter>` (the chapter
-  and the notes that enter there), and `/u/<universe>/e/<entity>`, where
-  the entity is named by its id, or by its path while it has none. Each
-  page takes `?at=`. An entity page shows the name, type, status, scope
-  breadcrumb, and entry point; the fields; the sections, as markdown;
-  and "Linked from", grouped by source. `[[...]]` links become in-app
-  links through the API's resolved `links`, matched by exact text. A
-  broken link is marked as broken. An ambiguous link lists its matches
-  in a tooltip. As of a position, a link to a note the reader hasn't met
-  is plain text. Markdown is rendered with react-markdown, which builds
-  React elements and never HTML strings. Raw HTML in a note is dropped,
-  and unsafe URLs such as `javascript:` are removed.
+  The rest is v0 behaviour, not a recorded decision.
+  - **Routes and URLs.** The UI routes with TanStack Router:
+    `/u/<universe>` (the overview), `/u/<universe>/s/<series>`,
+    `/u/<universe>/b/<book>` (its chapters, with their titles),
+    `/u/<universe>/b/<book>/c/<chapter>` (the chapter, and the notes that
+    enter there), and `/u/<universe>/e/<entity>`, where the entity is
+    named by its id, or by its path while it has none. `serve` answers
+    any path under `/u` with `index.html`, so a path ending in `.md`
+    reloads too.
+  - **The position in the URL.** It's `?at=<position>`, such as
+    `?at=dracula:9`. "Everything" leaves `at` out and sends no `asOf`. A
+    blank `at=` is sent as it is, so the API refuses it and the page
+    offers "Show everything" rather than quietly showing everything. A
+    change of position replaces the history entry, so Back leaves the
+    page rather than stepping back through chapters.
+  - **The bar.** It has step buttons and a "Show everything" reset. The
+    arrow keys step one chapter, and Home and End go to the first
+    chapter and to everything. A chapter without a number, such as
+    Dracula's closing note, is named by its title.
+  - **The tree.** A den with several universes has a universe switcher.
+    `/` goes straight to the universe of a server pinned with
+    `serve --universe`, or of a den with one. On a narrow screen the
+    tree folds behind a Contents button and opens over the page, below
+    the top bar. Focus moves into it, and Escape closes it.
+  - **Hidden notes.** A note out of view for its status rather than its
+    entry point is listed in the peek as "not in canon: <status>". The
+    peek closes when the position or the list changes. The banner for a
+    note not met yet also offers to go to where it enters, or to show
+    everything. The tab's title names only what's in view.
+  - **Entity pages.** An entity page shows the name, type, status, scope
+    breadcrumb, and entry point; the fields; the sections, as markdown;
+    and "Linked from", grouped by source. `[[...]]` links become in-app
+    links through the API's resolved `links`, matched by exact text in
+    order. A broken link is marked as broken, and an ambiguous link
+    lists its matches in a tooltip. As of a position, a link to a note
+    the reader hasn't met is plain text. Markdown is rendered with
+    react-markdown, which builds React elements and never HTML strings.
+    Raw HTML in a note is dropped, and unsafe URLs such as `javascript:`
+    are removed.
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and
   unknown content. This gets heavy test coverage, since it decides whether
   people trust the tool with their notes.
