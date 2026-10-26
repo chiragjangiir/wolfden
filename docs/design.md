@@ -1144,6 +1144,23 @@ docs/
   is plain text. Markdown is rendered with react-markdown, which builds
   React elements and never HTML strings. Raw HTML in a note is dropped,
   and unsafe URLs such as `javascript:` are removed.
+- **The search page** (#25; v0 behaviour, not a recorded decision). A
+  search box sits in the top bar; `/` focuses it from anywhere but a
+  text box. Typing searches once it pauses (300 ms), on
+  `/u/<universe>/search?q=<words>`, which also keeps the filters
+  (`type`, `series` or `book`, `status`, `canon=true`) and `at`. The
+  page sends them to `/api/search` and lists the hits by note, with
+  the note's type and scope, the section (linked to its anchor on the
+  note's page), and the snippet with the matched words marked. The
+  snippet is rendered as text; a bracketed run is marked only when its
+  words are the query's, since a note's own text can hold brackets.
+  "Show more matches" asks again with a bigger `limit` (20, 50, 100,
+  200), as the API has no offset. As of a position the search sends
+  `asOf`, says so ("Searching as of Dracula chapter 9"), and offers to
+  search everything; hits the reader hasn't met aren't shown or
+  peeked at. Search is full-text only: the API has no search of one
+  field's value (such as every character whose `occupation:` holds
+  physician), and field values aren't in the full-text index.
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and
   unknown content. This gets heavy test coverage, since it decides whether
   people trust the tool with their notes.
