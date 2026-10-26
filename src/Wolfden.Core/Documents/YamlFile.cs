@@ -91,7 +91,7 @@ public sealed class YamlFile : DenFile
     {
         ArgumentNullException.ThrowIfNull(path);
         return Edit(
-            (source, block) => YamlEditor.Remove(source, block, path, emptied),
+            (source, block) => YamlEditor.Remove(source, block, path, emptied, out _),
             (before, after) => YamlTreeCheck.SameExcept(before, after, path.Take(path.Count - 1).ToList(), (b, a) => YamlTreeCheck.Removed(b, a, path[^1], emptied)),
             $"Removing '{string.Join('.', path)}'");
     }

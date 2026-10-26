@@ -154,6 +154,7 @@ public sealed partial class DenTools
         {
             var touched = new List<string>();
             var added = new List<string>();
+            var notes = new List<string>();
             var facts = EntityFacts.For(catalog, new Bookkeeping(catalog.Universe.Den.BookkeepingSections));
             var held = facts.Fields.SelectMany(f => f.Entries.Where(e => e.Pinned).Select(e => $"fields.{f.Name}"))
                 .Concat(facts.Sections.Where(s => s.Pinned && (s.Section.Parent is null || !facts[s.Section.Parent].Pinned)).Select(s => $"section '{s.Section.Name}'"))
@@ -184,12 +185,12 @@ public sealed partial class DenTools
                 {
                     "set" => () => file.WithFrontmatterValue(path, op.Value!, inTemplateOrder: true),
                     "add" => () => file.WithNewListItem(path, op.Value!, op.Index, inTemplateOrder: true),
-                    _ => () => Remove(file, path),
+                    _ => () => Remove(file, path, notes),
                 });
             }
 
             return (file, (Func<CatalogEntity, CatalogEntity, IEnumerable<string>>)((before, after) =>
-                FieldEffects(before, after, touched).Concat(added.SelectMany(a => AliasEffects(after, a))).ToList()));
+                FieldEffects(before, after, touched).Concat(added.SelectMany(a => AliasEffects(after, a))).Concat(notes).ToList()));
         });
     }
 
@@ -386,6 +387,7 @@ public sealed partial class DenTools
             }
 
             var touched = new List<string>();
+            var notes = new List<string>();
             foreach (var op in ops)
             {
                 var field = op.Field!;
@@ -395,8 +397,9 @@ public sealed partial class DenTools
                 {
                     "set" => () => file.WithFrontmatterValue(fieldPath, op.Value!),
                     "add" => () => file.WithNewListItem(fieldPath, op.Value!, op.Index),
-                    "remove" => () => file.WithoutChapterFieldItem(ch.Key, field, ItemToRemove(file, fieldPath, op)),
-                    _ => () => Clear(file, fieldPath, ch, field),
+                    "remove" => () => NoteEmptied(
+                        notes, file.WithoutChapterFieldItem(ch.Key, field, ItemToRemove(file, fieldPath, op), out var comments), comments, $"{field} of chapter '{ch.Key}'"),
+                    _ => () => Clear(file, fieldPath, ch, field, notes),
                 });
             }
 
@@ -417,7 +420,7 @@ public sealed partial class DenTools
             var afterBook = FindBook(check.Structure, universeKey, target.Key);
             var afterChapter = afterBook.FindChapter(ch.Key)!;
             return new WriteResult(
-                ToolJson.Version, true, path, HashOf(bytes), null, ChapterEffects(ch, afterChapter, touched.Distinct().ToList()), [], Warnings(check),
+                ToolJson.Version, true, path, HashOf(bytes), null, [.. ChapterEffects(ch, afterChapter, touched.Distinct().ToList()), .. notes], [], Warnings(check),
                 Chapter: ChapterOf(afterChapter), IdAdded: idAdded);
         }
     }
@@ -1229,7 +1232,7 @@ public sealed partial class DenTools
         }
     }
 
-    private static MarkdownFile Remove(MarkdownFile file, IReadOnlyList<string> path)
+    private static MarkdownFile Remove(MarkdownFile file, IReadOnlyList<string> path, List<string> notes)
     {
         var parent = path.Count == 1 ? file.Frontmatter : file.GetFrontmatterValue(path.Take(path.Count - 1).ToList());
         var present = parent switch
@@ -1243,7 +1246,23 @@ public sealed partial class DenTools
             throw new DenToolException(ToolErrorCodes.BadArgument, $"There's nothing at '{string.Join('.', path)}' to remove.");
         }
 
-        return file.WithoutFrontmatterValue(path);
+        return NoteEmptied(notes, file.WithoutFrontmatterValue(path, EmptiedList.Null, out var comments), comments, string.Join('.', path.Take(path.Count - 1)));
+    }
+
+    /// <summary>
+    /// Says, in <paramref name="notes"/>, how many comment lines went because
+    /// a removal emptied the block mapping or list <paramref name="where"/>
+    /// (format.md F-RT-6). One may have been a commented-out value, so the
+    /// writer is told; a checkpoint, or the den's history, keeps the old text.
+    /// </summary>
+    private static MarkdownFile NoteEmptied(List<string> notes, MarkdownFile file, int comments, string where)
+    {
+        if (comments > 0)
+        {
+            notes.Add($"Removed {comments} comment line{(comments == 1 ? "" : "s")} inside {where}, which the change emptied.");
+        }
+
+        return file;
     }
 
     /// <summary>The pinned facts a frontmatter change touches: an entry with <c>pin: true</c> it sets, removes, or changes, or a new one it adds.</summary>
@@ -1391,14 +1410,14 @@ public sealed partial class DenTools
         throw new DenToolException(ToolErrorCodes.BadArgument, "A 'remove' change names the item to remove: 'item' (its number from 0) or 'value'.");
     }
 
-    private static MarkdownFile Clear(MarkdownFile file, string[] fieldPath, Chapter chapter, string field)
+    private static MarkdownFile Clear(MarkdownFile file, string[] fieldPath, Chapter chapter, string field, List<string> notes)
     {
         if ((file.GetFrontmatterValue(fieldPath[..^1]) as YamlMapping)?.ContainsKey(field) != true)
         {
             throw new DenToolException(ToolErrorCodes.BadArgument, $"Chapter '{chapter.Key}' doesn't set '{field}' itself, so there's nothing to clear: it already inherits.");
         }
 
-        return file.WithoutFrontmatterValue(fieldPath);
+        return NoteEmptied(notes, file.WithoutFrontmatterValue(fieldPath, EmptiedList.Null, out var comments), comments, $"the fields of chapter '{chapter.Key}'");
     }
 
     private static List<string> ChapterEffects(Chapter before, Chapter after, IReadOnlyList<string> fields)

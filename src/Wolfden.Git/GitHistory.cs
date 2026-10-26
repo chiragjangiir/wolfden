@@ -82,9 +82,14 @@ public sealed partial class GitHistory : IHistoryProvider
     /// The options every diff takes, so the user's diff settings can't change
     /// what Wolfden parses. A submodule counts as changed only when the
     /// commit it's at does: edits inside it aren't the den's (#142 review, L2).
+    /// <c>--submodule=short</c> keeps a submodule's patch a <c>diff --git</c>
+    /// part whatever <c>diff.submodule</c> says (#158 review, M1).
     /// </summary>
     private static readonly string[] DiffOptions =
-        ["--no-color", "--no-ext-diff", "--no-textconv", "--relative", "-M", "--src-prefix=a/", "--dst-prefix=b/", "--ignore-submodules=dirty"];
+    [
+        "--no-color", "--no-ext-diff", "--no-textconv", "--relative", "-M", "--src-prefix=a/", "--dst-prefix=b/", "--ignore-submodules=dirty",
+        "--submodule=short",
+    ];
 
     /// <summary>
     /// Settings for every git command that uses Wolfden's temporary index
@@ -109,6 +114,12 @@ public sealed partial class GitHistory : IHistoryProvider
     private const string EmptyBlobSha1 = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
 
     private const string EmptyBlobSha256 = "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
+
+    /// <summary>A submodule's mode in git's raw output.</summary>
+    private const string GitlinkMode = "160000";
+
+    /// <summary>The mode in git's raw output of a side that isn't there: an add's old side, or a delete's new one.</summary>
+    private const string NoMode = "000000";
 
     // Fields of a log entry: start, separator, end of the header. %B is the raw message.
     private const string LogFormat = "--format=%x01%H%x02%aI%x02%an%x02%B%x03";
@@ -787,7 +798,7 @@ public sealed partial class GitHistory : IHistoryProvider
     {
         List<string> args =
         [
-            "--no-optional-locks", "log", "--no-color", "--no-show-signature", "--encoding=UTF-8", "--relative", "-z", "--name-status", "-M",
+            "--no-optional-locks", "log", "--no-color", "--no-show-signature", "--encoding=UTF-8", "--relative", "-z", "--raw", "-M",
             "--diff-merges=first-parent", LogFormat,
         ];
         if (skip > 0)
@@ -819,7 +830,7 @@ public sealed partial class GitHistory : IHistoryProvider
                 throw new HistoryException("Git's log didn't have the shape Wolfden asked for.");
             }
 
-            var changes = ParseChanges(chunk[(end + 1)..].Split('\0'), raw: false).Select(c => c.Change).OfType<HistoryFileChange>().ToList();
+            var changes = ParseChanges(chunk[(end + 1)..].Split('\0')).Select(c => c.Change).OfType<HistoryFileChange>().ToList();
             entries.Add(new HistoryEntry(
                 header[0],
                 DateTimeOffset.Parse(header[1], CultureInfo.InvariantCulture),
@@ -843,36 +854,95 @@ public sealed partial class GitHistory : IHistoryProvider
     {
         var output = Git(
             [.. TempIndexSettings, "diff", .. DiffOptions, "--raw", "--patch", "-z", .. revisions, "--", .. specs], cancellationToken, environment: environment);
+        return ReadDiff(output);
+    }
+
+    /// <summary>
+    /// The den files and their patches from the output of one
+    /// <c>git diff --raw --patch -z</c>.
+    /// </summary>
+    /// <remarks>
+    /// A type change (status <c>T</c>, #158) is one raw record, but git
+    /// writes its patch as two parts under the same <c>diff --git</c> line:
+    /// the old side deleted, then the new side created. Between a file and
+    /// a symbolic link, both sides are den files (the den reads a link to a
+    /// file as that file, #112), so the change is a modification and its
+    /// patch is both parts, as git wrote them; <c>git apply</c> takes them
+    /// so. Between a file and a submodule (mode 160000), only the file side
+    /// is a den file: the change is the file deleted or added, and its patch
+    /// is that side's part alone. A type change that isn't exactly those two
+    /// parts, or any other header that comes twice, is an error.
+    /// <para>
+    /// Git sees a link, not what it links to: its patch shows the link's
+    /// target path, never the linked note's text, and a note replaced by a
+    /// link is a modification even where the den doesn't read the link as a
+    /// note: a link to a folder, which the den skips (#102), or a broken
+    /// one, which it takes as absent (#112). A link to a file outside the
+    /// den is read as that file, so for it a modification is right.
+    /// </para>
+    /// </remarks>
+    internal static List<HistoryFileDiff> ReadDiff(string output)
+    {
         var (tokens, patch) = SplitRawAndPatch(output);
-        var changes = ParseChanges(tokens, raw: true);
-        var patches = new Dictionary<string, string>(StringComparer.Ordinal);
+        var changes = ParseChanges(tokens);
+        var patches = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var part in SplitPatch(patch))
         {
             var header = part[..part.IndexOf('\n', StringComparison.Ordinal)];
-            if (!patches.TryAdd(header, part))
+            if (patches.TryGetValue(header, out var parts))
             {
-                throw new HistoryException($"Git's diff gave two patches headed '{header}'.");
+                parts.Add(part);
+            }
+            else
+            {
+                patches.Add(header, [part]);
             }
         }
 
-        if (patches.Count != changes.Count)
-        {
-            throw new HistoryException($"Git's diff listed {changes.Count} files but gave {patches.Count} patches.");
-        }
-
         var files = new List<HistoryFileDiff>();
-        foreach (var (change, _, from, to) in changes)
+        foreach (var (change, status, from, to) in changes)
         {
             var header = $"diff --git {QuotePath("a/" + from)} {QuotePath("b/" + to)}";
-            if (!patches.TryGetValue(header, out var part))
+            if (!patches.Remove(header, out var parts))
             {
                 throw new HistoryException($"Git's diff listed '{to}' but gave no patch for it.");
+            }
+
+            string part;
+            if (status[0] == 'T')
+            {
+                if (parts.Count != 2 || !parts[0].Contains("\ndeleted file mode ", StringComparison.Ordinal)
+                    || !parts[1].Contains("\nnew file mode ", StringComparison.Ordinal))
+                {
+                    throw new HistoryException(
+                        $"Git's diff changed the type of '{to}' but didn't give its patch as the old side deleted and the new side created.");
+                }
+
+                part = change?.Kind switch
+                {
+                    HistoryChangeKind.Deleted => parts[0],
+                    HistoryChangeKind.Added => parts[1],
+                    _ => parts[0] + parts[1],
+                };
+            }
+            else if (parts.Count == 1)
+            {
+                part = parts[0];
+            }
+            else
+            {
+                throw new HistoryException($"Git's diff gave {parts.Count} patches headed '{header}'.");
             }
 
             if (change is not null)
             {
                 files.Add(new HistoryFileDiff(change, part));
             }
+        }
+
+        if (patches.Count > 0)
+        {
+            throw new HistoryException($"Git's diff gave a patch headed '{patches.Keys.First()}' for a file it didn't list.");
         }
 
         return files;
@@ -961,11 +1031,17 @@ public sealed partial class GitHistory : IHistoryProvider
     }
 
     /// <summary>
-    /// Changes from git's <c>-z</c> name-status or raw output, in order. A
-    /// change to a hidden path has a null change, so lists stay in step with
-    /// the patches; a rename from or to a hidden path is an add or a delete.
+    /// Changes from git's <c>-z</c> raw output, in order. A change to a
+    /// hidden path has a null change, so lists stay in step with the
+    /// patches; a rename from or to a hidden path is an add or a delete.
     /// </summary>
-    private static List<(HistoryFileChange? Change, string Status, string From, string To)> ParseChanges(IReadOnlyList<string> tokens, bool raw)
+    /// <remarks>
+    /// A submodule isn't a den file (#158 review, L1). A change with a
+    /// submodule on both sides, or a submodule on one and nothing on the
+    /// other, has a null change too. A type change between a submodule and
+    /// a file is the file added or deleted.
+    /// </remarks>
+    private static List<(HistoryFileChange? Change, string Status, string From, string To)> ParseChanges(IReadOnlyList<string> tokens)
     {
         var changes = new List<(HistoryFileChange?, string, string, string)>();
         for (var i = 0; i < tokens.Count;)
@@ -978,12 +1054,13 @@ public sealed partial class GitHistory : IHistoryProvider
             }
 
             // Raw lines are ':<old mode> <new mode> <old id> <new id> <status>'.
-            var status = raw ? token[(token.LastIndexOf(' ') + 1)..] : token;
-            if (raw && !token.StartsWith(':'))
+            var fields = token.Split(' ');
+            if (!token.StartsWith(':') || fields.Length != 5 || fields[4].Length == 0)
             {
-                throw new HistoryException("Git's diff didn't have the shape Wolfden asked for.");
+                throw new HistoryException("Git's list of changed files didn't have the shape Wolfden asked for.");
             }
 
+            var status = fields[4];
             var two = status[0] is 'R' or 'C';
             if (i + (two ? 2 : 1) >= tokens.Count)
             {
@@ -993,7 +1070,17 @@ public sealed partial class GitHistory : IHistoryProvider
             var path = tokens[i + 1];
             var newPath = two ? tokens[i + 2] : null;
             i += two ? 3 : 2;
-            changes.Add((Change(status[0], path, newPath), status, path, newPath ?? path));
+
+            var oldFile = fields[0][1..] is not (NoMode or GitlinkMode);
+            var newFile = fields[1] is not (NoMode or GitlinkMode);
+            var change = (oldFile, newFile, status[0]) switch
+            {
+                (false, false, _) => null,
+                (false, true, 'T') => Change('A', path, newPath),
+                (true, false, 'T') => Change('D', path, newPath),
+                _ => Change(status[0], path, newPath),
+            };
+            changes.Add((change, status, path, newPath ?? path));
         }
 
         return changes;
