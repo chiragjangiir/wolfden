@@ -270,7 +270,9 @@ public sealed class MoveEntityToolTests : IDisposable
         var result = Tools.MoveEntity("Signal log", hash, toBook: "a-quiet-moon", universe: Universe);
 
         Assert.EndsWith("The [[01JA7Q8M4XK3V9R2D5W8HN6TQG|Lantern]] signals. [[Nobody we know]] answers.\n", _den.Read(result.Path), StringComparison.Ordinal);
-        Assert.Contains(result.Effects, e => e.StartsWith("Its own link [[Lantern]]", StringComparison.Ordinal) && e.Contains(LanternItem, StringComparison.Ordinal));
+        Assert.Contains(
+            result.Effects,
+            e => e.StartsWith("Its own link [[Lantern]] (line 9 before the move)", StringComparison.Ordinal) && e.Contains(LanternItem, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -286,6 +288,51 @@ public sealed class MoveEntityToolTests : IDisposable
         Assert.EndsWith("The [[Lantern]] signals.\n", _den.Read(result.Path), StringComparison.Ordinal);
         Assert.DoesNotContain(result.Effects, e => e.StartsWith("Its own link", StringComparison.Ordinal));
         Assert.Contains(result.Effects, e => e.Contains($"now reaches 'Lantern' ({LanternShip})", StringComparison.Ordinal) && e.Contains(LanternItem, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-29")]
+    public void AnOwnLinkToATargetWithNoIdRefusesTheMoveAndSaysWhatAllowRelinksDoes()
+    {
+        // The Ash beacon has no id, so the signal log's [[Beacon]] can't be kept on it by id;
+        // in A Quiet Moon, it would reach the ship there instead.
+        _den.Write(Ash + "/entities/items/beacon.md", "---\ntype: item\nname: Beacon\nstatus: canon\n---\n");
+        _den.Write(Moon + "/entities/ships/beacon.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z7\ntype: ship\nname: Beacon\nstatus: canon\n---\n");
+        const string Old = Ash + "/entities/notes/signal-log.md";
+        _den.Write(Old, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z9\ntype: note\nname: Signal log\nstatus: draft\nfrom: \"a-quiet-moon:1\"\n---\n\nThe [[Beacon]] and the [[Lantern]] signal.\n");
+        var before = _den.Read(Old);
+        var hash = Tools.GetEntity("Signal log", Universe).Entity!.Hash!;
+
+        var refused = Assert.Throws<DenToolException>(() => Tools.MoveEntity("Signal log", hash, toBook: "a-quiet-moon", universe: Universe));
+
+        Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
+        Assert.Contains("own links to entities with no id", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("wolfden check --fix", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("allow_relinks", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("also stops the rewriting of its other own links", refused.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Link those by id", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(before, _den.Read(Old));
+
+        // With allow_relinks, both own links follow the new scope, the one that had an id included.
+        var result = Tools.MoveEntity("Signal log", hash, toBook: "a-quiet-moon", universe: Universe, allowRelinks: true);
+        Assert.EndsWith("The [[Beacon]] and the [[Lantern]] signal.\n", _den.Read(result.Path), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-29")]
+    public void TheMovedFilesOwnRewrittenLinksAreListedUpToTheCapWithTheirLineBeforeTheMove()
+    {
+        // Pike has one [[Lantern]]; twelve more make thirteen, three past the cap of ten.
+        var lines = string.Concat(Enumerable.Range(1, 12).Select(i => $"Lamp {i}: [[Lantern]].\n"));
+        _den.Write(Pike, _den.Read(Pike) + "\n" + lines);
+        var hash = Tools.GetEntity("Halden Pike", Universe).Entity!.Hash!;
+
+        var result = Tools.MoveEntity("Halden Pike", hash, universe: Universe);
+
+        var own = result.Effects.Where(e => e.StartsWith("Its own link", StringComparison.Ordinal)).ToList();
+        Assert.Equal(10, own.Count);
+        Assert.All(own, e => Assert.Matches(@"\(line \d+ before the move\)", e));
+        Assert.Contains(result.Effects, e => e.StartsWith("And 3 more of its own links were rewritten", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -399,6 +446,8 @@ public sealed class MoveEntityToolTests : IDisposable
         Assert.Contains("keep_entry", refused.Message, StringComparison.Ordinal);
         Assert.Contains("enter_at_new_scope", refused.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("before then leave it out", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("earlier than readers now meet it (ash:2).", refused.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("(ash:2 (", refused.Message, StringComparison.Ordinal);
 
         var result = Tools.MoveEntity("Sash Orel", hash, toBook: "ember", enterAtNewScope: true, universe: Universe);
         Assert.Contains(result.Effects, e => e.Contains("now include it, earlier than the reader met it before", StringComparison.Ordinal));

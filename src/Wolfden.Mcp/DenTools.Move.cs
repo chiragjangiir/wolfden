@@ -155,12 +155,22 @@ public sealed partial class DenTools
             var relinked = plan.Changes.Where(l => l.Before.Outcome == Core.Links.LinkOutcome.Resolved).ToList();
             if (relinked.Count > 0 && !allowRelinks)
             {
+                // The moved file's own links that are here reach an entity with no id, so they
+                // couldn't be kept on their targets by id: the writer gives those entities ids, or
+                // lets every own link follow the new scope (allow_relinks).
+                var idless = relinked.Count(l => l.Before.Occurrence.Path == path && l.Before.Target!.Path != path && l.Before.Target.Id is null);
+                var others = relinked.Count - idless;
+                var advice = idless == 0
+                    ? $"Link those by id or file name first, or {Words.AllowRelinks} to move it anyway."
+                    : $"{(others == 0 ? "They're" : $"{idless} of them are")} its own links to entities with no id, so they can't be kept on their targets by id (F-ID-6): " +
+                      $"run 'wolfden check --fix' to give those entities ids{(others == 0 ? "" : ", and link the others by id or file name")}, then move it again. " +
+                      $"Or {Words.AllowRelinks} to move it anyway; that also stops the rewriting of its other own links to their targets' ids, so they all follow the new scope.";
                 throw new DenToolException(
                     ToolErrorCodes.BadArgument,
                     $"{relinked.Count} link(s) would change which entity they reach once '{target.Name}' is in {EntityMove.Describe(scope)}: " +
                     $"{string.Join("; ", relinked.Take(ListedLinkChanges).Select(l => $"{Where(l.After)}{(InFinalBook(l.Before) ? " (in a final book)" : "")} reaches {Reached(l.Before)} and would {Outcome(l.After)}"))}" +
                     $"{(relinked.Count > ListedLinkChanges ? $"; and {relinked.Count - ListedLinkChanges} more" : "")}. Nothing was changed. " +
-                    $"Link those by id or file name first, or {Words.AllowRelinks} to move it anyway.");
+                    advice);
             }
 
             var frozenRelinks = relinked.Where(l => InFinalBook(l.Before)).ToList();
@@ -189,9 +199,14 @@ public sealed partial class DenTools
             }
 
             // Its own links that would have reached another entity, or none, from the new scope.
-            effects.AddRange(plan.OwnRewritten.Select(l =>
-                $"Its own link {l.Occurrence.Link.Text} (line {l.Occurrence.Link.Line}) reached {Reached(l)}, and from {EntityMove.Describe(scope)} it wouldn't " +
+            // The line is the one in the file before the move: an added id or 'from' can shift it.
+            effects.AddRange(plan.OwnRewritten.Take(ListedLinkChanges).Select(l =>
+                $"Its own link {l.Occurrence.Link.Text} (line {l.Occurrence.Link.Line} before the move) reached {Reached(l)}, and from {EntityMove.Describe(scope)} it wouldn't " +
                 $"(F-LINK-7), so it was rewritten to that entity's id, showing the same text as before. Pass allow_relinks to leave such links to follow the new scope instead."));
+            if (plan.OwnRewritten.Count > ListedLinkChanges)
+            {
+                effects.Add($"And {plan.OwnRewritten.Count - ListedLinkChanges} more of its own links were rewritten to their targets' ids the same way.");
+            }
 
             effects.AddRange(plan.Changes.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} {Now(l.After)}; before, it {Was(l.Before)}."));
             if (plan.Changes.Count > ListedLinkChanges)
@@ -328,13 +343,15 @@ public sealed partial class DenTools
             return new EntryChange(keep, effects, false);
         }
 
-        var enters = entity.From is not null ? $"{entity.From} (its 'from')" : $"{entity.Scope.StartDescription} (it has no 'from')";
+        // Where it enters, bare, for inside parentheses; and with where that comes from, for a sentence.
+        var at = entity.From is not null ? $"{entity.From}" : entity.Scope.StartDescription;
+        var enters = entity.From is not null ? $"{at} (its 'from')" : $"{at} (it has no 'from')";
         if (enterAtNewScope)
         {
             effects.Add(
                 $"It now enters canon at {scope.StartDescription} (enter_at_new_scope); before the move it entered at {enters}, " +
                 (place is Place.After or Place.Unnamed
-                    ? $"so canon views from {scope.StartDescription} up to {enters} now include it, earlier than the reader met it before"
+                    ? $"so canon views from {scope.StartDescription} up to {at} now include it, earlier than the reader met it before"
                     : "so canon views between the two points don't include it any more") +
                 (entity.From is null ? "." : ", and its 'from' was taken out."));
 
@@ -366,7 +383,7 @@ public sealed partial class DenTools
             : $"so the reader meets it only after {EntityMove.Describe(scope)}";
         var instead = place == Place.Before
             ? $"so canon views before then leave it out"
-            : $"but be warned: it would then appear in canon views from {scope.StartDescription} on, earlier than readers now meet it ({enters})";
+            : $"but be warned: it would then appear in canon views from {scope.StartDescription} on, earlier than readers now meet it ({at})";
         throw new DenToolException(
             ToolErrorCodes.EntryOutsideScope,
             $"'{entity.Name}' enters canon at {enters}, in book '{book.Key}', which is {describe}, {already}. " +
