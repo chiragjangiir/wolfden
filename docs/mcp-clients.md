@@ -21,17 +21,19 @@ dotnet publish src/Wolfden.Cli -c Release -o <folder>
 ```
 
 The folder then holds `wolfden.exe` on Windows, or `wolfden` on macOS and
-Linux. It needs the .NET 10 runtime, which the SDK includes. Check that it
-runs:
+Linux. It needs the .NET 10 runtime and the ASP.NET Core 10 runtime; the
+SDK includes both. Check that it runs:
 
 ```sh
 <folder>/wolfden mcp --help
 ```
 
-You can also run the server straight from the clone with
-`dotnet run --project src/Wolfden.Cli -- mcp --den <den>`, but that builds
-the project each time the client starts it, which is slow. A published
-folder is better for everyday use.
+You can also run the server straight from the clone, with the command
+`dotnet` and the arguments
+`run --project <clone>/src/Wolfden.Cli -- mcp --den <den>`, where
+`<clone>` is the clone's full path (a client doesn't start the server in
+the clone). But that builds the project each time the client starts it,
+which is slow. A published folder is better for everyday use.
 
 ## 2. Pick a den
 
@@ -41,9 +43,12 @@ folder above it with a `den.yaml`. MCP clients don't always say which
 folder that is, so give `--den` with a full path.
 
 To try the write tools, **copy the Dracula sample out of the clone first**,
-to a folder of its own, and make it a git repository:
+to a folder of its own, and make it a git repository. From the clone's
+root (in PowerShell, use `Copy-Item -Recurse` for `cp -r`):
 
 ```sh
+cp -r samples/dracula <copy>
+cd <copy>
 git init
 git add -A
 git commit -m "Start from the Dracula sample"
@@ -68,9 +73,10 @@ server speaks MCP over stdio. It needs no network access, keys, or
 environment variables. Use full paths in client settings, and don't count
 on `~` or `%USERPROFILE%` being expanded there.
 
-The examples below use `C:\Wolfden\bin\wolfden.exe` and `C:\Wolfden\dracula`
-on Windows, and `/opt/wolfden/wolfden` and `/srv/dens/dracula` on macOS
-and Linux. Replace them with your own paths.
+The examples below use `C:\Wolfden\bin\wolfden.exe` and
+`C:\Wolfden\dracula` on Windows, and `/opt/wolfden/wolfden` and
+`/Users/you/dens/dracula` on macOS and Linux. Replace them with your own
+paths.
 
 ### Claude Code
 
@@ -85,7 +91,7 @@ claude mcp add wolfden -- C:\Wolfden\bin\wolfden.exe mcp --den C:\Wolfden\dracul
 On macOS and Linux:
 
 ```sh
-claude mcp add wolfden -- /opt/wolfden/wolfden mcp --den /srv/dens/dracula
+claude mcp add wolfden -- /opt/wolfden/wolfden mcp --den /Users/you/dens/dracula
 ```
 
 `--scope` (before the name) says where the setting is kept:
@@ -97,7 +103,7 @@ claude mcp add wolfden -- /opt/wolfden/wolfden mcp --den /srv/dens/dracula
   approve a project's servers before it starts them.
 
 ```sh
-claude mcp add --scope user wolfden -- /opt/wolfden/wolfden mcp --den /srv/dens/dracula
+claude mcp add --scope user wolfden -- /opt/wolfden/wolfden mcp --den /Users/you/dens/dracula
 ```
 
 You can also write `.mcp.json` by hand:
@@ -148,7 +154,7 @@ On macOS:
   "mcpServers": {
     "wolfden": {
       "command": "/opt/wolfden/wolfden",
-      "args": ["mcp", "--den", "/srv/dens/dracula"]
+      "args": ["mcp", "--den", "/Users/you/dens/dracula"]
     }
   }
 }
@@ -179,7 +185,7 @@ You can run more than one client against the same den. Only one Wolfden
 watches a den's files at a time; the others check the files before each
 call instead.
 
-## The tools
+## 4. The tools
 
 The server's own instructions and each tool's description tell the
 assistant how to use them, so you don't need to name tools in your
@@ -190,7 +196,7 @@ prompts. This list is for knowing what the assistant can do.
 | Tool | What it does |
 |---|---|
 | `search` | Full-text search over names, aliases, leads, and section text. |
-| `get_entity` | One entity, by name, alias, file name, id, or path; with `as_of`, only what the reader knows at that position. |
+| `get_entity` | One entity, by name, alias, file name, id, key, or path; with `as_of`, only what the reader knows at that position. |
 | `list_entities` | Entities by type, status, series, or book. |
 | `canon_as_of` | Canon at a story position (or the end of the story), pinned canon first. |
 | `get_chapter` | A book's chapters and their fields, with each value's source (the chapter, or `chapter_defaults` above it). |
@@ -203,7 +209,7 @@ prompts. This list is for knowing what the assistant can do.
 | Tool | What it does |
 |---|---|
 | `create_entity` | A new entity from its type's template. |
-| `update_fields` | Set, add to, or remove an entity's fields (and add aliases). |
+| `update_fields` | Set, add to, or remove anything in an entity's frontmatter (its fields, `status`, `from`), and add aliases. |
 | `append_section` | Add text to a section, or add a new section. |
 | `add_idea` | Record undecided material with `status: idea`, as its own entity or as a section of one. |
 | `rename_section` | Rename a section and rewrite the links to it, den-wide. |
@@ -214,7 +220,7 @@ prompts. This list is for knowing what the assistant can do.
 | `update_chapter_defaults` | Change a universe's, series', or book's `chapter_defaults`. |
 | `checkpoint` | Commit the den (or some paths) to git, with the assistant as co-author. |
 
-## What keeps the writes safe
+## 5. What keeps the writes safe
 
 - **Nothing is saved that the den couldn't read.** Each edit is checked
   as a load of the den would check it, and refused if it would leave an
@@ -226,23 +232,26 @@ prompts. This list is for knowing what the assistant can do.
   and retries.
 - **Finished books stay finished.** Nothing in a book with `status: final`
   is written: its entities, `book.md`, or outline. A rename that would
-  have to rewrite a link in one is refused as a whole.
+  have to rewrite a link in one is refused as a whole, and so is a change
+  to a series' or universe's `chapter_defaults` that would change what a
+  final book's chapters have.
 - **Effects, not just bytes.** Results say what an edit means for the
   story: a status that takes an entity out of canon views, a chapter left
-  with no POV, links that a rename rewrote or that would now reach a
-  different entity (those are refused unless the assistant is told to
-  allow them).
+  with no POV, the links a rename rewrote, and any link that would now
+  reach a different entity (a change like that is refused unless the
+  assistant is told to allow it).
 - **Files only, until a checkpoint.** Writes go to the files, not to git.
   `checkpoint` commits them, and lists which files the session wrote and
   which were changed outside it, so your own edits are never hidden in an
   assistant's commit. Until then, `git diff` shows exactly what changed.
-- **One universe at a time.** Every tool but `check` reads one universe,
-  and `--universe` can pin a session to one.
+- **One universe at a time.** Every tool but `check` and `checkpoint`
+  reads one universe; `search` and `list_entities` also take `*` for
+  every universe. `--universe` pins a session to one.
 
 Your MCP client may also ask you to approve each tool call. That's the
 client's setting, not Wolfden's.
 
-## Example prompts
+## 6. Example prompts
 
 These work against the Dracula sample. The sample's one book has the key
 `dracula`, so `dracula:9` is chapter 9. Prompts that write need the copy
@@ -255,8 +264,8 @@ described in [Pick a den](#2-pick-a-den).
 | "Where do my notes mention the bloofer lady?" | `search` |
 | "Whose point of view is chapter 21, and when is it set?" | `get_chapter` |
 | "Run a continuity check on the den and explain anything it finds." | `check` |
-| "What changed in Count Dracula's notes since the last checkpoint?" | `get_history` with `diff` |
 | "Add to Renfield's Want section: he wants to be trusted with something alive and large." | `get_entity`, then `append_section` |
+| "What changed in Renfield's notes since the last checkpoint?" | `get_history` with `diff` |
 | "Rename the faction 'The little band' to 'The Crew of Light', and fix any links." | `get_entity`, then `rename_entity` |
 | "Note an idea, not canon: what if Renfield kept a diary of his own?" | `add_idea` |
 | "Checkpoint this session as 'Renfield notes'." | `checkpoint` |

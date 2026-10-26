@@ -568,8 +568,9 @@ commands, and `wolfden <command> --help` describes each one:
 
 They share one surface:
 
-- **Which den.** `--den <folder>` names it (`check` and `index` also take
-  it as a plain argument). Otherwise it's the current folder, or the
+- **Which den.** `--den <folder>` names it (`check`, `index`, and `mcp`
+  also take it as a plain argument; `init` takes the new den's folder as
+  one, and has no `--den`). Otherwise it's the current folder, or the
   nearest folder above it that holds a `den.yaml`, as git finds its
   repository.
 - **Which universe** (maintainer decision, 2026-10-23). A den with one
