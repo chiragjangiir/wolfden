@@ -1,7 +1,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
-import { denQuery, type LinkView } from '../api'
+import { denQuery, remoteImagesAtLoad, type LinkView } from '../api'
 import { WIKI_LINK, WikiLink, createLinkMatcher } from './Links'
 
 // Notes' markdown, rendered safely. react-markdown builds React elements
@@ -92,12 +92,15 @@ export function imageSource(src: string, base: string = window.location.href): {
 const InLink = createContext(false)
 
 /** What shows in place of an image from a website that doesn't load. */
-function BlockedImage({ src, alt, url }: { src: string; alt: string | undefined; url: URL | null }) {
+function BlockedImage({ src, alt, url, reload }: { src: string; alt: string | undefined; url: URL | null; reload: boolean }) {
   const inLink = useContext(InLink)
   const label = alt?.trim() ? `Image not loaded: ${alt.trim()}` : 'Image not loaded'
   const web = url !== null && (url.protocol === 'https:' || url.protocol === 'http:')
+  const title = reload
+    ? 'den.yaml now allows images from websites; reload the page to load them.'
+    : "Images from websites don't load unless den.yaml has remote_images: true."
   return (
-    <span className="blocked-image" title="Images from websites don't load unless den.yaml has remote_images: true.">
+    <span className="blocked-image" title={title}>
       <span className="blocked-image-label">{label}</span>{' '}
       {web && !inLink ? (
         <a href={url.href} target="_blank" rel="noopener noreferrer">
@@ -106,12 +109,27 @@ function BlockedImage({ src, alt, url }: { src: string; alt: string | undefined;
       ) : (
         <span className="blocked-image-address">{src}</span>
       )}
+      {reload && <span className="blocked-image-hint"> (reload the page to load images)</span>}
     </span>
   )
 }
 
+/**
+ * Whether a note's images from websites load. The page's
+ * Content-Security-Policy was fixed when it loaded, so they load only if
+ * the den allowed them in its first answer and still does: turning the
+ * setting off blocks them at once, and turning it on asks for a reload.
+ */
+function useRemoteImages(): { allowed: boolean; reload: boolean } {
+  const client = useQueryClient()
+  // Until the den's setting is known, images from websites stay blocked.
+  const live = useQuery(denQuery).data?.remoteImages === true
+  const atLoad = remoteImagesAtLoad(client) === true
+  return { allowed: live && atLoad, reload: live && !atLoad }
+}
+
 /** A note's image: as written if it's local, and from a website only if the den allows it. */
-function Image({ src, alt, title, remoteImages }: { src: unknown; alt?: string; title?: string; remoteImages: boolean }) {
+function Image({ src, alt, title, remoteImages }: { src: unknown; alt?: string; title?: string; remoteImages: { allowed: boolean; reload: boolean } }) {
   if (typeof src !== 'string') {
     return null
   }
@@ -121,8 +139,8 @@ function Image({ src, alt, title, remoteImages }: { src: unknown; alt?: string; 
     return <img src={src} alt={alt} title={title} />
   }
 
-  if (!remoteImages || !source.url) {
-    return <BlockedImage src={src} alt={alt} url={source.url} />
+  if (!remoteImages.allowed || !source.url) {
+    return <BlockedImage src={src} alt={alt} url={source.url} reload={remoteImages.reload} />
   }
 
   return <img src={src} alt={alt} title={title} referrerPolicy="no-referrer" />
@@ -141,8 +159,8 @@ function NoteLink({ href, children }: { href: string; children: ReactNode }) {
 
 /** A note's markdown, with its `[[...]]` links resolved as the API resolved them. */
 export function Markdown({ text, links, universe }: { text: string; links: readonly LinkView[]; universe: string }) {
-  // Until the den's setting is known, images from websites stay blocked.
-  const remoteImages = useQuery(denQuery).data?.remoteImages === true
+  const { allowed, reload } = useRemoteImages()
+  const remoteImages = useMemo(() => ({ allowed, reload }), [allowed, reload])
   const { plugin, resolved } = useMemo(() => {
     const resolved: LinkView[] = []
     return { plugin: wikiLinks(links, resolved), resolved }

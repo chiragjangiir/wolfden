@@ -134,6 +134,57 @@ describe('SC-WEB-37: den.yaml lets images from websites load', () => {
   })
 })
 
+describe('SC-WEB-37: a change to the setting while the page is open', () => {
+  function stubChangingDen(first: boolean) {
+    const setting = { remoteImages: first }
+    stubApi({
+      override: (path) => (path === '/api/den' ? { ...den, remoteImages: setting.remoteImages } : undefined),
+      entityPage: (): EntityPageResult => ({
+        version: 1,
+        view: 'full',
+        position: null,
+        inView: true,
+        note: null,
+        entity: page(jonathan, { sections: [section('Pictures', '![Castle at dusk](https://example.com/castle.jpg)')] }),
+      }),
+    })
+    return setting
+  }
+
+  async function open() {
+    const app = renderApp('/u/dracula/e/E-JONATHAN')
+    const main = await screen.findByRole('main')
+    await within(main).findByRole('heading', { name: 'Pictures' })
+    return { main, queryClient: app.queryClient }
+  }
+
+  it('turned on, asks for a reload rather than show an image the page’s policy blocks', async () => {
+    const setting = stubChangingDen(false)
+    const { main, queryClient } = await open()
+    expect(within(main).getByText('Image not loaded: Castle at dusk')).toBeTruthy()
+
+    setting.remoteImages = true
+    await queryClient.refetchQueries({ queryKey: ['den'] })
+
+    await within(main).findByText(/reload the page to load images/)
+    expect(main.querySelectorAll('img')).toHaveLength(0)
+    expect(within(main).getByText('Image not loaded: Castle at dusk')).toBeTruthy()
+  })
+
+  it('turned off, blocks images at once', async () => {
+    const setting = stubChangingDen(true)
+    const { main, queryClient } = await open()
+    await within(main).findByRole('img', { name: 'Castle at dusk' })
+
+    setting.remoteImages = false
+    await queryClient.refetchQueries({ queryKey: ['den'] })
+
+    await within(main).findByText('Image not loaded: Castle at dusk')
+    expect(main.querySelectorAll('img')).toHaveLength(0)
+    expect(within(main).queryByText(/reload the page/)).toBeNull()
+  })
+})
+
 describe('SC-WEB-38: an image in the den is rendered as before', () => {
   it('keeps a relative address as written, whatever the setting', async () => {
     for (const remoteImages of [false, true]) {
