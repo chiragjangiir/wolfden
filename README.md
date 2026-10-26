@@ -52,6 +52,8 @@ second lists everything a reader knows by chapter 9 of *Dracula*.
 [design.md §7](docs/design.md).
 To connect Claude or another AI assistant, see
 [Connecting MCP clients](docs/mcp-clients.md).
+For choosing whether a note goes in the universe, a series, or a book, see
+[Where to file things](docs/where-to-file.md).
 
 ## Planned features
 

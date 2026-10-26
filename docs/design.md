@@ -55,7 +55,8 @@ canon view at a position covers every scope of the universe, in story
 order, so a Book 4 view shows a side character filed under Book 1
 ([`format.md`](format.md) F-VIEW-1). A character who appears across a whole
 series lives at Series (or Universe) scope. A one-book side character lives
-at Book scope.
+at Book scope. [`where-to-file.md`](where-to-file.md) is a short guide for
+writers on choosing a scope.
 
 Entities can **reference across scopes** in any direction. Book 3 can link to
 a character introduced in a standalone book in the same universe. A reference
