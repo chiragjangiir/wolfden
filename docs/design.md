@@ -568,8 +568,9 @@ commands, and `wolfden <command> --help` describes each one:
 
 They share one surface:
 
-- **Which den.** `--den <folder>` names it (`check` and `index` also take
-  it as a plain argument). Otherwise it's the current folder, or the
+- **Which den.** `--den <folder>` names it (`check`, `index`, and `mcp`
+  also take it as a plain argument; `init` takes the new den's folder as
+  one, and has no `--den`). Otherwise it's the current folder, or the
   nearest folder above it that holds a `den.yaml`, as git finds its
   repository.
 - **Which universe** (maintainer decision, 2026-10-23). A den with one
@@ -643,7 +644,9 @@ They share one surface:
 ## 8. AI integration (MCP)
 
 Wolfden ships an MCP server, using the official C# MCP SDK, over the same core
-library the API uses. `wolfden mcp` runs it over stdio (§7). Tool surface:
+library the API uses. `wolfden mcp` runs it over stdio (§7); how to add
+it to Claude Code, Claude Desktop, and other clients is in
+[`mcp-clients.md`](mcp-clients.md). Tool surface:
 
 | Tool | Status | Purpose |
 |---|---|---|
