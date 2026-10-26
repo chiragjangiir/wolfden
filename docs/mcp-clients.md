@@ -43,7 +43,7 @@ folder above it with a `den.yaml`. MCP clients don't always say which
 folder that is, so give `--den` with a full path.
 
 To try the write tools, **copy the Dracula sample out of the clone first**,
-to a folder of its own, and make it a git repository. From the clone's
+to a new folder that doesn't exist yet, and make it a git repository. From the clone's
 root (in PowerShell, use `Copy-Item -Recurse` for `cp -r`):
 
 ```sh
@@ -75,7 +75,7 @@ on `~` or `%USERPROFILE%` being expanded there.
 
 The examples below use `C:\Wolfden\bin\wolfden.exe` and
 `C:\Wolfden\dracula` on Windows, and `/opt/wolfden/wolfden` and
-`/Users/you/dens/dracula` on macOS and Linux. Replace them with your own
+`/opt/dens/dracula` on macOS and Linux. Replace them with your own
 paths.
 
 ### Claude Code
@@ -91,7 +91,7 @@ claude mcp add wolfden -- C:\Wolfden\bin\wolfden.exe mcp --den C:\Wolfden\dracul
 On macOS and Linux:
 
 ```sh
-claude mcp add wolfden -- /opt/wolfden/wolfden mcp --den /Users/you/dens/dracula
+claude mcp add wolfden -- /opt/wolfden/wolfden mcp --den /opt/dens/dracula
 ```
 
 `--scope` (before the name) says where the setting is kept:
@@ -103,7 +103,7 @@ claude mcp add wolfden -- /opt/wolfden/wolfden mcp --den /Users/you/dens/dracula
   approve a project's servers before it starts them.
 
 ```sh
-claude mcp add --scope user wolfden -- /opt/wolfden/wolfden mcp --den /Users/you/dens/dracula
+claude mcp add --scope user wolfden -- /opt/wolfden/wolfden mcp --den /opt/dens/dracula
 ```
 
 You can also write `.mcp.json` by hand:
@@ -154,7 +154,7 @@ On macOS:
   "mcpServers": {
     "wolfden": {
       "command": "/opt/wolfden/wolfden",
-      "args": ["mcp", "--den", "/Users/you/dens/dracula"]
+      "args": ["mcp", "--den", "/opt/dens/dracula"]
     }
   }
 }
