@@ -1623,8 +1623,9 @@ pinned species.
   the result's hash works. An edit that would leave an error
   (`status: maybe`, `from: dracula:7.2`) is refused as `invalid_edit`
   with the rule, and the file is unchanged. An `id` edit is refused
-  (F-ID-4); renaming the entity or changing an alias is refused until
-  links can follow (F-RT-5). The change to the pinned species is made,
+  (F-ID-4); renaming the entity or changing an alias is left to
+  `rename_entity` and `change_alias`, so links follow (F-RT-5,
+  SC-MCP-26, SC-MCP-27). The change to the pinned species is made,
   and `pinned_canon` says it touched pinned canon, as it does for a
   status change on the Count, whose pinned facts take his status. An
   edit that changes nothing writes nothing, not even a missing id. An
@@ -1858,6 +1859,110 @@ Covered by:
 `ChapterDefaultsToolTests.ALinkInADefaultIsComparedByTheEntityItReaches`,
 `ChapterDefaultsToolTests.ABookFrozenWhileTheEditIsMadeStopsIt`,
 `ChapterDefaultsToolTests.ABookLeftOutForErrorsThatSaysFinalStopsTheEdit`.
+
+### SC-MCP-26. My assistant renames a character
+
+A note on Whitby dialect links `[[Mr. Swales]]`, `[[mr. swales # voice
+|how he talks]]`, and `[[mr-swales]]`, and a field links
+`[[Mr. Swales#Voice]]`; a chapter's `pov` in `book.md` and a row of the
+outline (`[[Mr. Swales\|Swales]]`) link him by name too. The assistant
+renames him Old Swales.
+
+- `rename_entity` changes his `name`, and his title heading, which read
+  the old name, and rewrites every link that reached him by the old
+  name to `[[Old Swales]]`, keeping each link's spacing, heading, and
+  label, in the same change. The link by file name is left alone, and
+  so is the file's name. The result lists every file written with its
+  new hash, and `check` finds no broken or ambiguous link.
+- With `keep_old_name`, "Mr. Swales" becomes an alias instead and no
+  link changes, which suits a name that changes in the story. If
+  another character in the book goes by "Mr. Swales" too, the result
+  says that links by it are now ambiguous (F-LINK-7), naming the link
+  in the note. A new name that only changes case or spacing changes no
+  link.
+- If a note in a final book uses the old name, nothing is renamed
+  (`frozen`), and the error suggests `keep_old_name`, which leaves the
+  frozen book alone. Swales in a final book isn't renamed at all. A new
+  name that would send the rewritten links elsewhere ("Renfield", R. M.
+  Renfield's file name) is refused, and so is one a link can't hold
+  (`#`). A file with errors that uses the old name is named in the
+  result for the writer to fix by hand, and a write that fails part way
+  puts back what it wrote, as does one where `book.md` changed after
+  the rename was planned. The id still never changes.
+- Links in code, HTML comments, embeds, and escaped links are left
+  alone. A link in a block or folded scalar, or a quoted value, is
+  spliced in place; a plain value the new name ("Swales: the elder")
+  would make read differently is written anew, quoted. Renamed in the
+  universe, a character whose new name a character in the book has
+  ("Mr. Swales") would lose the book's links to that one, so the
+  rename is refused, naming them. Renaming the Count to his own alias
+  "Dracula" takes it out of his aliases.
+- Renamed "the Count", Swales would take a note's `[[the Count]]` from
+  Count Dracula, since a name matches before an alias, even with
+  `keep_old_name`. That's refused, listing the link with its old and
+  new target (and saying if it's in a final book); with
+  `allow_relinks`, the rename is made and the result lists the link. A
+  new name another note already has (Renfield's file name) is said in
+  the result even when the old name is kept. If a sailor in the
+  universe is also named Mr. Swales, keeping "Mr. Swales" only as an
+  alias would send a book note's `[[Mr. Swales]]` to the sailor, whose
+  name now wins: refused the same way, unless `allow_relinks`.
+
+Spec: format.md F-RT-5, F-LINK-1, F-LINK-4, F-LINK-6, F-LINK-7, F-SEC-2,
+F-BOOK-1 (maintainer decisions, 2026-10-25 and 2026-10-26). Covered by:
+`RenameEntityToolTests.RenamingAnEntityRewritesTheLinksThatUsedTheOldName`,
+`RenameEntityToolTests.KeepingTheOldNameAsAnAliasLeavesTheLinksAlone`,
+`RenameEntityToolTests.ALinkInAFrozenBookStopsTheRewriteButNotKeepingTheOldName`,
+`RenameEntityToolTests.AKeptAliasThatAnotherEntityHasIsSaidToBeAmbiguous`,
+`RenameEntityToolTests.ANewNameThatWouldSendARewrittenLinkElsewhereIsRefused`,
+`RenameEntityToolTests.AFileWithErrorsThatUsesTheOldNameIsNamed`,
+`RenameEntityToolTests.ARenameThatFailsPartWayPutsBackWhatItWrote`,
+`RenameEntityToolTests.RenamingToOneOfItsOwnAliasesTakesThatAliasOut`,
+`RenameEntityToolTests.ANewNameThatCollidesIsSaidEvenWhenTheOldNameIsKept`,
+`RenameEntityToolTests.ABookEntityWithTheNewNameShadowsItForLinksInTheBook`,
+`RenameEntityToolTests.LinksInCodeCommentsAndEmbedsAreLeftAlone`,
+`RenameEntityToolTests.LinksInFrontmatterValuesKeepTheirStyleOrAreQuotedAnew`,
+`RenameEntityToolTests.AContainerFileChangedWhileTheRenameIsMadeStopsIt`,
+`RenameEntityToolTests.ANameThatTakesAnotherEntitysLinksIsRefusedUnlessAllowed`,
+`RenameEntityToolTests.ARelinkInAFinalBookIsListedAndAllowedOnlyWithTheFlag`,
+`RenameEntityToolTests.AKeptNameThatLosesItsLinksToAnotherEntitysNameIsRefusedUnlessAllowed`,
+`EntityRenameEditTests.ALinksTargetIsReplacedKeepingItsSpacingHeadingAndLabel`,
+`EntityRenameEditTests.TheTitleChangesAndNothingElse`,
+`EntityRenameEditTests.ASetextTitleOrOneWithACommentKeepsItsForm`.
+
+### SC-MCP-27. My assistant changes one of the Count's aliases
+
+A note links `[[the Count]]`, `[[The  count|him]]`, `[[Count de
+Ville]]`, and `[[Dracula]]`. The assistant changes the alias "the
+Count" to "the Voivode", then removes "Count de Ville".
+
+- `change_alias` changes the alias in place and rewrites the two links
+  that used it to `[[the Voivode]]`, label kept. Removing "Count de
+  Ville" takes it out of `aliases` and rewrites its link to the
+  Count's name. With `keep_old_alias`, the new alias goes in beside the
+  old one and no link changes. An alias he doesn't have, a new alias
+  that's already his name or another of his aliases, and
+  `keep_old_alias` without a new alias are refused.
+- If a note in a final book uses the alias, it isn't removed or
+  changed (`frozen`); a change suggests `keep_old_alias`. If a legend
+  note in the universe is also named Count Dracula, a universe note's
+  `[[the Count]]` rewritten to his name would reach the legend, so
+  removing the alias is refused, suggesting keeping it or linking by id
+  or file name first.
+- A new alias "Lucy" would make a note's `[[Lucy]]`, which reaches Lucy
+  Westenra, ambiguous: refused, even with `keep_old_alias`, unless
+  `allow_relinks`, and then the result lists the link. A link that was
+  ambiguous before (`[[the sailor]]`, which Swales and Young Swales
+  both go by) and reaches Young Swales once Swales's alias changes is
+  only reported.
+
+Spec: format.md F-RT-5, F-RT-6, F-ENT-4, F-LINK-7, F-BOOK-1 (maintainer
+decisions, 2026-10-25 and 2026-10-26). Covered by:
+`RenameEntityToolTests.ChangingOrRemovingAnAliasRewritesItsLinks`,
+`RenameEntityToolTests.RemovingAnAliasALinkInAFrozenBookUsesIsRefused`,
+`RenameEntityToolTests.RemovingAnAliasWhoseLinksWouldReachAnotherEntityIsRefusedWithItsOwnHint`,
+`RenameEntityToolTests.AnAliasThatTakesAnotherEntitysLinksIsRefusedUnlessAllowed`,
+`RenameEntityToolTests.AnAmbiguousLinkThatNowResolvesIsReportedNotRefused`.
 
 ## STORE: Wolfden saves, moves, and deletes notes
 

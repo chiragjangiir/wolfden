@@ -141,8 +141,9 @@ public sealed partial class DenTools
     /// time), or <c>remove</c> a key or item, each at a path such as
     /// <c>fields.rank.1.from</c>. The changes are made in order, and saved
     /// together or not at all. <c>id</c> never changes (F-ID-4); the
-    /// <c>name</c>, and existing aliases, can't be changed here, since links
-    /// that matched the old text would have to follow (F-RT-5).
+    /// <c>name</c>, and existing aliases, are changed by
+    /// <see cref="RenameEntity"/> and <see cref="ChangeAlias"/>, since links
+    /// that matched the old text have to follow (F-RT-5).
     /// </summary>
     public WriteResult UpdateFields(string entity, string expectedHash, JsonElement changes, string? universe = null)
     {
@@ -1204,11 +1205,11 @@ public sealed partial class DenTools
             case "name":
                 throw new DenToolException(
                     ToolErrorCodes.UnsupportedEdit,
-                    "Renaming an entity means rewriting the links that match the old name (F-RT-5), which the write tools don't do yet. Ask the writer to rename it, or add the new name as an alias.");
+                    "Renaming an entity means rewriting the links that match the old name (F-RT-5): use rename_entity, which does that.");
             case "aliases" when op != "add" || path.Count != 1:
                 throw new DenToolException(
                     ToolErrorCodes.UnsupportedEdit,
-                    "Aliases can be added here, but not changed or removed: links that matched the old alias would break (F-RT-5). Ask the writer to make that change.");
+                    "Aliases can be added here, but not changed or removed: links that matched the old alias must follow (F-RT-5). Use change_alias, which rewrites them.");
             case "fields" when path.Count == 1 && op != "set":
                 throw new DenToolException(ToolErrorCodes.BadArgument, "Name a field: 'fields.<name>'.");
             case "fields" when path.Count == 1:

@@ -17,6 +17,7 @@ public sealed partial class MarkdownFile : DenFile
     private readonly int _frontmatterEnd;
     private readonly int _bodyStart;
     private readonly int _leadEnd;
+    private readonly (int Start, int End)? _titleSpan;
     private readonly IReadOnlyList<Section> _sections = [];
     private readonly Diagnostic? _missingFrontmatter;
 
@@ -69,6 +70,7 @@ public sealed partial class MarkdownFile : DenFile
         _sections = body.Sections;
         _leadEnd = body.LeadEnd;
         Title = body.Title;
+        _titleSpan = body.TitleSpan;
         AddDiagnostics(diagnostics);
         SortDiagnostics();
 
@@ -862,6 +864,39 @@ public sealed partial class MarkdownFile : DenFile
         if (result.Body != Body || !result.CanEdit || !YamlTreeCheck.SameExceptScalars(_frontmatter.Root, result._frontmatter?.Root, changed))
         {
             throw new ArgumentException("The frontmatter wouldn't read back with only those values changed.", nameof(replacements));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Changes the display title, the first level-1 heading in the lead
+    /// (F-SEC-2): only the heading's text changes, as
+    /// <see cref="WithSectionName"/> changes a section's.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The file has no title.</exception>
+    /// <exception cref="ArgumentException">The title isn't one line of text, or wouldn't read back as the title with nothing else changed.</exception>
+    public MarkdownFile WithTitle(string title)
+    {
+        ArgumentNullException.ThrowIfNull(title);
+        EnsureEditable();
+        CheckSectionName(title);
+        if (_titleSpan is not { } span || Title is null)
+        {
+            throw new InvalidOperationException("The file has no level-1 heading in its lead, so it has no title to change.");
+        }
+
+        if (Title == title)
+        {
+            return this;
+        }
+
+        var text = Source!.Text;
+        var insert = span.Start == span.End && span.Start > 0 && text[span.Start - 1] == '#' ? " " + title : title;
+        var result = Reparse([new TextEdit(span.Start, span.End - span.Start, insert)]);
+        if (result.FrontmatterText != FrontmatterText || result.Title != title || !Shapes().SequenceEqual(result.Shapes()))
+        {
+            throw new ArgumentException($"'{title}' wouldn't read back as the file's title with nothing else changed.", nameof(title));
         }
 
         return result;
