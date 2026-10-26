@@ -210,6 +210,14 @@ public class ServeCommandTests
             var html = await page.Content.ReadAsStringAsync(token);
             Assert.Equal(await File.ReadAllTextAsync(index, token), html);
             Assert.True(page.Headers.CacheControl?.NoCache);
+
+            // The page's Content-Security-Policy allows no inline script or
+            // style, so the built page must have none (#180).
+            Assert.Equal(
+                "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+                Assert.Single(page.Headers.GetValues("Content-Security-Policy")));
+            Assert.All(System.Text.RegularExpressions.Regex.Matches(html, @"<script\b[^>]*>").Select(m => m.Value), tag => Assert.Contains(" src=", tag, StringComparison.Ordinal));
+            Assert.DoesNotMatch(@"<style\b|\sstyle=|\son[a-z]+=", html);
             var script = System.Text.RegularExpressions.Regex.Match(html, @"src=""(/assets/[^""]+\.js)""").Groups[1].Value;
             using var asset = await client.GetAsync(script, token);
             Assert.Equal(HttpStatusCode.OK, asset.StatusCode);

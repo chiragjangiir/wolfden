@@ -63,6 +63,28 @@ public sealed class DenStructure
     public bool SpoilerChecks { get; internal set; }
 
     /// <summary>
+    /// True if <c>den.yaml</c> lets the web UI load images from websites in
+    /// notes, with <c>remote_images: true</c> (F-DEN-8). Off by default.
+    /// </summary>
+    public bool RemoteImages { get; internal set; }
+
+    /// <summary>
+    /// Reads <c>remote_images</c> (F-DEN-8) straight from <c>den.yaml</c>'s
+    /// bytes, without loading the den, as <c>wolfden serve</c> does for each
+    /// page it sends. True only when the file parses, its <c>format</c> is
+    /// one this reader supports (F-DEN-1, as the loader requires before it
+    /// reads any setting), and the value is the YAML boolean <c>true</c>;
+    /// anything else, a broken file included, leaves remote images off.
+    /// </summary>
+    public static bool ReadRemoteImages(ReadOnlySpan<byte> denYaml)
+    {
+        var file = YamlFile.Parse(denYaml);
+        return !file.HasErrors
+            && DenLoader.ReadFormat(file, out _) is not null
+            && DenLoader.ReadBoolean(file, DenLoader.RemoteImagesKey, out _) == true;
+    }
+
+    /// <summary>
     /// The den's own bookkeeping patterns from <c>den.yaml</c>'s
     /// <c>bookkeeping_sections</c> (F-DEN-6), as written. The built-in ones
     /// (F-SEC-12) aren't included.

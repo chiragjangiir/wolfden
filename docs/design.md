@@ -1048,9 +1048,22 @@ docs/
   itself (`localhost` or `127.0.0.1` on its port), and sends no CORS
   headers, so another site's script can't read an answer or send a
   write. Requests without those headers, such as `curl`'s, are answered.
-  Every response has `X-Content-Type-Options: nosniff`, and pages are
-  sent with `Cache-Control: no-cache`, so a new build shows on the next
-  load. Hosting for several users (§10) brings its own authentication.
+  Every response the app sends, its errors included (a refused host, a
+  `cross_site` 403, an `internal_error`), has `X-Content-Type-Options:
+  nosniff`, and pages are sent with `Cache-Control: no-cache`, so a new
+  build shows on the next load. Every response the app sends also has a
+  Content-Security-Policy (#180), as defence in depth. A page's is `default-src 'self'; script-src 'self';
+  style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src
+  'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none';
+  form-action 'self'`: the built UI has no inline script or style, and
+  `data:` is there only for its empty icon. In a den with
+  `remote_images: true` (format.md F-DEN-8), `img-src` adds `https:
+  http:`; `den.yaml` is read for each page, so a change applies on the
+  next load. Everything else, the API's JSON, the UI's files, and error
+  pages, gets `default-src 'none'`, and the page that says how to build the UI allows
+  only its own inline style. The policy comes from `serve`, so `npm run
+  dev`, whose page has an inline script for hot reload, isn't affected.
+  Hosting for several users (§10) brings its own authentication.
   The API is JSON under `/api`, in camelCase, as is usual for a web
   client (the MCP tools keep snake_case, §8); errors are `{code,
   message}`, with the MCP tools' codes where they mean the same thing
@@ -1058,7 +1071,8 @@ docs/
   `method_not_allowed`, `cross_site`, and `internal_error` otherwise.
   Results carry a `version` for their shape, as `--json` does. Each request brings the
   index up to date first, as an MCP tool call does. It has
-  `/api/health`, `/api/den` (the den's name and its universes), and the
+  `/api/health`, `/api/den` (the den's name, its universes, and
+  `remoteImages`, F-DEN-8), and the
   read endpoints below for M3's pages (#24 to #27). The UI in `web/` is built with npm (`npm run
   build`, Node.js 22.12 or later) into `web/dist`, which `dotnet build`
   copies next to `wolfden` as `wwwroot` when it's there; `dotnet build`
@@ -1189,6 +1203,27 @@ docs/
     react-markdown, which builds React elements and never HTML strings.
     Raw HTML in a note is dropped, and unsafe URLs such as `javascript:`
     are removed.
+  - **Images from websites** (maintainer decision on #180, 2026-10-26).
+    By default an image in a note whose address is on a website
+    (`https:`, `http:`, or `//host/...`; in practice, any address that
+    resolves to another origin than the page's) doesn't load, so opening
+    a note doesn't tell that website the den was opened. The renderer
+    shows a small placeholder instead, with the image's alt text and its
+    address as a link that opens in a new tab (`rel="noopener
+    noreferrer"`); inside a note's link it shows the address as text, so
+    links don't nest. `remote_images: true` in `den.yaml` (format.md
+    F-DEN-8) loads them, with `referrerpolicy="no-referrer"`. The UI reads
+    the setting from `/api/den` and blocks until it knows it. The page's
+    policy is fixed when it loads, so the UI keeps the setting's first
+    answer: turned off while the page is open, images are blocked at
+    once; turned on, the placeholder stays and says to reload the page,
+    rather than showing images the policy would break. The
+    blocking is done by the renderer, so it doesn't depend on the browser
+    enforcing the Content-Security-Policy, which blocks them too. An image
+    with a relative address is rendered as written, as before; `serve`
+    doesn't serve the den's files, so such an image doesn't show yet.
+    Nothing else in a rendered note fetches anything: links are plain
+    links, and raw HTML is dropped.
 - **The search page** (#25; v0 behaviour, not a recorded decision). A
   search box sits in the top bar; `/` focuses it from anywhere but a
   text box. Typing searches once it pauses (300 ms), on
