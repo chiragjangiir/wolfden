@@ -839,11 +839,20 @@ store, so an edit changes only what it means to (format.md §12):
   the error suggests keeping the old text. Before anything is written,
   every link in the den is resolved again as it would be after the
   change: a rewritten link that would no longer reach the entity (the
-  new text is another entity's file name, say) refuses the change, and
-  any other link that would resolve differently (a kept alias another
-  entity also has makes it ambiguous, F-LINK-7) is listed in
+  new text is another entity's file name, say) refuses the change. So
+  does one that would change the target of a link that reached a
+  different entity (a new name that's another entity's alias takes its
+  links, since a name matches before an alias), with or without
+  keeping the old text (maintainer decision, 2026-10-26): the error
+  lists each such link, its file, and its old and new target, and
+  `allow_relinks` makes the change anyway. For now `allow_relinks`
+  covers links in final books too; that case is a separate check, so
+  it can become an always-refuse. Any other link that would resolve
+  differently (a kept alias another entity also has makes it
+  ambiguous, F-LINK-7), and any relinked link allowed, is listed in
   `effects`. A change that only alters case or spacing changes no link
-  (F-LINK-4).
+  (F-LINK-4). Renaming an entity to one of its own aliases takes that
+  alias out.
   Moving and copying entities come later (#89, #129).
 
 ## 9. Architecture

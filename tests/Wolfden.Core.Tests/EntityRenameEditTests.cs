@@ -11,7 +11,7 @@ namespace Wolfden.Core.Tests;
 public class EntityRenameEditTests
 {
     [Fact]
-    [Trait("Scenario", "SC-MCP-24")]
+    [Trait("Scenario", "SC-MCP-26")]
     public void ALinksTargetIsReplacedKeepingItsSpacingHeadingAndLabel()
     {
         Assert.Equal("[[Old Swales]]", LinkSyntax.WithTarget("[[Mr. Swales]]", "Old Swales"));
@@ -22,7 +22,7 @@ public class EntityRenameEditTests
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-24")]
+    [Trait("Scenario", "SC-MCP-26")]
     public void TheTitleChangesAndNothingElse()
     {
         var file = MarkdownFile.Parse(TestFiles.Utf8("---\nname: Mara Voss\n---\n\n# Mara Voss ##\n\nLead.\n\n## Arc\nText.\n"));
@@ -34,5 +34,21 @@ public class EntityRenameEditTests
         Assert.Same(renamed, renamed.WithTitle("Mara Ellery"));
         Assert.Throws<ArgumentException>(() => file.WithTitle("Two\nlines"));
         Assert.Throws<InvalidOperationException>(() => MarkdownFile.Parse(TestFiles.Utf8("---\nname: X\n---\n\nNo title.\n")).WithTitle("X"));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-26")]
+    public void ASetextTitleOrOneWithACommentKeepsItsForm()
+    {
+        var setext = MarkdownFile.Parse(TestFiles.Utf8("---\nname: Mara Voss\n---\n\nMara Voss\n=========\n\nLead.\n"));
+        var renamed = setext.WithTitle("Mara Ellery");
+        Assert.Equal("---\nname: Mara Voss\n---\n\nMara Ellery\n=========\n\nLead.\n", renamed.Text);
+        Assert.Equal("Mara Ellery", renamed.Title);
+
+        var commented = MarkdownFile.Parse(TestFiles.Utf8("---\nname: Mara Voss\n---\n\n# Mara Voss <!-- working title -->\n\n## Arc\nText.\n"));
+        Assert.Equal("Mara Voss", commented.Title);
+        Assert.Equal(
+            "---\nname: Mara Voss\n---\n\n# Mara Ellery <!-- working title -->\n\n## Arc\nText.\n",
+            commented.WithTitle("Mara Ellery").Text);
     }
 }

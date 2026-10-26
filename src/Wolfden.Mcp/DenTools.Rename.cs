@@ -19,14 +19,25 @@ namespace Wolfden.Mcp;
 /// can be kept as an alias, and then no link changes. If a link to rewrite
 /// is in a final book, nothing changes, and the error suggests keeping the
 /// old text, which leaves the frozen book alone. A rewrite that would send a
-/// rewritten link somewhere else is refused; any other link that would
+/// rewritten link somewhere else is refused. So is one that would re-point a
+/// link that reached another entity (a new name that's another entity's
+/// alias takes its links, F-LINK-6), unless <c>allow_relinks</c> says to go
+/// ahead (maintainer decision, 2026-10-26). Any other link that would
 /// resolve differently afterwards (an alias kept that another entity also
-/// has, F-LINK-7, say) is listed in the result's effects.
+/// has, F-LINK-7, say), and any relinked link allowed, is listed in the
+/// result's effects.
 /// </remarks>
 public sealed partial class DenTools
 {
     /// <summary>How many links whose resolution changes are listed in effects, before "and N more".</summary>
     private const int ListedLinkChanges = 10;
+
+    /// <summary>
+    /// True to refuse a change that re-points a link in a final book even with
+    /// <c>allow_relinks</c>. The maintainer's decision (2026-10-26) lets
+    /// <c>allow_relinks</c> cover them for now.
+    /// </summary>
+    private const bool RefuseRelinksInFinalBooks = false;
 
     /// <summary>
     /// Changes an entity's <c>name</c>, and rewrites every link that reached
@@ -35,7 +46,7 @@ public sealed partial class DenTools
     /// alias instead, and no link changes. A display title (<c># Old name</c>)
     /// that reads the old name follows. The file isn't renamed.
     /// </summary>
-    public WriteResult RenameEntity(string entity, string newName, string expectedHash, bool keepOldName = false, string? universe = null)
+    public WriteResult RenameEntity(string entity, string newName, string expectedHash, bool keepOldName = false, string? universe = null, bool allowRelinks = false)
     {
         var hash = RequireHash(expectedHash);
         if (string.IsNullOrWhiteSpace(newName) || newName.Any(char.IsControl))
@@ -44,7 +55,7 @@ public sealed partial class DenTools
         }
 
         newName = newName.Trim();
-        return ChangeText(entity, universe, hash, target =>
+        return ChangeText(entity, universe, hash, allowRelinks, target =>
         {
             var oldName = target.Name;
             if (oldName == newName)
@@ -55,11 +66,22 @@ public sealed partial class DenTools
             var sameForLinks = LinkText.Matches(oldName, newName);
             var keep = keepOldName && !sameForLinks;
             var alreadyAlias = target.Aliases.Any(a => LinkText.Matches(a, oldName));
+
+            // Renamed to one of its own aliases: the alias goes, so the name isn't also an alias.
+            var aliasItems = (target.File.GetFrontmatterValue("aliases") as YamlSequence)?.Items ?? [];
+            var ownAlias = sameForLinks ? -1 : aliasItems.ToList().FindIndex(i => i is YamlScalar { IsNull: false } s && LinkText.Matches(s.Text, newName));
+            var dropped = ownAlias >= 0 ? ((YamlScalar)aliasItems[ownAlias]).Text : null;
+            const string Hint = "pass keep_old_name: true to keep the old name as an alias instead, which leaves those links as they are";
             return new TextChange(
                 LinkMatchKind.Name, oldName, newName, keep || sameForLinks ? null : newName,
                 file =>
                 {
                     file = Apply(() => file.WithFrontmatterValue(["name"], YamlScalarValue.String(newName)));
+                    if (ownAlias >= 0)
+                    {
+                        file = Apply(() => file.WithoutFrontmatterValue(["aliases", ownAlias.ToString(System.Globalization.CultureInfo.InvariantCulture)]));
+                    }
+
                     if (keep && !alreadyAlias)
                     {
                         file = Apply(() => file.WithNewListItem(["aliases"], YamlScalarValue.String(oldName), null, inTemplateOrder: true));
@@ -70,7 +92,9 @@ public sealed partial class DenTools
                 Kept: keep ? oldName : null,
                 NewAlias: null,
                 SameForLinks: sameForLinks,
-                KeepHint: "pass keep_old_name: true to keep the old name as an alias instead, which leaves those links as they are");
+                KeepHint: Hint,
+                LostHint: "choose another name, or " + Hint,
+                DroppedAlias: dropped);
         });
     }
 
@@ -82,7 +106,7 @@ public sealed partial class DenTools
     /// entity's name. With <paramref name="keepOldAlias"/>, the new alias is
     /// added beside the old one instead, and no link changes.
     /// </summary>
-    public WriteResult ChangeAlias(string entity, string alias, string expectedHash, string? newAlias = null, bool keepOldAlias = false, string? universe = null)
+    public WriteResult ChangeAlias(string entity, string alias, string expectedHash, string? newAlias = null, bool keepOldAlias = false, string? universe = null, bool allowRelinks = false)
     {
         var hash = RequireHash(expectedHash);
         if (string.IsNullOrWhiteSpace(alias))
@@ -102,7 +126,7 @@ public sealed partial class DenTools
         }
 
         newAlias = newAlias?.Trim();
-        return ChangeText(entity, universe, hash, target =>
+        return ChangeText(entity, universe, hash, allowRelinks, target =>
         {
             var file = target.File;
             var list = file.GetFrontmatterValue("aliases") as YamlSequence;
@@ -143,7 +167,10 @@ public sealed partial class DenTools
                 SameForLinks: sameForLinks,
                 KeepHint: newAlias is null
                     ? "keep the alias, or ask the writer to unfreeze the book"
-                    : "pass keep_old_alias: true to add the new alias beside the old one instead, which leaves those links as they are");
+                    : "pass keep_old_alias: true to add the new alias beside the old one instead, which leaves those links as they are",
+                LostHint: newAlias is null
+                    ? "keep the alias, or change those links to the entity's id or file name first"
+                    : "choose another alias, or pass keep_old_alias: true to add the new alias beside the old one instead, which leaves those links as they are");
         });
     }
 
@@ -159,11 +186,13 @@ public sealed partial class DenTools
     /// <param name="NewAlias">For an alias: the new alias, or null if it's removed.</param>
     /// <param name="SameForLinks">True if the new text matches the old for links (F-LINK-4), so links needn't change.</param>
     /// <param name="KeepHint">What to do instead when a link to rewrite is in a final book.</param>
+    /// <param name="LostHint">What to do instead when a rewritten link wouldn't reach the entity.</param>
+    /// <param name="DroppedAlias">For a rename to one of the entity's own aliases: that alias, taken out of <c>aliases</c>.</param>
     private sealed record TextChange(
         LinkMatchKind Kind, string OldText, string? NewText, string? LinkText, Func<MarkdownFile, MarkdownFile> Edit, string? Kept, string? NewAlias, bool SameForLinks,
-        string KeepHint);
+        string KeepHint, string LostHint, string? DroppedAlias = null);
 
-    private WriteResult ChangeText(string entity, string? universe, string hash, Func<CatalogEntity, TextChange?> change)
+    private WriteResult ChangeText(string entity, string? universe, string hash, bool allowRelinks, Func<CatalogEntity, TextChange?> change)
     {
         var (path, ids) = Locate(entity, universe);
         lock (_writeLock)
@@ -230,7 +259,33 @@ public sealed partial class DenTools
                     $"{lost.Count} link(s) that use '{c.OldText}' would be rewritten to [[{c.LinkText}]], which wouldn't reach '{target.Name}': " +
                     $"{string.Join("; ", lost.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} would {Outcome(l.After)}"))}" +
                     $"{(lost.Count > ListedLinkChanges ? $"; and {lost.Count - ListedLinkChanges} more" : "")}. Nothing was changed. " +
-                    $"Choose other text, or {c.KeepHint}.");
+                    $"To make the change, {c.LostHint}.");
+            }
+
+            // Links that weren't rewritten but resolve differently now are reported below. Those that
+            // reached another entity and wouldn't any more (a name beats that entity's alias, say)
+            // refuse the change unless allow_relinks says to go ahead (maintainer decision, 2026-10-26).
+            var moved = changed.Where(l => !rewritten.Contains(l.Before)).ToList();
+            var relinked = moved.Where(l => l.Before.Outcome == Core.Links.LinkOutcome.Resolved && l.Before.Target!.Path != path).ToList();
+            if (relinked.Count > 0 && !allowRelinks)
+            {
+                throw new DenToolException(
+                    ToolErrorCodes.BadArgument,
+                    $"{relinked.Count} link(s) that reach another entity would change target: " +
+                    $"{string.Join("; ", relinked.Take(ListedLinkChanges).Select(l => $"{Where(l.After)}{(InFinalBook(l.Before) ? " (in a final book)" : "")} reaches {Reached(l.Before)} and would {Outcome(l.After)}"))}" +
+                    $"{(relinked.Count > ListedLinkChanges ? $"; and {relinked.Count - ListedLinkChanges} more" : "")}. Nothing was changed. " +
+                    "Choose other text, link those by id or file name first, or pass allow_relinks: true to make the change anyway.");
+            }
+
+            // Relinks in a final book: allowed with allow_relinks for now. To always refuse them,
+            // set RefuseRelinksInFinalBooks to true.
+            var frozenRelinks = relinked.Where(l => InFinalBook(l.Before)).ToList();
+            if (frozenRelinks.Count > 0 && RefuseRelinksInFinalBooks)
+            {
+                throw new DenToolException(
+                    ToolErrorCodes.Frozen,
+                    $"{frozenRelinks.Count} link(s) in a final (frozen) book reach another entity and would change target (F-BOOK-1): " +
+                    $"{string.Join("; ", frozenRelinks.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} reaches {Reached(l.Before)}"))}. Nothing was changed. Choose other text.");
             }
 
             Save(files, plan.Originals, created: null);
@@ -243,14 +298,19 @@ public sealed partial class DenTools
                 {
                     effects.Add($"Its title heading, '# {title}', now reads '# {c.NewText}' too.");
                 }
+
+                if (c.DroppedAlias is { } dropped)
+                {
+                    effects.Add($"'{dropped}' was one of its aliases; it's the name now, so it was taken out of aliases. Links that use it still reach it, by name now.");
+                }
             }
 
-            foreach (var text in new[] { c.Kind == LinkMatchKind.Name && c.Kept is null ? c.NewText : null, c.Kept, c.NewAlias }.Where(t => t is not null).Distinct())
+            var name = c.Kind == LinkMatchKind.Name ? c.NewText : null;
+            foreach (var text in new[] { name, c.Kept, c.NewAlias }.Where(t => t is not null).Distinct())
             {
-                effects.AddRange(TextEffects(afterLinks.Catalog, after, text!, isName: c.Kind == LinkMatchKind.Name && text == c.NewText));
+                effects.AddRange(TextEffects(afterLinks.Catalog, after, text!, isName: text == name));
             }
 
-            var moved = changed.Where(l => !rewritten.Contains(l.Before)).ToList();
             effects.AddRange(moved.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} {Now(l.After)}; before, it {Was(l.Before)}."));
             if (moved.Count > ListedLinkChanges)
             {
@@ -260,8 +320,8 @@ public sealed partial class DenTools
             if (plan.SkippedPaths.Count > 0)
             {
                 effects.Add(
-                    $"These files have errors, so the den leaves them out and they weren't edited, but their text has links that use '{c.OldText}': " +
-                    $"{string.Join(", ", plan.SkippedPaths)}. Once they're fixed, change those links to '{c.LinkText}' by hand.");
+                    $"These files have errors, so the den leaves them out and they weren't edited, but their text has links by '{c.OldText}', which may be links to it: " +
+                    $"{string.Join(", ", plan.SkippedPaths)}. Once they're fixed, check those links and change the ones to it to '{c.LinkText}' by hand.");
             }
 
             if (idAdded is not null)
@@ -347,6 +407,10 @@ public sealed partial class DenTools
         Core.Links.LinkOutcome.Ambiguous => $"be ambiguous: {link.Resolution.Problem?.TrimEnd('.')}",
         _ => "be broken",
     };
+
+    private static bool InFinalBook(ResolvedLink link) => link.Occurrence.Scope is Book { Status: BookStatus.Final };
+
+    private static string Reached(ResolvedLink link) => $"'{link.Target!.Name}' ({link.Target.Path})";
 
     private static string Now(ResolvedLink link) => link.Outcome switch
     {

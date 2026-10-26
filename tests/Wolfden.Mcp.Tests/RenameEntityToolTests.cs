@@ -21,7 +21,7 @@ public sealed class RenameEntityToolTests : IDisposable
     public void Dispose() => _den.Dispose();
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-24")]
+    [Trait("Scenario", "SC-MCP-26")]
     public void RenamingAnEntityRewritesTheLinksThatUsedTheOldName()
     {
         _den.Write(Note,
@@ -66,7 +66,7 @@ public sealed class RenameEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-24")]
+    [Trait("Scenario", "SC-MCP-26")]
     public void KeepingTheOldNameAsAnAliasLeavesTheLinksAlone()
     {
         const string Text = "See [[Mr. Swales]].\n";
@@ -90,7 +90,7 @@ public sealed class RenameEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-24")]
+    [Trait("Scenario", "SC-MCP-26")]
     public void ALinkInAFrozenBookStopsTheRewriteButNotKeepingTheOldName()
     {
         _den.Write("universes/dracula/books/aftermath/book.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z2\nname: Aftermath\nstatus: final\n---\n");
@@ -116,7 +116,7 @@ public sealed class RenameEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-24")]
+    [Trait("Scenario", "SC-MCP-26")]
     public void AKeptAliasThatAnotherEntityHasIsSaidToBeAmbiguous()
     {
         // Another character in the book goes by "Mr. Swales" too; the note is in the universe, so scope can't choose.
@@ -136,7 +136,7 @@ public sealed class RenameEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-24")]
+    [Trait("Scenario", "SC-MCP-26")]
     public void ANewNameThatWouldSendARewrittenLinkElsewhereIsRefused()
     {
         WriteNote("See [[Mr. Swales]].\n");
@@ -159,7 +159,7 @@ public sealed class RenameEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-24")]
+    [Trait("Scenario", "SC-MCP-26")]
     public void AFileWithErrorsThatUsesTheOldNameIsNamed()
     {
         const string Broken = "universes/dracula/entities/notes/broken.md";
@@ -173,7 +173,7 @@ public sealed class RenameEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-25")]
+    [Trait("Scenario", "SC-MCP-27")]
     public void ChangingOrRemovingAnAliasRewritesItsLinks()
     {
         WriteNote("Beware [[the Count]], [[The  count|him]], [[Count de Ville]], and [[Dracula]].\n");
@@ -207,7 +207,7 @@ public sealed class RenameEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-25")]
+    [Trait("Scenario", "SC-MCP-27")]
     public void RemovingAnAliasALinkInAFrozenBookUsesIsRefused()
     {
         _den.Write("universes/dracula/books/aftermath/book.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z2\nname: Aftermath\nstatus: final\n---\n");
@@ -224,7 +224,7 @@ public sealed class RenameEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-24")]
+    [Trait("Scenario", "SC-MCP-26")]
     public void ARenameThatFailsPartWayPutsBackWhatItWrote()
     {
         WriteNote("See [[Mr. Swales]].\n");
@@ -240,6 +240,193 @@ public sealed class RenameEntityToolTests : IDisposable
         Assert.Equal(before.Note, _den.Read(Note));
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-MCP-26")]
+    public void RenamingToOneOfItsOwnAliasesTakesThatAliasOut()
+    {
+        WriteNote("Beware [[Dracula]].\n");
+        var hash = Tools.GetEntity("Count Dracula").Entity!.Hash!;
+
+        var result = Tools.RenameEntity("Count Dracula", "Dracula", hash);
+
+        var count = _den.Read(Count);
+        Assert.Contains("\nname: Dracula\naliases: [the Count, Count de Ville]\n", count, StringComparison.Ordinal);
+        Assert.Contains(result.Effects, e => e.Contains("'Dracula' was one of its aliases", StringComparison.Ordinal));
+        Assert.EndsWith("Beware [[Dracula]].\n", _den.Read(Note), StringComparison.Ordinal);
+        Assert.DoesNotContain(Tools.Check().Diagnostics, d => d.Rule is "F-LINK-8" or "F-LINK-7");
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-26")]
+    public void ANewNameThatCollidesIsSaidEvenWhenTheOldNameIsKept()
+    {
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        var result = Tools.RenameEntity("Mr. Swales", "Renfield", hash, keepOldName: true);
+
+        Assert.Contains(result.Effects, e => e.Contains("'Renfield' is also the file name of 'R. M. Renfield'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-27")]
+    public void RemovingAnAliasWhoseLinksWouldReachAnotherEntityIsRefusedWithItsOwnHint()
+    {
+        // A legend note in the universe is also named Count Dracula: from the universe, [[Count Dracula]] reaches it.
+        _den.Write("universes/dracula/entities/notes/the-legend.md",
+            "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z5\ntype: note\nname: Count Dracula\nstatus: draft\n---\n");
+        WriteNote("Beware [[the Count]].\n");
+        var before = _den.Read(Count);
+        var hash = Tools.GetEntity(Count).Entity!.Hash!;
+
+        var refused = Assert.Throws<DenToolException>(() => Tools.ChangeAlias(Count, "the Count", hash));
+
+        Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
+        Assert.Contains("wouldn't reach 'Count Dracula'", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("keep the alias, or change those links to the entity's id or file name first", refused.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("unfreeze", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(before, _den.Read(Count));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-26")]
+    public void ABookEntityWithTheNewNameShadowsItForLinksInTheBook()
+    {
+        const string Sailor = "universes/dracula/entities/characters/the-sailor.md";
+        const string BookNote = Book + "/entities/notes/harbour.md";
+        _den.Write(Sailor, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z6\ntype: character\nname: The Sailor\nstatus: draft\n---\n");
+        _den.Write(BookNote, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z7\ntype: note\nname: Harbour\nstatus: draft\n---\n\nSee [[The Sailor]].\n");
+        WriteNote("See [[The Sailor]].\n");
+        var hash = Tools.GetEntity(Sailor).Entity!.Hash!;
+
+        // In the book, [[Mr. Swales]] reaches Swales, the nearer scope (F-LINK-7); in the universe, the sailor.
+        var refused = Assert.Throws<DenToolException>(() => Tools.RenameEntity(Sailor, "Mr. Swales", hash));
+
+        Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
+        Assert.Contains($"[[Mr. Swales]] in {BookNote}", refused.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(Note, refused.Message, StringComparison.Ordinal);
+        Assert.EndsWith("See [[The Sailor]].\n", _den.Read(BookNote), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-26")]
+    public void LinksInCodeCommentsAndEmbedsAreLeftAlone()
+    {
+        const string Text = "Code `[[Mr. Swales]]`, <!-- [[Mr. Swales]] -->, ![[Mr. Swales]], \\[[Mr. Swales]].\n\n```\n[[Mr. Swales]]\n```\n\nBut [[Mr. Swales]].\n";
+        WriteNote(Text);
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        var result = Tools.RenameEntity("Mr. Swales", "Old Swales", hash);
+
+        Assert.EndsWith(Text.Replace("But [[Mr. Swales]]", "But [[Old Swales]]", StringComparison.Ordinal), _den.Read(Note), StringComparison.Ordinal);
+        Assert.Contains(result.Effects, e => e.Contains("rewrote 1 link(s)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-26")]
+    public void LinksInFrontmatterValuesKeepTheirStyleOrAreQuotedAnew()
+    {
+        _den.Write(Note,
+            "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z1\ntype: note\nname: Whitby dialect\nstatus: draft\nfields:\n" +
+            "  x_block: |\n    Read [[Mr. Swales]] aloud.\n" +
+            "  x_folded: >\n    Folded [[Mr. Swales]]\n    text.\n" +
+            "  x_quoted: 'it''s [[Mr. Swales]]'\n" +
+            "  x_plain: see [[Mr. Swales]] now\n---\n\n# Whitby dialect\n");
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        // A colon and space would end a plain scalar's key, so that value is written anew, quoted.
+        Tools.RenameEntity("Mr. Swales", "Swales: the elder", hash);
+
+        var text = _den.Read(Note);
+        Assert.Contains("  x_block: |\n    Read [[Swales: the elder]] aloud.\n", text, StringComparison.Ordinal);
+        Assert.Contains("  x_folded: >\n    Folded [[Swales: the elder]]\n    text.\n", text, StringComparison.Ordinal);
+        Assert.Contains("  x_quoted: 'it''s [[Swales: the elder]]'\n", text, StringComparison.Ordinal);
+        Assert.Contains("  x_plain: ", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("  x_plain: see [[Swales: the elder]] now\n", text, StringComparison.Ordinal);
+        Assert.Contains("see [[Swales: the elder]] now", text, StringComparison.Ordinal);
+        Assert.Equal(0, Tools.Check(path: Note).Errors);
+        Assert.DoesNotContain(Tools.Check().Diagnostics, d => d.Rule is "F-LINK-8" or "F-LINK-7");
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-26")]
+    public void AContainerFileChangedWhileTheRenameIsMadeStopsIt()
+    {
+        _den.Write(BookFile, _den.Read(BookFile).Replace(
+            "      pov: [\"[[mina-harker]]\", \"[[john-seward]]\"]\n", "      pov: [\"[[mina-harker]]\", \"[[Mr. Swales]]\"]\n", StringComparison.Ordinal));
+        var before = (Swales: _den.Read(Swales), Book: _den.Read(BookFile));
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+        var theirs = before.Book + "# Saved in an editor.\n";
+
+        // The writer saves book.md after the rename is planned, just as it's about to be written.
+        var tools = new DenTools(_den.Root) { Store = new ReadHookStore(_den.Root, Swales, 1, () => _den.Write(BookFile, theirs)) };
+        var stale = Assert.Throws<DenToolException>(() => tools.RenameEntity("Mr. Swales", "Old Swales", hash));
+
+        Assert.Equal(ToolErrorCodes.StaleFile, stale.Code);
+        Assert.Contains(BookFile, stale.Message, StringComparison.Ordinal);
+        Assert.Equal(before.Swales, _den.Read(Swales));
+        Assert.Equal(theirs, _den.Read(BookFile));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-26")]
+    public void ANameThatTakesAnotherEntitysLinksIsRefusedUnlessAllowed()
+    {
+        WriteNote("Beware [[the Count]].\n");
+        var before = _den.Read(Swales);
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        // A name matches before an alias, so [[the Count]] would reach Swales.
+        var refused = Assert.Throws<DenToolException>(() => Tools.RenameEntity("Mr. Swales", "the Count", hash));
+        Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
+        Assert.Contains($"[[the Count]] in {Note} (line 8) reaches 'Count Dracula'", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("allow_relinks", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(before, _den.Read(Swales));
+
+        // Keeping the old name doesn't help: the new name still takes the links.
+        Assert.Equal(ToolErrorCodes.BadArgument, Assert.Throws<DenToolException>(() => Tools.RenameEntity("Mr. Swales", "the Count", hash, keepOldName: true)).Code);
+
+        var allowed = Tools.RenameEntity("Mr. Swales", "the Count", hash, allowRelinks: true);
+        Assert.Contains(
+            allowed.Effects,
+            e => e.Contains($"[[the Count]] in {Note} (line 8) now reaches 'the Count' ({Swales}); before, it reached 'Count Dracula' ({Count})", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-26")]
+    public void ARelinkInAFinalBookIsListedAndAllowedOnlyWithTheFlag()
+    {
+        const string Memories = "universes/dracula/books/aftermath/entities/notes/memories.md";
+        _den.Write("universes/dracula/books/aftermath/book.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z2\nname: Aftermath\nstatus: final\n---\n");
+        _den.Write(Memories, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z3\ntype: note\nname: Memories\nstatus: draft\n---\n\nRecall [[the Count]].\n");
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        var refused = Assert.Throws<DenToolException>(() => Tools.RenameEntity("Mr. Swales", "the Count", hash));
+        Assert.Contains($"[[the Count]] in {Memories} (line 8) (in a final book)", refused.Message, StringComparison.Ordinal);
+
+        // For now (maintainer decision, 2026-10-26) the flag covers final books too; the frozen file isn't written.
+        var allowed = Tools.RenameEntity("Mr. Swales", "the Count", hash, allowRelinks: true);
+        Assert.Equal([Swales], allowed.Files!.Select(f => f.Path));
+        Assert.EndsWith("Recall [[the Count]].\n", _den.Read(Memories), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-27")]
+    public void AnAliasThatTakesAnotherEntitysLinksIsRefusedUnlessAllowed()
+    {
+        WriteNote("See [[Lucy]].\n");
+        var hash = Tools.GetEntity("Count Dracula").Entity!.Hash!;
+
+        // Lucy Westenra goes by "Lucy" too: the link would become ambiguous.
+        var refused = Assert.Throws<DenToolException>(() => Tools.ChangeAlias("Count Dracula", "Count de Ville", hash, newAlias: "Lucy"));
+        Assert.Contains("reaches 'Lucy Westenra'", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(
+            ToolErrorCodes.BadArgument,
+            Assert.Throws<DenToolException>(() => Tools.ChangeAlias("Count Dracula", "Count de Ville", hash, newAlias: "Lucy", keepOldAlias: true)).Code);
+
+        var allowed = Tools.ChangeAlias("Count Dracula", "Count de Ville", hash, newAlias: "Lucy", allowRelinks: true);
+        Assert.Contains(allowed.Effects, e => e.Contains("is now ambiguous (F-LINK-7)", StringComparison.Ordinal));
+    }
+
     private void WriteNote(string text) =>
         _den.Write(Note, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z1\ntype: note\nname: Whitby dialect\nstatus: draft\n---\n\n" + text);
 
@@ -247,5 +434,46 @@ public sealed class RenameEntityToolTests : IDisposable
     {
         using var document = System.Text.Json.JsonDocument.Parse(json);
         return document.RootElement.Clone();
+    }
+
+    /// <summary>A den store on disk that runs <paramref name="hook"/> once, on the <paramref name="call"/>th read of <paramref name="path"/>.</summary>
+    private sealed class ReadHookStore(string root, string path, int call, Action hook) : Core.Structure.IDenStore
+    {
+        private readonly Core.Structure.FileSystemDenStore _disk = new(root);
+        private int _reads;
+
+        public bool IsReadOnly => false;
+
+        public bool FileExists(string p) => _disk.FileExists(p);
+
+        public byte[] ReadFile(string p) => _disk.ReadFile(p);
+
+        public byte[]? TryReadFile(string p)
+        {
+            if (p == path && ++_reads == call)
+            {
+                hook();
+            }
+
+            return _disk.TryReadFile(p);
+        }
+
+        public byte[]? TryReadListedFile(string p) => _disk.TryReadListedFile(p);
+
+        public IEnumerable<string> GetDirectories(string p) => _disk.GetDirectories(p);
+
+        public IEnumerable<string> GetFiles(string p) => _disk.GetFiles(p);
+
+        public bool FolderExists(string p) => _disk.FolderExists(p);
+
+        public void WriteFile(string p, byte[] bytes, Core.Structure.DenWriteMode mode = Core.Structure.DenWriteMode.CreateOrReplace) => _disk.WriteFile(p, bytes, mode);
+
+        public void DeleteFile(string p) => _disk.DeleteFile(p);
+
+        public void MoveFile(string from, string to) => _disk.MoveFile(from, to);
+
+        public void MoveFolder(string from, string to) => _disk.MoveFolder(from, to);
+
+        public void DeleteFolder(string p) => _disk.DeleteFolder(p);
     }
 }

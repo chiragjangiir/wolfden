@@ -255,14 +255,16 @@ public sealed class WolfdenTools
         "the file isn't renamed, so links by file name or id are untouched. With keep_old_name true, the old name becomes an alias " +
         "instead and no link changes, which suits a name that changes in the story. If a link to rewrite is in a final (frozen) book, " +
         "nothing changes: keep the old name instead. A new name that would send a rewritten link elsewhere is refused. The result lists " +
-        "every file written, with its new hash, and any other link that now resolves differently." + WriteHelp)]
+        "every file written, with its new hash, and any other link that now resolves differently. If a link that reaches another " +
+        "entity would change target (a new name that is its alias takes its links), nothing changes unless allow_relinks is true." + WriteHelp)]
     public CallToolResult RenameEntity(
         [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
         [Description("The new name: one line, and without [, ], |, or # if links use the old name.")] string new_name,
         [Description(HashHelp)] string expected_hash,
         [Description("If true, keep the old name as an alias and leave links as they are.")] bool keep_old_name = false,
-        [Description(UniverseHelp)] string? universe = null) =>
-        Respond(() => _tools.RenameEntity(entity, new_name, expected_hash, keep_old_name, universe));
+        [Description(UniverseHelp)] string? universe = null,
+        [Description(RelinksHelp)] bool allow_relinks = false) =>
+        Respond(() => _tools.RenameEntity(entity, new_name, expected_hash, keep_old_name, universe, allow_relinks));
 
     /// <summary>The <c>change_alias</c> tool.</summary>
     [McpServerTool(Name = "change_alias", Title = "Change or remove an alias", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]
@@ -270,15 +272,21 @@ public sealed class WolfdenTools
         "Changes one of an entity's aliases to new_alias, or removes it when new_alias is left out, and in the same change rewrites " +
         "every link that reached the entity by the old alias, in any file of the den: to the new alias, or to the entity's name for a " +
         "removed one. With keep_old_alias true, the new alias is added beside the old one instead and no link changes. If a link to " +
-        "rewrite is in a final (frozen) book, nothing changes. To add an alias, update_fields is enough." + WriteHelp)]
+        "rewrite is in a final (frozen) book, nothing changes. If a link that reaches another entity would change target, nothing " +
+        "changes unless allow_relinks is true. To add an alias, update_fields is enough." + WriteHelp)]
     public CallToolResult ChangeAlias(
         [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
         [Description("The alias to change or remove, as it's written.")] string alias,
         [Description(HashHelp)] string expected_hash,
         [Description("The new alias; leave it out to remove the alias.")] string? new_alias = null,
         [Description("If true, add new_alias beside the old one and leave links as they are.")] bool keep_old_alias = false,
-        [Description(UniverseHelp)] string? universe = null) =>
-        Respond(() => _tools.ChangeAlias(entity, alias, expected_hash, new_alias, keep_old_alias, universe));
+        [Description(UniverseHelp)] string? universe = null,
+        [Description(RelinksHelp)] bool allow_relinks = false) =>
+        Respond(() => _tools.ChangeAlias(entity, alias, expected_hash, new_alias, keep_old_alias, universe, allow_relinks));
+
+    private const string RelinksHelp =
+        "If true, make the change even though links that reach another entity would change target; they're listed in the result's effects. " +
+        "Check them with the writer first.";
 
     /// <summary>The <c>get_chapter</c> tool.</summary>
     [McpServerTool(Name = "get_chapter", Title = "Read a book's chapters", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]
