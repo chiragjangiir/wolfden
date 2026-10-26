@@ -162,4 +162,33 @@ public class ApiTests
             Directory.Delete(webRoot, recursive: true);
         }
     }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-17")]
+    public async Task AnEntityPageNamedByItsPathIsServedWithIndexHtml()
+    {
+        using var den = TempDen.Dracula();
+        var webRoot = WebRoot.Built();
+        try
+        {
+            await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root) { WebRoot = webRoot });
+            var token = TestContext.Current.CancellationToken;
+
+            // A note without an id is named by its path, which ends in .md.
+            Assert.Equal(WebRoot.IndexHtml, await server.Client.GetStringAsync("/u/dracula/e/universes/dracula/entities/locations/bistritz.md?at=dracula:3", token));
+            Assert.Equal(WebRoot.IndexHtml, await server.Client.GetStringAsync("/u/dracula/e/universes%2Fdracula%2Fnotes%2Fa%20b.md", token));
+
+            // Real files, the API, and a missing file outside /u are as before.
+            Assert.Equal(WebRoot.Script, await server.Client.GetStringAsync("/assets/app.js", token));
+            using var missing = await server.Client.GetAsync("/assets/missing.js", token);
+            Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+            var den1 = await server.GetJsonAsync("/api/den", HttpStatusCode.OK);
+            Assert.Equal("Dracula", den1.GetProperty("name").GetString());
+            await server.GetJsonAsync("/api/nothing.md", HttpStatusCode.NotFound);
+        }
+        finally
+        {
+            Directory.Delete(webRoot, recursive: true);
+        }
+    }
 }

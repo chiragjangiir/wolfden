@@ -54,6 +54,8 @@ function entity(key: string, name: string, type: string, scopeKind: EntitySummar
   }
 }
 
+export const YEAR_PATH = 'universes/dracula/notes/the year #1893.md'
+
 export const entities: EntitySummary[] = [
   entity('E-CASTLE', 'Castle Dracula', 'location', 'universe', 'dracula:1'),
   entity('E-DATES', 'Dates and the year', 'note', 'universe', null),
@@ -62,6 +64,9 @@ export const entities: EntitySummary[] = [
   entity('E-LUCY', 'Lucy Westenra', 'character', 'book', 'dracula:5'),
   entity('E-QUINCEY', 'Quincey P. Morris', 'character', 'book', 'dracula:5'),
   entity('E-SCENE', 'A scene at the inn', 'event', 'book', null, 'idea'),
+  entity('E-QUINCEY-H', 'Quincey Harker', 'character', 'book', 'dracula:note'),
+  // A note without an id is named by its path, slashes, spaces and all.
+  { ...entity(YEAR_PATH, 'The year #1893', 'note', 'universe', null), id: null, path: YEAR_PATH },
 ]
 
 /** Which entities are in the canon view at a position: draft or canon, and entered by then. */
@@ -114,7 +119,7 @@ export function page(summary: EntitySummary, extra: Partial<EntityPage> = {}): E
   }
 }
 
-export type Responder = (path: string, params: URLSearchParams) => unknown
+export type Responder = (path: string, params: URLSearchParams) => unknown | Promise<unknown>
 
 /**
  * Stubs fetch with the test den's API. `entityPage` answers /api/entity;
@@ -128,7 +133,7 @@ export function stubApi(options: { entityPage?: (key: string, at: string | null)
     calls.push(`${url.pathname}${url.search}`)
     const params = url.searchParams
     const at = params.get('asOf')
-    const body = options.override?.(url.pathname, params) ?? answer(url.pathname, params, at, options)
+    const body = (await options.override?.(url.pathname, params)) ?? answer(url.pathname, params, at, options)
     if (body instanceof Response) {
       return body
     }
@@ -140,6 +145,10 @@ export function stubApi(options: { entityPage?: (key: string, at: string | null)
 }
 
 function answer(path: string, params: URLSearchParams, at: string | null, options: Parameters<typeof stubApi>[0] = {}): unknown {
+  if (at === '') {
+    return new Response(JSON.stringify({ code: 'bad_argument', message: "'asOf' is empty. Leave it out for the full view." }), { status: 400 })
+  }
+
   switch (path) {
     case '/api/den':
       return options.den ?? den

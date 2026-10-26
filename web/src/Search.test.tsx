@@ -49,7 +49,7 @@ function stubSearch(answer?: (params: URLSearchParams) => SearchResult | Respons
 const searchBox = () => screen.getByRole('searchbox', { name: 'Search notes' }) as HTMLInputElement
 const searchOf = (history: { location: { search: string } }) => new URLSearchParams(history.location.search)
 
-describe('SC-WEB-16: I search from the top bar', () => {
+describe('SC-WEB-18: I search from the top bar', () => {
   it('searches once typing pauses, keeping the position, and shows the words in the URL', async () => {
     const { searches } = stubSearch()
     const { history } = renderApp('/u/dracula?at=dracula:3')
@@ -104,7 +104,7 @@ describe('SC-WEB-16: I search from the top bar', () => {
   })
 })
 
-describe('SC-WEB-17: search filters and results', () => {
+describe('SC-WEB-19: search filters and results', () => {
   it('lists hits by note with type, scope, section links, and marked snippets', async () => {
     stubSearch()
     renderApp('/u/dracula/search?q=blood')
@@ -167,7 +167,7 @@ describe('SC-WEB-17: search filters and results', () => {
   })
 })
 
-describe('SC-WEB-18: searching as of a story position', () => {
+describe('SC-WEB-20: searching as of a story position', () => {
   it('passes asOf, says it searches as of the position, and says there are no matches there', async () => {
     const { searches } = stubSearch()
     const { history } = renderApp('/u/dracula/search?q=blood&at=dracula:3')
@@ -206,7 +206,7 @@ describe('SC-WEB-18: searching as of a story position', () => {
   })
 })
 
-describe('SC-WEB-19: a snippet holds HTML or brackets of its own', () => {
+describe('SC-WEB-21: a snippet holds HTML or brackets of its own', () => {
   it('renders the snippet as text, marking only the matches', () => {
     const snippet = '<img src=x onerror="alert(1)"> the [blood] and [[mina-harker|[Mina]]] <script>alert(2)</script> [note]'
     const { container } = render(

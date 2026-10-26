@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, getRouteApi } from '@tanstack/react-router'
 import { hierarchyQuery, positionsQuery, type BookNode, type SeriesNode, type UniverseNode } from '../api'
 import { ErrorState, Loading } from '../components/States'
-import { usePosition } from '../hooks'
+import { useDocumentTitle, usePosition } from '../hooks'
 import { ordinalOf } from '../story'
 import { Counts } from './UniversePage'
 
@@ -27,6 +27,7 @@ export function BookPage() {
   const { at } = usePosition()
   const hierarchy = useQuery(hierarchyQuery(universe, at))
   const positions = useQuery(positionsQuery(universe))
+  useDocumentTitle(hierarchy.data ? findBook(hierarchy.data.universe, book)?.book.name : undefined)
 
   if (hierarchy.isPending) {
     return <Loading what="the book" />
@@ -78,7 +79,8 @@ export function BookPage() {
             return (
               <li key={c.key} className={later ? 'later' : undefined} aria-current={c.position === at ? 'step' : undefined}>
                 <Link to="/u/$universe/b/$book/c/$chapter" params={{ universe, book: b.key, chapter: c.key }}>
-                  <span className="chapter-number">{c.number ?? c.key}</span> {c.title ?? <span className="muted">Untitled</span>}
+                  <span className="chapter-number">{c.number ?? ''}</span>
+                  <span className="chapter-title">{c.title ?? `Chapter ${c.key}`}</span>
                 </Link>
                 {c.position === at && <span className="badge">you are here</span>}
               </li>

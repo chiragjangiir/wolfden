@@ -2493,7 +2493,7 @@ its API on this computer only (127.0.0.1) and opens the default browser.
 v0 has no accounts, so it never listens on the network. The browsing,
 search, and history pages come in M3 (#24 to #27); their read API comes
 first, and SC-WEB-4 to SC-WEB-10 describe what it answers. SC-WEB-11
-to SC-WEB-15 describe the browsing pages, and SC-WEB-16 to SC-WEB-19
+to SC-WEB-17 describe the browsing pages, and SC-WEB-18 to SC-WEB-21
 the search page.
 
 ### SC-WEB-1. I open my den in the browser
@@ -2713,11 +2713,14 @@ bookmarked at chapter 3.
   takes `at` out of the URL. The book and chapter menus jump there, and
   "Show everything" resets. The URL reads `?at=dracula:5`.
 - The position carries to the next page through any link. A position
-  the story doesn't have shows the API's message and offers to show
-  everything.
+  the story doesn't have, or a blank `?at=`, shows the API's message and
+  offers to show everything; a blank one is never taken for everything.
+- Each position's answers are cached on their own: while a new position
+  loads, the page says so rather than showing the last position's
+  page, and going back to everything shows its page at once.
 
 Spec: design.md §9 (#26, maintainer decision). Covered by:
-`PositionBar.test.tsx` (web).
+`PositionBar.test.tsx`, `Navigation.test.tsx` (web).
 
 ### SC-WEB-12. As of a chapter, the tree hides what the reader hasn't met
 
@@ -2729,9 +2732,11 @@ The writer sets the bar to Dracula chapter 3.
   each with "enters at Dracula chapter 5". A note left out for its
   status, such as an idea, says "not in canon: idea" instead. With no
   position, every note is listed and there's no peek.
+- An open peek closes when the position changes, or when the writer
+  moves to another chapter's page.
 
 Spec: design.md §9 (#24, #26, maintainer decision). Covered by:
-`Browse.test.tsx` (web).
+`Browse.test.tsx`, `Navigation.test.tsx` (web).
 
 ### SC-WEB-13. I open a note the reader hasn't met yet
 
@@ -2739,8 +2744,11 @@ The writer, at Dracula chapter 3, opens Quincey Morris's page from a
 bookmark.
 
 - The page shows only a banner: "Readers first meet Quincey P. Morris in
-  Dracula chapter 5." Nothing else of the note is shown. A button moves
-  the position to chapter 5, and the page appears there.
+  Dracula chapter 5." Nothing else of the note is shown or fetched. A
+  button moves the position to chapter 5, and the page appears there.
+- "Show it anyway" fetches the note's full view and shows it below the
+  banner, greyed, still at chapter 3. Another position, another page,
+  or a reload hides it again.
 
 Spec: design.md §9 (#24, #26, maintainer decision). Covered by:
 `Browse.test.tsx` (web).
@@ -2755,7 +2763,8 @@ Spec: design.md §9 (#24, #26, maintainer decision). Covered by:
   reaches. "Linked from" groups backlinks by the note or book they're
   in, and says where each one is.
 
-Spec: design.md §9 (#24). Covered by: `Browse.test.tsx` (web).
+Spec: design.md §9 (#24). Covered by: `Browse.test.tsx`,
+`Navigation.test.tsx` (web).
 
 ### SC-WEB-15. A note holds HTML or a script link
 
@@ -2767,7 +2776,32 @@ a `javascript:` link.
 
 Spec: design.md §9 (#24). Covered by: `Browse.test.tsx` (web).
 
-### SC-WEB-16. I search from the top bar
+### SC-WEB-16. I open a chapter
+
+The writer opens Dracula chapter 5 from the book's page.
+
+- The page names the chapter by its title, "Letters—Lucy and Mina", and
+  lists the notes that enter the story there (Lucy Westenra, Quincey P.
+  Morris), hidden with a peek as of an earlier position. A button reads
+  the den as of this chapter. A chapter the book doesn't have says so.
+
+Spec: design.md §9 (#24). Covered by: `Navigation.test.tsx` (web).
+
+### SC-WEB-17. I bookmark a note that has no id yet
+
+A note without an id is named by its path, such as
+`universes/dracula/notes/the year #1893.md`.
+
+- Its page's URL holds the path, with characters such as spaces and `#`
+  encoded, and opens the note. Reloading it, or opening the bookmark,
+  serves the page, though the URL ends in `.md`. Real files and `/api`
+  are served as before.
+
+Spec: design.md §9 (#24). Covered by:
+`ApiTests.AnEntityPageNamedByItsPathIsServedWithIndexHtml`,
+`Navigation.test.tsx` (web).
+
+### SC-WEB-18. I search from the top bar
 
 The writer, at Dracula chapter 3, presses `/` and types "blood".
 
@@ -2779,7 +2813,7 @@ The writer, at Dracula chapter 3, presses `/` and types "blood".
 
 Spec: design.md §9 (#25). Covered by: `Search.test.tsx` (web).
 
-### SC-WEB-17. I filter my search
+### SC-WEB-19. I filter my search
 
 - The page lists the hits by note, best first, each note with its type
   and the universe, series, or book it's filed in. Each hit names its
@@ -2793,7 +2827,7 @@ Spec: design.md §9 (#25). Covered by: `Search.test.tsx` (web).
 
 Spec: design.md §9 (#25). Covered by: `Search.test.tsx` (web).
 
-### SC-WEB-18. I search as of a story position
+### SC-WEB-20. I search as of a story position
 
 The writer searches "Renfield" at Dracula chapter 3, then follows
 "Search everything".
@@ -2807,7 +2841,7 @@ The writer searches "Renfield" at Dracula chapter 3, then follows
 
 Spec: design.md §9 (#25, #26). Covered by: `Search.test.tsx` (web).
 
-### SC-WEB-19. A snippet holds HTML or brackets of its own
+### SC-WEB-21. A snippet holds HTML or brackets of its own
 
 - A snippet is rendered as text: `<script>` or `<img onerror>` in a note
   shows as written and never runs. The API marks matches in square

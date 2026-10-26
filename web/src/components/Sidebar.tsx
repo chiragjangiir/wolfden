@@ -63,7 +63,7 @@ function UniverseTree({ universe }: { universe: string }) {
   const current = all.find((e) => e.key === params._splat || e.id === params._splat || e.path === params._splat)
   const byScope = groupByScope(all)
   const scopeGroups = (kind: ScopeKind, key: string) => (
-    <TypeGroups universe={universe} entities={byScope.get(`${kind}:${key}`) ?? []} split={view.split} current={current} />
+    <TypeGroups universe={universe} entities={byScope.get(`${kind}:${key}`) ?? []} view={view} current={current} />
   )
   const book = (b: BookNode) => (
     <TreeNode
@@ -77,8 +77,8 @@ function UniverseTree({ universe }: { universe: string }) {
             {b.chapters.map((c) => (
               <li key={c.key}>
                 <Link to="/u/$universe/b/$book/c/$chapter" params={{ universe, book: b.key, chapter: c.key }}>
-                  {c.number ?? c.key}
-                  {c.title ? `. ${c.title}` : ''}
+                  {c.number !== null && `${c.number}. `}
+                  {c.title ?? `Chapter ${c.key}`}
                 </Link>
               </li>
             ))}
@@ -122,14 +122,15 @@ function groupByScope(entities: readonly EntitySummary[]): Map<string, EntitySum
 function TypeGroups({
   universe,
   entities,
-  split,
+  view,
   current,
 }: {
   universe: string
   entities: readonly EntitySummary[]
-  split: ReturnType<typeof useEntitiesInView>['split']
+  view: ReturnType<typeof useEntitiesInView>
   current: EntitySummary | undefined
 }) {
+  const { split } = view
   const types = [...new Set(entities.map((e) => e.type))].sort()
   return (
     <>
@@ -145,7 +146,7 @@ function TypeGroups({
             }
             open={current !== undefined && current.type === type && entities.includes(current)}
           >
-            <EntityList universe={universe} shown={shown} hidden={hidden} current={current?.key} />
+            <EntityList key={view.at ?? ''} universe={universe} shown={shown} hidden={hidden} current={current?.key} />
           </TreeNode>
         )
       })}

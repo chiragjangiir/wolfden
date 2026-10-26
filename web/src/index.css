@@ -14,7 +14,7 @@
   --link-visited: #5a4a8b;
   --broken: #b3261e;
   --ambiguous: #9a6700;
-  --later: #8f8a80;
+  --later: #6e6960;
   --banner-bg: #fff5d6;
   --banner-border: #e5c76b;
   --focus: #2563eb;
@@ -40,7 +40,7 @@
     --link-visited: #b3a3e0;
     --broken: #f28b82;
     --ambiguous: #e3b341;
-    --later: #7d786f;
+    --later: #9a958b;
     --banner-bg: #3a3220;
     --banner-border: #7a6430;
     --focus: #8ab4f8;
@@ -141,9 +141,13 @@ code {
   padding: 1rem;
   overflow-y: auto;
   position: sticky;
-  top: 3.5rem;
-  max-height: calc(100vh - 3.5rem);
+  top: var(--header-height, 3.5rem);
+  max-height: calc(100vh - var(--header-height, 3.5rem));
   font-size: 0.9rem;
+}
+
+.sidebar:focus {
+  outline: none;
 }
 
 .page {
@@ -165,10 +169,9 @@ code {
   .sidebar {
     display: none;
     position: fixed;
-    top: auto;
+    top: var(--header-height, 6rem);
     left: 0;
     bottom: 0;
-    height: calc(100vh - 6rem);
     max-height: none;
     width: min(85vw, var(--sidebar));
     z-index: 20;
@@ -418,6 +421,14 @@ button.peek {
   border-bottom: 1px solid var(--border);
 }
 
+.chapters a {
+  text-decoration: none;
+}
+
+.chapters a .chapter-title {
+  text-decoration: underline;
+}
+
 .chapters li[aria-current] {
   font-weight: 600;
 }
@@ -546,6 +557,22 @@ button.peek {
   padding-left: 1.2rem;
   font-size: 0.875rem;
   color: var(--text-muted);
+}
+
+.revealed {
+  color: var(--later);
+  border-top: 1px dashed var(--border);
+  margin-top: 1rem;
+}
+
+.revealed a,
+.revealed .markdown,
+.revealed .fields dt {
+  color: var(--later);
+}
+
+.revealed .page-body {
+  max-width: none;
 }
 
 .banner {

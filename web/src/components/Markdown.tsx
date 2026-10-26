@@ -8,7 +8,9 @@ import { WIKI_LINK, WikiLink, createLinkMatcher } from './Links'
 // check drops `javascript:` and other unsafe links. `[[...]]` links become
 // in-app links through the API's resolved `links`.
 
-const WIKI_PROTOCOL = 'wolfden-link:'
+// The scheme of the links the plugin makes. It's random for each page load,
+// so a link written in a note can't pass for one.
+const WIKI_PROTOCOL = `wolfden-${Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join('')}:`
 
 interface MdNode {
   type: string
@@ -59,8 +61,9 @@ function wikiLinks(links: readonly LinkView[], resolved: LinkView[]) {
   }
 }
 
-function urlTransform(url: string): string {
-  return url.startsWith(WIKI_PROTOCOL) ? url : defaultUrlTransform(url)
+/** Keeps the plugin's own links (as an `href` only); every other URL gets react-markdown's check. */
+function urlTransform(url: string, key: string): string {
+  return key === 'href' && url.startsWith(WIKI_PROTOCOL) ? url : defaultUrlTransform(url)
 }
 
 /** A note's markdown, with its `[[...]]` links resolved as the API resolved them. */
