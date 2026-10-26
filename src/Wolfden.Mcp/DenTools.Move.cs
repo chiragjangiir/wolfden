@@ -102,17 +102,14 @@ public sealed partial class DenTools
             }
 
             var id = target.Id ?? idAdded;
-            MarkdownFile EditOwn(MarkdownFile file)
-            {
-                file = entry.Edit(file);
-                return idAdded is null ? file : Apply(() => file.WithId(idAdded));
-            }
+            MarkdownFile WithIdAdded(MarkdownFile file) => idAdded is null ? file : Apply(() => file.WithId(idAdded));
 
             var links = LinkIndex.Build(catalog, den);
             EntityMovePlan plan;
             try
             {
-                plan = EntityMove.Plan(links, den, target, scope, id, EditOwn);
+                plan = EntityMove.Plan(
+                    links, den, target, scope, id, f => WithIdAdded(entry.Edit(f)), entry.InterimEdit is { } interim ? f => WithIdAdded(interim(f)) : null);
             }
             catch (InvalidOperationException e)
             {
@@ -134,6 +131,9 @@ public sealed partial class DenTools
             var files = plan.Files.ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
             var check = Check(den, structure, files);
 
+            // The file is rewritten in place before it moves, so that state must load too.
+            Check(den, structure, new Dictionary<string, byte[]>(StringComparer.Ordinal) { [path] = plan.Interim });
+
             // A link to it that still wouldn't reach it, even by id (another file has the same id, say).
             var lost = plan.Changes.Where(c => c.Before.Target?.Path == path).ToList();
             if (lost.Count > 0)
@@ -148,7 +148,13 @@ public sealed partial class DenTools
             // (a nearer scope wins a tie, F-LINK-7), refuse the move unless allow_relinks says
             // to go ahead (maintainer decision, 2026-10-26). That includes the moved file's own
             // links, whose scope chain changes. A link that was ambiguous or broken is only reported.
+            // The moved file's own links are kept apart: whether they're refused like the others, or
+            // rewritten to the id of what they reached before (as links to it are), is the
+            // maintainer's call (PR #164). To rewrite them, plan those in EntityMove.Plan and drop
+            // them from 'relinked' here.
             var relinked = plan.Changes.Where(l => l.Before.Outcome == Core.Links.LinkOutcome.Resolved).ToList();
+            var ownRelinked = relinked.Where(l => l.After.Occurrence.Path == plan.To).ToList();
+            relinked = [.. relinked.Except(ownRelinked), .. ownRelinked];
             if (relinked.Count > 0 && !allowRelinks)
             {
                 throw new DenToolException(
@@ -168,7 +174,7 @@ public sealed partial class DenTools
                     $"{string.Join("; ", frozenRelinks.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} reaches {Reached(l.Before)}"))}. Nothing was changed.");
             }
 
-            Save(files, plan.Originals, created: plan.To, removed: path);
+            SaveMove(path, plan.To, plan.Interim, files, plan.Originals);
             var after = EntityCatalog.ReadEntityFile(check.Structure, plan.To, files[plan.To]).Entity!;
             var effects = new List<string>
             {
@@ -252,11 +258,25 @@ public sealed partial class DenTools
         return universe;
     }
 
+    /// <summary>
+    /// True to let <c>enter_at_new_scope</c> move an entity the reader meets
+    /// only after the new scope, so it enters canon earlier than before. The
+    /// maintainer hasn't decided yet whether that case keeps both ways
+    /// forward or only <c>keep_entry</c> (PR #164); false offers only
+    /// <c>keep_entry</c>.
+    /// </summary>
+    private const bool EnterAtNewScopeWhenEntryIsAfter = true;
+
     /// <summary>What a move does to where the entity enters canon.</summary>
     /// <param name="Edit">The edit of its <c>from</c>, if any.</param>
     /// <param name="Effects">What that means, for the result.</param>
     /// <param name="ChangesViews">True if canon views change: it enters at the start of the new scope now.</param>
-    private sealed record EntryChange(Func<MarkdownFile, MarkdownFile> Edit, List<string> Effects, bool ChangesViews);
+    /// <param name="InterimEdit">
+    /// The edit for the file in place, before it moves, when it differs from
+    /// <paramref name="Edit"/>: a <c>from</c> that only means the same at the
+    /// new scope (one taken out, for <c>enter_at_new_scope</c>) waits for the move.
+    /// </param>
+    private sealed record EntryChange(Func<MarkdownFile, MarkdownFile> Edit, List<string> Effects, bool ChangesViews, Func<MarkdownFile, MarkdownFile>? InterimEdit = null);
 
     /// <summary>
     /// Keeps where <paramref name="entity"/> enters canon across a move to
@@ -297,30 +317,37 @@ public sealed partial class DenTools
             }
         }
 
-        var where = book is null ? null : WhereIn(book, scope);
-        if (where is null && book is not null)
+        var place = book is null ? Place.Unnamed : PlaceOf(book, scope);
+        Func<MarkdownFile, MarkdownFile> keep = f => toWrite is null ? f : WithFrom(f, toWrite);
+        if (place == Place.Inside)
         {
             if (keepEntry || enterAtNewScope)
             {
                 effects.Add($"It enters canon inside {EntityMove.Describe(scope)}, so {(keepEntry ? "keep_entry" : "enter_at_new_scope")} wasn't needed and changed nothing.");
             }
 
-            if (toWrite is null)
+            if (toWrite is not null)
             {
-                return new EntryChange(f => f, effects, false);
+                effects.Insert(0, $"It had no 'from', so it entered canon at {entity.Scope.StartDescription}; that's now written as {written}, so canon views don't change (F-RT-5, F-ENT-6).");
             }
 
-            effects.Insert(0, $"It had no 'from', so it entered canon at {entity.Scope.StartDescription}; that's now written as {written}, so canon views don't change (F-RT-5, F-ENT-6).");
-            return new EntryChange(f => WithFrom(f, toWrite), effects, false);
+            return new EntryChange(keep, effects, false);
         }
 
         var enters = entity.From is not null ? $"{entity.From} (its 'from')" : $"{entity.Scope.StartDescription} (it has no 'from')";
-        if (enterAtNewScope)
+        var enterOffered = place != Place.After || EnterAtNewScopeWhenEntryIsAfter;
+        if (enterAtNewScope && enterOffered)
         {
             effects.Add(
                 $"It now enters canon at {scope.StartDescription} (enter_at_new_scope); before the move it entered at {enters}, " +
-                "so canon views between the two points don't include it any more" + (entity.From is null ? "." : ", and its 'from' was taken out."));
-            return new EntryChange(f => entity.From is null ? f : Apply(() => f.WithoutFrontmatterValue(["from"])), effects, true);
+                (place is Place.After or Place.Unnamed
+                    ? $"so canon views from {scope.StartDescription} up to {enters} now include it, earlier than the reader met it before"
+                    : "so canon views between the two points don't include it any more") +
+                (entity.From is null ? "." : ", and its 'from' was taken out."));
+
+            // In place, before the move, the file keeps its 'from' (or its lack of one), so views
+            // don't change until it moves; the 'from' is taken out once it's there.
+            return new EntryChange(f => entity.From is null ? f : Apply(() => f.WithoutFrontmatterValue(["from"])), effects, true, f => f);
         }
 
         if (book is null)
@@ -331,28 +358,42 @@ public sealed partial class DenTools
                 $"Nothing was changed. Ask the writer, then call again with enter_at_new_scope: true to have it enter canon at {scope.StartDescription}, or give it a 'from' first with update_fields.");
         }
 
+        var describe = place == Place.Before ? $"before the start of {EntityMove.Describe(scope)}" : $"after {EntityMove.Describe(scope)}";
         if (keepEntry)
         {
             effects.Add(
-                $"It still enters canon at {enters} (keep_entry), which is {where} {EntityMove.Describe(scope)}" +
+                $"It still enters canon at {enters} (keep_entry), which is {describe}" +
                 (toWrite is null ? "." : $"; that's now written as {written}.") +
                 (scope is Book ? " A book entity whose 'from' is outside its book gets a warning (F-ENT-6)." : ""));
-            return new EntryChange(f => toWrite is null ? f : WithFrom(f, toWrite), effects, false);
+            return new EntryChange(keep, effects, false);
         }
 
-        var already = where!.StartsWith("before", StringComparison.Ordinal)
+        var already = place == Place.Before
             ? $"so the reader has already met it when {EntityMove.Describe(scope)} starts"
             : $"so the reader meets it only after {EntityMove.Describe(scope)}";
+        var instead = place == Place.Before
+            ? $"so canon views before then leave it out"
+            : $"so canon views from then on include it, earlier than the reader meets it now";
         throw new DenToolException(
             ToolErrorCodes.EntryOutsideScope,
-            $"'{entity.Name}' enters canon at {enters}, in book '{book.Key}', which is {where} {EntityMove.Describe(scope)}, {already}. " +
+            $"'{entity.Name}' enters canon at {enters}, in book '{book.Key}', which is {describe}, {already}. " +
             "Moving it there needs the writer's choice, so nothing was changed. Ask the writer, then call again with keep_entry: true to keep " +
-            $"{written} (it still enters canon there{(scope is Book ? ", and check warns that its 'from' is outside its book, F-ENT-6" : "")}), " +
-            $"or enter_at_new_scope: true to have it enter canon at {scope.StartDescription} instead, so canon views before then leave it out.");
+            $"{written} (it still enters canon there{(scope is Book ? ", and check warns that its 'from' is outside its book, F-ENT-6" : "")})" +
+            (enterOffered ? $", or enter_at_new_scope: true to have it enter canon at {scope.StartDescription} instead, {instead}." : "."));
     }
 
-    /// <summary>Null if <paramref name="book"/> is in <paramref name="scope"/>; otherwise "before" or "after", as it comes in story order.</summary>
-    private static string? WhereIn(Book book, Container scope)
+    /// <summary>Where the book an entity enters canon in lies, against a scope it moves to.</summary>
+    private enum Place
+    {
+        Inside,
+        Before,
+        After,
+
+        /// <summary>No book names the entry point (F-POS-7), so it can't be kept as a <c>from</c>.</summary>
+        Unnamed,
+    }
+
+    private static Place PlaceOf(Book book, Container scope)
     {
         var inside = scope switch
         {
@@ -360,7 +401,120 @@ public sealed partial class DenTools
             Series s => book.Series == s,
             _ => book == scope,
         };
-        return inside ? null : book.Start < scope.Start ? "before the start of" : "after";
+        return inside ? Place.Inside : book.Start < scope.Start ? Place.Before : Place.After;
+    }
+
+    /// <summary>
+    /// Saves a move so that every state the den passes through loads with
+    /// one copy of the entity and the same canon views: the file is rewritten
+    /// in place first (<paramref name="interim"/>: its id, a kept <c>from</c>,
+    /// its own links), then the links to it in other files, then the file is
+    /// moved whole, an atomic rename that also refuses a name taken in any
+    /// case, and last, if the final text differs, rewritten at its new path.
+    /// A failure puts back every step made, newest first, but only where the
+    /// file still holds what was written, so another program's save is kept.
+    /// </summary>
+    private void SaveMove(string from, string to, byte[] interim, Dictionary<string, byte[]> files, IReadOnlyDictionary<string, byte[]> originals)
+    {
+        foreach (var (path, before) in originals)
+        {
+            var now = Store.TryReadFile(path);
+            if (now is null || !now.AsSpan().SequenceEqual(before))
+            {
+                throw new DenToolException(
+                    ToolErrorCodes.StaleFile, $"{path} changed while the move was being made, so nothing was written. Read it again and retry.");
+            }
+        }
+
+        bool Holds(string path, byte[] bytes) => Store.TryReadFile(path) is { } now && now.AsSpan().SequenceEqual(bytes);
+
+        // Each step made, with how to put it back: the path to check, what it should hold, and the undo.
+        var made = new List<(string Path, byte[] Holds, Action Undo)>();
+        var final = files[to];
+        try
+        {
+            var original = originals[from];
+            if (!interim.AsSpan().SequenceEqual(original))
+            {
+                Store.WriteFile(from, interim, DenWriteMode.Replace);
+                made.Add((from, interim, () => Store.WriteFile(from, original, DenWriteMode.Replace)));
+            }
+
+            foreach (var (path, bytes) in files.Where(p => p.Key != to).OrderBy(p => p.Key, StringComparer.Ordinal))
+            {
+                Store.WriteFile(path, bytes, DenWriteMode.Replace);
+                var was = originals[path];
+                made.Add((path, bytes, () => Store.WriteFile(path, was, DenWriteMode.Replace)));
+            }
+
+            Store.MoveFile(from, to);
+            made.Add((to, interim, () => Store.MoveFile(to, from)));
+            if (!final.AsSpan().SequenceEqual(interim))
+            {
+                Store.WriteFile(to, final, DenWriteMode.Replace);
+                made.Add((to, final, () => Store.WriteFile(to, interim, DenWriteMode.Replace)));
+            }
+
+            foreach (var (path, bytes) in files.Where(p => p.Key != to))
+            {
+                _sessionWritten[path] = bytes;
+            }
+
+            _sessionWritten[to] = final;
+            _sessionWritten[from] = null;
+        }
+        catch (Exception e)
+        {
+            var stuck = new List<string>();
+            foreach (var (path, holds, undo) in Enumerable.Reverse(made))
+            {
+                try
+                {
+                    if (Holds(path, holds))
+                    {
+                        undo();
+                    }
+                    else
+                    {
+                        stuck.Add(path);
+                    }
+                }
+                catch (Exception u) when (u is IOException or UnauthorizedAccessException)
+                {
+                    stuck.Add(path);
+                }
+            }
+
+            // A file put back is as the session found it; one that still holds the edit is the session's.
+            foreach (var path in stuck.Distinct(StringComparer.Ordinal))
+            {
+                if (Store.TryReadFile(path) is { } now && files.TryGetValue(path, out var wrote) && now.AsSpan().SequenceEqual(wrote))
+                {
+                    _sessionWritten[path] = wrote;
+                }
+            }
+
+            var left = stuck.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+            if (e is not (IOException or UnauthorizedAccessException))
+            {
+                if (left.Count > 0)
+                {
+                    throw new DenToolException(
+                        ToolErrorCodes.WriteFailed,
+                        $"The move stopped ({e.GetType().Name}: {e.Message}), and some files couldn't be put back, and hold the edit: {string.Join(", ", left)}. Check them, or restore them from history.");
+                }
+
+                throw;
+            }
+
+            var code = e is DenStoreException { Error: DenStoreError.AlreadyExists or DenStoreError.CaseConflict } ? ToolErrorCodes.AlreadyExists : ToolErrorCodes.WriteFailed;
+            var said = e is DenStoreException ? e.Message : $"The move failed: {e.Message}";
+            throw new DenToolException(
+                code,
+                said + (made.Count == 0 ? " Nothing was written."
+                    : left.Count == 0 ? $" What was already written was put back as it was, and {from} is where it was, so nothing changed."
+                    : $" Some files couldn't be put back, and hold the edit: {string.Join(", ", left)}. Check them, or restore them from history."));
+        }
     }
 
     private static MarkdownFile WithFrom(MarkdownFile file, string bookKey) =>

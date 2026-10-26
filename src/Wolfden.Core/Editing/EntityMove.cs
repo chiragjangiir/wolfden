@@ -12,16 +12,24 @@ namespace Wolfden.Core.Editing;
 /// </summary>
 /// <param name="From">The entity file's path now.</param>
 /// <param name="To">Its path after the move.</param>
-/// <param name="Files">The new contents of each file to write, by den-relative path: the moved file at <paramref name="To"/> first. <paramref name="From"/> isn't here: it's deleted.</param>
+/// <param name="Files">The new contents of each file to write, by den-relative path: the moved file at <paramref name="To"/> first. <paramref name="From"/> isn't here: the file there moves to <paramref name="To"/>.</param>
 /// <param name="Originals">What each file that changes held when the plan was made, <paramref name="From"/> included, to check that nothing changed them before they're written.</param>
 /// <param name="After">The den's links as they'd resolve after the move.</param>
 /// <param name="Changes">The links that would resolve differently after the move, by entity (the moved one counts as the same entity at either path). A link that was rewritten to the id and still reaches the entity isn't here.</param>
 /// <param name="Rewritten">The links to the entity that were rewritten to its id, as the den resolved them before.</param>
 /// <param name="FrozenPaths">Files with links to the entity that would stop reaching it but are in a final book (F-BOOK-1), so they can't be rewritten; when there are any, the move mustn't be made.</param>
 /// <param name="SkippedPaths">Files the den leaves out for errors (F-GEN-2) whose text holds a link that could be to the entity, by its id, slug, name, or an alias. Their links can't be resolved, so the writer should check them.</param>
+/// <param name="Interim">
+/// What the file at <paramref name="From"/> holds before it's moved, for a
+/// writer that rewrites it in place first and then moves it whole, so the
+/// den is never without the entity or with two copies of it: its own links
+/// rewritten, with the interim edit (its id, and a <c>from</c> that keeps
+/// views as they are) instead of the final one.
+/// </param>
 public sealed record EntityMovePlan(
     string From, string To, IReadOnlyDictionary<string, byte[]> Files, IReadOnlyDictionary<string, byte[]> Originals, LinkIndex After,
-    IReadOnlyList<LinkChange> Changes, IReadOnlyList<ResolvedLink> Rewritten, IReadOnlyList<string> FrozenPaths, IReadOnlyList<string> SkippedPaths);
+    IReadOnlyList<LinkChange> Changes, IReadOnlyList<ResolvedLink> Rewritten, IReadOnlyList<string> FrozenPaths, IReadOnlyList<string> SkippedPaths,
+    byte[] Interim);
 
 /// <summary>
 /// Moves an entity's file to another scope of its universe: the universe,
@@ -66,11 +74,13 @@ public static class EntityMove
     /// <param name="scope">The scope it moves to, of the same universe.</param>
     /// <param name="id">The entity's id once <paramref name="editOwn"/> is made (it may add one), or null if it has none.</param>
     /// <param name="editOwn">The edit of the entity's own file (its <c>from</c>, a missing id), made after its links are rewritten.</param>
+    /// <param name="interimEdit">The edit for <see cref="EntityMovePlan.Interim"/>, the file in place before it moves, if it differs from <paramref name="editOwn"/>.</param>
     /// <exception cref="ArgumentException">The scope is the entity's own, or in another universe.</exception>
     /// <exception cref="InvalidOperationException">Links to the entity would stop reaching it, and it has no id to rewrite them to.</exception>
     /// <exception cref="NotSupportedException">A file's links can't be rewritten in place.</exception>
     /// <exception cref="EditVerificationException">An edit didn't read back as intended (a bug).</exception>
-    public static EntityMovePlan Plan(LinkIndex links, IDenSource den, CatalogEntity entity, Container scope, string? id, Func<MarkdownFile, MarkdownFile> editOwn)
+    public static EntityMovePlan Plan(LinkIndex links, IDenSource den, CatalogEntity entity, Container scope, string? id, Func<MarkdownFile, MarkdownFile> editOwn,
+        Func<MarkdownFile, MarkdownFile>? interimEdit = null)
     {
         ArgumentNullException.ThrowIfNull(links);
         ArgumentNullException.ThrowIfNull(den);
@@ -113,8 +123,13 @@ public static class EntityMove
         var frozen = result.Frozen.ToHashSet(StringComparer.Ordinal);
         var keys = new[] { entity.Slug, entity.Name }.Concat(entity.Aliases).Where(k => k is not null).Select(k => LinkText.Normalize(k!)).ToHashSet(StringComparer.Ordinal);
         var skipped = LinkRewriter.Skipped(links, den, entity, (target, _) => target == entity.Id || keys.Contains(LinkText.Normalize(target)));
+        var interim = interimEdit is null ? result.Files[from]
+            : LinkRewriter.Rewrite(
+                links, den, entity, lost.Where(l => l.Occurrence.Path == from).ToList(), (_, _) => true,
+                (text, inTableRow) => LinkSyntax.WithIdTarget(text, id!, inTableRow), $"{id}|", interimEdit).Files[from];
         return new EntityMovePlan(
-            from, to, files, result.Originals, after, Between(links, after, from, to), lost.Where(l => !frozen.Contains(l.Occurrence.Path)).ToList(), result.Frozen, skipped);
+            from, to, files, result.Originals, after, Between(links, after, from, to), lost.Where(l => !frozen.Contains(l.Occurrence.Path)).ToList(), result.Frozen, skipped,
+            interim);
     }
 
     /// <summary>

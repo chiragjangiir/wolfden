@@ -283,8 +283,8 @@ public sealed class MoveEntityToolTests : IDisposable
         var hash = Tools.GetEntity(Tessaly, Universe).Entity!.Hash!;
         var moved = Ash + "/entities/ships/tessaly.md";
 
-        // Deleting the old file fails, after every other file is written.
-        var tools = new DenTools(_den.Root) { Store = new DeleteFailingStore(_den.Root, Tessaly) };
+        // Moving the file fails, after the links to it are rewritten.
+        var tools = new DenTools(_den.Root) { Store = new StepStore(_den.Root, failMove: true) };
         var failed = Assert.Throws<DenToolException>(() => tools.MoveEntity(Tessaly, hash, toBook: "ash", keepEntry: true, universe: Universe));
 
         Assert.Equal(ToolErrorCodes.WriteFailed, failed.Code);
@@ -294,12 +294,54 @@ public sealed class MoveEntityToolTests : IDisposable
         Assert.Equal(before.Mara, _den.Read(Mara));
         Assert.False(File.Exists(Path.Combine(_den.Root, moved)));
 
-        // A write that fails puts back the moved file's new copy too.
+        // A link rewrite that fails puts back the file rewritten in place, and the one written before it.
         tools = new DenTools(_den.Root) { Store = new WriteToolTests.FailingStore(_den.Root, Mara) };
         Assert.Equal(ToolErrorCodes.WriteFailed, Assert.Throws<DenToolException>(() => tools.MoveEntity(Tessaly, hash, toBook: "ash", keepEntry: true, universe: Universe)).Code);
         Assert.False(File.Exists(Path.Combine(_den.Root, moved)));
         Assert.Equal(before.Outline, _den.Read(EmberOutline));
         Assert.Equal(before.Tessaly, _den.Read(Tessaly));
+
+        // The last write, at the new path (enter_at_new_scope takes 'from' out there), fails: the file moves back.
+        var maraHash = Tools.GetEntity(Mara, Universe).Entity!.Hash!;
+        var maraMoved = Ash + "/entities/characters/mara-voss.md";
+        tools = new DenTools(_den.Root) { Store = new StepStore(_den.Root, failWrite: maraMoved) };
+        Assert.Equal(ToolErrorCodes.WriteFailed, Assert.Throws<DenToolException>(() => tools.MoveEntity(Mara, maraHash, toBook: "ash", enterAtNewScope: true, universe: Universe)).Code);
+        Assert.Equal(before.Mara, _den.Read(Mara));
+        Assert.False(File.Exists(Path.Combine(_den.Root, maraMoved)));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-28")]
+    public void TheDenNeverHoldsTwoCopiesOrNoneWhileItMoves()
+    {
+        var hash = Tools.GetEntity(Mara, Universe).Entity!.Hash!;
+        var moved = Ash + "/entities/characters/mara-voss.md";
+        var store = new StepStore(_den.Root, watch: (Mara, moved));
+
+        // Rewritten in place, then moved whole, then its 'from' taken out at the new path.
+        var result = new DenTools(_den.Root) { Store = store }.MoveEntity(Mara, hash, toBook: "ash", enterAtNewScope: true, universe: Universe);
+
+        Assert.Equal(moved, result.Path);
+        Assert.False(store.SawTwoOrNone);
+        Assert.False(File.Exists(Path.Combine(_den.Root, Mara)));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-28")]
+    public void EnterAtNewScopeForAnEntryAfterItSaysItEntersEarlier()
+    {
+        _den.Write(Ash + "/entities/characters/sash-orel.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z8\ntype: character\nname: Sash Orel\nstatus: canon\nfrom: \"ash:2\"\n---\n");
+        var hash = Tools.GetEntity("Sash Orel", Universe).Entity!.Hash!;
+
+        var refused = Assert.Throws<DenToolException>(() => Tools.MoveEntity("Sash Orel", hash, toBook: "ember", universe: Universe));
+        Assert.Equal(ToolErrorCodes.EntryOutsideScope, refused.Code);
+        Assert.Contains("after book 'ember'", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("earlier than the reader meets it now", refused.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("before then leave it out", refused.Message, StringComparison.Ordinal);
+
+        var result = Tools.MoveEntity("Sash Orel", hash, toBook: "ember", enterAtNewScope: true, universe: Universe);
+        Assert.Contains(result.Effects, e => e.Contains("now include it, earlier than the reader met it before", StringComparison.Ordinal));
+        Assert.True(Tools.GetEntity("Sash Orel", Universe, "ember:1").InView);
     }
 
     [Fact]
@@ -335,10 +377,15 @@ public sealed class MoveEntityToolTests : IDisposable
         Assert.Contains(universe.Effects, e => e.Contains("'row' ids now resolve among the outlines of every book in the universe", StringComparison.Ordinal));
     }
 
-    /// <summary>A den store whose delete of one file fails.</summary>
-    private sealed class DeleteFailingStore(string root, string failing) : Core.Structure.IDenStore
+    /// <summary>
+    /// A den store that can fail a move, or a write to one path, and that
+    /// notes whether any step left both or neither of two paths there.
+    /// </summary>
+    private sealed class StepStore(string root, bool failMove = false, string? failWrite = null, (string A, string B)? watch = null) : Core.Structure.IDenStore
     {
         private readonly Core.Structure.FileSystemDenStore _disk = new(root);
+
+        public bool SawTwoOrNone { get; private set; }
 
         public bool IsReadOnly => false;
 
@@ -356,22 +403,44 @@ public sealed class MoveEntityToolTests : IDisposable
 
         public bool FolderExists(string path) => _disk.FolderExists(path);
 
-        public void WriteFile(string path, byte[] bytes, Core.Structure.DenWriteMode mode = Core.Structure.DenWriteMode.CreateOrReplace) => _disk.WriteFile(path, bytes, mode);
+        public void WriteFile(string path, byte[] bytes, Core.Structure.DenWriteMode mode = Core.Structure.DenWriteMode.CreateOrReplace)
+        {
+            if (path == failWrite)
+            {
+                throw new Core.Structure.DenStoreException(Core.Structure.DenStoreError.AccessDenied, path, $"'{path}' is read-only.");
+            }
+
+            _disk.WriteFile(path, bytes, mode);
+            Look();
+        }
 
         public void DeleteFile(string path)
         {
-            if (path == failing)
-            {
-                throw new Core.Structure.DenStoreException(Core.Structure.DenStoreError.InUse, path, $"'{path}' is open in another program.");
-            }
-
             _disk.DeleteFile(path);
+            Look();
         }
 
-        public void MoveFile(string from, string to) => _disk.MoveFile(from, to);
+        public void MoveFile(string from, string to)
+        {
+            if (failMove)
+            {
+                throw new Core.Structure.DenStoreException(Core.Structure.DenStoreError.InUse, from, $"'{from}' is open in another program.");
+            }
+
+            _disk.MoveFile(from, to);
+            Look();
+        }
 
         public void MoveFolder(string from, string to) => _disk.MoveFolder(from, to);
 
         public void DeleteFolder(string path) => _disk.DeleteFolder(path);
+
+        private void Look()
+        {
+            if (watch is { } w && _disk.FileExists(w.A) == _disk.FileExists(w.B))
+            {
+                SawTwoOrNone = true;
+            }
+        }
     }
 }

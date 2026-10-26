@@ -11,7 +11,7 @@ namespace Wolfden.Core.Editing;
 /// link to rewrite is spliced in place in its file, in a body, an outline,
 /// or a frontmatter value, so everything else stays as written.
 /// </summary>
-internal static class LinkRewriter
+internal static partial class LinkRewriter
 {
     /// <summary>What a rewrite changes, none of it written yet.</summary>
     /// <param name="Files">The new contents of each file that changes, by den-relative path: the entity's file first.</param>
@@ -222,17 +222,57 @@ internal static class LinkRewriter
         return (result, count);
     }
 
-    /// <summary>True if the line that holds <paramref name="offset"/> is a table row: its first character other than spaces and tabs is <c>|</c>.</summary>
-    private static bool InTableRow(string text, int offset)
+    /// <summary>
+    /// True if the line that holds <paramref name="offset"/> is a table row
+    /// (GFM tables), where a <c>|</c> splits the cell: one that starts with
+    /// <c>|</c>, or one with a <c>|</c> in a run of lines that has a delimiter
+    /// row (<c>---|---</c>), for a table written without the outer pipes. A
+    /// blockquote's <c>&gt;</c> markers are skipped first, for a table in a quote.
+    /// </summary>
+    internal static bool InTableRow(string text, int offset)
     {
-        var start = offset == 0 ? 0 : text.LastIndexOf('\n', offset - 1) + 1;
-        while (start < offset && text[start] is ' ' or '\t')
+        var lines = text.Split('\n');
+        var at = text.AsSpan(0, Math.Min(offset, text.Length)).Count('\n');
+        var line = Unquoted(lines[at]);
+        if (line.StartsWith('|'))
         {
-            start++;
+            return true;
         }
 
-        return start < text.Length && text[start] == '|';
+        if (!line.Contains('|', StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        for (var step = -1; step <= 1; step += 2)
+        {
+            for (var i = at; i >= 0 && i < lines.Length && Unquoted(lines[i]).Length > 0; i += step)
+            {
+                if (DelimiterRow().IsMatch(Unquoted(lines[i])))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
+
+    /// <summary>The line without its indent, any blockquote markers, or a carriage return.</summary>
+    private static string Unquoted(string line)
+    {
+        var s = line.TrimEnd('\r').TrimStart();
+        while (s.StartsWith('>'))
+        {
+            s = s[1..].TrimStart();
+        }
+
+        return s;
+    }
+
+    /// <summary>A GFM table's delimiter row, with at least one <c>|</c>: <c>---|:--:</c> or <c>| --- | --- |</c>.</summary>
+    [System.Text.RegularExpressions.GeneratedRegex(@"^(?=.*\|)\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex DelimiterRow();
 
     /// <summary>True if splicing <paramref name="text"/> into <paramref name="scalar"/> as written could change how YAML reads it, so the value is written anew instead.</summary>
     private static bool NeedsQuoting(YamlScalar scalar, string text) => scalar.Style switch

@@ -25,6 +25,23 @@ public class EntityMoveEditTests
         Assert.Null(LinkSyntax.WithIdTarget("not a link", Id, inTableRow: false));
     }
 
+    [Theory]
+    [Trait("Scenario", "SC-MCP-28")]
+    [InlineData("| a | [[X]] |\n", true)]
+    [InlineData("  | a | [[X]] |\n", true)]
+    [InlineData("a | b\n--- | ---\nc | [[X]]\n", true)]
+    [InlineData("[[X]] | b\n:--|--:\n", true)]
+    [InlineData("> | a | [[X]] |\n", true)]
+    [InlineData("> a | b\n> --- | ---\n> c | [[X]]\n", true)]
+    [InlineData("See [[X]].\n", false)]
+    [InlineData("See [[Y|y]] and [[X]].\n", false)]
+    [InlineData("a | b\n\nc | [[X]]\n--- | ---\n", true)]
+    [InlineData("a | b\n--- | ---\n\nc | [[X]]\n", false)]
+    public void ATableRowIsFoundWithOrWithoutItsOuterPipes(string text, bool inTable)
+    {
+        Assert.Equal(inTable, LinkRewriter.InTableRow(text, text.IndexOf("[[X]]", StringComparison.Ordinal)));
+    }
+
     [Fact]
     [Trait("Scenario", "SC-MCP-28")]
     public void AnOverlayCanLeaveAFileOut()

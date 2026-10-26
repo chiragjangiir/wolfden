@@ -54,9 +54,10 @@ public sealed partial class DenTools
     /// made some other way. A file a failed write put back as it was isn't
     /// here. Paths compare as the file system does (ignoring case on
     /// Windows and macOS, as git's paths may differ in case there).
-    /// Guarded by <see cref="_writeLock"/>.
+    /// A null value marks a file this session deleted: the old path of a
+    /// file <c>move_entity</c> moved. Guarded by <see cref="_writeLock"/>.
     /// </summary>
-    private readonly Dictionary<string, byte[]> _sessionWritten =
+    private readonly Dictionary<string, byte[]?> _sessionWritten =
         new(OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private IDenStore? _store;
 
@@ -467,7 +468,17 @@ public sealed partial class DenTools
                 var onDisk = new Dictionary<string, byte[]?>(_sessionWritten.Comparer);
                 foreach (var (path, bytes) in _sessionWritten.ToList())
                 {
-                    if (history.HoldsAtLatest(path, bytes) is { IsAvailable: true, Value: true })
+                    if (bytes is null)
+                    {
+                        // Deleted by this session. A file there again was put there some other way,
+                        // so the deletion isn't the session's to claim any more.
+                        onDisk[path] = Store.TryReadFile(path);
+                        if (onDisk[path] is not null)
+                        {
+                            _sessionWritten.Remove(path);
+                        }
+                    }
+                    else if (history.HoldsAtLatest(path, bytes) is { IsAvailable: true, Value: true })
                     {
                         _sessionWritten.Remove(path);
                     }
@@ -506,7 +517,8 @@ public sealed partial class DenTools
 
                     ours.Add(change.Path);
                     var now = change.Path == tracked ? onDisk.GetValueOrDefault(tracked) : Store.TryReadFile(change.Path);
-                    if (now is null || !now.AsSpan().SequenceEqual(_sessionWritten[tracked]))
+                    var wrote = _sessionWritten[tracked];
+                    if (wrote is null ? now is not null : now is null || !now.AsSpan().SequenceEqual(wrote))
                     {
                         theirs.Add(change.Path);
                     }
@@ -947,11 +959,8 @@ public sealed partial class DenTools
     /// <summary>
     /// Writes the files, after checking that none changed since it was read
     /// (<paramref name="originals"/>), and that a new file isn't there yet.
-    /// A file to delete (<paramref name="removed"/>, the old path of a moved
-    /// file) goes last, once every write has been made, so a failure before
-    /// it leaves the old file in place and puts back the rest.
     /// </summary>
-    private void Save(Dictionary<string, byte[]> files, IReadOnlyDictionary<string, byte[]>? originals, string? created, string? removed = null)
+    private void Save(Dictionary<string, byte[]> files, IReadOnlyDictionary<string, byte[]>? originals, string? created)
     {
         foreach (var (path, original) in originals ?? new Dictionary<string, byte[]>())
         {
@@ -972,11 +981,6 @@ public sealed partial class DenTools
                 written.Add(path);
             }
 
-            if (removed is not null)
-            {
-                Store.DeleteFile(removed);
-            }
-
             // A store that failed after replacing a file would leave it written but not
             // listed here; FileSystemDenStore's write is one move, so it can't.
             foreach (var path in written)
@@ -988,7 +992,7 @@ public sealed partial class DenTools
         {
             // One change or none (format.md F-RT-5): put back what was written, newest first,
             // whatever stopped the writes, cancellation included.
-            var failed = files.Keys.Except(written).Order(StringComparer.Ordinal).FirstOrDefault();
+            var failed = files.Keys.Except(written).Order(StringComparer.Ordinal).First();
             var stuck = RollBack(written, files, originals, created);
 
             // A file put back is as the session found it; one that still holds the edit is the session's.
@@ -1009,7 +1013,7 @@ public sealed partial class DenTools
             }
 
             var code = e is DenStoreException { Error: DenStoreError.AlreadyExists } ? ToolErrorCodes.AlreadyExists : ToolErrorCodes.WriteFailed;
-            var said = e is DenStoreException ? e.Message : failed is null ? $"Couldn't delete {removed}: {e.Message}" : $"Couldn't write {failed}: {e.Message}";
+            var said = e is DenStoreException ? e.Message : $"Couldn't write {failed}: {e.Message}";
             throw new DenToolException(
                 code,
                 said + (written.Count == 0 ? " Nothing was written."
@@ -1038,7 +1042,8 @@ public sealed partial class DenTools
                 }
                 else if (path == created)
                 {
-                    // A moved file's new copy (move_entity): the old one is deleted only after every write.
+                    // Only a single-file write creates a file, and it's the one that failed if any did,
+                    // so this isn't reached today; it's kept so a multi-file create rolls back too.
                     Store.DeleteFile(path);
                 }
                 else if (originals is not null && originals.TryGetValue(path, out var original))

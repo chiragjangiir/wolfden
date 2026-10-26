@@ -1486,7 +1486,11 @@ rewrite, in the same change, every reference that depends on the old name:
   before the new scope and names both ways forward. The same goes when
   no position can name the old entry point (the start of a series with
   no books, with no book after it), except that only entering at the new
-  scope is possible. (Maintainer decision, 2026-10-24, #89.)
+  scope is possible. (Maintainer decision, 2026-10-24, #89.) What stays
+  the same is every canon view, not every link: a link that was
+  ambiguous and now resolves (the moved entity is nearer to it), and a
+  `row` id that now resolves among other outlines (F-FLD-7), are
+  reported to the writer, not prevented.
 
 The core library's edits each change one file (`WithSectionName` renames
 a heading, for example). The den-wide rewrite belongs to the app's and

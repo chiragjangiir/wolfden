@@ -1986,7 +1986,10 @@ War, a series with no books yet. The assistant moves notes between them.
   pinned canon the result flags it. A series character with no `from`
   kept this way gets `from: ember`. A character of The Drift War with no
   `from` can't keep its entry point, since no position names it, so only
-  `enter_at_new_scope` moves it.
+  `enter_at_new_scope` moves it. Sash Orel, met at `ash:2`, moved into
+  Ember is refused too, and the error says that `enter_at_new_scope`
+  would bring her in earlier than the reader meets her now; with it, she
+  is in Ember's views.
 - With a second Tessaly in A Quiet Moon, the Ember outline's
   `[[Tessaly]]` and Mara's `[[tessaly]]` reach the series' Tessaly only
   because it's nearer. Moving it into Ash rewrites both to its id with
@@ -2001,9 +2004,14 @@ War, a series with no books yet. The assistant moves notes between them.
   own link to the item: refused the same way. The ship moved to the
   universe makes the Reach's ambiguous `[[Lantern]]` reach it, which is
   only reported.
-- A file already at the new path stops the move (`already_exists`). A
-  move that fails part way, writing a file or deleting the old one, puts
+- A file already at the new path stops the move (`already_exists`). The
+  file is rewritten in place, then moved whole, so the den never holds
+  two copies of it, or none. A move that fails part way, at a link
+  rewrite, the move itself, or the last write at the new path, puts
   everything back and leaves no new file. A note without an id gets one.
+  A checkpoint after the move counts the old path as the session's,
+  even when git sees a delete and an add, and even when the session
+  edited the note before moving it.
   An event whose `row` ids would now resolve among other outlines
   (moved from the series to the universe) is said in the result.
 
@@ -2025,7 +2033,12 @@ Spec: format.md F-RT-5, F-ENT-6, F-POS-7, F-ORD-3, F-LINK-7, F-BOOK-1
 `MoveEntityToolTests.AMoveThatFailsPartWayPutsBackWhatItWrote`,
 `MoveEntityToolTests.AnEntityWithoutAnIdGetsOneAndOtherArgumentsAreChecked`,
 `MoveEntityToolTests.RowIdsThatNowResolveElsewhereAreSaid`,
+`MoveEntityToolTests.TheDenNeverHoldsTwoCopiesOrNoneWhileItMoves`,
+`MoveEntityToolTests.EnterAtNewScopeForAnEntryAfterItSaysItEntersEarlier`,
+`HistoryToolTests.AMovedFilesOldPathIsTheSessionsWhenGitSeesADeleteAndAnAdd`,
+`HistoryToolTests.AFileTheSessionEditedThenMovedIsntChangedOutsideIt`,
 `EntityMoveEditTests.ALinkRewrittenToAnIdShowsTheSameText`,
+`EntityMoveEditTests.ATableRowIsFoundWithOrWithoutItsOuterPipes`,
 `EntityMoveEditTests.AnOverlayCanLeaveAFileOut`.
 
 ## STORE: Wolfden saves, moves, and deletes notes

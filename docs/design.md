@@ -902,18 +902,32 @@ store, so an edit changes only what it means to (format.md §12):
   error names both ways forward, and `keep_entry` (keep it as `from`,
   with the F-ENT-6 warning) or `enter_at_new_scope` (take `from` out, so
   it enters at the new scope's start, which `pinned_canon` flags if it
-  holds pinned facts) makes the move. Neither changes anything when the
-  entry point is inside the new scope. Every link in the den is resolved
+  holds pinned facts) makes the move. For an entity met before the new
+  scope, that leaves it out of the views in between; for one met only
+  after it (`from: ash:2` moved into Ember), it enters earlier than the
+  reader met it before, and the error and `effects` say which. Neither
+  changes anything when the entry point is inside the new scope. Every
+  link in the den is resolved
   again as it would be after the move. A link to the entity that would
   stop reaching it (F-LINK-7 tie-breaks change with scope) is rewritten
-  to its id, showing the same text (`[[id|Tessaly]]`, `\|` in a table
-  row), and the entity gets an id if it has none; if such a link is in a
+  to its id, showing the same text (`[[id|Tessaly]]`; `\|` in a table
+  row, with or without its outer pipes, in a blockquote too), and the
+  entity gets an id if it has none; if such a link is in a
   final book, nothing moves. Any other link that would change which
   entity it reaches, the moved file's own links included, refuses the
   move unless `allow_relinks`, as for renames, and links that resolve
-  differently are listed in `effects`. The new file and the rewritten
-  ones are written first, and the old file is deleted last, so a
-  failure part way puts everything back, the new file deleted.
+  differently, such as an ambiguous one that now resolves, are listed
+  in `effects` rather than prevented (format.md F-RT-5). The steps keep
+  one copy of the entity, with the same views, at every point: the file
+  is rewritten in place (its id, a kept `from`, its own links), then the
+  links to it in other files, then it's moved whole with one atomic
+  rename (which also refuses a name taken in any case), and last, for
+  `enter_at_new_scope`, its `from` is taken out at the new path. A
+  failure puts back every step made, newest first. The session counts
+  the old path as its own deletion, so a checkpoint lists it under
+  `written_by_session` even when git sees a delete and an add rather
+  than a rename; a checkpoint with `paths` needs both the old and the
+  new path to record the move.
   Copying entities comes later (#129).
 
 ## 9. Architecture

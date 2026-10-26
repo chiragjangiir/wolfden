@@ -242,6 +242,56 @@ public sealed class HistoryToolTests : IDisposable
         Assert.Equal([Swales], result.ChangedOutsideSession);
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-22")]
+    public void AMovedFilesOldPathIsTheSessionsWhenGitSeesADeleteAndAnAdd()
+    {
+        // A note so short that the id and 'from' the move adds leave git no rename to see.
+        const string Old = "universes/dracula/books/dracula/entities/notes/q.md";
+        const string New = "universes/dracula/entities/notes/q.md";
+        _den.Write(Old, "---\ntype: note\nname: Q\n---\n");
+        RunGit("init", "--quiet");
+        Commit("Start the Dracula notes");
+        var tools = new DenTools(_den.Root) { History = () => GitHistory.ForDen(_den.Root, Git) };
+        tools.MoveEntity("Q", tools.GetEntity("Q").Entity!.Hash!);
+
+        var result = tools.Checkpoint("Move Q", "Claude <noreply@anthropic.com>");
+
+        Assert.Equal("deleted", result.Checkpoint!.Changes.Single(c => c.Path == Old).Kind);
+        Assert.Equal([Old, New], result.WrittenBySession!.Order(StringComparer.Ordinal));
+        Assert.Empty(result.ChangedOutsideSession!);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-22")]
+    public void AFileTheSessionEditedThenMovedIsntChangedOutsideIt()
+    {
+        const string Old = "universes/dracula/books/dracula/entities/notes/q.md";
+        const string New = "universes/dracula/entities/notes/q.md";
+        _den.Write(Old, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z1\ntype: note\nname: Q\nstatus: draft\nfrom: dracula\n---\n");
+        RunGit("init", "--quiet");
+        Commit("Start the Dracula notes");
+        var tools = new DenTools(_den.Root) { History = () => GitHistory.ForDen(_den.Root, Git) };
+
+        // The session's edit changes most of the file, so git sees no rename either.
+        var edited = tools.AppendSection("Q", "Overview", string.Join("\n\n", Enumerable.Range(1, 12).Select(i => $"A long paragraph about Q, number {i}, so the file is mostly new.")), tools.GetEntity("Q").Entity!.Hash!);
+        tools.MoveEntity("Q", edited.Hash);
+
+        var result = tools.Checkpoint("Edit and move Q", "Claude <noreply@anthropic.com>");
+
+        Assert.Equal("deleted", result.Checkpoint!.Changes.Single(c => c.Path == Old).Kind);
+        Assert.Equal([Old, New], result.WrittenBySession!.Order(StringComparer.Ordinal));
+        Assert.Empty(result.ChangedOutsideSession!);
+
+        // A file put back at the old path by hand, later, is the writer's.
+        _den.Write(Old, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z2\ntype: note\nname: Q again\nstatus: draft\n---\n");
+        var next = tools.Checkpoint("Q again", "Claude <noreply@anthropic.com>");
+        Assert.Empty(next.WrittenBySession!);
+        Assert.Equal([Old], next.ChangedOutsideSession);
+    }
+
     public void Dispose()
     {
         var git = Path.Combine(_den.Root, ".git");

@@ -296,7 +296,7 @@ public sealed class WolfdenTools
         "book entity's 'from' outside its book) or enter_at_new_scope true (it enters at the start of the new scope instead). Nothing " +
         "moves into or out of a final (frozen) book. If a link that reaches another entity would change target, nothing changes " +
         "unless allow_relinks is true. The result's path and hash are the file's new ones, and 'files' marks the moved file with its " +
-        "old path." + WriteHelp)]
+        "old path. A checkpoint with 'paths' needs both the old and the new path." + WriteHelp)]
     public CallToolResult MoveEntity(
         [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
         [Description(HashHelp)] string expected_hash,
@@ -384,7 +384,8 @@ public sealed class WolfdenTools
         "checkpoint can include edits the writer made elsewhere. The result lists the recorded files your writes in this session " +
         "saved since they were last recorded ('written_by_session') apart from those that changed some other way " +
         "('changed_outside_session'); a file you wrote that was changed after, say in the writer's editor, is in both. Tell the writer " +
-        "about the second list. If nothing changed since the last checkpoint, nothing is recorded. If the den has no history, the result says so ('available' false) and the edits are still saved in the files.")]
+        "about the second list. If nothing changed since the last checkpoint, nothing is recorded. After move_entity, 'paths' must name " +
+        "both the old and the new path to record the move. If the den has no history, the result says so ('available' false) and the edits are still saved in the files.")]
     public CallToolResult Checkpoint(
         [Description("What the checkpoint is, such as 'End of chapter 14 session: Lucy's timeline'.")] string message,
         [Description("You, as 'Name <email>' on one line, such as 'Claude <noreply@anthropic.com>'.")] string co_author,
