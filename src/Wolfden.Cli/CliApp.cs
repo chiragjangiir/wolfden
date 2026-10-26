@@ -30,7 +30,7 @@ internal static class CliApp
     internal const int ExitStoppedByFailure = 3;
 
     /// <summary>
-    /// True while a command that runs until it's stopped (<c>index --watch</c>, <c>mcp</c>)
+    /// True while a command that runs until it's stopped (<c>index --watch</c>, <c>serve</c>, <c>mcp</c>)
     /// is running, so Ctrl+C stops it cleanly instead of ending the process.
     /// Other commands end at Ctrl+C as usual.
     /// </summary>
@@ -44,10 +44,7 @@ internal static class CliApp
     internal static Wolfden.Git.GitOptions Git { get; set; } = Wolfden.Git.GitOptions.Default;
 
     /// <summary>Commands that work, in the order the usage lists them.</summary>
-    internal static readonly string[] Commands = ["init", "check", "index", "query", "copy", "new-id", "mcp"];
-
-    /// <summary>Commands planned for v0 that aren't implemented yet.</summary>
-    internal static readonly string[] PlannedCommands = ["serve"];
+    internal static readonly string[] Commands = ["init", "check", "index", "query", "copy", "new-id", "serve", "mcp"];
 
     internal static string Version =>
         typeof(CliApp).Assembly
@@ -56,7 +53,7 @@ internal static class CliApp
         ?? "unknown";
 
     internal static string Usage =>
-        $"""
+        """
         usage: wolfden [--version] <command> [<args>]
 
         commands:
@@ -69,13 +66,12 @@ internal static class CliApp
           copy <entity> <name>     copy an entity under a new name, with a new id
                                    (--to <scope> puts it elsewhere)
           new-id [<count>]         print new ids for files made by hand
+          serve [<den>]            open the den's web UI in a browser (runs until Ctrl+C)
           mcp [<den>]              run the MCP server over stdio for an AI client
 
         Run 'wolfden <command> --help' for a command's options. Commands find the
         den from the current folder, or take '--den <folder>', and '--json'
         prints one JSON document instead of text.
-
-        planned, not yet implemented: {string.Join(", ", PlannedCommands)}
         """;
 
     /// <summary>Runs the command and returns the process exit code. Output and errors both go to <paramref name="output"/>.</summary>
@@ -121,12 +117,10 @@ internal static class CliApp
                 return CopyCommand.Run(rest, output, error);
             case ["new-id", .. var rest]:
                 return NewIdCommand.Run(rest, output, error);
+            case ["serve", .. var rest]:
+                return ServeCommand.Run(rest, output, error, stop);
             case ["mcp", .. var rest]:
                 return McpCommand.Run(rest, output, error, stop);
-            case [var command, ..] when PlannedCommands.Contains(command):
-                error.WriteLine($"wolfden: '{command}' isn't implemented yet.");
-                error.WriteLine(Usage);
-                return ExitUsage;
             default:
                 error.WriteLine($"wolfden: unknown command '{args[0]}'.");
                 error.WriteLine(Usage);

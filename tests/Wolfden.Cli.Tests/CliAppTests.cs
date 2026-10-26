@@ -28,7 +28,7 @@ public class CliAppTests
             Assert.Contains($"\n  {command} ", text.ReplaceLineEndings("\n"));
         }
 
-        Assert.Contains("not yet implemented: serve", text);
+        Assert.DoesNotContain("not yet implemented", text, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -38,6 +38,8 @@ public class CliAppTests
     [InlineData("query")]
     [InlineData("copy")]
     [InlineData("new-id")]
+    [InlineData("serve")]
+    [InlineData("mcp")]
     public void EveryCommandHasHelpThatStartsWithItsUsage(string command)
     {
         var (exitCode, output, error) = Cli.Run(command, "--help");
@@ -59,19 +61,6 @@ public class CliAppTests
 
         Assert.Contains("--den <den>", output, StringComparison.Ordinal);
         Assert.Contains("--json", output, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void APlannedCommandSaysItIsntImplementedAndExitsTwo()
-    {
-        var output = new StringWriter();
-        var error = new StringWriter();
-
-        var exitCode = CliApp.Run(["serve"], output, error);
-
-        Assert.Equal(CliApp.ExitUsage, exitCode);
-        Assert.Empty(output.ToString());
-        Assert.StartsWith("wolfden: 'serve' isn't implemented yet.", error.ToString());
     }
 
     [Fact]

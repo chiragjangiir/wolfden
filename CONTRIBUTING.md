@@ -34,6 +34,8 @@ dotnet test
 ```
 
 The solution is `Wolfden.slnx`. Projects live in `src/`, tests in `tests/`.
+The web UI lives in `web/` and is built separately, with npm (see "The web
+UI" below).
 Warnings fail the build, and package versions are kept in
 `Directory.Packages.props`. CI runs the same build and tests on Linux and
 Windows for every pull request. To turn off .NET SDK telemetry locally (CI
@@ -43,6 +45,37 @@ Tests that check a writer's situation carry its id from
 [`docs/scenarios.md`](docs/scenarios.md), for example
 `[Trait("Scenario", "SC-CANON-2")]`. When you describe a new situation in
 an issue or PR, add it to that list.
+
+### The web UI
+
+The UI is React, TypeScript, Vite, and TanStack Query, in `web/`. You need
+[Node.js](https://nodejs.org) 22.12 or later (CI uses the 24 LTS line).
+From `web/`:
+
+```sh
+npm ci          # install the exact versions in package-lock.json
+npm run build   # type-check and build into web/dist
+npm test        # run the UI's tests (Vitest)
+```
+
+`dotnet build` copies a built `web/dist` next to `wolfden` as `wwwroot`,
+and `wolfden serve` serves it. So build the UI first, then the solution.
+Without a built UI, `wolfden serve` still runs the API, and its page says
+how to build the UI.
+
+To work on the UI with hot reload, run the server and the Vite dev server
+side by side:
+
+```sh
+dotnet run --project src/Wolfden.Cli -- serve samples/dracula --no-open
+npm run dev     # in web/; it passes /api on to the server on port 9653
+```
+
+If the server runs on another port (`serve --port <n>`), set
+`WOLFDEN_PORT=<n>` for `npm run dev`.
+
+Pin each npm dependency to an exact version, commit `package-lock.json`,
+and check its license first, as for NuGet packages.
 
 ## Branches and pull requests
 

@@ -91,28 +91,9 @@ internal static class McpCommand
         }
 
         var pinned = line.Value("--universe");
-        if (pinned == DenTools.AllUniverses)
+        if (!PinnedUniverse.Check(Spec.Name, root, pinned, error))
         {
-            error.WriteLine("wolfden mcp: '*' (every universe) can't be pinned: --universe pins one universe. Leave it out to serve them all.");
             return CliApp.ExitUsage;
-        }
-
-        if (pinned is not null)
-        {
-            var structure = DenStructure.Load(root);
-            if (!structure.IsLoaded)
-            {
-                error.WriteLine($"wolfden mcp: den.yaml doesn't load, so universe '{pinned}' can't be found. Run 'wolfden check' to see why.");
-                return CliApp.ExitUsage;
-            }
-
-            if (structure.FindUniverse(pinned) is null)
-            {
-                var keys = structure.Universes.Select(u => u.Key).Order(StringComparer.Ordinal).ToList();
-                error.WriteLine(
-                    $"wolfden mcp: the den has no universe '{pinned}'." + (keys.Count == 0 ? " It has no universes yet." : $" Its universes: {string.Join(", ", keys)}."));
-                return CliApp.ExitUsage;
-            }
         }
 
         ITransport transport;
