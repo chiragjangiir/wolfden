@@ -2428,7 +2428,8 @@ hasn't checkpointed yet.
   afterwards. A diff of one file shows only it, and a diff between two
   checkpoints shows a moved note as a rename. One checkpoint's own diff
   compares it with the checkpoint before it, or, for the first, with
-  nothing, so its notes show as added. A checkpoint that isn't
+  nothing, so its notes show as added; narrowed to a moved note's new
+  path, it still shows the rename. A checkpoint that isn't
   in the repository is an error that says so, and a revision is never
   read as a git option.
 - A patch shows the note's text as it is. A form feed, a lone carriage
@@ -2576,7 +2577,12 @@ yet.
 Spec: design.md §9 (#24). Covered by:
 `ReadEndpointTests.TheHierarchyListsSeriesBooksAndChaptersInStoryOrderWithCountsPerScope`,
 `ReadEndpointTests.TheHierarchyAsOfAPositionCountsOnlyWhatTheReaderHasMet`,
-`ReadEndpointTests.APinnedServerReadsOnlyItsUniverse`.
+`ReadEndpointTests.APinnedServerReadsOnlyItsUniverse`,
+`ReadEndpointTests.APinnedServerDoesntNameAnotherUniversesEntityInABrokenLink`.
+
+Chapters and their titles are listed whatever the position (maintainer
+decision, 2026-10-26): the as-of view hides notes, not the table of
+contents.
 
 ### SC-WEB-5. I pick a point in the story
 
@@ -2607,7 +2613,14 @@ The writer opens Mara Voss's page, then the same page as of `ember:1`.
   links to it. As of a position, only links in what the reader has met
   count: Mara's injury section links Kessan Reach only from `ember:2b`.
   A link to an entity the reader hasn't met yet doesn't say what it
-  reaches, even by id.
+  reaches, even by id. Chapter POV fields and outline rows link from
+  their chapter, so they count from there on.
+- Nothing on any page or list as of a position names an entity the
+  reader hasn't met: not its name, an alias, its key, id, or path. When
+  Jonathan and Quincey Harker share the alias "Harker", a `[[Harker]]`
+  link as of `dracula:25` is ambiguous, names Jonathan, and says only
+  that there are others not met yet. A server pinned to one universe
+  doesn't name another universe's entity in a broken link's problem.
 
 Spec: design.md §9 (#24, #26). Covered by:
 `ReadEndpointTests.AnEntityPageAsOfAPositionGivesWhatGetEntityGives`,
@@ -2615,7 +2628,10 @@ Spec: design.md §9 (#24, #26). Covered by:
 `ReadEndpointTests.AnEntityPageGivesItsScopeChainEntryPointAndResolvedLinks`,
 `ReadEndpointTests.AnEntityWithoutFromInheritsItsScopesStart`,
 `ReadEndpointTests.BacklinksSayWhereTheLinkIsAndAsOfAPositionOnlyCountWhatTheReaderHasMet`,
-`ReadEndpointTests.AsOfAPositionALinkToAnEntityTheReaderHasntMetDoesntSayWhatItReaches`.
+`ReadEndpointTests.AsOfAPositionALinkToAnEntityTheReaderHasntMetDoesntSayWhatItReaches`,
+`ReadEndpointTests.BacklinksAsOfAPositionFromChaptersAndOutlineRowsCountUpToThatChapter`,
+`SpoilerTests.AnAmbiguousLinksProblemNamesOnlyTheMatchesTheReaderHasMet`,
+`SpoilerTests.NothingAsOfAPositionNamesAnEntityTheReaderHasntMet`.
 
 ### SC-WEB-7. I list entities and read canon as of a chapter
 
@@ -2651,7 +2667,10 @@ Mina Harker, and an edit since.
   shows the note added), the change between two checkpoints, or the
   change since a checkpoint (by default the latest) up to the note as
   it is now, as a unified diff for the UI to show. A checkpoint that
-  isn't one is `unknown_checkpoint`.
+  renamed the note shows the rename. A checkpoint that isn't one is
+  `unknown_checkpoint`; `to` without `from`, or a revision that can't be
+  one (it starts with `-` or holds a space), is `bad_argument`, and a
+  very long one is cut short in the message.
 - A den without history isn't an error: `available` is false, the
   backend is `none`, and `reason` says why. So it is for a diff in a
   repository with nothing checkpointed yet.
@@ -2659,7 +2678,9 @@ Mina Harker, and an edit since.
 Spec: design.md §9 (#27). Covered by:
 `HistoryEndpointTests.HistoryPagesThroughAnEntitysCheckpointsAsGetHistoryDoes`,
 `HistoryEndpointTests.ADiffIsOfOneCheckpointBetweenTwoOrSinceOneUpToNow`,
-`HistoryEndpointTests.ADenWithoutHistorySaysSoRatherThanFailing`.
+`HistoryEndpointTests.ADenWithoutHistorySaysSoRatherThanFailing`,
+`HistoryEndpointTests.ACheckpointThatRenamedTheNoteShowsTheRename`,
+`HistoryEndpointTests.ARevisionThatCantBeOneIsABadArgumentAndALongOneIsCutShort`.
 
 ### SC-WEB-10. The UI asks for something that isn't there
 
@@ -2668,7 +2689,10 @@ Spec: design.md §9 (#27). Covered by:
   `unknown_universe`, `unknown_scope`); a name two entities share is
   409 `ambiguous_entity`, listing both. A parameter an endpoint doesn't
   take (such as `as_of` for `asOf`), one given twice, or a value that
-  doesn't fit is 400 `bad_argument`, never quietly ignored.
+  doesn't fit is 400 `bad_argument`, never quietly ignored. An empty
+  `asOf` is `bad_argument` too, rather than the full view.
 
 Spec: design.md §9. Covered by:
-`ReadEndpointTests.BadRequestsGetACodeAndAMessage`.
+`ReadEndpointTests.BadRequestsGetACodeAndAMessage`,
+`ReadEndpointTests.AnEmptyAsOfIsRefusedRatherThanShowingEverything`,
+`HistoryEndpointTests.ARevisionThatCantBeOneIsABadArgumentAndALongOneIsCutShort`.
