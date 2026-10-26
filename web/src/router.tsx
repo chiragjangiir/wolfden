@@ -12,7 +12,8 @@ import { UniversePage } from './pages/UniversePage'
 import { SeriesPage } from './pages/SeriesPage'
 import { BookPage } from './pages/BookPage'
 import { ChapterPage } from './pages/ChapterPage'
-import { EntityPageView } from './pages/EntityPageView'
+import { EntityRoute } from './pages/EntityRoute'
+import { validateEntitySearch } from './entitySearch'
 import { NotFound } from './components/States'
 
 /**
@@ -71,8 +72,14 @@ const chapterRoute = createRoute({
 })
 
 // An entity is named by its id, or by its path while it has none, so the
-// rest of the URL is the name, slashes and all.
-const entityRoute = createRoute({ getParentRoute: () => rootRoute, path: '/u/$universe/e/$', component: EntityPageView })
+// rest of the URL is the name, slashes and all. Its history is the same
+// route with `?view=history` (#27), since nothing can follow the name.
+const entityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/u/$universe/e/$',
+  validateSearch: validateEntitySearch,
+  component: EntityRoute,
+})
 
 const routeTree = rootRoute.addChildren([homeRoute, universeRoute, seriesRoute, bookRoute, chapterRoute, entityRoute])
 

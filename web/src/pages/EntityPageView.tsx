@@ -12,6 +12,7 @@ import {
   type PageSection,
   type PositionView,
 } from '../api'
+import { EntityTabs } from '../components/EntityTabs'
 import { EntityLink, LinkedText, createLinkMatcher, sectionAnchor } from '../components/Links'
 import { Markdown } from '../components/Markdown'
 import { ErrorState, Loading, StatusBadge } from '../components/States'
@@ -50,8 +51,20 @@ export function EntityPageView() {
   return <EntityArticle universe={universe} entity={entity} positions={view.positions ?? []} />
 }
 
-/** The banner for an entity the reader hasn't met at the position. */
-function NotInView({ summary, note, positions, at }: { summary: EntitySummary | undefined; note: string | null; positions: PositionView[]; at: string | undefined }) {
+/** The banner for an entity the reader hasn't met at the position, with any `actions` a page adds. */
+export function NotInView({
+  summary,
+  note,
+  positions,
+  at,
+  actions,
+}: {
+  summary: EntitySummary | undefined
+  note: string | null
+  positions: PositionView[]
+  at: string | undefined
+  actions?: ReactNode
+}) {
   const { setAt } = usePosition()
   const entry = summary ? entryOf(summary, positions) : null
   const entryOrdinal = entry === null ? -1 : ordinalOf(entry, positions)
@@ -82,6 +95,7 @@ function NotInView({ summary, note, positions, at }: { summary: EntitySummary | 
           <button type="button" onClick={() => setAt(undefined)}>
             Show everything
           </button>
+          {actions}
         </p>
       </div>
     </div>
@@ -93,6 +107,7 @@ function EntityArticle({ universe, entity, positions }: { universe: string; enti
   return (
     <article className="page-body entity">
       <Breadcrumb universe={universe} scope={entity.scope} />
+      <EntityTabs universe={universe} entityKey={entity.key} current="note" />
       <header>
         <p className="eyebrow">
           {entity.type} <StatusBadge status={entity.status} />
