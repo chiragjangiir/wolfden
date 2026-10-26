@@ -421,7 +421,8 @@ The den store and the history provider are interfaces in `Wolfden.Core`
   unchanged; without one, a file marked by hand is compared as it is on
   disk. Edits inside a submodule aren't the den's, and a submodule isn't
   a den file: log and diff leave out its additions, deletions, and
-  commit moves (#158). A note that becomes a symbolic link, or the other
+  commit moves (#158), and a checkpoint that changed only submodules is
+  still listed in the log, with no files. A note that becomes a symbolic link, or the other
   way round, is modified, with git's patch of the link's target path; a
   note that becomes a submodule is deleted, and one that replaces a
   submodule is added. Git doesn't see what a link leads to, so a note
