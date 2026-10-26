@@ -442,7 +442,11 @@ The den store and the history provider are interfaces in `Wolfden.Core`
   the rename's other side, and one diff of the pair, with literal
   pathspecs, gives its patch; past 100 other sides, or if git pairs
   them otherwise, the whole den's patch is narrowed to the path
-  (#175). A checkpoint's own diff of a path that can't be a den file
+  (#175). Rename detection sees hidden paths too, though they're never
+  reported, so a note moved into a hidden folder (`.trash/`) shows as
+  deleted, never as renamed to a den file that looks like it; a log
+  entry that may hide such a pairing is read again the same way (#184
+  review). A checkpoint's own diff of a path that can't be a den file
   has no files. The log pages by position: each page
   walks the same log from HEAD with the same path filter and starts
   after the `before` entry, since a history with merges isn't a line

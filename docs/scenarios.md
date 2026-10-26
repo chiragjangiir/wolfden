@@ -2517,10 +2517,15 @@ compares it with a checkpoint from before the rename.
   path. A folder's view shows a note moved into or out of it as a
   rename too, even when a whole folder of notes was moved into it at
   once.
+- A note moved into a hidden folder (`.trash/`) shows as deleted, in a
+  compare, a checkpoint's own diff, and the log, even when a copy of it
+  appears in the den under another name: the copy is added, not a
+  rename of the note.
 
 Spec: design.md §6, §9 (#175, #181). Covered by:
 `GitHistoryTests.ACompareOfOneNoteAcrossARenameShowsTheRename`,
-`GitHistoryTests.ACheckpointThatRenamedAWholeFolderShowsEveryRename`;
+`GitHistoryTests.ACheckpointThatRenamedAWholeFolderShowsEveryRename`,
+`GitHistoryTests.ANoteMovedIntoAHiddenFolderIsDeletedNotRenamedToALookAlike`;
 through the API, SC-WEB-9.
 
 ### SC-HIST-11. A note with errors still has its history

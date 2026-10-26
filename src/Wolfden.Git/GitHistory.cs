@@ -237,10 +237,7 @@ public sealed partial class GitHistory : IHistoryProvider
         }
 
         var entries = ReadLog(head, query.Limit, specs, cancellationToken, skip);
-        if (query.Path is not null)
-        {
-            PairRenames(entries, CheckPath(query.Path), cancellationToken);
-        }
+        PairRenames(entries, query.Path is null ? null : CheckPath(query.Path), cancellationToken);
 
         return HistoryResult<IReadOnlyList<HistoryEntry>>.Done(entries);
 
@@ -310,7 +307,9 @@ public sealed partial class GitHistory : IHistoryProvider
     /// <summary>What changed between <paramref name="from"/> and the den's files as they are now, in <paramref name="limit"/> or the whole den.</summary>
     private HistoryResult<HistoryDiff> DiffWithFiles(string from, string? limit, CancellationToken cancellationToken)
     {
-        var specs = Pathspecs(limit is null ? null : [limit]);
+        // The whole den keeps hidden paths in, for rename detection only (CompareFiles).
+        var specs = Pathspecs(limit is null ? null : [limit], withHidden: limit is null);
+
         // The files as they are now, new ones included (#142): a temporary
         // index lists HEAD's files and the new ones, and git compares the
         // files on disk with 'from' through it. The user's index is left
@@ -336,7 +335,7 @@ public sealed partial class GitHistory : IHistoryProvider
             // own diff has a file added, deleted, or renamed.
             void WholeDen()
             {
-                var den = Pathspecs(null);
+                var den = Pathspecs(null, withHidden: true);
                 _ = Run([.. TempIndexSettings, "add", "--refresh", "--", .. den], cancellationToken, environment: environment);
                 ListNewFiles(den, emptyBlob, environment, cancellationToken);
             }
@@ -580,6 +579,12 @@ public sealed partial class GitHistory : IHistoryProvider
         {
             id = Head(CancellationToken.None);
             entry = id is null ? null : ReadLog(id, 1, Pathspecs(null), CancellationToken.None).SingleOrDefault();
+            if (entry is not null)
+            {
+                List<HistoryEntry> read = [entry];
+                PairRenames(read, null, CancellationToken.None);
+                entry = read[0];
+            }
         }
         catch (HistoryException e)
         {
@@ -965,7 +970,11 @@ public sealed partial class GitHistory : IHistoryProvider
     /// patch, narrowed to the path.</item>
     /// </list>
     /// Every answer comes from one git run that gives the changes and their
-    /// patches together (#142 review, H2).
+    /// patches together (#142 review, H2). Steps 2 and 3 and the whole den's
+    /// patch keep hidden paths in, so a note moved into a hidden folder
+    /// pairs with its hidden new path and shows as deleted, never as renamed
+    /// to a den file that looks like it; hidden paths themselves are never
+    /// reported (<see cref="ParseChanges"/>).
     /// </remarks>
     private List<HistoryFileDiff> CompareFiles(
         IReadOnlyList<string> revisions,
@@ -976,7 +985,7 @@ public sealed partial class GitHistory : IHistoryProvider
     {
         if (limit is null)
         {
-            return CompareSpecs(revisions, Pathspecs(null), environment, cancellationToken);
+            return CompareSpecs(revisions, Pathspecs(null, withHidden: true), environment, cancellationToken);
         }
 
         var own = CompareSpecs(revisions, Pathspecs([limit]), environment, cancellationToken);
@@ -986,7 +995,7 @@ public sealed partial class GitHistory : IHistoryProvider
         }
 
         wholeDen?.Invoke();
-        var raw = Git([.. TempIndexSettings, "diff", .. DiffOptions, "--raw", "-z", .. revisions, "--", .. Pathspecs(null)], cancellationToken, environment: environment);
+        var raw = Git([.. TempIndexSettings, "diff", .. DiffOptions, "--raw", "-z", .. revisions, "--", .. Pathspecs(null, withHidden: true)], cancellationToken, environment: environment);
         var touching = ParseChanges(SplitRawAndPatch(raw).Tokens)
             .Select(c => c.Change)
             .OfType<HistoryFileChange>()
@@ -1001,7 +1010,7 @@ public sealed partial class GitHistory : IHistoryProvider
             .Where(p => !Under(p, limit)).Distinct(StringComparer.Ordinal).ToList();
         if (others.Count <= MostPairedPaths && others.All(IsDenPath))
         {
-            var paired = CompareSpecs(revisions, Pathspecs([limit, .. others]), environment, cancellationToken)
+            var paired = CompareSpecs(revisions, Pathspecs([limit, .. others], withHidden: true), environment, cancellationToken)
                 .Where(f => Touches(f.Change, limit))
                 .ToList();
             if (SameChanges(paired.Select(f => f.Change), touching))
@@ -1010,22 +1019,34 @@ public sealed partial class GitHistory : IHistoryProvider
             }
         }
 
-        return CompareSpecs(revisions, Pathspecs(null), environment, cancellationToken).Where(f => Touches(f.Change, limit)).ToList();
+        return CompareSpecs(revisions, Pathspecs(null, withHidden: true), environment, cancellationToken).Where(f => Touches(f.Change, limit)).ToList();
     }
 
     /// <summary>
-    /// Makes the changes of each log entry of <paramref name="limit"/> that
-    /// adds or deletes a file there what the whole den's diff of that
-    /// checkpoint says, so a checkpoint that renamed a file into or out of
-    /// it is listed as a rename, not as an add or a delete (#181). The log's
-    /// pathspec hides a rename's other side, as a diff's does.
+    /// Makes the changes of each log entry that may hide a rename what the
+    /// whole den's diff of that checkpoint, hidden paths included, says
+    /// (#181, #184 review). The log's pathspec hides a rename's other side,
+    /// as a diff's does: in the log of <paramref name="limit"/>, a file
+    /// renamed into or out of it shows as added or deleted; and in any log,
+    /// a note moved into a hidden folder can pair with a den file that looks
+    /// like it, as a false rename. So an entry of a path's log that adds,
+    /// deletes, or renames a file there, or an entry of the whole den's log
+    /// (<paramref name="limit"/> null) that renames one, is read again.
     /// </summary>
-    private void PairRenames(List<HistoryEntry> entries, string limit, CancellationToken cancellationToken)
+    /// <remarks>
+    /// Cost: two git processes (<c>rev-parse</c> and a raw whole-den
+    /// <c>diff</c>, which writes no patches) for each such entry on the page.
+    /// A note's log has one at most per creation or rename, but a folder's
+    /// log can have one on most entries, so a page of 20 can run about 40
+    /// more git processes. Batching them through <c>git diff-tree
+    /// --stdin</c> would make it one, if that ever matters.
+    /// </remarks>
+    private void PairRenames(List<HistoryEntry> entries, string? limit, CancellationToken cancellationToken)
     {
         for (var i = 0; i < entries.Count; i++)
         {
             var entry = entries[i];
-            if (!entry.Changes.Any(c => c.Kind is HistoryChangeKind.Added or HistoryChangeKind.Deleted))
+            if (!entry.Changes.Any(c => c.Kind == HistoryChangeKind.Renamed || (limit is not null && c.Kind != HistoryChangeKind.Modified)))
             {
                 continue;
             }
@@ -1037,8 +1058,9 @@ public sealed partial class GitHistory : IHistoryProvider
                 continue;
             }
 
-            var raw = Git(["diff", .. DiffOptions, "--raw", "-z", CommitId(parent), entry.Id, "--", .. Pathspecs(null)], cancellationToken);
-            var touching = ParseChanges(SplitRawAndPatch(raw).Tokens).Select(c => c.Change).OfType<HistoryFileChange>().Where(c => Touches(c, limit)).ToList();
+            var raw = Git(["diff", .. DiffOptions, "--raw", "-z", CommitId(parent), entry.Id, "--", .. Pathspecs(null, withHidden: true)], cancellationToken);
+            var touching = ParseChanges(SplitRawAndPatch(raw).Tokens).Select(c => c.Change).OfType<HistoryFileChange>()
+                .Where(c => limit is null || Touches(c, limit)).ToList();
             if (touching.Count > 0)
             {
                 entries[i] = entry with { Changes = touching };
@@ -1360,10 +1382,19 @@ public sealed partial class GitHistory : IHistoryProvider
 
     /// <summary>
     /// The pathspecs for den-relative <paramref name="paths"/>, or for the
-    /// whole den, always without hidden paths. Each path is taken literally,
-    /// so a name with <c>*</c> or <c>[</c> in it is just a name.
+    /// whole den, without hidden paths unless <paramref name="withHidden"/>.
+    /// Each path is taken literally, so a name with <c>*</c> or <c>[</c> in
+    /// it is just a name.
     /// </summary>
-    private static List<string> Pathspecs(IReadOnlyList<string>? paths)
+    /// <param name="paths">Den-relative files or folders, or null for the whole den.</param>
+    /// <param name="withHidden">
+    /// True to keep hidden paths in, for rename detection only: a note moved
+    /// into a hidden folder (<c>.trash/</c>) must pair with its hidden new
+    /// path, which <see cref="ParseChanges"/> then makes a delete, rather
+    /// than with a den file that looks like it (#184 review). Nothing hidden
+    /// is ever reported.
+    /// </param>
+    private static List<string> Pathspecs(IReadOnlyList<string>? paths, bool withHidden = false)
     {
         var specs = new List<string>();
         if (paths is null || paths.Count == 0)
@@ -1378,7 +1409,11 @@ public sealed partial class GitHistory : IHistoryProvider
             }
         }
 
-        specs.AddRange(HiddenExcludes);
+        if (!withHidden)
+        {
+            specs.AddRange(HiddenExcludes);
+        }
+
         return specs;
     }
 

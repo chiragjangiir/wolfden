@@ -571,6 +571,45 @@ public sealed class GitHistoryTests
 
     [Fact]
     [Trait("Scenario", "SC-HIST-10")]
+    public void ANoteMovedIntoAHiddenFolderIsDeletedNotRenamedToALookAlike()
+    {
+        // Mara's note goes to .trash/ and a copy of it, under another name,
+        // appears in the den. Without the hidden side, git would pair Mara
+        // with the copy (#184 review).
+        const string copy = "universes/vael/entities/characters/mara.md";
+        const string text = "# Mara Voss\n\nA pilot who flies the night run to the outer moons.\n";
+        using var repo = TestRepo.Create();
+        repo.WriteDen(Mara, text);
+        repo.WriteDen(Fen, "# Fen Harbour\n");
+        var before = repo.CommitAll("start");
+        Directory.CreateDirectory(Path.Combine(repo.DenRoot, ".trash"));
+        File.Move(Path.Combine(repo.DenRoot, Mara), Path.Combine(repo.DenRoot, ".trash", "mara-voss.md"));
+        repo.WriteDen(copy, text);
+
+        var deleted = new HistoryFileChange(HistoryChangeKind.Deleted, Mara);
+        var added = new HistoryFileChange(HistoryChangeKind.Added, copy);
+
+        // Up to the files now, then between checkpoints and in the checkpoint's own diff and log.
+        Assert.Equal(deleted, Assert.Single(repo.History.Diff(new HistoryDiffQuery(before, null, Mara), Token).Value.Files).Change);
+        Assert.Equal(added, Assert.Single(repo.History.Diff(new HistoryDiffQuery(before, null, copy), Token).Value.Files).Change);
+        Assert.Equal([added, deleted], repo.History.Diff(new HistoryDiffQuery(before), Token).Value.Files.Select(f => f.Change).OrderBy(c => c.Kind));
+        var after = repo.CommitAll("trash Mara");
+        Assert.Equal([added, deleted], repo.History.DiffCheckpoint(after, null, Token).Value.Files.Select(f => f.Change).OrderBy(c => c.Kind));
+        Assert.Equal([added, deleted], Assert.Single(repo.History.Log(new HistoryLogQuery(Limit: 1), Token).Value).Changes.OrderBy(c => c.Kind));
+        Assert.Equal(
+            [added, deleted],
+            repo.History.Log(new HistoryLogQuery("universes/vael/entities/characters", Limit: 1), Token).Value[0].Changes.OrderBy(c => c.Kind));
+        Assert.Equal(deleted, Assert.Single(repo.History.Diff(new HistoryDiffQuery(before, after, Mara), Token).Value.Files).Change);
+        Assert.Equal(deleted, Assert.Single(repo.History.DiffCheckpoint(after, Mara, Token).Value.Files).Change);
+        Assert.Equal(added, Assert.Single(repo.History.DiffCheckpoint(after, copy, Token).Value.Files).Change);
+        Assert.Equal([added], Assert.Single(repo.History.Log(new HistoryLogQuery(copy), Token).Value).Changes);
+        Assert.Equal(
+            [added, deleted],
+            repo.History.DiffCheckpoint(after, "universes/vael/entities/characters", Token).Value.Files.Select(f => f.Change).OrderBy(c => c.Kind));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-10")]
     public void ACheckpointThatRenamedAWholeFolderShowsEveryRename()
     {
         // More renames into the folder than one command line names: the whole den's patch, narrowed.
