@@ -158,13 +158,25 @@ public sealed partial class DenTools
                 // The moved file's own links that are here reach an entity with no id, so they
                 // couldn't be kept on their targets by id: the writer gives those entities ids, or
                 // lets every own link follow the new scope (allow_relinks).
-                var idless = relinked.Count(l => l.Before.Occurrence.Path == path && l.Before.Target!.Path != path && l.Before.Target.Id is null);
-                var others = relinked.Count - idless;
-                var advice = idless == 0
-                    ? $"Link those by id or file name first, or {Words.AllowRelinks} to move it anyway."
-                    : $"{(others == 0 ? "They're" : $"{idless} of them are")} its own links to entities with no id, so they can't be kept on their targets by id (F-ID-6): " +
-                      $"run 'wolfden check --fix' to give those entities ids{(others == 0 ? "" : ", and link the others by id or file name")}, then move it again. " +
-                      $"Or {Words.AllowRelinks} to move it anyway; that also stops the rewriting of its other own links to their targets' ids, so they all follow the new scope.";
+                var idless = relinked.Where(l => l.Before.Occurrence.Path == path && l.Before.Target!.Path != path && l.Before.Target.Id is null).ToList();
+                var others = relinked.Count - idless.Count;
+                string advice;
+                if (idless.Count == 0)
+                {
+                    advice = $"Link those by id or file name first, or {Words.AllowRelinks} to move it anyway.";
+                }
+                else
+                {
+                    // No such target is in a final book, where 'wolfden check --fix' wouldn't add an id
+                    // (F-BOOK-1): a link reaches an entity in a book only from that book, or when the
+                    // name is unique in the universe (F-LINK-7). Nothing moves out of a final book, and
+                    // a unique name stays unique after a move, so that link wouldn't change target.
+                    advice =
+                        $"{(others == 0 ? "They're" : $"{idless.Count} of them {(idless.Count == 1 ? "is" : "are")}")} its own link(s) to entities with no id, so they can't be kept on their targets by id (F-ID-6). " +
+                        $"Run 'wolfden check --fix' to give those entities ids{(others > 0 ? ", and link the other links by id or file name" : "")}, then move it again. " +
+                        $"Or {Words.AllowRelinks} to move it anyway" +
+                        (plan.OwnRewritten.Count > 0 ? "; that also stops the rewriting of its other own links to their targets' ids, so they follow the new scope too." : ".");
+                }
                 throw new DenToolException(
                     ToolErrorCodes.BadArgument,
                     $"{relinked.Count} link(s) would change which entity they reach once '{target.Name}' is in {EntityMove.Describe(scope)}: " +

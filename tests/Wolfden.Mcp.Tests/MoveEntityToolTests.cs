@@ -223,6 +223,8 @@ public sealed class MoveEntityToolTests : IDisposable
         Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
         Assert.Contains(Pike, refused.Message, StringComparison.Ordinal);
         Assert.Contains("allow_relinks", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("Link those by id or file name first, or pass allow_relinks: true to move it anyway.", refused.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("check --fix", refused.Message, StringComparison.Ordinal);
         Assert.Equal(before, _den.Read(LanternShip));
 
         var result = Tools.MoveEntity(LanternShip, hash, toBook: "ash", keepEntry: true, universe: Universe, allowRelinks: true);
@@ -306,7 +308,7 @@ public sealed class MoveEntityToolTests : IDisposable
         var refused = Assert.Throws<DenToolException>(() => Tools.MoveEntity("Signal log", hash, toBook: "a-quiet-moon", universe: Universe));
 
         Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
-        Assert.Contains("own links to entities with no id", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("They're its own link(s) to entities with no id", refused.Message, StringComparison.Ordinal);
         Assert.Contains("wolfden check --fix", refused.Message, StringComparison.Ordinal);
         Assert.Contains("allow_relinks", refused.Message, StringComparison.Ordinal);
         Assert.Contains("also stops the rewriting of its other own links", refused.Message, StringComparison.Ordinal);
@@ -316,6 +318,28 @@ public sealed class MoveEntityToolTests : IDisposable
         // With allow_relinks, both own links follow the new scope, the one that had an id included.
         var result = Tools.MoveEntity("Signal log", hash, toBook: "a-quiet-moon", universe: Universe, allowRelinks: true);
         Assert.EndsWith("The [[Beacon]] and the [[Lantern]] signal.\n", _den.Read(result.Path), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-29")]
+    public void AnOwnLinkToATargetWithNoIdAndAnotherFilesLinkAreAdvisedTogether()
+    {
+        // The ship's own [[Beacon]] reaches the id-less beacon of A Quiet Moon; in Ash, it would reach
+        // the Ash beacon. Pike's [[Lantern]] there would tie with the ship. The ship has no other own
+        // links to rewrite, so allow_relinks isn't said to stop any.
+        _den.Write(Moon + "/entities/items/beacon.md", "---\ntype: item\nname: Beacon\nstatus: canon\n---\n");
+        _den.Write(Ash + "/entities/items/beacon.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z7\ntype: item\nname: Beacon\nstatus: canon\n---\n");
+        _den.Write(LanternShip, _den.Read(LanternShip) + "\nIts [[Beacon]] burns.\n");
+        var hash = Tools.GetEntity(LanternShip, Universe).Entity!.Hash!;
+
+        var refused = Assert.Throws<DenToolException>(() => Tools.MoveEntity(LanternShip, hash, toBook: "ash", keepEntry: true, universe: Universe));
+
+        Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
+        Assert.Contains(Pike, refused.Message, StringComparison.Ordinal);
+        Assert.Contains("1 of them is its own link(s) to entities with no id", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("Run 'wolfden check --fix' to give those entities ids, and link the other links by id or file name, then move it again.", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("Or pass allow_relinks: true to move it anyway.", refused.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("also stops the rewriting", refused.Message, StringComparison.Ordinal);
     }
 
     [Fact]
