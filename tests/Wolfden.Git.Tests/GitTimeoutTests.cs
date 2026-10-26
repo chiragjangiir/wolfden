@@ -233,7 +233,7 @@ public sealed class GitTimeoutTests
             var stopped = Assert.Throws<HistoryException>(() => history.Diff(new HistoryDiffQuery(), Token));
             clock.Stop();
 
-            Assert.Equal("git add didn't finish within 10 seconds, so Wolfden stopped it, and nothing was changed. " +
+            Assert.Equal("git diff didn't finish within 10 seconds, so Wolfden stopped it, and nothing was changed. " +
                 "Git may be waiting on a credential helper or a filter (such as Git LFS), or the repository may be very large.", stopped.Message);
             Assert.True(File.Exists(GitFile(repo, "wolfden-filter-started")), "The filter never ran.");
 

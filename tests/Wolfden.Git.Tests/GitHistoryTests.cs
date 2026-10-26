@@ -436,6 +436,92 @@ public sealed class GitHistoryTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-HIST-6")]
+    public void ADiffWithTheFilesOnDiskWritesNothingIntoTheRepository()
+    {
+        // A den in a subfolder, a user who turned off diff.autoRefreshIndex,
+        // and every kind of change a writer can leave before a checkpoint.
+        using var repo = TestRepo.Create("writing/vael-notes");
+        const string old = "universes/vael/entities/characters/mara.md";
+        const string accented = "universes/vael/entities/characters/Ilona Székely.md";
+        const string staged = "universes/vael/entities/items/compass.md";
+        repo.WriteDen(old, "# Mara Voss\n\nA pilot who flies the night run to the outer moons.\n");
+        repo.WriteDen(Fen, "# Fen Harbour\n");
+        repo.WriteDen("universes/vael/unchanged.md", "# Still the same\n");
+        repo.WriteRepo("README.md", "# outside the den\n");
+        var start = repo.CommitAll("start");
+        repo.Git("config", "diff.autoRefreshIndex", "false");
+
+        File.Move(Path.Combine(repo.DenRoot, old), Path.Combine(repo.DenRoot, Mara));
+        repo.DeleteDen(Fen);
+        repo.WriteDen(accented, "# Ilona\n");
+        repo.WriteDen("universes/vael/empty.md", string.Empty);
+        File.WriteAllBytes(Path.Combine(repo.DenRoot, "universes", "vael", "map.png"), [0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02, 0x00]);
+        repo.WriteDen(staged, "# The Compass\n");
+        repo.Git("add", $"writing/vael-notes/{staged}");
+        repo.WriteDen(".wolfden/index.db", "not really\n");
+        repo.WriteRepo("README.md", "# outside the den, changed\n");
+        repo.WriteRepo("blog/post.md", "outside the den, new\n");
+        var objects = Objects(repo);
+        var status = repo.Git("status", "--porcelain", "--untracked-files=all");
+
+        var diff = repo.History.Diff(new HistoryDiffQuery(), Token).Value;
+
+        Assert.Equal(start, diff.From);
+        Assert.Equal(
+            [
+                new HistoryFileChange(HistoryChangeKind.Added, "universes/vael/empty.md"),
+                new HistoryFileChange(HistoryChangeKind.Added, accented),
+                new HistoryFileChange(HistoryChangeKind.Renamed, Mara, old),
+                new HistoryFileChange(HistoryChangeKind.Added, staged),
+                new HistoryFileChange(HistoryChangeKind.Deleted, Fen),
+                new HistoryFileChange(HistoryChangeKind.Added, "universes/vael/map.png"),
+            ],
+            diff.Files.Select(f => f.Change).OrderBy(c => c.Path, StringComparer.Ordinal));
+        Assert.Contains("Binary files", diff.Files.Single(f => f.Change.Path.EndsWith(".png", StringComparison.Ordinal)).Patch, StringComparison.Ordinal);
+        Assert.Contains("\n+# Ilona\n", diff.Files.Single(f => f.Change.Path == accented).Patch, StringComparison.Ordinal);
+        Assert.Contains("\n+# The Compass\n", diff.Files.Single(f => f.Change.Path == staged).Patch, StringComparison.Ordinal);
+
+        // One file only, a new one and a deleted one.
+        Assert.Equal([accented], repo.History.Diff(new HistoryDiffQuery(Path: accented), Token).Value.Files.Select(f => f.Change.Path));
+        Assert.Equal([Fen], repo.History.Diff(new HistoryDiffQuery(Path: Fen), Token).Value.Files.Select(f => f.Change.Path));
+        Assert.Empty(repo.History.Diff(new HistoryDiffQuery(Path: "universes/vael/never.md"), Token).Value.Files);
+
+        // Nothing was stored: no loose object and no pack, not even the empty file's.
+        Assert.Equal(objects, Objects(repo));
+        Assert.Equal(status, repo.Git("status", "--porcelain", "--untracked-files=all"));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-6")]
+    public void ADiffOnABranchWithNoCommitsYetComparesTheFilesOnDisk()
+    {
+        using var repo = TestRepo.Create();
+        repo.WriteDen(Mara, "# Mara Voss\n");
+        repo.WriteDen(Fen, "# Fen Harbour\n");
+        var start = repo.CommitAll("start");
+        repo.Git("checkout", "--quiet", "--orphan", "fresh");
+        repo.Git("rm", "--quiet", "-r", "--cached", ".");
+        repo.WriteDen(Mara, "# Mara Voss\n\nA pilot.\n");
+        var objects = Objects(repo);
+
+        var diff = repo.History.Diff(new HistoryDiffQuery(start), Token).Value;
+
+        Assert.Equal([new HistoryFileChange(HistoryChangeKind.Modified, Mara)], diff.Files.Select(f => f.Change));
+        Assert.Equal(objects, Objects(repo));
+    }
+
+    /// <summary>Every file in the repository's object store, loose objects and packs alike.</summary>
+    private static List<string> Objects(TestRepo repo)
+    {
+        var store = Path.Combine(repo.Root, ".git", "objects");
+        return Directory.EnumerateFiles(store, "*", SearchOption.AllDirectories)
+            .Select(file => Path.GetRelativePath(store, file))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-HIST-2")]
     public void NamesWithSpacesAndAccentsComeBackAsTheyAre()
     {

@@ -413,7 +413,8 @@ The den store and the history provider are interfaces in `Wolfden.Core`
   checkpoint works up to its commit. Wolfden never deletes git's lock
   files. A diff against the files as they
   are now includes new files git doesn't track yet (not ignored ones),
-  through a temporary index, so it never changes the user's index. The
+  through a temporary index, so it never changes the user's index, and
+  it writes nothing into the repository's objects (#142). The
   log of a file follows its current path, not back through renames
   (`--follow` can't be paged). The log pages by position: each page
   walks the same log from HEAD with the same path filter and starts

@@ -35,7 +35,9 @@ namespace Wolfden.Git;
 /// <para>
 /// <b>Diffs against the files as they are now</b> include new files git
 /// doesn't track yet (but not ignored ones). They're compared through a
-/// temporary index, so the user's own index is never changed by a diff.
+/// temporary index, so the user's own index is never changed by a diff,
+/// and git compares the files on disk without storing them, so a diff
+/// writes nothing into the repository's objects (#142).
 /// </para>
 /// <para>
 /// <b>Revisions</b> from callers are resolved to commit hashes first
@@ -74,6 +76,14 @@ public sealed partial class GitHistory : IHistoryProvider
     /// <summary>The options every diff takes, so the user's diff settings can't change what Wolfden parses.</summary>
     private static readonly string[] DiffOptions =
         ["--no-color", "--no-ext-diff", "--no-textconv", "--relative", "-M", "--src-prefix=a/", "--dst-prefix=b/"];
+
+    /// <summary>
+    /// Comparing with the files on disk, a file whose stat data doesn't
+    /// match the index but whose content does isn't a change. Git drops
+    /// those only while <c>diff.autoRefreshIndex</c> is on (its default), so
+    /// a user who turned it off would see unchanged files as modified.
+    /// </summary>
+    private static readonly string[] NoStatOnlyChanges = ["-c", "diff.autoRefreshIndex=true"];
 
     // Fields of a log entry: start, separator, end of the header. %B is the raw message.
     private const string LogFormat = "--format=%x01%H%x02%aI%x02%an%x02%B%x03";
@@ -204,22 +214,75 @@ public sealed partial class GitHistory : IHistoryProvider
             return HistoryResult<HistoryDiff>.Done(new HistoryDiff(from, to, CompareFiles([from, to], specs, null, cancellationToken)));
         }
 
-        // The files as they are now, new ones included: put them in a
-        // temporary index and compare that, leaving the user's index alone.
+        // The files as they are now, new ones included (#142): a temporary
+        // index lists HEAD's files and the new ones, and git compares the
+        // files on disk with 'from' through it. The user's index is left
+        // alone, and nothing is written into the repository's objects.
         var index = Path.Combine(Path.GetTempPath(), $"wolfden-{Guid.NewGuid():N}.index");
         var environment = new Dictionary<string, string?> { ["GIT_INDEX_FILE"] = index };
         try
         {
             Git(["read-tree", Head(cancellationToken) ?? "--empty"], cancellationToken, environment: environment);
-            // The whole den, so a path that's gone, or never was, is still compared.
-            Git(["add", "--all", "--", .. Pathspecs(null)], cancellationToken, environment: environment);
-            return HistoryResult<HistoryDiff>.Done(new HistoryDiff(from, null, CompareFiles(["--cached", from], specs, environment, cancellationToken)));
+
+            // read-tree leaves no stat data, so git would read every den file
+            // in each of the two diffs below to tell which ones changed.
+            // Refreshing reads them once and records which are as committed.
+            // It writes only the temporary index. It fails if no file in the
+            // index matches the pathspecs, and then there's nothing to refresh.
+            _ = Run(["add", "--refresh", "--", .. specs], cancellationToken, environment: environment);
+            ListNewFiles(specs, environment, cancellationToken);
+            return HistoryResult<HistoryDiff>.Done(new HistoryDiff(from, null, CompareFiles([from], specs, environment, cancellationToken)));
         }
         finally
         {
             Delete(index);
             Delete(index + ".lock");
         }
+    }
+
+    /// <summary>
+    /// Adds the den's new files at <paramref name="specs"/> (untracked, not
+    /// ignored) to the temporary index <paramref name="environment"/> names,
+    /// without their content, so a diff against the files on disk includes
+    /// them.
+    /// </summary>
+    /// <remarks>
+    /// Each entry names the empty blob and has no stat data, so git never
+    /// takes it as up to date and always reads the file itself; the empty
+    /// blob is never read, so it needn't exist. That's the shape
+    /// <c>git add --intent-to-add</c> gives an entry, but <c>add</c> also
+    /// writes the empty blob into the repository's objects, and
+    /// <c>update-index --index-info</c> writes nothing there.
+    /// </remarks>
+    private void ListNewFiles(IReadOnlyList<string> specs, IReadOnlyDictionary<string, string?> environment, CancellationToken cancellationToken)
+    {
+        // Listed against the temporary index, so a file the user has staged
+        // but not committed counts as new. Repository-relative, as
+        // update-index takes them.
+        var untracked = Git(["ls-files", "-z", "--full-name", "--others", "--exclude-standard", "--", .. specs], cancellationToken, environment: environment)
+            .Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            // A folder (ending in '/') is a nested repository, not a den file.
+            .Where(path => !path.EndsWith('/'))
+            .ToList();
+        if (untracked.Count == 0)
+        {
+            return;
+        }
+
+        // The empty blob's id, which depends on the repository's hash (SHA-1 or SHA-256); without -w, nothing is written.
+        var empty = Git(["hash-object", "-t", "blob", "--stdin"], cancellationToken, input: string.Empty).Trim();
+        if (empty.Length < 40 || !empty.All(char.IsAsciiHexDigitLower))
+        {
+            throw new HistoryException($"git hash-object didn't give an object id (it gave '{empty}').");
+        }
+
+        var entries = new StringBuilder();
+        foreach (var path in untracked)
+        {
+            entries.Append("100644 ").Append(empty).Append('\t').Append(path).Append('\0');
+        }
+
+        Git(["update-index", "-z", "--add", "--index-info"], cancellationToken, input: entries.ToString(), environment: environment);
     }
 
     /// <inheritdoc />
@@ -688,8 +751,8 @@ public sealed partial class GitHistory : IHistoryProvider
     private List<HistoryFileDiff> CompareFiles(
         IReadOnlyList<string> revisions, IReadOnlyList<string> specs, IReadOnlyDictionary<string, string?>? environment, CancellationToken cancellationToken)
     {
-        var raw = Git(["diff", .. DiffOptions, "--raw", "-z", .. revisions, "--", .. specs], cancellationToken, environment: environment);
-        var patch = Git(["diff", .. DiffOptions, "--patch", .. revisions, "--", .. specs], cancellationToken, environment: environment);
+        var raw = Git([.. NoStatOnlyChanges, "diff", .. DiffOptions, "--raw", "-z", .. revisions, "--", .. specs], cancellationToken, environment: environment);
+        var patch = Git([.. NoStatOnlyChanges, "diff", .. DiffOptions, "--patch", .. revisions, "--", .. specs], cancellationToken, environment: environment);
         var changes = ParseChanges(raw.Split('\0'), raw: true);
         var patches = SplitPatch(patch);
         if (patches.Count != changes.Count)
