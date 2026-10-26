@@ -194,9 +194,10 @@ public sealed class SearchWords
     /// <summary>
     /// The words of <paramref name="text"/>, each with its folded form, as
     /// SQLite's <c>unicode61</c> tokenizer finds them: runs of letters,
-    /// digits, private-use characters, and combining diacritical marks
-    /// (U+0300 to U+036F, which folding drops). Any other combining mark,
-    /// such as a Devanagari vowel sign or a Hebrew point, ends a word.
+    /// digits, private-use characters, and the combining marks SQLite counts
+    /// as diacritics (<see cref="IsDiacritic"/>, which folding drops). Any
+    /// other combining mark, such as U+0305 overline, a Devanagari vowel
+    /// sign, or a Hebrew point, ends a word.
     /// </summary>
     private static List<(int Start, int Length, string Folded)> Tokens(string text)
     {
@@ -240,8 +241,8 @@ public sealed class SearchWords
 
     /// <summary>
     /// Lower case, without the diacritics <c>remove_diacritics 2</c> removes:
-    /// combining marks U+0300 to U+036F, and those of precomposed Latin
-    /// letters (é, ñ, ǘ). Other scripts' letters are kept as they are, so ё
+    /// combining diacritics (<see cref="IsDiacritic"/>), and those of
+    /// precomposed Latin letters (é, ñ, ǘ). Other scripts' letters are kept as they are, so ё
     /// isn't е, and ά isn't α, as in the search table.
     /// </summary>
     private static string Fold(string word)
@@ -254,15 +255,11 @@ public sealed class SearchWords
                 continue;
             }
 
-            if (IsLatinWithMarks(c))
+            var parts = IsLatinWithMarks(c) ? c.ToString().Normalize(NormalizationForm.FormD) : null;
+            if (parts is { Length: > 1 } && parts.Skip(1).All(IsDiacritic))
             {
-                foreach (var d in c.ToString().Normalize(NormalizationForm.FormD))
-                {
-                    if (!IsDiacritic(d))
-                    {
-                        builder.Append(d);
-                    }
-                }
+                // A Latin letter whose marks are all diacritics folds to its base.
+                builder.Append(parts[0]);
             }
             else
             {
@@ -273,9 +270,28 @@ public sealed class SearchWords
         return builder.ToString().ToLowerInvariant();
     }
 
-    /// <summary>A combining diacritical mark (U+0300 to U+036F).</summary>
-    private static bool IsDiacritic(char c) => c is >= '̀' and <= 'ͯ';
+    /// <summary>
+    /// A combining mark SQLite's <c>unicode61</c> counts as a diacritic: a
+    /// copy of <c>sqlite3Fts5UnicodeIsdiacritic</c>, whose masks pick 25 code
+    /// points of U+0300 to U+0331 (such as U+0301 acute and U+0308
+    /// diaeresis, but not U+0305 overline). Every other mark ends a word.
+    /// Checked against SQLite 3.53.3, as bundled with
+    /// Microsoft.EntityFrameworkCore.Sqlite 10.0.12, by
+    /// <c>SearchTests.SearchWordsMatchFieldTextAsTheSearchTableDoes</c>.
+    /// </summary>
+    private static bool IsDiacritic(char c)
+    {
+        const uint mask0 = 0x08029FDF; // U+0300 to U+031F
+        const uint mask1 = 0x000361F8; // U+0320 to U+0331
+        int code = c;
+        if (code < 0x0300 || code > 0x0331)
+        {
+            return false;
+        }
+
+        return code < 0x0320 ? (mask0 & (1u << (code - 0x0300))) != 0 : (mask1 & (1u << (code - 0x0320))) != 0;
+    }
 
     /// <summary>A Latin letter that may be precomposed with diacritics: Latin-1 Supplement, Latin Extended-A and -B, and Latin Extended Additional.</summary>
-    private static bool IsLatinWithMarks(char c) => c is (>= 'À' and <= 'ɏ') or (>= 'Ḁ' and <= 'ỿ');
+    private static bool IsLatinWithMarks(char c) => c is (>= (char)0x00C0 and <= (char)0x024F) or (>= (char)0x1E00 and <= (char)0x1EFF);
 }

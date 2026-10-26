@@ -176,7 +176,15 @@ public sealed class SearchTests : IClassFixture<SearchTests.Built>
     [InlineData("docks salt", "the Salt Marsh docks", true)]
     [InlineData("[[x]]", "[[x]]", true)]
     [InlineData("cafe", "Café", true)]
-    [InlineData("resume", "résumé", true)]
+    [InlineData("resume", "re\u0301sume\u0301", true)]
+    [InlineData("ab", "a\u0301b", true)]
+    [InlineData("ab", "a\u0305b", false)]
+    [InlineData("a b", "a\u0305b", true)]
+    [InlineData("ab", "a\u0336b", false)]
+    [InlineData("a", "a\u0336b", true)]
+    [InlineData("ab", "a\u0331b", true)]
+    [InlineData("ab", "a\u0332b", false)]
+    [InlineData("o", "\u01A1", true)]
     [InlineData("senor", "SEÑOR", true)]
     [InlineData("nguyen", "Nguyễn", true)]
     [InlineData("елка", "ёлка", false)]
@@ -219,6 +227,12 @@ public sealed class SearchTests : IClassFixture<SearchTests.Built>
     }
 
     /// <summary>Whether SQLite's own FTS5 table, with the index's tokenizer, finds <paramref name="query"/> in <paramref name="text"/>, read as DenIndex.Search reads it.</summary>
+    /// <remarks>
+    /// The parity cases were written against the SQLite bundled with
+    /// Microsoft.EntityFrameworkCore.Sqlite 10.0.12 (SQLitePCLRaw's
+    /// e_sqlite3): SQLite 3.53.3. They run against whatever SQLite is
+    /// bundled, so an upgrade that changes the tokenizer fails here.
+    /// </remarks>
     private static bool Fts5Matches(string query, string text)
     {
         using var connection = new SqliteConnection("Data Source=:memory:");
