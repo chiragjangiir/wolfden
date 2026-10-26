@@ -681,7 +681,8 @@ the rest.
 
 **The read tools (#20; v0 behaviour, not a recorded decision).** They
 reuse the index's queries and `check`, so they answer as `wolfden query`
-and `wolfden check` do:
+and `wolfden check` do, and the web API's read endpoints answer from the
+same code (§9):
 
 - **Positions are opt-in.** Without one, `get_entity`, `list_entities`,
   and `search` give the author's full view: every entity and fact,
@@ -1031,9 +1032,9 @@ docs/
   (`den_not_loaded`, `den_unreadable`), and `not_found`,
   `method_not_allowed`, `cross_site`, and `internal_error` otherwise.
   Results carry a `version` for their shape, as `--json` does. Each request brings the
-  index up to date first, as an MCP tool call does. So far it has
-  `/api/health` and `/api/den` (the den's name and its universes); M3
-  adds the rest (#24 to #27). The UI in `web/` is built with npm (`npm run
+  index up to date first, as an MCP tool call does. It has
+  `/api/health`, `/api/den` (the den's name and its universes), and the
+  read endpoints below for M3's pages (#24 to #27). The UI in `web/` is built with npm (`npm run
   build`, Node.js 22.12 or later) into `web/dist`, which `dotnet build`
   copies next to `wolfden` as `wwwroot` when it's there; `dotnet build`
   never runs npm, so .NET work doesn't need Node. Paths that aren't files
@@ -1043,6 +1044,39 @@ docs/
   proxy drops the `Origin` of the dev server's own page, since its port
   is Vite's, and passes any other `Origin` on, so the API still refuses
   a request from another site that comes through the dev server.
+- **The read API** (#24 to #27; v0 behaviour, not a recorded decision).
+  Every endpoint is `GET`, with query parameters in camelCase. The
+  answers come from the same read queries as the MCP read tools
+  (`DenReader` in `Wolfden.Index`), so the same question gets the same
+  answer, in camelCase instead of snake_case; where a tool answers the
+  question, the endpoint returns its result, and a page adds to it.
+  `universe` works as the tools' does (§8, "One universe per call"),
+  and `serve --universe` pins every request as `mcp --universe` pins a
+  session. `asOf` is the tools' `as_of`: a position, with the same
+  syntax, checks, and canon-as-of meaning; without it, the author's
+  full view. An endpoint refuses a parameter it doesn't take (so
+  `as_of` isn't quietly ignored) or one given twice, and an empty value
+  counts as left out. Errors use the tools' codes, with 400 for
+  `bad_argument`, `bad_position`, `universe_required`, and
+  `unknown_type`; 404 for `unknown_universe`, `unknown_scope`,
+  `unknown_entity`, `unknown_checkpoint`, and `no_universe`; 409 for
+  `ambiguous_entity` (with its `candidates`); 503 for `den_not_loaded`
+  and `den_unreadable`; and 500 for `history_failed`.
+
+  | Endpoint | Parameters | Answers |
+  |---|---|---|
+  | `/api/hierarchy` | `universe`, `asOf` | The universe, its series in story order with their books, its standalone books, and each book's chapters (key, number, title, position). Each scope counts the entities filed in it, in all and by type; as of a position, only those in the canon view there. |
+  | `/api/positions` | `universe` | Every story position in order, with its book's name and series and the chapter's number and title, for a position picker. A book with no chapters yet is listed by its bare key. |
+  | `/api/entities` | `universe`, `type`, `status`, `series`, `book`, `asOf`, `limit` | `list_entities`; with `asOf`, only the entities in the canon view there, in its order. |
+  | `/api/entity` | `entity`, `universe`, `asOf` | `get_entity`, as a page: each field value or entry and each section lists its links, resolved from the index (the entity reached, or broken or ambiguous); also the scope's container chain, where the entity enters canon (its `from`, or its scope's start, inherited, format.md F-ENT-6), and its backlinks (which entity, field, section, chapter, or outline row). As of a position, a link to an entity the reader hasn't met doesn't say what it reaches, and only links in what the reader has met count as backlinks. |
+  | `/api/canon` | `universe`, `asOf`, `series`, `book`, `type`, `brief` | `canon_as_of`. |
+  | `/api/search` | `query`, `universe`, `type`, `canonOnly`, `limit`, `status`, `series`, `book`, `asOf` | `search`, with snippets; it can also keep entities of one status, those a series or book filter covers (as in a canon view), or, as of a position, hits in the entities and sections in the canon view there. |
+  | `/api/history` | `entity`, `universe`, `limit`, `before` | `get_history`'s checkpoints, a page at a time. |
+  | `/api/history/diff` | `entity`, `universe`, and `checkpoint`, or `from` and `to` | The entity file's unified diff: what one checkpoint changed (against the one before it, or for the first, against nothing, through the history provider's `DiffCheckpoint`), the change between two, or since one (by default the latest) up to the file as it is now. |
+
+  History endpoints, like `get_history`, treat a den without history as
+  an answer, not an error: `available` is false, `backend` is `none`,
+  and `reason` says why.
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and
   unknown content. This gets heavy test coverage, since it decides whether
   people trust the tool with their notes.
