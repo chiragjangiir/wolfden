@@ -318,6 +318,39 @@ public sealed class WolfdenTools
         [Description(UniverseHelp)] string? universe = null) =>
         Respond(() => _tools.UpdateChapterFields(book, chapter, expected_hash, changes, universe));
 
+    /// <summary>The <c>get_chapter_defaults</c> tool.</summary>
+    [McpServerTool(Name = "get_chapter_defaults", Title = "Read chapter defaults", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]
+    [Description(
+        "The chapter_defaults of a universe, a series (with 'series'), or a book (with 'book'): the chapter field values (such as pov, " +
+        "narration, tense) its books' chapters inherit, field by field, unless a nearer container or the chapter sets its own. Each " +
+        "field gives this container's own value and what its books would inherit from above without it. A list field set to [] means " +
+        "'none here' and stops inheritance. Also lists the books it reaches (and which are final), and gives the hash of its file " +
+        "(universe.md, series.md, or book.md), for update_chapter_defaults.")]
+    public CallToolResult GetChapterDefaults(
+        [Description(UniverseHelp)] string? universe = null,
+        [Description("A series' key, for that series' defaults.")] string? series = null,
+        [Description("A book's key, for that book's defaults.")] string? book = null) =>
+        Respond(() => _tools.GetChapterDefaults(universe, series, book));
+
+    /// <summary>The <c>update_chapter_defaults</c> tool.</summary>
+    [McpServerTool(Name = "update_chapter_defaults", Title = "Change chapter defaults", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]
+    [Description(
+        "Changes the chapter_defaults of a universe, a series (with 'series'), or a book (with 'book'), such as 'make Mina the default POV " +
+        "for this book'. 'changes' is a list of {\"op\": \"set\", \"field\": \"tense\", \"value\": \"past\"}, {\"op\": \"add\", \"field\": \"pov\", " +
+        "\"value\": \"[[mina-harker]]\"}, {\"op\": \"remove\", \"field\": \"pov\", \"item\": 0} (or \"value\": the item's text), and " +
+        "{\"op\": \"clear\", \"field\": \"pov\"}. Removing a list's last item leaves [], 'none here', which stops the books below inheriting " +
+        "the field from further up; 'clear' removes the value so they inherit from the container above again. The result says, book by " +
+        "book, which chapters now have what, and which keep their own value or a nearer default, so check with the writer that's what " +
+        "they meant. A final (frozen) book's defaults can't be changed, nor a series' or universe's where that would change what a " +
+        "final book's chapters have." + WriteHelp)]
+    public CallToolResult UpdateChapterDefaults(
+        [Description("The hash of the file your edit is based on: 'hash' from get_chapter_defaults (or get_chapter for a book), or from your last write's result.")] string expected_hash,
+        [Description("The changes, in order: a list of {op, field, value, index, item}.")] JsonElement changes,
+        [Description(UniverseHelp)] string? universe = null,
+        [Description("A series' key, to change that series' defaults.")] string? series = null,
+        [Description("A book's key, to change that book's defaults.")] string? book = null) =>
+        Respond(() => _tools.UpdateChapterDefaults(expected_hash, changes, universe, series, book));
+
     /// <summary>The <c>checkpoint</c> tool.</summary>
     [McpServerTool(Name = "checkpoint", Title = "Make a checkpoint", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
     [Description(

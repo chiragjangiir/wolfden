@@ -43,12 +43,13 @@ public static class WolfdenMcpServer
         what changed since.
 
         The write tools (create_entity, update_fields, append_section, add_idea, rename_section, rename_entity, change_alias,
-        update_chapter_fields) change the den's files, keeping everything they don't change as the writer wrote it. A rename
-        rewrites the links that used the old text, in the same change. Each edit of an existing file takes the
-        hash the file had when you read it (from get_entity, get_chapter, or your last write), and is refused if the file has
-        changed since. An edit that would leave an error is refused, and nothing in a final (frozen) book can be changed. Edits
-        to hard canon are allowed, but the result lists them: check them with the writer. Writes aren't committed: call
-        checkpoint once at the end of a session of edits, naming yourself as co_author.
+        update_chapter_fields, update_chapter_defaults) change the den's files, keeping everything they don't change as the
+        writer wrote it. A rename rewrites the links that used the old text, in the same change. Each edit
+        of an existing file takes the hash the file had when you read it (from get_entity, get_chapter, get_chapter_defaults, or
+        your last write), and is refused if the file has changed since. An edit that would leave an error is refused, and
+        nothing in a final (frozen) book can be changed. Edits to hard canon are allowed, but the result lists them: check them
+        with the writer. Writes aren't committed: call checkpoint once at the end of a session of edits, naming yourself as
+        co_author.
         """;
 
     /// <summary>The server's options: its name and version, its instructions, and its tools over <paramref name="tools"/>.</summary>
