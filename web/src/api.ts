@@ -1,6 +1,8 @@
-import { QueryClient } from '@tanstack/react-query'
+import { QueryClient, queryOptions } from '@tanstack/react-query'
 
-// The shapes of Wolfden's API (src/Wolfden.Api/DenEndpoints.cs), in camelCase.
+// The shapes of Wolfden's API (src/Wolfden.Api/DenEndpoints.cs,
+// ReadEndpoints.cs, ReadResults.cs, and Wolfden.Index's read results), in
+// camelCase. Only the members the pages use are listed.
 
 export interface UniverseSummary {
   key: string
@@ -16,6 +18,204 @@ export interface DenSummary {
   name: string
   pinnedUniverse: string | null
   universes: UniverseSummary[]
+}
+
+export interface EntityCounts {
+  total: number
+  byType: Record<string, number>
+}
+
+export interface ChapterNode {
+  key: string
+  number: number | null
+  title: string | null
+  position: string
+}
+
+export interface BookNode {
+  key: string
+  name: string
+  id: string | null
+  path: string
+  status: string
+  position: string
+  entities: EntityCounts
+  chapters: ChapterNode[]
+}
+
+export interface SeriesNode {
+  key: string
+  name: string
+  id: string | null
+  path: string
+  entities: EntityCounts
+  books: BookNode[]
+}
+
+export interface UniverseNode {
+  key: string
+  name: string
+  id: string | null
+  path: string
+  entities: EntityCounts
+  series: SeriesNode[]
+  books: BookNode[]
+}
+
+export interface HierarchyResult {
+  version: number
+  position: string | null
+  universe: UniverseNode
+}
+
+export interface PositionView {
+  position: string
+  book: string
+  bookName: string
+  series: string | null
+  chapter: string | null
+  number: number | null
+  title: string | null
+}
+
+export interface PositionsResult {
+  version: number
+  universe: string
+  count: number
+  positions: PositionView[]
+}
+
+export type ScopeKind = 'universe' | 'series' | 'book'
+
+export interface EntitySummary {
+  key: string
+  id: string | null
+  name: string
+  type: string
+  status: string
+  universe: string
+  scopeKind: ScopeKind
+  scopeKey: string
+  path: string
+  from: string | null
+}
+
+export interface EntityListResult {
+  version: number
+  count: number
+  total: number
+  truncated: boolean
+  entities: EntitySummary[]
+}
+
+export interface EntityRef {
+  key: string
+  id: string | null
+  name: string
+  type: string
+}
+
+export interface ContainerRef {
+  kind: ScopeKind
+  key: string
+  name: string
+  id: string | null
+  path: string
+}
+
+export interface LinkView {
+  text: string
+  target: string
+  heading: string | null
+  label: string | null
+  line: number
+  column: number
+  outcome: 'resolved' | 'ambiguous' | 'broken'
+  entity: EntityRef | null
+  section: string | null
+  matches: EntityRef[] | null
+  problem: string | null
+  inView: boolean | null
+}
+
+export interface PageField {
+  name: string
+  value: unknown
+  kind: 'plain' | 'entry' | 'temporal' | 'default'
+  status: string | null
+  pinned: boolean
+  from: string | null
+  until: string | null
+  line: number
+  entryIndex: number | null
+  live: boolean | null
+  links: LinkView[]
+}
+
+export interface PageSection {
+  name: string
+  level: number
+  headingPath: string[]
+  status: string
+  pinned: boolean
+  from: string | null
+  until: string | null
+  line: number
+  body: string
+  bookkeeping: boolean | null
+  links: LinkView[]
+}
+
+export interface EntryView {
+  position: string | null
+  inherited: boolean
+  description: string
+}
+
+export interface BacklinkView {
+  source: EntityRef | null
+  container: ContainerRef | null
+  site: string
+  path: string
+  line: number
+  column: number
+  text: string
+  field: string | null
+  section: string | null
+  chapter: string | null
+  outlineRow: string | null
+  status: string | null
+  bookkeeping: boolean
+}
+
+export interface EntityPage {
+  key: string
+  id: string | null
+  name: string
+  type: string
+  status: string
+  universe: string
+  scopeKind: ScopeKind
+  scopeKey: string
+  path: string
+  from: string | null
+  aliases: string[] | null
+  lead: string | null
+  fields: PageField[]
+  sections: PageSection[]
+  scope: ContainerRef[]
+  entry: EntryView
+  leadLinks: LinkView[]
+  backlinks: BacklinkView[]
+}
+
+export interface EntityPageResult {
+  version: number
+  view: string
+  position: string | null
+  inView: boolean
+  note: string | null
+  entity: EntityPage | null
 }
 
 export interface ApiError {
@@ -56,6 +256,19 @@ function isObject(value: unknown): value is object {
   return typeof value === 'object' && value !== null
 }
 
+/** An API path with its query parameters; those left undefined are left out. */
+export function apiPath(path: string, params: Record<string, string | number | undefined>): string {
+  const query = new URLSearchParams()
+  for (const [name, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') {
+      query.set(name, String(value))
+    }
+  }
+
+  const text = query.toString()
+  return text ? `${path}?${text}` : path
+}
+
 /**
  * The page's query client. An error the API answered with (an ApiRequestError,
  * such as den_not_loaded) comes back the same until the writer acts, so it's
@@ -71,10 +284,44 @@ export function createQueryClient(): QueryClient {
   })
 }
 
-export const denQuery = {
+export const denQuery = queryOptions({
   queryKey: ['den'],
   queryFn: () => getJson<DenSummary>('/api/den'),
-} as const
+})
+
+// Every query that depends on the story position has the position in its key
+// (null for the full view), so each position is cached on its own.
+
+export function hierarchyQuery(universe: string, at: string | undefined) {
+  return queryOptions({
+    queryKey: ['hierarchy', universe, at ?? null],
+    queryFn: () => getJson<HierarchyResult>(apiPath('/api/hierarchy', { universe, asOf: at })),
+  })
+}
+
+export function positionsQuery(universe: string) {
+  return queryOptions({
+    queryKey: ['positions', universe],
+    queryFn: () => getJson<PositionsResult>(apiPath('/api/positions', { universe })),
+  })
+}
+
+/** The most entities one list asks for: the API's own limit. */
+export const ENTITY_LIMIT = 1000
+
+export function entitiesQuery(universe: string, at: string | undefined) {
+  return queryOptions({
+    queryKey: ['entities', universe, at ?? null],
+    queryFn: () => getJson<EntityListResult>(apiPath('/api/entities', { universe, asOf: at, limit: ENTITY_LIMIT })),
+  })
+}
+
+export function entityQuery(universe: string, entity: string, at: string | undefined) {
+  return queryOptions({
+    queryKey: ['entity', universe, entity, at ?? null],
+    queryFn: () => getJson<EntityPageResult>(apiPath('/api/entity', { entity, universe, asOf: at })),
+  })
+}
 
 /** "1 book", "2 books". */
 export function count(n: number, one: string, many: string): string {
