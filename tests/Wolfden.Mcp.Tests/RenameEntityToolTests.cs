@@ -469,6 +469,21 @@ public sealed class RenameEntityToolTests : IDisposable
             e => e.Contains($"[[the sailor]] in {Note} (line 8) now reaches 'Young Swales'", StringComparison.Ordinal) && e.Contains("before, it was ambiguous", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [Trait("Scenario", "SC-RT-16")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DroppingTheLastAliasSaysWhichCommentLinesWentWithIt(bool rename)
+    {
+        _den.Write(Swales, _den.Read(Swales).Replace("name: Mr. Swales\n", "name: Mr. Swales\naliases:\n  # what the fishermen call him\n  - the old sailor\n", StringComparison.Ordinal));
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        var result = rename ? Tools.RenameEntity("Mr. Swales", "the old sailor", hash) : Tools.ChangeAlias("Mr. Swales", "the old sailor", hash);
+
+        Assert.Contains("\naliases:\nstatus:", _den.Read(Swales), StringComparison.Ordinal);
+        Assert.Contains("Removed 1 comment line inside aliases, which is now empty.", result.Effects);
+    }
+
     private void WriteNote(string text) =>
         _den.Write(Note, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z1\ntype: note\nname: Whitby dialect\nstatus: draft\n---\n\n" + text);
 

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using Wolfden.Core.Text;
 
@@ -118,9 +119,9 @@ internal static partial class YamlEditor
     /// with its lines: a comment on its last line, and comment lines right
     /// after it indented under it, go with it; comment lines above it stay,
     /// except when it's the last key or item of a nested block mapping or
-    /// list. Then the comment lines inside the emptied collection, between
-    /// its parent's line and the removed key or item, can only be about
-    /// that key or item, so they go too (format.md F-RT-6).
+    /// list. Then every comment line inside the emptied collection, above
+    /// or below the removed key or item, goes too: with nothing left, it
+    /// can only have been about what was removed (format.md F-RT-6).
     /// A block list or mapping that loses its last item is left as
     /// <c>key:</c> with no value (format.md F-RT-6), or for a block list
     /// with <paramref name="emptied"/> set to <see cref="EmptiedList.EmptyList"/>,
@@ -136,9 +137,13 @@ internal static partial class YamlEditor
     /// <exception cref="InvalidOperationException">The path doesn't fit the file's shape.</exception>
     /// <exception cref="NotSupportedException">The removal would delete or move a comment that belongs to something else,
     /// or the key is written in a form that can't be removed in place.</exception>
-    public static List<TextEdit> Remove(SourceText source, YamlBlock block, IReadOnlyList<string> path, EmptiedList emptied = EmptiedList.Null)
+    /// <param name="emptiedComments">How many comment lines inside an emptied
+    /// collection went with it, beyond the removed key's or item's own (the
+    /// comment on its last line, and the lines indented under it).</param>
+    public static List<TextEdit> Remove(SourceText source, YamlBlock block, IReadOnlyList<string> path, EmptiedList emptied, out int emptiedComments)
     {
         CheckPath(path);
+        emptiedComments = 0;
         YamlNode? node = block.Root;
         YamlEntry? holder = null;
         for (var i = 0; i < path.Count; i++)
@@ -161,7 +166,7 @@ internal static partial class YamlEditor
                     {
                         return mapping.IsFlow
                             ? FlowRemove(source, mapping, k)
-                            : BlockRemoveEntry(source, mapping, k, nested: !ReferenceEquals(mapping, block.Root), holder);
+                            : BlockRemoveEntry(source, mapping, k, nested: !ReferenceEquals(mapping, block.Root), holder, out emptiedComments);
                     }
 
                     holder = mapping.Entries[k];
@@ -186,7 +191,7 @@ internal static partial class YamlEditor
                     {
                         return sequence.IsFlow
                             ? FlowRemove(source, sequence, k)
-                            : BlockRemoveItem(source, sequence, k, emptied, holder);
+                            : BlockRemoveItem(source, sequence, k, emptied, holder, out emptiedComments);
                     }
 
                     holder = null;
@@ -705,21 +710,28 @@ internal static partial class YamlEditor
     }
 
     /// <summary>
-    /// The first line to delete when removing the only key or item of a
-    /// nested block mapping or list, which starts on line
-    /// <paramref name="firstLine"/> at <paramref name="column"/> and ends on
-    /// <paramref name="lastLine"/> (format.md F-RT-6). The blank and comment
-    /// lines between the line that opens the collection (its key's, or a
-    /// list item's dash) and the removed one are inside a collection that's
-    /// about to be empty, so they go with it. A comment there that's at or
-    /// left of the opening key, and left of the removed one, or a comment
-    /// after the removed one that's still indented past the opening key,
-    /// can't be told apart from a comment on what comes next, so the
-    /// removal is refused rather than guess.
+    /// The lines to delete when removing the only key or item of a nested
+    /// block mapping or list, which starts on line <paramref name="firstLine"/>
+    /// at <paramref name="column"/> and ends on <paramref name="lastLine"/>
+    /// (format.md F-RT-6). With nothing left in the collection, every comment
+    /// line inside it can only have been about what's removed, so it goes
+    /// too: the blank and comment lines between the line that opens the
+    /// collection (its key's, or a list item's dash) and the removed one,
+    /// and the comment lines after it that are still indented past the
+    /// opening key, with the blank lines among them. A comment line after it
+    /// at or left of the opening key is about what comes next, and stays.
+    /// A comment line above it that's at or left of the opening key, and
+    /// left of the removed one, can't be told apart from a note on the
+    /// parent, so the removal is refused rather than guess.
     /// </summary>
-    /// <param name="holder">The entry whose value the collection is, or null for a list item.</param>
+    /// <remarks>Columns count characters, so a tab is one column. A tab in the
+    /// indent of a content line is already an error (F-YAML-1); on a comment
+    /// line it's counted as written.</remarks>
+    /// <param name="holder">The entry whose value the collection is, or null for a collection that's a list item.</param>
     /// <param name="what">The removed key or item, for the message.</param>
-    private static int EmptiedCollectionStart(SourceText source, int firstLine, int lastLine, int column, YamlEntry? holder, string what)
+    /// <returns>The first and last lines to delete, and how many comment lines among them are inside the
+    /// collection beyond the removed key's or item's own.</returns>
+    private static (int First, int Last, int Comments) EmptiedCollectionLines(SourceText source, int firstLine, int lastLine, int column, YamlEntry? holder, string what)
     {
         var first = firstLine;
         while (first > 0 && (IsCommentLine(source, first - 1) || IsBlankLine(source, first - 1)))
@@ -727,28 +739,45 @@ internal static partial class YamlEditor
             first--;
         }
 
-        // The opening line: the holder's key, or the dash of the list item
-        // the collection is.
+        // The opening line, first - 1: the holder's key, or, with no holder,
+        // the dash of the list item the collection is. A nested collection
+        // always has one, so first is never 0 here.
+        Debug.Assert(first > 0, "A nested collection has an opening line above it.");
         var openColumn = holder is not null ? Column(source, holder.Key.Start) : Indent(source, first - 1);
+        var comments = 0;
         for (var i = first; i < firstLine; i++)
         {
-            if (IsCommentLine(source, i) && Indent(source, i) < column && Indent(source, i) <= openColumn)
+            if (!IsCommentLine(source, i))
+            {
+                continue;
+            }
+
+            if (Indent(source, i) < column && Indent(source, i) <= openColumn)
             {
                 throw new NotSupportedException(
                     $"Removing {what} would empty its collection, and the comment at line {i + 1} above it may be about something else, so it can't be removed in place.");
             }
+
+            comments++;
         }
 
-        for (var i = OwnedEnd(source, lastLine, column) + 1; i < source.Lines.Count && (IsCommentLine(source, i) || IsBlankLine(source, i)); i++)
+        var owned = OwnedEnd(source, lastLine, column);
+        var last = owned;
+        for (var i = owned + 1; i < source.Lines.Count && (IsCommentLine(source, i) || IsBlankLine(source, i)); i++)
         {
-            if (IsCommentLine(source, i) && Indent(source, i) > openColumn)
+            if (IsCommentLine(source, i))
             {
-                throw new NotSupportedException(
-                    $"Removing {what} would empty its collection, and the comment at line {i + 1} after it would be left inside it, so it can't be removed in place.");
+                if (Indent(source, i) <= openColumn)
+                {
+                    break;
+                }
+
+                last = i;
+                comments++;
             }
         }
 
-        return first;
+        return (first, last, comments);
     }
 
     private static int Indent(SourceText source, int index)
@@ -776,17 +805,23 @@ internal static partial class YamlEditor
     /// <param name="holder">The entry whose value the list is, or null for a
     /// list that's an item of another list. For <see cref="EmptiedList.EmptyList"/>,
     /// <c>[]</c> is written after that key's colon, before any comment on its line.</param>
-    private static List<TextEdit> BlockRemoveItem(SourceText source, YamlSequence sequence, int k, EmptiedList emptied, YamlEntry? holder)
+    private static List<TextEdit> BlockRemoveItem(SourceText source, YamlSequence sequence, int k, EmptiedList emptied, YamlEntry? holder, out int emptiedComments)
     {
         var item = sequence.Items[k];
         var (dash, lineStart) = Dash(source, item);
         var dashLine = source.LineIndexOf(dash);
         var lastLine = LineIndexOfEnd(source, item);
         var column = dash - lineStart;
-        var first = sequence.Items.Count == 1
-            ? EmptiedCollectionStart(source, dashLine, lastLine, column, holder, $"the item at line {item.Line}")
-            : dashLine;
-        var delete = DeleteOwnedLines(source, first, lastLine, column);
+
+        // A list is never the top level (that's a mapping, or the edit fails
+        // before here), so it always has an opening line: its key's when
+        // holder is set, or, when holder is null, the dash of the list item
+        // it is, whose indent EmptiedCollectionLines reads instead.
+        var (first, last, comments) = sequence.Items.Count == 1
+            ? EmptiedCollectionLines(source, dashLine, lastLine, column, holder, $"the item at line {item.Line}")
+            : (dashLine, lastLine, 0);
+        emptiedComments = comments;
+        var delete = DeleteOwnedLines(source, first, last, column);
         if (sequence.Items.Count > 1 || emptied == EmptiedList.Null)
         {
             return [delete];
@@ -803,8 +838,9 @@ internal static partial class YamlEditor
 
     /// <param name="nested">False for the top-level mapping, which may be left empty with its comments.</param>
     /// <param name="holder">The entry whose value the mapping is, or null for a list item or the top level.</param>
-    private static List<TextEdit> BlockRemoveEntry(SourceText source, YamlMapping mapping, int k, bool nested, YamlEntry? holder)
+    private static List<TextEdit> BlockRemoveEntry(SourceText source, YamlMapping mapping, int k, bool nested, YamlEntry? holder, out int emptiedComments)
     {
+        emptiedComments = 0;
         var text = source.Text;
         var entry = mapping.Entries[k];
 
@@ -816,10 +852,11 @@ internal static partial class YamlEditor
         if (IsSpaces(text, keyLineStart, entry.Key.Start))
         {
             var column = entry.Key.Start - keyLineStart;
-            var first = nested && mapping.Entries.Count == 1
-                ? EmptiedCollectionStart(source, keyLine, lastLine, column, holder, $"'{entry.KeyText}' at line {entry.Key.Line}")
-                : keyLine;
-            return [DeleteOwnedLines(source, first, lastLine, column)];
+            var (first, last, comments) = nested && mapping.Entries.Count == 1
+                ? EmptiedCollectionLines(source, keyLine, lastLine, column, holder, $"'{entry.KeyText}' at line {entry.Key.Line}")
+                : (keyLine, lastLine, 0);
+            emptiedComments = comments;
+            return [DeleteOwnedLines(source, first, last, column)];
         }
 
         // Something before the key on its line: a list item's dash

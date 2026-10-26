@@ -279,8 +279,9 @@ public sealed partial class MarkdownFile : DenFile
     /// <c>["aliases", "0"]</c>. Its lines go, with a comment on its last
     /// line and comment lines right after it indented under it; comment
     /// lines above it stay, unless it was the last key or item of a nested
-    /// block mapping or list, whose inside comment lines then go too
-    /// (format.md F-RT-6). If it sat between two blank lines, one goes.
+    /// block mapping or list, whose comment lines inside then go too
+    /// (format.md F-RT-6; the overload with <c>emptiedComments</c> says how
+    /// many). If it sat between two blank lines, one goes.
     /// Nothing changes if it isn't there: a missing key, an item number past
     /// the end of a list, or a null value on the way. A block list or
     /// mapping that loses its last item is left as <c>key:</c> with no
@@ -295,14 +296,27 @@ public sealed partial class MarkdownFile : DenFile
     /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it,
     /// or the key is written as an explicit <c>? key</c>.</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
-    public MarkdownFile WithoutFrontmatterValue(IReadOnlyList<string> path, EmptiedList emptied = EmptiedList.Null)
+    public MarkdownFile WithoutFrontmatterValue(IReadOnlyList<string> path, EmptiedList emptied = EmptiedList.Null) =>
+        WithoutFrontmatterValue(path, emptied, out _);
+
+    /// <summary>
+    /// Removes the frontmatter key or list item at <paramref name="path"/>, as
+    /// <see cref="WithoutFrontmatterValue(IReadOnlyList{string}, EmptiedList)"/> does.
+    /// </summary>
+    /// <param name="emptiedComments">How many comment lines went because the removal emptied the block mapping
+    /// or list that held it (format.md F-RT-6), beyond the removed key's or item's own; 0 if it emptied nothing.
+    /// A write tool reports them, since a comment there may be a commented-out value.</param>
+    public MarkdownFile WithoutFrontmatterValue(IReadOnlyList<string> path, EmptiedList emptied, out int emptiedComments)
     {
         ArgumentNullException.ThrowIfNull(path);
-        return EditFrontmatter(
-            block => YamlEditor.Remove(Source!, block, path, emptied),
+        var comments = 0;
+        var result = EditFrontmatter(
+            block => YamlEditor.Remove(Source!, block, path, emptied, out comments),
             (before, after) => YamlTreeCheck.SameExcept(before, after, path.Take(path.Count - 1).ToList(), (b, a) => YamlTreeCheck.Removed(b, a, path[^1], emptied)),
             addFrontmatter: false,
             $"Removing '{string.Join('.', path)}'");
+        emptiedComments = comments;
+        return result;
     }
 
     /// <summary>Removes a field under <c>fields:</c>.</summary>
@@ -320,7 +334,12 @@ public sealed partial class MarkdownFile : DenFile
     /// <exception cref="InvalidOperationException">No chapter, or more than one, has that key; or the field isn't a list with that item.</exception>
     /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it.</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
-    public MarkdownFile WithoutChapterFieldItem(string chapterKey, string field, int item)
+    public MarkdownFile WithoutChapterFieldItem(string chapterKey, string field, int item) =>
+        WithoutChapterFieldItem(chapterKey, field, item, out _);
+
+    /// <inheritdoc cref="WithoutChapterFieldItem(string, string, int)"/>
+    /// <param name="emptiedComments">How many comment lines inside the list went with its last item (format.md F-RT-6).</param>
+    public MarkdownFile WithoutChapterFieldItem(string chapterKey, string field, int item, out int emptiedComments)
     {
         ArgumentNullException.ThrowIfNull(chapterKey);
         ArgumentNullException.ThrowIfNull(field);
@@ -340,7 +359,7 @@ public sealed partial class MarkdownFile : DenFile
         }
 
         string[] listPath = ["chapters", matches[0].ToString(System.Globalization.CultureInfo.InvariantCulture), "fields", field];
-        return WithoutListItemAsEmpty(listPath, item, $"'{field}' in chapter '{chapterKey}'");
+        return WithoutListItemAsEmpty(listPath, item, $"'{field}' in chapter '{chapterKey}'", out emptiedComments);
     }
 
     /// <summary>
@@ -355,15 +374,20 @@ public sealed partial class MarkdownFile : DenFile
     /// <exception cref="InvalidOperationException">The field isn't a list in <c>chapter_defaults</c>, or has no such item.</exception>
     /// <exception cref="NotSupportedException">The removal would delete or move a comment that isn't part of it.</exception>
     /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
-    public MarkdownFile WithoutChapterDefaultItem(string field, int item)
+    public MarkdownFile WithoutChapterDefaultItem(string field, int item) =>
+        WithoutChapterDefaultItem(field, item, out _);
+
+    /// <inheritdoc cref="WithoutChapterDefaultItem(string, int)"/>
+    /// <param name="emptiedComments">How many comment lines inside the list went with its last item (format.md F-RT-6).</param>
+    public MarkdownFile WithoutChapterDefaultItem(string field, int item, out int emptiedComments)
     {
         ArgumentNullException.ThrowIfNull(field);
         ArgumentOutOfRangeException.ThrowIfNegative(item);
-        return WithoutListItemAsEmpty(["chapter_defaults", field], item, $"'{field}' in chapter_defaults");
+        return WithoutListItemAsEmpty(["chapter_defaults", field], item, $"'{field}' in chapter_defaults", out emptiedComments);
     }
 
     /// <summary>Removes one item of the list at <paramref name="listPath"/>, leaving <c>[]</c> if it was the last.</summary>
-    private MarkdownFile WithoutListItemAsEmpty(string[] listPath, int item, string what)
+    private MarkdownFile WithoutListItemAsEmpty(string[] listPath, int item, string what, out int emptiedComments)
     {
         if (GetFrontmatterValue(listPath) is not YamlSequence list)
         {
@@ -375,7 +399,7 @@ public sealed partial class MarkdownFile : DenFile
             throw new InvalidOperationException($"{what} has no item {item}.");
         }
 
-        return WithoutFrontmatterValue([.. listPath, item.ToString(System.Globalization.CultureInfo.InvariantCulture)], EmptiedList.EmptyList);
+        return WithoutFrontmatterValue([.. listPath, item.ToString(System.Globalization.CultureInfo.InvariantCulture)], EmptiedList.EmptyList, out emptiedComments);
     }
 
     /// <summary>Applies a frontmatter edit and checks that it read back as intended.</summary>

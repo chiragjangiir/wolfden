@@ -998,16 +998,73 @@ public class CollectionEditTests
     [Trait("Scenario", "SC-RT-14")]
     [Trait("Scenario", "SC-RT-16")]
     [InlineData("chapter_defaults:\n# pov: \"[[wren-calder]]\"\n  pov: x\nchapters: []\n", "chapter_defaults.pov")]
-    [InlineData("chapter_defaults:\n  pov: x\n  # narration: first\nchapters: []\n", "chapter_defaults.pov")]
-    [InlineData("chapter_defaults:\n  pov: x\n\n    # about the chapters\nchapters: []\n", "chapter_defaults.pov")]
     [InlineData("x-meta:\n  palette:\n  # the palette\n    accent: amber\n", "x-meta.palette.accent")]
-    [InlineData("aliases:\n  - Voss\n  # the Commander, once she earns it\nname: x\n", "aliases.0")]
-    public void EmptyingACollectionIsRefusedWhenACommentInsideItMayBeAboutSomethingElse(string text, string path)
+    public void EmptyingACollectionIsRefusedWhenACommentAboveItMayBeAboutTheParent(string text, string path)
     {
         var file = Md(text);
 
         Assert.Throws<NotSupportedException>(() => file.WithoutFrontmatterValue(path.Split('.')));
         Assert.Equal(text, Fm(file));
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-RT-16")]
+    [InlineData("chapter_defaults:\n  pov: x\n  # narration: first\nchapters: []\n", "chapter_defaults.pov", "chapter_defaults:\nchapters: []\n", 1)]
+    [InlineData("chapter_defaults:\n  pov: x\n\n    # about the chapters\nchapters: []\n", "chapter_defaults.pov", "chapter_defaults:\nchapters: []\n", 1)]
+    [InlineData("chapter_defaults:\n  pov: x\n  # a note\n\n  # another\n\nchapters: []\n", "chapter_defaults.pov", "chapter_defaults:\n\nchapters: []\n", 2)]
+    [InlineData("chapter_defaults:\n  pov: x\n  # inside\n# about the chapters\n  # after an outer comment\nchapters: []\n", "chapter_defaults.pov", "chapter_defaults:\n# about the chapters\n  # after an outer comment\nchapters: []\n", 1)]
+    [InlineData("aliases:\n  - Voss\n  # the Commander, once she earns it\nname: x\n", "aliases.0", "aliases:\nname: x\n", 1)]
+    [InlineData("chapter_defaults:\n  # a\n  pov: x\n    # under pov\n  # b\nchapters: []\n", "chapter_defaults.pov", "chapter_defaults:\nchapters: []\n", 2)]
+    public void EmptyingACollectionTakesTheCommentsAfterItThatAreStillInsideIt(string text, string path, string after, int comments)
+    {
+        var edited = Md(text).WithoutFrontmatterValue(path.Split('.'), EmptiedList.Null, out var removed);
+
+        Assert.Equal(after, Fm(edited));
+        Assert.Equal(comments, removed);
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-RT-16")]
+    [InlineData("chapter_defaults:\n  pov: x\n  # until the Reach\n  narration: first\nchapters: []\n", new[] { "narration", "pov" })]
+    [InlineData("chapter_defaults:\n  # who narrates\n  pov: x\n\n  # how\n  narration: first\n\n  # when\n  tense: past\nchapters: []\n", new[] { "tense", "narration", "pov" })]
+    [InlineData("chapter_defaults:\n  # who narrates\n  pov: x\n\n  # how\n  narration: first\n\n  # when\n  tense: past\nchapters: []\n", new[] { "pov", "narration", "tense" })]
+    [InlineData("chapter_defaults:\n  # who narrates\n  pov: x\n\n  # how\n  narration: first\n\n  # when\n  tense: past\nchapters: []\n", new[] { "narration", "tense", "pov" })]
+    public void ClearingAMappingKeyByKeyInAnyOrderEndsTheSame(string text, string[] keys)
+    {
+        var file = Md(text);
+        foreach (var key in keys)
+        {
+            file = file.WithoutFrontmatterValue(["chapter_defaults", key]);
+        }
+
+        Assert.Equal("chapter_defaults:\nchapters: []\n", Fm(file));
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-RT-16")]
+    [InlineData("1", "0")]
+    [InlineData("0", "0")]
+    public void EmptyingAListItemByItemInAnyOrderEndsTheSame(string first, string second)
+    {
+        var text = "aliases:\n  - Voss\n  # her rank\n  - the Commander\nname: x\n";
+
+        var edited = Md(text).WithoutFrontmatterValue(["aliases", first]).WithoutFrontmatterValue(["aliases", second]);
+
+        Assert.Equal("aliases:\nname: x\n", Fm(edited));
+    }
+
+    [Fact]
+    public void OnlyCommentsThatGoWithAnEmptiedCollectionAreCounted()
+    {
+        Md(FoundDocuments).WithoutFrontmatterValue(["chapter_defaults", "narration"], EmptiedList.Null, out var notEmptied);
+        Md("x-meta:\n  palette:\n    accent: amber  # warm\n      # checked\n").WithoutFrontmatterValue(["x-meta", "palette", "accent"], EmptiedList.Null, out var ownOnly);
+        Md("chapter_defaults:\n  pov:\n    # the log\n    - x\n").WithoutChapterDefaultItem("pov", 0, out var listed);
+        Md("chapters:\n  - key: a\n    fields:\n      pov:\n        # the log\n        - x\n").WithoutChapterFieldItem("a", "pov", 0, out var chapterListed);
+
+        Assert.Equal(0, notEmptied);
+        Assert.Equal(0, ownOnly);
+        Assert.Equal(1, listed);
+        Assert.Equal(1, chapterListed);
     }
 
     [Theory]

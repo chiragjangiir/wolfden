@@ -1503,16 +1503,23 @@ Comments go the same way as with any other removal: a comment on the
 removed key's or item's last line, and comment lines right after it
 indented under it, go with it. In a mapping or list that still has
 other keys or items, comment lines above the removed one stay. When the
-last one goes, the comment lines between the parent's line (the key, or
-a list item's dash) and the removed key or item are inside a collection
-that's now empty, so they can only have been about what was removed,
-and they go too, with any blank lines among them. A comment on the
-parent's own line stays. If a comment there is at or left of the
-parent's key and left of the removed one, or a comment after the removed
-key or item is still indented past the parent's key, it might be about
-what comes next, so the writer refuses the edit rather than guess
-(#157). A new key or item written under an empty key later goes after
-any comment lines already indented under that key.
+last one goes, every comment line inside the collection is in one that's
+now empty, so it can only have been about what was removed, and it goes
+too, with the blank lines among them: the lines between the parent's
+line (the key, or a list item's dash) and the removed key or item, and
+the comment lines after it that are still indented past the parent's
+key. So clearing a mapping key by key ends the same in any order. A
+comment on the parent's own line stays, and so does a comment after the
+removed key or item at or left of the parent's key, which is about what
+comes next. A comment above the removed key or item that's at or left
+of the parent's key, and left of the removed one, might be a note on the
+parent, so the writer refuses the edit rather than guess (#157). A
+comment line there may be a commented-out value (`# pov: "[[wren-calder]]"`),
+so the MCP write tools say how many comment lines went. The den's
+history keeps the old text from the last checkpoint (a commit) before
+the edit. A new key or
+item written under an empty key later goes after any comment lines
+already indented under that key.
 
 ## 13. Appendix: a minimal den
 
