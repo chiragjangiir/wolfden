@@ -2426,7 +2426,10 @@ hasn't checkpointed yet.
   included although git doesn't track it yet, each with a unified diff.
   Asking for the diff doesn't stage anything: `git status` is the same
   afterwards. A diff of one file shows only it, and a diff between two
-  checkpoints shows a moved note as a rename. A checkpoint that isn't
+  checkpoints shows a moved note as a rename. One checkpoint's own diff
+  compares it with the checkpoint before it, or, for the first, with
+  nothing, so its notes show as added; narrowed to a moved note's new
+  path, it still shows the rename. A checkpoint that isn't
   in the repository is an error that says so, and a revision is never
   read as a git option.
 - A patch shows the note's text as it is. A form feed, a lone carriage
@@ -2439,6 +2442,7 @@ hasn't checkpointed yet.
 Spec: design.md §6 (#19). Covered by:
 `GitHistoryTests.ADiffSinceTheLatestCheckpointShowsNewChangedAndDeletedNotesAndLeavesTheIndexAlone`,
 `GitHistoryTests.ADiffBetweenTwoCheckpointsShowsARename`,
+`GitHistoryTests.ACheckpointsOwnDiffComparesItWithTheOneBeforeOrWithNothingForTheFirst`,
 `GitHistoryTests.ARevisionThatIsntOneIsAHistoryException`,
 `GitHistoryTests.APatchKeepsCharactersThatArentLineFeedsAsTheyAre`,
 `GitHistoryTests.ALineInAPatchCantStartAnotherFilesPart`,
@@ -2487,7 +2491,8 @@ Spec: design.md §6 (maintainer decision, 2026-10-22). Covered by:
 Background: `wolfden serve` (design.md §7, §9, #23) hosts the web UI and
 its API on this computer only (127.0.0.1) and opens the default browser.
 v0 has no accounts, so it never listens on the network. The browsing,
-search, and history pages come in M3 (#24 to #27).
+search, and history pages come in M3 (#24 to #27); their read API comes
+first, and SC-WEB-4 to SC-WEB-10 describe what it answers.
 
 ### SC-WEB-1. I open my den in the browser
 
@@ -2551,3 +2556,143 @@ Spec: design.md §9. Covered by:
 `ApiGuardTests.ACrossSiteRequestIsRefusedWithoutCorsHeaders`,
 `ApiGuardTests.ARequestFromItsOwnPageOrWithoutABrowserIsAnswered`,
 `ListenerConfigurationTests.EnvironmentVariablesAndAppSettingsAddNoListener`.
+
+### SC-WEB-4. I browse my universe's series, books, and chapters
+
+The writer opens Starfall, which has The Long Dark (Ember, then Ash), a
+standalone book A Quiet Moon, and The Drift War, a series with no books
+yet.
+
+- `/api/hierarchy` lists the series in story order with their books in
+  series order, then the standalone books, each book with its chapters
+  (key, number, title, and position). Each universe, series, and book
+  says how many entities are filed there itself, in all and by type.
+- As of `ember:1`, the counts hold only what the reader has met: Ash's
+  Halden Pike isn't counted yet. A position settles the universe, as for
+  the MCP tools.
+- A server started with `--universe drift` reads only Drift: naming
+  another universe, or `*`, is `bad_argument`, and a position in another
+  universe doesn't resolve.
+
+Spec: design.md §9 (#24). Covered by:
+`ReadEndpointTests.TheHierarchyListsSeriesBooksAndChaptersInStoryOrderWithCountsPerScope`,
+`ReadEndpointTests.TheHierarchyAsOfAPositionCountsOnlyWhatTheReaderHasMet`,
+`ReadEndpointTests.APinnedServerReadsOnlyItsUniverse`,
+`ReadEndpointTests.APinnedServerDoesntNameAnotherUniversesEntityInABrokenLink`.
+
+Chapters and their titles are listed whatever the position (maintainer
+decision, 2026-10-26): the as-of view hides notes, not the table of
+contents.
+
+### SC-WEB-5. I pick a point in the story
+
+The writer opens the position picker for Starfall.
+
+- `/api/positions` lists every chapter of every book in story order
+  (`ember:prologue` through `a-quiet-moon:2b`), with the book's name, its
+  series, and the chapter's number and title. A book with no chapters
+  yet is listed by its bare key. Every position listed is one `asOf`
+  takes. In a den with several universes, the universe must be named.
+
+Spec: design.md §9 (#26). Covered by:
+`ReadEndpointTests.PositionsListEveryChapterInStoryOrderWithTitles`.
+
+### SC-WEB-6. I open a character's page, now or as of a chapter
+
+The writer opens Mara Voss's page, then the same page as of `ember:1`.
+
+- `/api/entity` gives what the MCP `get_entity` gives for the same name
+  and position, member for member: the full view without a position,
+  the canon-as-of view with one, or `inView: false` for an entity the
+  reader hasn't met. It adds the scope's container chain (Starfall, The
+  Long Dark), where the entity enters canon (its `from`, or the start of
+  the scope it's filed in, inherited), and its links: each field value
+  or entry and each section lists the links in it, resolved (the entity
+  reached, by id and name) or marked broken or ambiguous.
+- Backlinks say which entity, field, section, chapter, or outline row
+  links to it. As of a position, only links in what the reader has met
+  count: Mara's injury section links Kessan Reach only from `ember:2b`.
+  A link to an entity the reader hasn't met yet doesn't say what it
+  reaches, even by id. Chapter POV fields and outline rows link from
+  their chapter, so they count from there on.
+- Nothing on any page or list as of a position names an entity the
+  reader hasn't met: not its name, an alias, its key, id, or path. When
+  Jonathan and Quincey Harker share the alias "Harker", a `[[Harker]]`
+  link as of `dracula:25` is ambiguous, names Jonathan, and says only
+  that there are others not met yet. A server pinned to one universe
+  doesn't name another universe's entity in a broken link's problem.
+
+Spec: design.md §9 (#24, #26). Covered by:
+`ReadEndpointTests.AnEntityPageAsOfAPositionGivesWhatGetEntityGives`,
+`ReadEndpointTests.ADraculaEntityPageGivesWhatGetEntityGives`,
+`ReadEndpointTests.AnEntityPageGivesItsScopeChainEntryPointAndResolvedLinks`,
+`ReadEndpointTests.AnEntityWithoutFromInheritsItsScopesStart`,
+`ReadEndpointTests.BacklinksSayWhereTheLinkIsAndAsOfAPositionOnlyCountWhatTheReaderHasMet`,
+`ReadEndpointTests.AsOfAPositionALinkToAnEntityTheReaderHasntMetDoesntSayWhatItReaches`,
+`ReadEndpointTests.BacklinksAsOfAPositionFromChaptersAndOutlineRowsCountUpToThatChapter`,
+`SpoilerTests.AnAmbiguousLinksProblemNamesOnlyTheMatchesTheReaderHasMet`,
+`SpoilerTests.NothingAsOfAPositionNamesAnEntityTheReaderHasntMet`.
+
+### SC-WEB-7. I list entities and read canon as of a chapter
+
+- `/api/canon` gives what the MCP `canon_as_of` gives, with the same
+  series or book filter and type. `/api/entities` without a position
+  gives what `list_entities` gives; with `asOf`, only the entities in
+  the canon view there, in its order.
+
+Spec: design.md §9 (#24, #26). Covered by:
+`ReadEndpointTests.CanonAsOfGivesWhatCanonAsOfGives`,
+`ReadEndpointTests.ListsAndSearchesWithoutAPositionGiveWhatTheToolsGive`,
+`ReadEndpointTests.ListsAsOfAPositionHoldOnlyWhatTheReaderHasMet`.
+
+### SC-WEB-8. I search my notes
+
+- `/api/search` gives what the MCP `search` gives, with snippets. It can
+  also keep only entities of one status, those a series or book filter
+  covers (as in a canon view), or, as of a position, hits in the
+  entities and sections the reader has met: "flechette" finds nothing
+  at `ember:2` and Mara's injury at `ember:2b`.
+
+Spec: design.md §9 (#25). Covered by:
+`ReadEndpointTests.ListsAndSearchesWithoutAPositionGiveWhatTheToolsGive`,
+`ReadEndpointTests.SearchFiltersByStatusScopeAndPosition`.
+
+### SC-WEB-9. I look at a note's history
+
+The writer's den is a git repository with two checkpoints that changed
+Mina Harker, and an edit since.
+
+- `/api/history` gives what `get_history` gives, a page at a time.
+  `/api/history/diff` gives one checkpoint's own change (the first one's
+  shows the note added), the change between two checkpoints, or the
+  change since a checkpoint (by default the latest) up to the note as
+  it is now, as a unified diff for the UI to show. A checkpoint that
+  renamed the note shows the rename. A checkpoint that isn't one is
+  `unknown_checkpoint`; `to` without `from`, or a revision that can't be
+  one (it starts with `-` or holds a space), is `bad_argument`, and a
+  very long one is cut short in the message.
+- A den without history isn't an error: `available` is false, the
+  backend is `none`, and `reason` says why. So it is for a diff in a
+  repository with nothing checkpointed yet.
+
+Spec: design.md §9 (#27). Covered by:
+`HistoryEndpointTests.HistoryPagesThroughAnEntitysCheckpointsAsGetHistoryDoes`,
+`HistoryEndpointTests.ADiffIsOfOneCheckpointBetweenTwoOrSinceOneUpToNow`,
+`HistoryEndpointTests.ADenWithoutHistorySaysSoRatherThanFailing`,
+`HistoryEndpointTests.ACheckpointThatRenamedTheNoteShowsTheRename`,
+`HistoryEndpointTests.ARevisionThatCantBeOneIsABadArgumentAndALongOneIsCutShort`.
+
+### SC-WEB-10. The UI asks for something that isn't there
+
+- A position that doesn't resolve is 400 `bad_position`; an entity,
+  universe, or series that doesn't exist is 404 (`unknown_entity`,
+  `unknown_universe`, `unknown_scope`); a name two entities share is
+  409 `ambiguous_entity`, listing both. A parameter an endpoint doesn't
+  take (such as `as_of` for `asOf`), one given twice, or a value that
+  doesn't fit is 400 `bad_argument`, never quietly ignored. An empty
+  `asOf` is `bad_argument` too, rather than the full view.
+
+Spec: design.md §9. Covered by:
+`ReadEndpointTests.BadRequestsGetACodeAndAMessage`,
+`ReadEndpointTests.AnEmptyAsOfIsRefusedRatherThanShowingEverything`,
+`HistoryEndpointTests.ARevisionThatCantBeOneIsABadArgumentAndALongOneIsCutShort`.

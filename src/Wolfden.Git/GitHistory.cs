@@ -115,6 +115,11 @@ public sealed partial class GitHistory : IHistoryProvider
 
     private const string EmptyBlobSha256 = "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
 
+    /// <summary>The empty tree's id with SHA-1, and with SHA-256: what the first commit is compared with.</summary>
+    private const string EmptyTreeSha1 = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+    private const string EmptyTreeSha256 = "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321";
+
     /// <summary>A submodule's mode in git's raw output.</summary>
     private const string GitlinkMode = "160000";
 
@@ -250,6 +255,35 @@ public sealed partial class GitHistory : IHistoryProvider
             return HistoryResult<HistoryDiff>.Done(new HistoryDiff(from, to, CompareFiles([from, to], specs, null, cancellationToken)));
         }
 
+        return DiffWithFiles(from, specs, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public HistoryResult<HistoryDiff> DiffCheckpoint(string revision, string? path = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(revision);
+        var to = Resolve(revision, cancellationToken);
+
+        // The first parent; a commit without one is compared with the empty tree.
+        var parent = Run(["rev-parse", "--verify", "--quiet", to + "^1^{commit}"], cancellationToken);
+        var from = parent.Succeeded ? CommitId(parent) : null;
+
+        // The whole den is compared and then narrowed to the path, so rename
+        // detection (-M) sees a file's old path too: a pathspec of the new
+        // path alone would hide it, and a renamed file would show as added.
+        var files = CompareFiles([from ?? (to.Length == 64 ? EmptyTreeSha256 : EmptyTreeSha1), to], Pathspecs(null), null, cancellationToken);
+        if (path?.Replace('\\', '/').Trim('/') is { Length: > 0 } limit)
+        {
+            files = files.Where(f => Under(f.Change.Path) || (f.Change.OldPath is { } old && Under(old))).ToList();
+            bool Under(string p) => p == limit || p.StartsWith(limit + "/", StringComparison.Ordinal);
+        }
+
+        return HistoryResult<HistoryDiff>.Done(new HistoryDiff(from ?? "", to, files));
+    }
+
+    /// <summary>What changed between <paramref name="from"/> and the den's files as they are now.</summary>
+    private HistoryResult<HistoryDiff> DiffWithFiles(string from, IReadOnlyList<string> specs, CancellationToken cancellationToken)
+    {
         // The files as they are now, new ones included (#142): a temporary
         // index lists HEAD's files and the new ones, and git compares the
         // files on disk with 'from' through it. The user's index is left

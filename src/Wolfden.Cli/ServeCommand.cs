@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Connections;
 using Wolfden.Api;
+using Wolfden.Git;
 using Wolfden.Index;
 using Wolfden.Mcp;
 
@@ -111,6 +112,7 @@ internal static class ServeCommand
             WebRoot = WebRoot ?? DefaultWebRoot,
             Version = CliApp.Version,
             Log = log,
+            History = () => GitHistory.ForDen(root, CliApp.Git),
         });
 
         CliApp.RunsUntilStopped = true;

@@ -2,6 +2,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Wolfden.Api\Wolfden.Api.csproj" />
+    <!-- The read endpoints are checked against the MCP read tools' answers, and history against git. -->
+    <ProjectReference Include="..\..\src\Wolfden.Mcp\Wolfden.Mcp.csproj" />
+    <ProjectReference Include="..\..\src\Wolfden.Git\Wolfden.Git.csproj" />
   </ItemGroup>
 
 </Project>

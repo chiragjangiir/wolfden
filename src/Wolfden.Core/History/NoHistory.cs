@@ -35,6 +35,10 @@ public sealed class NoHistory : IHistoryProvider
         HistoryResult<HistoryDiff>.Unavailable(Say("comparing with an earlier version"));
 
     /// <inheritdoc />
+    public HistoryResult<HistoryDiff> DiffCheckpoint(string revision, string? path = null, CancellationToken cancellationToken = default) =>
+        HistoryResult<HistoryDiff>.Unavailable(Say("comparing with an earlier version"));
+
+    /// <inheritdoc />
     public HistoryResult<HistoryEntry?> Checkpoint(CheckpointRequest request, CancellationToken cancellationToken = default) =>
         HistoryResult<HistoryEntry?>.Unavailable(Say("a checkpoint", "Your edits are still saved in the files."));
 

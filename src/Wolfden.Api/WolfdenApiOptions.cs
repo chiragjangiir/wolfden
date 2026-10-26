@@ -1,3 +1,4 @@
+using Wolfden.Core.History;
 using Wolfden.Index;
 
 namespace Wolfden.Api;
@@ -44,4 +45,12 @@ public sealed class WolfdenApiOptions
 
     /// <summary>The longest a request waits for a running watcher to catch up before it rebuilds the index itself.</summary>
     public TimeSpan WatcherWait { get; init; } = IndexBuilder.WatcherWait;
+
+    /// <summary>
+    /// Finds the den's history provider, for the history endpoints. It's
+    /// asked on each request, so a den that becomes a repository while the
+    /// server runs gets history without a restart. By default the den has
+    /// none (<see cref="NoHistory"/>); <c>wolfden serve</c> uses git (#19).
+    /// </summary>
+    public Func<IHistoryProvider> History { get; init; } = () => NoHistory.Instance;
 }

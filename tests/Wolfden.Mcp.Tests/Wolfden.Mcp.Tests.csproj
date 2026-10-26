@@ -9,4 +9,9 @@
     <Compile Include="..\Wolfden.Index.Tests\IndexBuildCounter.cs" Link="IndexBuildCounter.cs" />
   </ItemGroup>
 
+  <!-- The den's shared read queries and their results (DenReader). -->
+  <ItemGroup>
+    <Using Include="Wolfden.Index.Reading" />
+  </ItemGroup>
+
 </Project>

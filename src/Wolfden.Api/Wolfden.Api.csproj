@@ -15,4 +15,9 @@
     <ProjectReference Include="..\Wolfden.Index\Wolfden.Index.csproj" />
   </ItemGroup>
 
+  <!-- The den's shared read queries and their results (DenReader). -->
+  <ItemGroup>
+    <Using Include="Wolfden.Index.Reading" />
+  </ItemGroup>
+
 </Project>
