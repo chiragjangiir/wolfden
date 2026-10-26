@@ -1247,7 +1247,7 @@ public sealed partial class DenTools
     {
         if (comments > 0)
         {
-            notes.Add($"Removed {comments} comment line{(comments == 1 ? "" : "s")} inside {where}, which is now empty.");
+            notes.Add($"Removed {comments} comment line{(comments == 1 ? "" : "s")} inside {where}, which the change emptied.");
         }
 
         return file;

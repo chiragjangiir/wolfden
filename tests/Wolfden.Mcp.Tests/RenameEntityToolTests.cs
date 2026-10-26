@@ -481,7 +481,7 @@ public sealed class RenameEntityToolTests : IDisposable
         var result = rename ? Tools.RenameEntity("Mr. Swales", "the old sailor", hash) : Tools.ChangeAlias("Mr. Swales", "the old sailor", hash);
 
         Assert.Contains("\naliases:\nstatus:", _den.Read(Swales), StringComparison.Ordinal);
-        Assert.Contains("Removed 1 comment line inside aliases, which is now empty.", result.Effects);
+        Assert.Contains("Removed 1 comment line inside aliases, which the change emptied.", result.Effects);
     }
 
     private void WriteNote(string text) =>

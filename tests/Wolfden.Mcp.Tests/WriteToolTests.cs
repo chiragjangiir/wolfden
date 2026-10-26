@@ -526,7 +526,7 @@ public sealed class WriteToolTests : IDisposable
         _den.Write(Swales, _den.Read(Swales).Replace("status: canon\n", "status: canon\nx-notes:\n  # for the reread\n  reread: yes\n", StringComparison.Ordinal));
         var fields = Tools.UpdateFields("Mr. Swales", Tools.GetEntity("Mr. Swales").Entity!.Hash!, Json("""[{"op": "remove", "path": "x-notes.reread"}]"""));
         Assert.Contains("\nx-notes:\nfrom:", _den.Read(Swales), StringComparison.Ordinal);
-        Assert.Contains("Removed 1 comment line inside x-notes, which is now empty.", fields.Effects);
+        Assert.Contains("Removed 1 comment line inside x-notes, which the change emptied.", fields.Effects);
 
         _den.Write(BookFile, _den.Read(BookFile)
             .Replace("chapter_defaults:\n  narration: first\n  tense: past\n", "chapter_defaults:\n  # always first person\n  narration: first\n  pov:\n    # the usual\n    - \"[[mina-harker]]\"\n", StringComparison.Ordinal)
@@ -535,17 +535,17 @@ public sealed class WriteToolTests : IDisposable
                 "    fields:\n      # from his journal\n      pov:\n        # Jonathan writes it all\n        - \"[[jonathan-harker]]\"\n",
                 StringComparison.Ordinal));
         var removed = Tools.UpdateChapterFields("dracula", "1", Tools.GetChapter("dracula", "1").Hash, Json("""[{"op": "remove", "field": "pov", "item": 0}]"""));
-        Assert.Contains("Removed 1 comment line inside pov of chapter '1', which is now empty.", removed.Effects);
+        Assert.Contains("Removed 1 comment line inside pov of chapter '1', which the change emptied.", removed.Effects);
         var cleared = Tools.UpdateChapterFields("dracula", "1", removed.Hash, Json("""[{"op": "clear", "field": "pov"}]"""));
-        Assert.Contains("Removed 1 comment line inside the fields of chapter '1', which is now empty.", cleared.Effects);
+        Assert.Contains("Removed 1 comment line inside the fields of chapter '1', which the change emptied.", cleared.Effects);
         Assert.Contains("    title: Jonathan Harker's Journal\n    fields:\n  - key: 2\n", _den.Read(BookFile), StringComparison.Ordinal);
 
         var item = Tools.UpdateChapterDefaults(cleared.Hash, Json("""[{"op": "remove", "field": "pov", "item": 0}]"""), book: "dracula");
-        Assert.Contains("Removed 1 comment line inside chapter_defaults.pov, which is now empty.", item.Effects);
+        Assert.Contains("Removed 1 comment line inside chapter_defaults.pov, which the change emptied.", item.Effects);
         var defaults = Tools.UpdateChapterDefaults(
             item.Hash, Json("""[{"op": "clear", "field": "pov"}, {"op": "clear", "field": "narration"}]"""), book: "dracula");
         Assert.Single(defaults.Effects, e => e.StartsWith("Removed", StringComparison.Ordinal));
-        Assert.Contains("Removed 1 comment line inside chapter_defaults, which is now empty.", defaults.Effects);
+        Assert.Contains("Removed 1 comment line inside chapter_defaults, which the change emptied.", defaults.Effects);
         Assert.Contains("\nchapter_defaults:\nchapters:\n", _den.Read(BookFile), StringComparison.Ordinal);
     }
 

@@ -1517,9 +1517,8 @@ parent, so the writer refuses the edit rather than guess (#157). A
 comment line there may be a commented-out value (`# pov: "[[wren-calder]]"`),
 so the MCP write tools say how many comment lines went. The den's
 history keeps the old text from the last checkpoint (a commit) before
-the edit. A new key or
-item written under an empty key later goes after any comment lines
-already indented under that key.
+the edit. A new key or item written under an empty key later goes
+after any comment lines already indented under that key.
 
 ## 13. Appendix: a minimal den
 
