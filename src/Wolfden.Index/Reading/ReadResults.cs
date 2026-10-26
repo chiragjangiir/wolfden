@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Wolfden.Index.Reading;
 
@@ -260,13 +261,33 @@ public sealed record ListEntitiesResult(int Version, int Count, int Total, bool 
 
 /// <summary>A search hit.</summary>
 /// <param name="Entity">The entity.</param>
-/// <param name="Section">The section the match is in, or null for the name, aliases, or lead.</param>
-/// <param name="Line">The section heading's line, or null.</param>
-/// <param name="Snippet">An excerpt with each match in square brackets.</param>
-/// <param name="Status">The effective status of the matching section, or of the entity.</param>
+/// <param name="Section">The section the match is in, or null for the name, aliases, lead, or a field.</param>
+/// <param name="Line">The section heading's line, or the field value's (its entry's, or for a plain value the field name's); null for the name, aliases, or lead.</param>
+/// <param name="Snippet">
+/// An excerpt with each match in square brackets. A bracket can also be the
+/// note's own (<c>[[a link]]</c>); <see cref="Text"/> and <see cref="Matches"/>
+/// tell them apart. For a field, the value as written, then, for a link
+/// whose note's name or alias matched, an arrow and that name.
+/// </param>
+/// <param name="Status">The effective status of the matching section or field value, or of the entity.</param>
 /// <param name="InCanon">True if the match is canon text (draft or canon, not bookkeeping).</param>
 /// <param name="InComment">True if the match is in an HTML comment, such as a to-do note.</param>
-public sealed record SearchHitView(EntitySummary Entity, string? Section, int? Line, string Snippet, string Status, bool InCanon, bool InComment);
+/// <param name="Field">The field the match is in (#179), or null for a match in the name, aliases, lead, or a section.</param>
+public sealed record SearchHitView(
+    EntitySummary Entity, string? Section, int? Line, string Snippet, string Status, bool InCanon, bool InComment, string? Field = null)
+{
+    /// <summary>
+    /// The excerpt without marks, for a surface that marks matches itself
+    /// (the web API, #179). The MCP tools leave it out: <see cref="Snippet"/>
+    /// reads better.
+    /// </summary>
+    [JsonIgnore]
+    public string Text { get; init; } = "";
+
+    /// <summary>Where the matches are in <see cref="Text"/>, in order.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<TextMatch> Matches { get; init; } = [];
+}
 
 /// <summary>The result of <c>search</c>.</summary>
 /// <param name="Version">The shape version.</param>
@@ -275,6 +296,13 @@ public sealed record SearchHitView(EntitySummary Entity, string? Section, int? L
 /// <param name="Truncated">True if more hits matched than <c>limit</c>.</param>
 /// <param name="Hits">The hits, best first.</param>
 public sealed record SearchResult(int Version, string Query, int Count, bool Truncated, IReadOnlyList<SearchHitView> Hits);
+
+/// <summary>The fields a search can be narrowed to (#179): the names of the fields notes give values for.</summary>
+/// <param name="Version">The shape version.</param>
+/// <param name="Position">The position the names are as of, or null for every note and value.</param>
+/// <param name="Count">How many names there are.</param>
+/// <param name="Fields">The field names, in ordinal order.</param>
+public sealed record FieldNamesResult(int Version, string? Position, int Count, IReadOnlyList<string> Fields);
 
 /// <summary>The result of <c>get_history</c>.</summary>
 /// <param name="Version">The shape version.</param>

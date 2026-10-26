@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { HierarchyResult, SearchHit, SearchResult } from './api'
 import { entities, hierarchy, renderApp, stubApi } from './test/harness'
-import { snippetParts } from './snippet'
+import { snippetParts, type TextMatch } from './snippet'
 import { Snippet } from './pages/SearchPage'
 import { SEARCH_DEBOUNCE_MS, isTextEntry } from './components/SearchBox'
 
@@ -14,9 +14,25 @@ afterEach(() => {
 
 const byKey = (key: string) => entities.find((e) => e.key === key)!
 
+/** The plain text and match ranges of a test snippet written with brackets around its matches. */
+function unbracket(snippet: string): Pick<SearchHit, 'text' | 'matches'> {
+  let text = ''
+  const matches: TextMatch[] = []
+  for (const part of snippet.split(/(\[[^[\]]+\])/)) {
+    if (/^\[[^[\]]+\]$/.test(part)) {
+      matches.push({ start: text.length, length: part.length - 2 })
+      text += part.slice(1, -1)
+    } else {
+      text += part
+    }
+  }
+
+  return { text, matches }
+}
+
 function hit(key: string, section: string | null, snippet: string, extra: Partial<SearchHit> = {}): SearchHit {
   const entity = byKey(key)
-  return { entity, section, line: section ? 10 : null, snippet, status: entity.status, inCanon: true, inComment: false, ...extra }
+  return { entity, section, line: section ? 10 : null, snippet, ...unbracket(snippet), status: entity.status, inCanon: true, inComment: false, ...extra }
 }
 
 const bloodHits: SearchHit[] = [
@@ -418,30 +434,76 @@ describe('SC-WEB-20: searching as of a story position', () => {
 })
 
 describe('SC-WEB-21: a snippet holds HTML or brackets of its own', () => {
-  it('renders the snippet as text, marking only the matches', () => {
-    // FTS marks each matching word, inside a link's target too.
-    const snippet = '<img src=x onerror="alert(1)"> the [blood] and [[[mina]-harker|[Mina]]] <script>alert(2)</script> [note]'
+  it('renders the snippet as text, marking only the ranges the API gives', () => {
+    // The API marks each matching word, inside a link's target too, by range: the note's own brackets are just text.
+    const text = '<img src=x onerror="alert(1)"> the blood and [[mina-harker|Mina]] <script>alert(2)</script> [blood]'
+    const at = (word: string, from = 0) => ({ start: text.indexOf(word, from), length: word.length })
     const { container } = render(
       <p>
-        <Snippet text={snippet} q="blood mina" />
+        <Snippet text={text} matches={[at('blood'), at('mina'), at('Mina')]} />
       </p>,
     )
 
     expect(container.querySelector('img')).toBeNull()
     expect(container.querySelector('script')).toBeNull()
     expect([...container.querySelectorAll('mark')].map((m) => m.textContent)).toEqual(['blood', 'mina', 'Mina'])
-    expect(container.textContent).toBe('<img src=x onerror="alert(1)"> the blood and [[mina-harker|Mina]] <script>alert(2)</script> [note]')
+    expect(container.textContent).toBe(text)
   })
 
-  it('matches words ignoring case and accents, and a word* as a prefix', () => {
-    expect(snippetParts('[Château] and [Vampires]', 'chateau vamp*')).toEqual([
+  it('splits text by its match ranges, whatever their order, clipping any that overlap or run past the end', () => {
+    expect(snippetParts('Château and Vampires', [{ start: 12, length: 8 }, { start: 0, length: 7 }])).toEqual([
       { text: 'Château', match: true },
       { text: ' and ', match: false },
       { text: 'Vampires', match: true },
     ])
-    expect(snippetParts('see [1] and [ blood ]', 'blood')).toEqual([
-      { text: 'see [1] and ', match: false },
-      { text: ' blood ', match: true },
+    expect(snippetParts('[[x]] y', [{ start: 2, length: 1 }, { start: 2, length: 3 }, { start: 6, length: 9 }])).toEqual([
+      { text: '[[', match: false },
+      { text: 'x', match: true },
+      { text: ']]', match: true },
+      { text: ' ', match: false },
+      { text: 'y', match: true },
     ])
+    expect(snippetParts('no marks', [])).toEqual([{ text: 'no marks', match: false }])
+  })
+})
+
+describe('SC-WEB-24: I search one field', () => {
+  const homeHit = hit('E-LUCY', null, '[Hillingham]', { field: 'home', line: 7 })
+
+  it('picks a field from those notes have, keeps it in the URL, and sends it to the API', async () => {
+    const { searches } = stubSearch((params) => {
+      const hits = params.get('field') === 'home' ? [homeHit] : bloodHits
+      return { version: 1, query: params.get('query')!, count: hits.length, truncated: false, hits }
+    })
+    const { history } = renderApp('/u/dracula/search?q=hillingham')
+    const filters = await screen.findByRole('group', { name: 'Filters' })
+    const field = within(filters).getByRole('combobox', { name: 'Field' }) as HTMLSelectElement
+    await waitFor(() => expect([...field.options].map((o) => o.value)).toEqual(['', 'home', 'occupation']))
+    expect(field.value).toBe('')
+    await waitFor(() => expect(searches.length).toBe(1))
+    expect(searches[0].has('field')).toBe(false)
+
+    fireEvent.change(field, { target: { value: 'home' } })
+    await waitFor(() => expect(searchOf(history).toString()).toBe('q=hillingham&field=home'))
+    await waitFor(() => expect(searches.at(-1)!.get('field')).toBe('home'))
+
+    // The hit says which field matched, and links to the note.
+    const main = screen.getByRole('main')
+    const place = await within(main).findByRole('link', { name: 'Field: home' })
+    expect(place.getAttribute('href')).toBe('/u/dracula/e/E-LUCY')
+    expect([...main.querySelectorAll('mark')].map((m) => m.textContent)).toEqual(['Hillingham'])
+  })
+})
+
+describe('SC-WEB-25: I search a field as of a story position', () => {
+  it('lists only the fields the reader has met, keeping the chosen one', async () => {
+    const { calls } = stubSearch((params) => ({ version: 1, query: params.get('query')!, count: 0, truncated: false, hits: [] }))
+    renderApp('/u/dracula/search?q=hillingham&at=dracula:3&field=home')
+    const field = (await screen.findByRole('combobox', { name: 'Field' })) as HTMLSelectElement
+
+    await waitFor(() => expect([...field.options].map((o) => o.value)).toEqual(['', 'occupation', 'home']))
+    expect(field.value).toBe('home')
+    expect(calls.filter((c) => c.startsWith('/api/fields'))).toEqual(['/api/fields?universe=dracula&asOf=dracula%3A3'])
+    expect(await screen.findByText('No matches as of Dracula chapter 3. Try without some of the filters.')).toBeTruthy()
   })
 })

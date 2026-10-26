@@ -38,18 +38,23 @@ public sealed class WolfdenTools
     /// <summary>The <c>search</c> tool.</summary>
     [McpServerTool(Name = "search", Title = "Search the den", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]
     [Description(
-        "Full-text search over the den's notes: entity names, aliases, leads, and section text. Words match whole, in any order, " +
-        "ignoring case and accents; end a word with * to match it as a prefix. Results include every status (ideas, undecided " +
-        "questions, retconned material) unless canon_only is true, and each hit says its status and whether it's canon text. " +
-        "Search has no story position, so it can show material the reader meets later: use canon_as_of or get_entity with as_of " +
-        "for spoiler-safe reading.")]
+        "Full-text search over the den's notes: entity names, aliases, leads, section text, and field values. Words match whole, " +
+        "in any order, ignoring case and accents; end a word with * to match it as a prefix. There's no phrase search: quotes " +
+        "don't keep words together, though a hyphenated word such as mara-voss matches its parts side by side. A field value's words are the value " +
+        "as written and, for a link, the linked entity's name and aliases. Give field to search only that field's values (field " +
+        "'home' with query 'saltmarsh' finds home: Saltmarsh Docks); each hit in a field names it in 'field', and its snippet " +
+        "shows the value, then '→' and a linked entity's name if that's what matched. Matches are in [square brackets]. Results " +
+        "include every status (ideas, undecided questions, retconned material) unless canon_only is true, and each hit says its " +
+        "status and whether it's canon text. Search has no story position, so it can show material the reader meets later: use " +
+        "canon_as_of or get_entity with as_of for spoiler-safe reading.")]
     public CallToolResult Search(
         [Description("The words to search for.")] string query,
         [Description(UniverseHelp + " Here '*' searches every universe.")] string? universe = null,
         [Description("Only entities of this type, such as 'character' or 'location'.")] string? type = null,
         [Description("If true, only canon text: draft or canon material, not ideas, retconned material, or bookkeeping sections.")] bool canon_only = false,
-        [Description("The most hits to return, 1 to 200.")] int limit = 20) =>
-        Respond(() => _tools.Search(query, universe, type, canon_only, limit));
+        [Description("The most hits to return, 1 to 200.")] int limit = 20,
+        [Description("Search only this field's values (the frontmatter key, such as 'home'), not names, leads, or sections.")] string? field = null) =>
+        Respond(() => _tools.Search(query, universe, type, canon_only, limit, field));
 
     /// <summary>The <c>get_entity</c> tool.</summary>
     [McpServerTool(Name = "get_entity", Title = "Read one entity", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]

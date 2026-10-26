@@ -1,4 +1,5 @@
 import { QueryClient, queryOptions } from '@tanstack/react-query'
+import type { TextMatch } from './snippet'
 
 // The shapes of Wolfden's API (src/Wolfden.Api/DenEndpoints.cs,
 // ReadEndpoints.cs, ReadResults.cs, and Wolfden.Index's read results), in
@@ -355,14 +356,28 @@ export function count(n: number, one: string, many: string): string {
 
 export interface SearchHit {
   entity: EntitySummary
-  /** The section the match is in, or null for the name, aliases, or lead. */
+  /** The section the match is in, or null for the name, aliases, lead, or a field. */
   section: string | null
   line: number | null
-  /** An excerpt with each match in square brackets. */
+  /** The field the match is in (#179), or null (or left out) for the name, aliases, lead, or a section. */
+  field?: string | null
+  /** An excerpt with each match in square brackets, as the MCP tool gives it. The page marks matches from `text` and `matches`. */
   snippet: string
+  /** The excerpt without marks. The API always gives it (#179); the page falls back to `snippet` unmarked. */
+  text?: string
+  /** Where the matches are in `text`; none marked if it's missing. */
+  matches?: TextMatch[]
   status: string
   inCanon: boolean
   inComment: boolean
+}
+
+/** The field names a search can be narrowed to (/api/fields): as of a position, only those of values the reader has met. */
+export interface FieldNamesResult {
+  version: number
+  position: string | null
+  count: number
+  fields: string[]
 }
 
 export interface SearchResult {
@@ -375,6 +390,8 @@ export interface SearchResult {
 
 /** What a search asks for besides its words: the filters /api/search takes. */
 export interface SearchFilters {
+  /** Search only this field's values. */
+  field?: string
   type?: string
   status?: string
   series?: string
@@ -392,6 +409,7 @@ export const SEARCH_LIMITS = [20, 50, 100, 200] as const
 export interface SearchKey {
   universe: string
   query: string
+  field: string | null
   type: string | null
   status: string | null
   series: string | null
@@ -402,10 +420,11 @@ export interface SearchKey {
 }
 
 export function searchQuery(universe: string, query: string, filters: SearchFilters, at: string | undefined, limit: number) {
-  const { type, status, series, book, canonOnly } = filters
+  const { field, type, status, series, book, canonOnly } = filters
   const key: SearchKey = {
     universe,
     query,
+    field: field ?? null,
     type: type ?? null,
     status: status ?? null,
     series: series ?? null,
@@ -418,7 +437,15 @@ export function searchQuery(universe: string, query: string, filters: SearchFilt
     queryKey: ['search', key] as const,
     queryFn: () =>
       getJson<SearchResult>(
-        apiPath('/api/search', { query, universe, type, status, series, book, canonOnly: canonOnly ? 'true' : undefined, asOf: at, limit }),
+        apiPath('/api/search', { query, universe, field, type, status, series, book, canonOnly: canonOnly ? 'true' : undefined, asOf: at, limit }),
       ),
+  })
+}
+
+/** The fields a search can be narrowed to: as of a position, only those the reader has met values of. */
+export function fieldsQuery(universe: string, at: string | undefined) {
+  return queryOptions({
+    queryKey: ['fields', universe, at ?? null],
+    queryFn: () => getJson<FieldNamesResult>(apiPath('/api/fields', { universe, asOf: at })),
   })
 }

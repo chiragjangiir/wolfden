@@ -14,14 +14,20 @@ namespace Wolfden.Index;
 /// <param name="EntityPath">The entity file's path.</param>
 /// <param name="SectionName">The section's name, or null if the match is the entity's name, aliases, or lead.</param>
 /// <param name="SectionLine">The section heading's line, or null.</param>
-/// <param name="Snippet">A short excerpt with each match wrapped in <c>[</c> and <c>]</c>.</param>
+/// <param name="Snippet">
+/// A short excerpt with each match wrapped in <c>[</c> and <c>]</c>, for
+/// reading. The note's own text can hold brackets too (<c>[[a link]]</c>);
+/// <see cref="Text"/> and <see cref="Matches"/> tell them apart.
+/// </param>
 /// <param name="Rank">The BM25 score; lower is better.</param>
 /// <param name="Status">The effective status (F-STAT-3) of the section, or of the entity for its name, aliases, and lead.</param>
 /// <param name="IsBookkeeping">True for a match in a bookkeeping section (F-SEC-12).</param>
 /// <param name="InComment">True if a match is in an HTML comment (F-SEC-11), such as a to-do note, rather than in the text.</param>
+/// <param name="Text">The excerpt without marks.</param>
+/// <param name="Matches">Where the matches are in <see cref="Text"/>, in order.</param>
 public sealed record SearchHit(
     string EntityKey, string EntityName, string EntityPath, string? SectionName, int? SectionLine, string Snippet, double Rank,
-    string Status, bool IsBookkeeping, bool InComment)
+    string Status, bool IsBookkeeping, bool InComment, string Text, IReadOnlyList<TextMatch> Matches)
 {
     /// <summary>True if the hit is canon text: its status is <c>draft</c> or <c>canon</c>, and it isn't bookkeeping.</summary>
     public bool IsInCanon => Status is "draft" or "canon" && !IsBookkeeping;
@@ -230,7 +236,7 @@ public sealed class DenIndex : IDisposable
         using var command = _connection.CreateCommand();
         command.CommandText = """
             SELECT e.key, e.name, e.path, s.name, s.line,
-                   snippet(search, -1, '[', ']', '…', 12), bm25(search, 10.0, 1.0, 0.5) AS rank,
+                   snippet(search, -1, char(1), char(2), '…', 12), bm25(search, 10.0, 1.0, 0.5) AS rank,
                    coalesce(s.status, e.status), coalesce(s.is_bookkeeping, 0),
                    instr(highlight(search, 2, char(1), char(2)), char(1)) > 0
             FROM search
@@ -249,17 +255,21 @@ public sealed class DenIndex : IDisposable
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {
+                // The search table holds no control characters (IndexWriter), so these marks are the snippet's own.
+                var marked = MarkedText.FromMarks(reader.GetString(5), MarkedText.Open, MarkedText.Close);
                 hits.Add(new SearchHit(
                     reader.GetString(0),
                     reader.GetString(1),
                     reader.GetString(2),
                     reader.IsDBNull(3) ? null : reader.GetString(3),
                     reader.IsDBNull(4) ? null : reader.GetInt32(4),
-                    reader.GetString(5),
+                    marked.Bracketed(),
                     reader.GetDouble(6),
                     reader.GetString(7),
                     reader.GetBoolean(8),
-                    reader.GetBoolean(9)));
+                    reader.GetBoolean(9),
+                    marked.Text,
+                    marked.Matches));
             }
         }
         finally
