@@ -18,6 +18,8 @@ export interface DenSummary {
   name: string
   pinnedUniverse: string | null
   universes: UniverseSummary[]
+  /** True if den.yaml has `remote_images: true`, so notes' images from websites load (#180). */
+  remoteImages: boolean
 }
 
 export interface EntityCounts {
@@ -288,10 +290,29 @@ export function createQueryClient(): QueryClient {
   })
 }
 
+/**
+ * The den's `remoteImages` in its first answer, for each query client (one
+ * per page load). The page's Content-Security-Policy was fixed when the page
+ * loaded, so turning the setting on lets images load only after a reload.
+ */
+const remoteImagesAtFirstAnswer = new WeakMap<QueryClient, boolean>()
+
 export const denQuery = queryOptions({
   queryKey: ['den'],
-  queryFn: () => getJson<DenSummary>('/api/den'),
+  queryFn: async ({ client }) => {
+    const den = await getJson<DenSummary>('/api/den')
+    if (!remoteImagesAtFirstAnswer.has(client)) {
+      remoteImagesAtFirstAnswer.set(client, den.remoteImages === true)
+    }
+
+    return den
+  },
 })
+
+/** The den's `remoteImages` as first answered for `client`'s page, or undefined before the first answer. */
+export function remoteImagesAtLoad(client: QueryClient): boolean | undefined {
+  return remoteImagesAtFirstAnswer.get(client)
+}
 
 // Every query that depends on the story position has the position in its key
 // (null for the full view), so each position is cached on its own.

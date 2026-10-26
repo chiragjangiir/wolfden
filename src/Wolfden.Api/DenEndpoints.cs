@@ -17,7 +17,11 @@ public sealed record HealthResult(string Status, string Wolfden);
 /// <param name="Name">The den's display name (format.md F-DEN-2).</param>
 /// <param name="PinnedUniverse">The universe the server is pinned to, or null.</param>
 /// <param name="Universes">The universes served, by key.</param>
-public sealed record DenResult(int Version, string Name, string? PinnedUniverse, IReadOnlyList<UniverseResult> Universes);
+/// <param name="RemoteImages">
+/// True if <c>den.yaml</c> lets the UI load images from websites in notes
+/// (<c>remote_images: true</c>, format.md F-DEN-8); by default it doesn't (#180).
+/// </param>
+public sealed record DenResult(int Version, string Name, string? PinnedUniverse, IReadOnlyList<UniverseResult> Universes, bool RemoteImages);
 
 /// <summary>One universe in <see cref="DenResult"/>.</summary>
 /// <param name="Key">Its key (its folder name).</param>
@@ -114,7 +118,7 @@ public static class DenEndpoints
                     containers.Count(c => c.UniverseId == u.Id && c.Kind == "book"),
                     entities.GetValueOrDefault(u.Id)))
                 .ToList();
-            return Results.Json(new DenResult(DenResultVersion, den.Name, options.PinnedUniverse, universes));
+            return Results.Json(new DenResult(DenResultVersion, den.Name, options.PinnedUniverse, universes, WolfdenApi.RemoteImages(options.DenRoot)));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or SqliteException)
         {
