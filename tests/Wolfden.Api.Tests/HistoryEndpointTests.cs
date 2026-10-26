@@ -149,6 +149,56 @@ public sealed class HistoryEndpointTests : IDisposable
         Assert.Equal("renamed", file.GetProperty("change").GetProperty("kind").GetString());
         Assert.Equal(moved, file.GetProperty("change").GetProperty("path").GetString());
         Assert.Equal(MinaFile, file.GetProperty("change").GetProperty("oldPath").GetString());
+
+        // The list says so too, and a compare across the rename shows it rather than an added note (#181).
+        var listed = Assert.Single(
+            Assert.Single((await server.GetJsonAsync("/api/history?entity=Mina", HttpStatusCode.OK)).GetProperty("entries").EnumerateArray())
+                .GetProperty("changes").EnumerateArray());
+        Assert.Equal(("renamed", MinaFile), (listed.GetProperty("kind").GetString(), listed.GetProperty("oldPath").GetString()));
+        var first = RunGit("rev-list", "--max-parents=0", "HEAD").Trim();
+        foreach (var path in new[] { $"/api/history/diff?entity=Mina&from={first}&to={rename}", $"/api/history/diff?entity=Mina&from={first}" })
+        {
+            var compared = Assert.Single((await server.GetJsonAsync(path, HttpStatusCode.OK)).GetProperty("diff").GetProperty("files").EnumerateArray());
+            Assert.Equal("renamed", compared.GetProperty("change").GetProperty("kind").GetString());
+            Assert.Equal(MinaFile, compared.GetProperty("change").GetProperty("oldPath").GetString());
+            Assert.Contains("+More about Mina.", compared.GetProperty("patch").GetString(), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-11")]
+    public async Task ANoteWithErrorsHasAHistoryByItsPath()
+    {
+        var (first, second) = TwoCheckpoints();
+        _den.Write(MinaFile, _den.Read(MinaFile).Replace("name: Mina Harker", "name: [Mina Harker", StringComparison.Ordinal));
+        await using var server = await StartAsync();
+        var tools = new DenTools(_den.Root) { History = () => GitHistory.ForDen(_den.Root, Git) };
+        var path = Uri.EscapeDataString(MinaFile);
+
+        // The den leaves the note out, so no name reaches it, and it has no page.
+        Assert.Equal("unknown_entity", (await server.GetJsonAsync("/api/history?entity=Mina%20Harker", HttpStatusCode.NotFound)).GetProperty("code").GetString());
+        Assert.Equal("unknown_entity", (await server.GetJsonAsync($"/api/entity?entity={path}", HttpStatusCode.NotFound)).GetProperty("code").GetString());
+
+        // By its path, its history and what broke it.
+        var history = await server.GetJsonAsync($"/api/history?entity={path}", HttpStatusCode.OK);
+        SameAsMcp.Assert(tools.GetHistory(MinaFile), history);
+        var entity = history.GetProperty("entity");
+        Assert.Equal(
+            (MinaFile, MinaFile, "mina-harker", "", "", "book", "dracula"),
+            (entity.GetProperty("key").GetString(), entity.GetProperty("path").GetString(), entity.GetProperty("name").GetString(),
+                entity.GetProperty("type").GetString(), entity.GetProperty("status").GetString(), entity.GetProperty("scopeKind").GetString(),
+                entity.GetProperty("scopeKey").GetString()));
+        Assert.Equal([second, first], history.GetProperty("entries").EnumerateArray().Select(e => e.GetProperty("id").GetString()));
+        var now = Assert.Single((await server.GetJsonAsync($"/api/history/diff?entity={path}", HttpStatusCode.OK)).GetProperty("diff").GetProperty("files").EnumerateArray());
+        Assert.Contains("+name: [Mina Harker", now.GetProperty("patch").GetString(), StringComparison.Ordinal);
+
+        // Only a note's file: not a container's, nor one that isn't there.
+        foreach (var other in new[] { "universes/dracula/books/dracula/book.md", "universes/dracula/books/dracula/entities/characters/nobody.md" })
+        {
+            Assert.Equal(
+                "unknown_entity",
+                (await server.GetJsonAsync($"/api/history?entity={Uri.EscapeDataString(other)}", HttpStatusCode.NotFound)).GetProperty("code").GetString());
+        }
     }
 
     [Fact]

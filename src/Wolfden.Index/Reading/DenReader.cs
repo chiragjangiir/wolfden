@@ -132,6 +132,12 @@ public sealed class DenReader
     /// without a position, as a summary whose <see cref="EntitySummary.Path"/>
     /// is the file to ask the history provider about.
     /// </summary>
+    /// <remarks>
+    /// A note with errors is left out of the index (format.md F-GEN-2), so
+    /// no name reaches it; but that's when a writer most wants to see what
+    /// changed in it (#181). Named by its path, it's found among the files
+    /// the index read: <see cref="BrokenNote"/>.
+    /// </remarks>
     public EntitySummary HistoryEntity(string entity, string? universe = null)
     {
         CheckEntityName(entity);
@@ -144,11 +150,37 @@ public sealed class DenReader
             var matches = Match(index, u.Id, entity.Trim(), null);
             return matches.Count switch
             {
-                0 => throw UnknownEntity(entity, u.Key),
+                0 => BrokenNote(db, u, entity.Trim(), scopes) ?? throw UnknownEntity(entity, u.Key),
                 > 1 => throw Ambiguous(entity, matches, universes, scopes, Words),
                 _ => Summary(matches[0], universes, scopes),
             };
         });
+    }
+
+    /// <summary>
+    /// The entity file at the path <paramref name="name"/> in universe
+    /// <paramref name="universe"/> that has errors, so the index left it out
+    /// (F-GEN-2), as a summary; or null if there's none. The index knows
+    /// only its path: the summary's key and path are the path, its name is
+    /// the file name, its scope is the container whose <c>entities/</c>
+    /// folder holds it, and its type and status are empty, since they're
+    /// read from the file's frontmatter.
+    /// </summary>
+    private static EntitySummary? BrokenNote(IndexDbContext db, ContainerRecord universe, string name, Dictionary<int, ContainerRecord> scopes)
+    {
+        var path = name.Replace('\\', '/');
+        if (!path.StartsWith(universe.Path + "/", StringComparison.Ordinal)
+            || !db.Files.Any(f => f.Path == path && f.Kind == "entity" && !f.IsLoaded))
+        {
+            return null;
+        }
+
+        var scope = scopes.Values
+            .Where(c => c.UniverseId == universe.Id && path.StartsWith(c.Path + "/entities/", StringComparison.Ordinal))
+            .MaxBy(c => c.Path.Length) ?? universe;
+        var file = path[(path.LastIndexOf('/') + 1)..];
+        return new EntitySummary(
+            path, null, file.EndsWith(".md", StringComparison.Ordinal) ? file[..^3] : file, "", "", universe.Key, scope.Kind, scope.Key, path, null);
     }
 
     /// <summary>A history provider's diff as a result.</summary>
