@@ -2945,14 +2945,16 @@ Covered by: `ContentSecurityPolicyTests.ByDefaultTheDenDoesntAllowRemoteImages`,
   lets it load script, style, images, and API answers only from the
   server itself (and a `data:` image, for its empty icon), with no
   inline script or style, no plugins, no `<base>`, and no framing by
-  another page. The API's answers and the UI's files get a policy that
-  loads nothing. The built page has no inline script or style for the
-  policy to block. `npm run dev` doesn't get the policy, so hot reload
-  still works.
+  another page. The API's answers, the UI's files, and errors (a
+  refused host name, a `cross_site` 403, an `internal_error`) get a
+  policy that loads nothing, and `nosniff`. The built page has no inline
+  script or style for the policy to block. `npm run dev` doesn't get the
+  policy, so hot reload still works.
 
 Spec: design.md §9 (#180). Covered by:
 `ContentSecurityPolicyTests.PagesGetAPolicyThatLoadsOnlyFromThisServer`,
 `ContentSecurityPolicyTests.EverythingElseGetsAPolicyThatLoadsNothing`,
+`ContentSecurityPolicyTests.ErrorsGetThePolicyThatLoadsNothing`,
 `ContentSecurityPolicyTests.ThePageThatSaysHowToBuildTheUiHasItsOwnPolicy`,
 `ServeCommandTests.TheBuiltUiIsServedFromWwwroot`.
 
@@ -2966,12 +2968,16 @@ page.
   `/api/den` says `remoteImages: true`. Until the UI knows the setting,
   images stay blocked. Setting it back to `false`, or to something that
   isn't true or false (a warning in `wolfden check`), blocks them again
-  on the next load, without a restart. A `den.yaml` that doesn't parse
-  keeps them blocked.
+  on the next load, without a restart. A `den.yaml` that doesn't parse,
+  or whose `format` this Wolfden can't read, keeps them blocked.
+- While a page is open, it keeps the setting it first got, since its
+  policy was fixed when it loaded. Turned off, images are blocked at
+  once. Turned on, the placeholder stays and says to reload the page,
+  rather than showing a broken image.
 
 Spec: format.md F-DEN-8, design.md §9 (#180). Covered by:
 `EntityCatalogTests.RemoteImagesAreABooleanThatDefaultsToOff`,
-`EntityCatalogTests.ADenYamlThatDoesntParseLeavesRemoteImagesOff`,
+`EntityCatalogTests.ADenYamlWithoutAFormatItCanReadLeavesRemoteImagesOff`,
 `ContentSecurityPolicyTests.RemoteImagesTrueAllowsThemInThePolicyAndTellsTheUi`,
 `ContentSecurityPolicyTests.ADenYamlThatDoesntLoadKeepsRemoteImagesBlocked`,
 `Images.test.tsx` (web).
