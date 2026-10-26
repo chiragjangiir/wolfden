@@ -643,7 +643,9 @@ They share one surface:
 ## 8. AI integration (MCP)
 
 Wolfden ships an MCP server, using the official C# MCP SDK, over the same core
-library the API uses. `wolfden mcp` runs it over stdio (§7). Tool surface:
+library the API uses. `wolfden mcp` runs it over stdio (§7); how to add
+it to Claude Code, Claude Desktop, and other clients is in
+[`mcp-clients.md`](mcp-clients.md). Tool surface:
 
 | Tool | Status | Purpose |
 |---|---|---|
