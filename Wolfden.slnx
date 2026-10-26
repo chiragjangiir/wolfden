@@ -8,6 +8,7 @@
     <Project Path="src/Wolfden.Mcp/Wolfden.Mcp.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Wolfden.Api.Tests/Wolfden.Api.Tests.csproj" />
     <Project Path="tests/Wolfden.Cli.Tests/Wolfden.Cli.Tests.csproj" />
     <Project Path="tests/Wolfden.Core.Tests/Wolfden.Core.Tests.csproj" />
     <Project Path="tests/Wolfden.Git.Tests/Wolfden.Git.Tests.csproj" />

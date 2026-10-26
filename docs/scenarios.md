@@ -47,6 +47,7 @@ of Book 3 (format.md §8).
 | MCP | An AI assistant reading the den through `wolfden mcp` |
 | STORE | Saving, moving, and deleting notes through Wolfden's den store |
 | HIST | Version history, checkpoints, and tags, with or without a history backend |
+| WEB | Reading the den in a browser through `wolfden serve` |
 
 ## CANON: what's canon at a point in the story
 
@@ -2379,3 +2380,58 @@ PATH.
 
 Spec: design.md §6 (maintainer decision, 2026-10-22). Covered by:
 `GitHistoryTests.WithoutGitEveryOperationSaysSoWithoutThrowing`.
+
+## WEB: the den in a browser
+
+Background: `wolfden serve` (design.md §7, §9, #23) hosts the web UI and
+its API on this computer only (127.0.0.1) and opens the default browser.
+v0 has no accounts, so it never listens on the network. The browsing,
+search, and history pages come in M3 (#24 to #27).
+
+### SC-WEB-1. I open my den in the browser
+
+The writer runs `wolfden serve` in their den.
+
+- It prints the address (`http://127.0.0.1:9653/` by default), opens it
+  in the default browser unless `--no-open`, and runs until Ctrl+C,
+  then exits 0. The page shows the den's name and its universes, with
+  how many series, books, and notes each holds; `--universe` shows only
+  that one. An edit made in another editor shows on the next load,
+  without a restart. If this copy of Wolfden was built without its web
+  UI, the page says how to build it, and the API still answers. Without
+  a den, or with a universe the den doesn't have, it doesn't start, says
+  why, and exits 2.
+
+Spec: design.md §7, §9. Covered by:
+`ServeCommandTests.ItServesTheApiAndOpensABrowserUntilStopped`,
+`ServeCommandTests.WithoutADenItDoesntStart`,
+`ApiTests.HealthSaysOkWithTheVersion`,
+`ApiTests.DenGivesItsNameAndUniversesInCamelCase`,
+`ApiTests.DenSeesAnEditWithoutARestart`,
+`ApiTests.APinnedServerListsOnlyItsUniverse`,
+`ApiTests.WithoutABuiltUiTheRootSaysHowToBuildIt`,
+`ApiTests.ABuiltUiIsServedWithIndexHtmlForItsOwnRoutes`,
+`App.test.tsx` (web).
+
+### SC-WEB-2. Wolfden is already serving on that port
+
+The writer runs `wolfden serve` while another `wolfden serve`, or some
+other program, already listens on port 9653.
+
+- It doesn't start: it says the port is in use and how to pick another
+  with `--port`, and exits 2. `--port 0` picks a free port.
+
+Spec: design.md §7. Covered by:
+`ServeCommandTests.APortInUseExitsTwoAndSaysSo`.
+
+### SC-WEB-3. A web page on another site tries to read my den
+
+While `wolfden serve` runs, the writer visits a site whose script sends
+requests to a DNS name that points at their own computer.
+
+- The server listens on 127.0.0.1 only, and answers only requests
+  addressed to `localhost` or `127.0.0.1`: any other host name gets 400
+  and nothing from the den.
+
+Spec: design.md §9. Covered by:
+`ApiTests.ItListensOnLoopbackOnlyAndRefusesOtherHostNames`.

@@ -18,4 +18,11 @@
     <ProjectReference Include="..\Wolfden.Mcp\Wolfden.Mcp.csproj" />
   </ItemGroup>
 
+  <!-- The built web UI (npm run build in web/), served by 'wolfden serve' from
+       wwwroot next to the executable. dotnet build doesn't run npm: without a
+       built UI, serve still runs the API and says how to build the UI (#23). -->
+  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)..\..\web\dist\index.html')">
+    <None Include="..\..\web\dist\**\*" LinkBase="wwwroot" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

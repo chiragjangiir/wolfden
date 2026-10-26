@@ -254,10 +254,11 @@ public static class WolfdenMcpServer
     /// unless <paramref name="stop"/> is cancelled meanwhile. Another
     /// watcher on the den, or an error that can't clear by itself, such as
     /// a missing den folder, <c>.wolfden</c> being a file, or the index path
-    /// being a folder, gives up at once.
+    /// being a folder, gives up at once. Messages start with
+    /// <paramref name="command"/>, the command hosting the watcher.
     /// </summary>
     internal static DenWatcher? StartWatcher(
-        string root, TextWriter log, IReadOnlyList<TimeSpan> retryDelays, Func<string, DenWatcher> create, CancellationToken stop)
+        string root, TextWriter log, IReadOnlyList<TimeSpan> retryDelays, Func<string, DenWatcher> create, CancellationToken stop, string command = "wolfden mcp")
     {
         for (var attempt = 0; ; attempt++)
         {
@@ -267,17 +268,17 @@ public static class WolfdenMcpServer
             }
 
             var watcher = create(root);
-            watcher.Failed += (_, e) => Log(log, $"wolfden mcp: {e.Message}");
+            watcher.Failed += (_, e) => Log(log, $"{command}: {e.Message}");
             try
             {
                 watcher.Start();
-                Log(log, $"wolfden mcp: serving the den at '{root}', keeping its index up to date as files change.");
+                Log(log, $"{command}: serving the den at '{root}', keeping its index up to date as files change.");
                 return watcher;
             }
             catch (DenAlreadyWatchedException e)
             {
                 watcher.Dispose();
-                Log(log, $"wolfden mcp: serving the den at '{root}' without its own watcher: {e.Message} Each call checks the files first.");
+                Log(log, $"{command}: serving the den at '{root}' without its own watcher: {e.Message} Each call checks the files first.");
                 return null;
             }
             catch (Exception e) when (CanClear(e) && attempt < retryDelays.Count)
@@ -286,7 +287,7 @@ public static class WolfdenMcpServer
                 var delay = retryDelays[attempt];
                 Log(
                     log,
-                    $"wolfden mcp: couldn't start watching the den at '{root}' yet: {e.Message} Trying again in " +
+                    $"{command}: couldn't start watching the den at '{root}' yet: {e.Message} Trying again in " +
                     $"{delay.TotalSeconds.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)} s.");
                 if (stop.WaitHandle.WaitOne(delay))
                 {
@@ -296,7 +297,7 @@ public static class WolfdenMcpServer
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or SqliteException or InvalidOperationException)
             {
                 watcher.Dispose();
-                Log(log, $"wolfden mcp: couldn't watch the den at '{root}': {e.Message} Each call checks the files first.");
+                Log(log, $"{command}: couldn't watch the den at '{root}': {e.Message} Each call checks the files first.");
                 return null;
             }
         }

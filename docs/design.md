@@ -553,7 +553,7 @@ don't fit the timeline, and open threads at a frozen book's end.
 
 ### The command line (v0)
 
-**v0 behaviour, not a recorded decision** (#17). The CLI has seven
+**v0 behaviour, not a recorded decision** (#17). The CLI has eight
 commands, and `wolfden <command> --help` describes each one:
 
 | Command | What it does |
@@ -564,12 +564,13 @@ commands, and `wolfden <command> --help` describes each one:
 | `wolfden query [<universe>] [--universe <key>] [--at <position>]` | Canon as of a position (format.md F-VIEW-1), from the index, of one universe (see "Which universe" below; `*` is refused, since a view is of one universe). `--series` or `--book` narrows the view, `--type` (any type an enabled pack defines) and `--entity` (matched as a link is, F-LINK-6, among the entities in the view, so one the reader meets later can't shadow one they've met) pick entities out of it, `--pinned` gives pinned canon (F-VIEW-2), and `--brief` lists one line per entity. |
 | `wolfden copy <entity> <new name> [--to <scope>] [--universe <key>] [--slug <slug>] [--allow-relinks]` | Copies an entity under a new name, with a new id, as the MCP tool `copy_entity` does (§8, #129): beside the original, or `--to` a universe (`<universe>`, or `<universe>/`) or one of its series or books (`<universe>/<key>`, or `<universe>/series:<key>` or `<universe>/book:<key>` when a series and a book share the key). In a den with one universe, a bare series or book key (or `series:<key>`, `book:<key>`) will do (as for `check`, #127), unless it's also the universe's key, which is refused with every spelling suggested. It writes the den's files only. Its messages name its options (`--allow-relinks`, `--slug`) and commands (`wolfden check`), not the tool's parameters: the tools take the words their advice uses as a setting, and names the writer gave come through as written. It exits 2 when the copy is refused. |
 | `wolfden new-id [<count>]` | Prints new ids for files made by hand (format.md F-ID-5). |
+| `wolfden serve [<den>] [--universe <key>] [--port <n>] [--no-open] [--no-watch]` | Serves the web UI and the API on 127.0.0.1 (§9, #23), opens the default browser unless `--no-open`, and runs until Ctrl+C. The port is 9653 by default (WOLF on a phone keypad); `--port 0` picks a free one, and the address is printed either way. A port in use exits 2 and says so. `--universe` serves only that universe, as `mcp --universe` pins one; a key the den doesn't have exits 2. It hosts the same watcher as `mcp`, unless `--no-watch`. Without a built UI, the API still works and the page says how to build the UI. |
 | `wolfden mcp [<den>] [--universe <key>] [--no-watch]` | Runs the MCP server over stdio for an AI client (§8, #20) until the client disconnects or Ctrl+C. `--universe` pins the session to one universe (§8); a key the den doesn't have exits 2. Standard output carries only the protocol; log messages go to standard error. It exits 2 if there's no den and 3 if it stops because of a failure after it started, but serves a den whose `den.yaml` doesn't load, so the client can call `check` to find out why. |
 
 They share one surface:
 
-- **Which den.** `--den <folder>` names it (`check` and `index` also take
-  it as a plain argument). Otherwise it's the current folder, or the
+- **Which den.** `--den <folder>` names it (`check`, `index`, `serve`, and
+  `mcp` also take it as a plain argument). Otherwise it's the current folder, or the
   nearest folder above it that holds a `den.yaml`, as git finds its
   repository.
 - **Which universe** (maintainer decision, 2026-10-23). A den with one
@@ -616,10 +617,11 @@ They share one surface:
   mistakes and failures to standard error.
 - **Exit codes.** 0 when the command did its job; for `check`, when the
   den has no errors (warnings alone pass, format.md F-GEN-1); for `index
-  --watch`, when it's stopped with Ctrl+C; for `mcp`, when the client
+  --watch` and `serve`, when it's stopped with Ctrl+C; for `mcp`, when the client
   disconnects or it's stopped with Ctrl+C. 1 only from
   `check`, when the den has at least one error. 2 when the command
-  couldn't do its job: a wrong command line, no den, a `den.yaml` that
+  couldn't do its job: a wrong command line, no den, a port `serve` can't
+  listen on, a `den.yaml` that
   doesn't load, a universe, position, filter, type, or entity that doesn't
   exist (for `query`, a den with no universes yet, or with several and
   none named), or an unexpected failure. A `query` whose view is empty,
@@ -636,7 +638,7 @@ They share one surface:
   waits up to about a second for it to catch up (#108). The long-running
   `mcp` hosts the same watcher (unless `--no-watch`, or another Wolfden
   is already watching the den), and checks the hash the same way before
-  each tool call; `serve` will do the same.
+  each tool call; `serve` does the same, before each request.
   `--watch` keeps going when `den.yaml` stops loading, so the writer can
   fix it, and reports a batch that fails on standard error, then rebuilds.
 
@@ -952,6 +954,28 @@ docs/
 - **v0 runs locally as one process.** `wolfden serve` hosts the API and the
   built web UI on localhost and opens a browser. `wolfden mcp` runs the MCP
   server over stdio for AI clients.
+- **The web scaffold** (#23; v0 behaviour, not a recorded decision).
+  `Wolfden.Api` is a library (an ASP.NET Core minimal API), not a program
+  of its own, so `wolfden serve` hosts it in the same process. It listens
+  on 127.0.0.1 only, never on another network interface, since v0 is
+  single-user with no accounts or authentication, and it answers only
+  requests addressed to `localhost` or `127.0.0.1`, so a web page on
+  another site can't reach the den through a DNS name that points at this
+  machine (DNS rebinding). Hosting for several users (§10) brings its own
+  authentication. The API is JSON under `/api`, in camelCase, as is usual
+  for a web client (the MCP tools keep snake_case, §8); errors are
+  `{code, message}` with the MCP tools' codes where they mean the same
+  thing (`den_not_loaded`, `den_unreadable`), and results carry a
+  `version` for their shape, as `--json` does. Each request brings the
+  index up to date first, as an MCP tool call does. So far it has
+  `/api/health` and `/api/den` (the den's name and its universes); M3
+  adds the rest (#24 to #27). The UI in `web/` is built with npm (`npm run
+  build`, Node.js 22.12 or later) into `web/dist`, which `dotnet build`
+  copies next to `wolfden` as `wwwroot` when it's there; `dotnet build`
+  never runs npm, so .NET work doesn't need Node. Paths that aren't files
+  get `index.html`, so the UI's own routes survive a reload. For UI work,
+  `npm run dev` serves the UI with hot reload and passes `/api` to a
+  running `wolfden serve --no-open`.
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and
   unknown content. This gets heavy test coverage, since it decides whether
   people trust the tool with their notes.
