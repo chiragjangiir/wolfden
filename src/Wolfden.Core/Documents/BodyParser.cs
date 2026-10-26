@@ -27,7 +27,8 @@ internal static partial class BodyParser
         "from", "until", "status", "pin", "canon",
     };
 
-    internal sealed record Result(IReadOnlyList<Section> Sections, string? Title, int? TitleLine, int LeadEnd);
+    /// <param name="TitleSpan">Where the title's text is in the file, for an edit of it.</param>
+    internal sealed record Result(IReadOnlyList<Section> Sections, string? Title, int? TitleLine, int LeadEnd, (int Start, int End)? TitleSpan = null);
 
     /// <param name="owner">The file the sections belong to.</param>
     /// <param name="source">The file's text.</param>
@@ -73,6 +74,7 @@ internal static partial class BodyParser
         var stack = new Stack<Section>();
         string? title = null;
         int? titleLine = null;
+        (int Start, int End)? titleSpan = null;
         var seenLevel2 = false;
 
         foreach (var heading in document.OfType<HeadingBlock>())
@@ -91,6 +93,7 @@ internal static partial class BodyParser
                     {
                         title = name;
                         titleLine = firstLine + 1;
+                        titleSpan = (nameStart, nameEnd);
                     }
 
                     continue;
@@ -171,7 +174,7 @@ internal static partial class BodyParser
 
         FindMisplacedComments(source, document, bodyStart, commentLines, diagnostics, isOutline);
         var leadEnd = sections.Count > 0 ? sections[0].HeadingStart : text.Length;
-        return new Result(sections, title, titleLine, leadEnd);
+        return new Result(sections, title, titleLine, leadEnd, titleSpan);
     }
 
     /// <summary>

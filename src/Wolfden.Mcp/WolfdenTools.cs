@@ -178,8 +178,8 @@ public sealed class WolfdenTools
         "(add an item to a list: an alias, or an entry of a field that changes over time; at the end without index), or " +
         "{\"op\": \"remove\", \"path\": ...} (a key or list item). A path is dotted: 'status', 'from', 'aliases', 'fields.born', " +
         "'fields.rank.1.from' (item numbers from 0). An entry is {\"value\": x, \"from\": \"book:chapter\", \"until\": ..., \"status\": ..., \"pin\": true}. " +
-        "The id never changes. The name, and existing aliases, can't be changed here, since links that matched the old text would break; " +
-        "aliases can be added." + WriteHelp)]
+        "The id never changes. Aliases can be added here; to rename the entity, or change or remove an alias, use rename_entity or " +
+        "change_alias, which rewrite the links that used the old text." + WriteHelp)]
     public CallToolResult UpdateFields(
         [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
         [Description(HashHelp)] string expected_hash,
@@ -246,6 +246,39 @@ public sealed class WolfdenTools
         [Description(UniverseHelp)] string? universe = null,
         [Description("When several sections have the name, the line of the heading you mean.")] int? section_line = null) =>
         Respond(() => _tools.RenameSection(entity, section, new_name, expected_hash, universe, section_line));
+
+    /// <summary>The <c>rename_entity</c> tool.</summary>
+    [McpServerTool(Name = "rename_entity", Title = "Rename an entity", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]
+    [Description(
+        "Changes an entity's name, and in the same change rewrites every link that reached it by the old name ([[Old name]], with any " +
+        "#heading and label kept) in any file of the den, so they use the new name. A title heading that reads the old name follows; " +
+        "the file isn't renamed, so links by file name or id are untouched. With keep_old_name true, the old name becomes an alias " +
+        "instead and no link changes, which suits a name that changes in the story. If a link to rewrite is in a final (frozen) book, " +
+        "nothing changes: keep the old name instead. A new name that would send a rewritten link elsewhere is refused. The result lists " +
+        "every file written, with its new hash, and any other link that now resolves differently." + WriteHelp)]
+    public CallToolResult RenameEntity(
+        [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
+        [Description("The new name: one line, and without [, ], |, or # if links use the old name.")] string new_name,
+        [Description(HashHelp)] string expected_hash,
+        [Description("If true, keep the old name as an alias and leave links as they are.")] bool keep_old_name = false,
+        [Description(UniverseHelp)] string? universe = null) =>
+        Respond(() => _tools.RenameEntity(entity, new_name, expected_hash, keep_old_name, universe));
+
+    /// <summary>The <c>change_alias</c> tool.</summary>
+    [McpServerTool(Name = "change_alias", Title = "Change or remove an alias", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]
+    [Description(
+        "Changes one of an entity's aliases to new_alias, or removes it when new_alias is left out, and in the same change rewrites " +
+        "every link that reached the entity by the old alias, in any file of the den: to the new alias, or to the entity's name for a " +
+        "removed one. With keep_old_alias true, the new alias is added beside the old one instead and no link changes. If a link to " +
+        "rewrite is in a final (frozen) book, nothing changes. To add an alias, update_fields is enough." + WriteHelp)]
+    public CallToolResult ChangeAlias(
+        [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
+        [Description("The alias to change or remove, as it's written.")] string alias,
+        [Description(HashHelp)] string expected_hash,
+        [Description("The new alias; leave it out to remove the alias.")] string? new_alias = null,
+        [Description("If true, add new_alias beside the old one and leave links as they are.")] bool keep_old_alias = false,
+        [Description(UniverseHelp)] string? universe = null) =>
+        Respond(() => _tools.ChangeAlias(entity, alias, expected_hash, new_alias, keep_old_alias, universe));
 
     /// <summary>The <c>get_chapter</c> tool.</summary>
     [McpServerTool(Name = "get_chapter", Title = "Read a book's chapters", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]

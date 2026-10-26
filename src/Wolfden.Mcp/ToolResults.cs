@@ -362,6 +362,7 @@ public sealed record WrittenFileView(string Path, string Hash, bool Created = fa
 /// <summary>
 /// The result of a write tool (<c>create_entity</c>, <c>update_fields</c>,
 /// <c>append_section</c>, <c>add_idea</c>, <c>rename_section</c>,
+/// <c>rename_entity</c>, <c>change_alias</c>,
 /// <c>update_chapter_fields</c>). Writes go to the files only: nothing is
 /// committed until <c>checkpoint</c>.
 /// </summary>

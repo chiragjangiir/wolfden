@@ -643,6 +643,7 @@ library the API uses. `wolfden mcp` runs it over stdio (§7). Tool surface:
 | `update_fields` / `append_section` | shipped (#21) | Structured edits that keep everything else intact |
 | `add_idea` | shipped (#21) | Record undecided material with `status: idea` |
 | `rename_section` | shipped (#21) | Rename a section and rewrite the links to it, den-wide (format.md F-RT-5) |
+| `rename_entity` / `change_alias` | shipped (#150) | Change an entity's name, or change or remove an alias, rewriting the links that used the old text den-wide, or keep the old text as an alias (F-RT-5) |
 | `update_chapter_fields` | shipped (#21) | Set, add to, remove from, or clear a chapter's own fields |
 | `checkpoint` | shipped (#21) | Commit with a message, naming the agent as co-author |
 
@@ -820,9 +821,29 @@ store, so an edit changes only what it means to (format.md §12):
   name the section. Files the den leaves out for errors can't be
   edited, so an entity or container file whose text looks like it
   links to the section is named in `effects` for the writer to fix by
-  hand (outlines with errors aren't searched). Renaming an entity, or changing or removing an
-  alias, needs the same rewrite for names (F-RT-5), so `update_fields`
-  refuses them for now (`unsupported_edit`); aliases can be added.
+  hand (outlines with errors aren't searched).
+- **Entity renames** (maintainer decision, 2026-10-25, #150).
+  `rename_entity` changes an entity's `name`, and `change_alias`
+  changes or removes one of its aliases; `update_fields` refuses both
+  (`unsupported_edit`) and only adds aliases. By default every link that
+  reached the entity by the old text (by name for a name, by alias for
+  an alias) is rewritten, in any file, with the same machinery and
+  guarantees as `rename_section`: links in bodies, frontmatter values,
+  `book.md`, and outline rows, spliced in place with their spacing,
+  `#heading`, and label kept. A removed alias's links get the name.
+  Links by id or file name don't depend on the text and are left
+  alone, as is the file's name; a title heading that reads the old name
+  follows. Instead, `keep_old_name` (or `keep_old_alias`) keeps the old
+  text as an alias and changes no link, which suits an in-story name
+  change. If a link to rewrite is in a final book, nothing changes and
+  the error suggests keeping the old text. Before anything is written,
+  every link in the den is resolved again as it would be after the
+  change: a rewritten link that would no longer reach the entity (the
+  new text is another entity's file name, say) refuses the change, and
+  any other link that would resolve differently (a kept alias another
+  entity also has makes it ambiguous, F-LINK-7) is listed in
+  `effects`. A change that only alters case or spacing changes no link
+  (F-LINK-4).
   Moving and copying entities come later (#89, #129).
 
 ## 9. Architecture
