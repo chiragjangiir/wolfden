@@ -430,7 +430,20 @@ The den store and the history provider are interfaces in `Wolfden.Core`
   replaced by a link to a folder, or by a broken one, is still modified,
   though the den skips the first and takes the second as absent. The
   log of a file follows its current path, not back through renames
-  (`--follow` can't be paged). The log pages by position: each page
+  (`--follow` can't be paged), but lists the checkpoint that renamed
+  it as a rename. Every log is in `--date-order`, so no checkpoint is
+  listed before one that came from it, even when a merged commit's
+  clock was wrong; it keeps date order wherever ancestry allows, where
+  `--topo-order` would also group each branch's commits (#181). A diff
+  of one file or folder (a checkpoint's own, between two, or up to the
+  files now) shows a file renamed into or out of it as a rename: the
+  path's own diff comes first, and only when it adds, deletes, or
+  renames a file does a raw diff of the whole den (no patches) find
+  the rename's other side, and one diff of the pair, with literal
+  pathspecs, gives its patch; past 100 other sides, or if git pairs
+  them otherwise, the whole den's patch is narrowed to the path
+  (#175). A checkpoint's own diff of a path that can't be a den file
+  has no files. The log pages by position: each page
   walks the same log from HEAD with the same path filter and starts
   after the `before` entry, since a history with merges isn't a line
   and the cursor's ancestors alone would miss main-line commits. A
@@ -749,7 +762,11 @@ same code (§9):
   words. A `before` or `diff_from` that isn't a checkpoint of that
   history is `unknown_checkpoint`; a git failure is `history_failed`.
   `wolfden mcp` looks for the den's repository on each call, so a den
-  made a repository while it runs gets history.
+  made a repository while it runs gets history. A note with errors,
+  which the index leaves out (F-GEN-2), can still be named by its path,
+  since that's when the writer most wants to see what changed (#181);
+  the index knows only its path, so its summary's name is the file
+  name and its type and status are empty.
 - **Hashes.** `get_entity` gives the SHA-256 of the entity's file as
   the index read it (`hash`), `get_chapter` the hash of `book.md`, and
   `get_chapter_defaults` the hash of the container's file: the
@@ -1081,8 +1098,10 @@ docs/
   History endpoints, like `get_history`, treat a den without history as
   an answer, not an error: `available` is false, `backend` is `none`,
   and `reason` says why. `/api/history/diff` takes `to` only with
-  `from`. A checkpoint's own diff compares the whole den and keeps the
-  entity's file, so a checkpoint that renamed it shows a rename.
+  `from`. A checkpoint's own diff, and a compare, show a checkpoint
+  that renamed the entity's file as a rename (§6). A note with errors
+  has a history by its path, as with `get_history`, but no
+  `/api/entity` page.
 
   **As of a position, nothing names what the reader hasn't met.** A
   link's `problem` is made again from what the reader has met: an
@@ -1214,10 +1233,13 @@ docs/
     until "Show it anyway". The reveal is one per note, at that
     position, shared by both tabs, and greyed alike; leaving the note,
     changing the position, or a reload hides it again.
-  - **Limits.** Since the log follows the file's current path (§6), a
-    checkpoint that renamed it is listed as adding it, and its own diff
-    shows the rename. Without history, the page gives the API's reason
-    and how to start one.
+  - **Limits.** Since the log follows the file's current path (§6), it
+    ends at the checkpoint that renamed the file, which it lists as a
+    rename; a compare across it shows the rename too. The page needs
+    the note's `/api/entity` page, so a note with errors, which the
+    index leaves out, has no History tab yet, though `/api/history`
+    gives its history by its path (#181). Without history, the page
+    gives the API's reason and how to start one.
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and
   unknown content. This gets heavy test coverage, since it decides whether
   people trust the tool with their notes.
