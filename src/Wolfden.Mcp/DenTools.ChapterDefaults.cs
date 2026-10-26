@@ -94,6 +94,7 @@ public sealed partial class DenTools
 
             var file = target.File;
             var touched = new List<string>();
+            var notes = new List<string>();
             foreach (var op in ops)
             {
                 var field = op.Field!;
@@ -103,8 +104,9 @@ public sealed partial class DenTools
                 {
                     "set" => () => file.WithFrontmatterValue(fieldPath, op.Value!),
                     "add" => () => file.WithNewListItem(fieldPath, op.Value!, op.Index),
-                    "remove" => () => file.WithoutChapterDefaultItem(field, ItemToRemove(file, fieldPath, op, "The default")),
-                    _ => () => ClearDefault(file, target, field),
+                    "remove" => () => NoteEmptied(
+                        notes, file.WithoutChapterDefaultItem(field, ItemToRemove(file, fieldPath, op, "The default"), out var comments), comments, $"chapter_defaults.{field}"),
+                    _ => () => ClearDefault(file, target, field, notes),
                 });
             }
 
@@ -144,6 +146,7 @@ public sealed partial class DenTools
             Save(files, new Dictionary<string, byte[]>(StringComparer.Ordinal) { [path] = original }, created: null);
 
             var effects = DefaultEffects(edit, touched);
+            effects.AddRange(notes);
             effects.AddRange(unloaded.Select(p =>
             {
                 var folder = p[..p.LastIndexOf('/')];
@@ -233,7 +236,7 @@ public sealed partial class DenTools
         }
     }
 
-    private static MarkdownFile ClearDefault(MarkdownFile file, Container container, string field)
+    private static MarkdownFile ClearDefault(MarkdownFile file, Container container, string field, List<string> notes)
     {
         if ((file.GetFrontmatterValue("chapter_defaults") as YamlMapping)?.ContainsKey(field) != true)
         {
@@ -242,7 +245,7 @@ public sealed partial class DenTools
                 $"{Capitalized(Where(container))} doesn't set '{field}', so there's nothing to clear: its books already inherit it from above.");
         }
 
-        return file.WithoutFrontmatterValue(["chapter_defaults", field]);
+        return NoteEmptied(notes, file.WithoutFrontmatterValue(["chapter_defaults", field], EmptiedList.Null, out var comments), comments, "chapter_defaults");
     }
 
     /// <summary>
