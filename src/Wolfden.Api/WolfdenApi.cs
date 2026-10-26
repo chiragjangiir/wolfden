@@ -10,6 +10,7 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Net.Http.Headers;
+using Wolfden.Core.Structure;
 
 namespace Wolfden.Api;
 
@@ -90,6 +91,11 @@ public static class WolfdenApi
         app.Use((context, next) =>
         {
             context.Response.Headers[HeaderNames.XContentTypeOptions] = "nosniff";
+            context.Response.OnStarting(() =>
+            {
+                AddContentSecurityPolicy(context.Response, options.DenRoot);
+                return Task.CompletedTask;
+            });
             return next(context);
         });
         app.UseHostFiltering();
@@ -138,6 +144,73 @@ public static class WolfdenApi
             && uri.Port == port;
     }
 
+    /// <summary>
+    /// The Content-Security-Policy of the UI's pages (#180). The built UI
+    /// loads its script and stylesheet from this server and has no inline
+    /// script or style. Images may come from this server or a <c>data:</c>
+    /// URL (the page's empty icon). The UI asks only this server's API.
+    /// Plugins, a <c>&lt;base&gt;</c>, and framing by any page are refused.
+    /// </summary>
+    internal const string PagePolicy =
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; " +
+        "font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
+
+    /// <summary><see cref="PagePolicy"/> for a den with <c>remote_images: true</c> (format.md F-DEN-8): images may come from websites too.</summary>
+    internal const string PagePolicyWithRemoteImages =
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https: http:; connect-src 'self'; " +
+        "font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
+
+    /// <summary>
+    /// The policy of everything that isn't a page, such as the API's JSON
+    /// and the UI's scripts: none of it should ever load anything.
+    /// </summary>
+    internal const string NonPagePolicy = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
+
+    /// <summary>
+    /// The policy of the page that says how to build the UI: its only
+    /// content is its own inline style, and nothing in it comes from the den.
+    /// </summary>
+    internal const string NotBuiltPagePolicy = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
+
+    /// <summary>
+    /// Adds a Content-Security-Policy to a response that hasn't one: <see
+    /// cref="PagePolicy"/> for a page, or <see cref="NonPagePolicy"/>. It's
+    /// defence in depth; the UI itself shows no image from a website unless
+    /// the den allows it (#180). A page reads <c>den.yaml</c> each time, so
+    /// a change to <c>remote_images</c> applies on the next load.
+    /// </summary>
+    private static void AddContentSecurityPolicy(HttpResponse response, string denRoot)
+    {
+        if (response.Headers.ContainsKey(HeaderNames.ContentSecurityPolicy))
+        {
+            return;
+        }
+
+        var page = MediaTypeHeaderValue.TryParse(response.ContentType, out var type)
+            && type.MediaType.Equals("text/html", StringComparison.OrdinalIgnoreCase);
+        response.Headers.ContentSecurityPolicy = !page ? NonPagePolicy
+            : RemoteImages(denRoot) ? PagePolicyWithRemoteImages
+            : PagePolicy;
+    }
+
+    /// <summary>
+    /// True if the den's <c>den.yaml</c> has <c>remote_images: true</c>
+    /// (format.md F-DEN-8). It's read from the file, not the index, so the
+    /// page's policy and <c>/api/den</c> agree without a rebuild; a missing
+    /// or unreadable file, or one that doesn't parse, leaves it off.
+    /// </summary>
+    internal static bool RemoteImages(string denRoot)
+    {
+        try
+        {
+            return DenStructure.ReadRemoteImages(File.ReadAllBytes(Path.Combine(denRoot, "den.yaml")));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>An unexpected failure, as JSON in the API's error shape.</summary>
     private static Task InternalError(HttpContext context)
     {
@@ -162,6 +235,7 @@ public static class WolfdenApi
             app.MapGet("/", (HttpContext context) =>
             {
                 context.Response.Headers.CacheControl = "no-cache";
+                context.Response.Headers.ContentSecurityPolicy = NotBuiltPagePolicy;
                 return Results.Content(NotBuiltPage, "text/html; charset=utf-8");
             });
             return;
