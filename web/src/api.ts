@@ -331,3 +331,73 @@ export function entityQuery(universe: string, entity: string, at: string | undef
 export function count(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`
 }
+
+export interface SearchHit {
+  entity: EntitySummary
+  /** The section the match is in, or null for the name, aliases, or lead. */
+  section: string | null
+  line: number | null
+  /** An excerpt with each match in square brackets. */
+  snippet: string
+  status: string
+  inCanon: boolean
+  inComment: boolean
+}
+
+export interface SearchResult {
+  version: number
+  query: string
+  count: number
+  truncated: boolean
+  hits: SearchHit[]
+}
+
+/** What a search asks for besides its words: the filters /api/search takes. */
+export interface SearchFilters {
+  type?: string
+  status?: string
+  series?: string
+  book?: string
+  canonOnly?: boolean
+}
+
+/** The statuses /api/search's `status` takes (DenReader.Statuses). */
+export const STATUSES = ['idea', 'undecided', 'candidate', 'draft', 'canon', 'retconned'] as const
+
+/** How many hits a search asks for at first, then on each "Show more", up to the API's own limit. */
+export const SEARCH_LIMITS = [20, 50, 100, 200] as const
+
+/** What a search's cache key holds: everything it was asked with, the position as `at` (null for everything). */
+export interface SearchKey {
+  universe: string
+  query: string
+  type: string | null
+  status: string | null
+  series: string | null
+  book: string | null
+  canonOnly: boolean
+  at: string | null
+  limit: number
+}
+
+export function searchQuery(universe: string, query: string, filters: SearchFilters, at: string | undefined, limit: number) {
+  const { type, status, series, book, canonOnly } = filters
+  const key: SearchKey = {
+    universe,
+    query,
+    type: type ?? null,
+    status: status ?? null,
+    series: series ?? null,
+    book: book ?? null,
+    canonOnly: canonOnly ?? false,
+    at: at ?? null,
+    limit,
+  }
+  return queryOptions({
+    queryKey: ['search', key] as const,
+    queryFn: () =>
+      getJson<SearchResult>(
+        apiPath('/api/search', { query, universe, type, status, series, book, canonOnly: canonOnly ? 'true' : undefined, asOf: at, limit }),
+      ),
+  })
+}
