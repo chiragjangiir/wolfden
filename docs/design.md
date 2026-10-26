@@ -419,7 +419,15 @@ The den store and the history provider are interfaces in `Wolfden.Core`
   `.git/lfs/objects`. In a sparse checkout, files marked skip-worktree
   (the ones it keeps off the disk, or any marked by hand) count as
   unchanged; without one, a file marked by hand is compared as it is on
-  disk. Edits inside a submodule aren't the den's. The
+  disk. Edits inside a submodule aren't the den's, and a submodule isn't
+  a den file: log and diff leave out its additions, deletions, and
+  commit moves (#158), and a checkpoint that changed only submodules is
+  still listed in the log, with no files. A note that becomes a symbolic link, or the other
+  way round, is modified, with git's patch of the link's target path; a
+  note that becomes a submodule is deleted, and one that replaces a
+  submodule is added. Git doesn't see what a link leads to, so a note
+  replaced by a link to a folder, or by a broken one, is still modified,
+  though the den skips the first and takes the second as absent. The
   log of a file follows its current path, not back through renames
   (`--follow` can't be paged). The log pages by position: each page
   walks the same log from HEAD with the same path filter and starts
