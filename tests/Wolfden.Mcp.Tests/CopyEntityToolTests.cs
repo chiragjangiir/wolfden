@@ -336,6 +336,22 @@ public sealed class CopyEntityToolTests : IDisposable
         Assert.Equal(Book + "/entities/characters/character.md", Tools.CopyEntity("Mr. Swales", "東京").Path);
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-MCP-28")]
+    public void CommentLinesThatGoWithTheAliasesAreSaid()
+    {
+        _den.Write(Note, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY9A2\ntype: note\nname: Whitby dialect\naliases:\n  - Dialect\n  # - Yorkshire talk\nstatus: draft\n---\n\nNotes.\n");
+
+        var result = Tools.CopyEntity("Whitby dialect", "Yorkshire dialect");
+
+        Assert.DoesNotContain("Yorkshire talk", _den.Read(result.Path), StringComparison.Ordinal);
+        Assert.Contains("Removed 1 comment line inside aliases, which went with them.", result.Effects);
+
+        // Without comments in it, nothing more is said.
+        var plain = Tools.CopyEntity("Count Dracula", "Count Varga");
+        Assert.DoesNotContain(plain.Effects, e => e.Contains("comment line", StringComparison.Ordinal));
+    }
+
     private int DenFiles() =>
         Directory.GetFiles(_den.Root, "*", SearchOption.AllDirectories).Count(f => !Path.GetRelativePath(_den.Root, f).StartsWith(".wolfden", StringComparison.Ordinal));
 

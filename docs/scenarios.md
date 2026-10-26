@@ -1221,21 +1221,26 @@ sequel book.
   `copy_entity` does (SC-MCP-28). `--to` takes a universe, or
   `<universe>/<key>` for one of its series or books
   (`<universe>/book:<key>` when a series shares the key). With one
-  universe, `--to aftermath` is enough, but `--to dracula` names both
-  the universe and its book, so it's refused, suggesting `dracula/` or
-  `dracula/book:dracula`. With two universes, a bare book key isn't a
+  universe, `--to aftermath` (or `--to book:aftermath`) is enough, but
+  `--to dracula` names both the universe and its book, so it's refused,
+  suggesting `dracula/` or `dracula/book:dracula`, and with a series
+  `dracula` too, `dracula/series:dracula` as well. With two universes, a bare book key isn't a
   universe, and the error says how to name it. A `den.yaml` that
   doesn't load is said as such. `--json` prints the write result.
 - A copy into a final book, or one that would take another note's
   links without `--allow-relinks`, exits 2 and writes nothing. Errors
   name the command's options and commands (`--allow-relinks`,
-  `--slug`, `wolfden query`), not the MCP tool's parameters.
+  `--slug`, `wolfden query`), not the MCP tool's parameters, and a copy
+  named "Count allow_relinks" is reported by that name, in text and
+  JSON.
 
 Spec: format.md F-ID-3, F-ID-4, design.md §7, §8 (#129). Covered by:
 `CopyCommandTests.ACopyGoesBesideTheOriginalWithANewIdAndSaysWhatItMeans`,
 `CopyCommandTests.ToNamesTheUniverseOrOneOfItsSeriesOrBooks`,
 `CopyCommandTests.ARefusedCopyExitsTwoAndWritesNothing`,
 `CopyCommandTests.ADenWhoseDenYamlDoesntLoadSaysSo`,
+`CopyCommandTests.AKeyThatIsTheUniverseASeriesAndABookOffersEverySpelling`,
+`CopyCommandTests.ANameThatLooksLikeAParameterComesThroughAsWritten`,
 `CopyCommandTests.JsonPrintsTheWriteResult`.
 
 ## WATCH: keeping the index up to date while notes change
@@ -2049,7 +2054,8 @@ legend universe and want a Swales there too.
   name another file has in a different case; a slug asked for that's
   taken is refused. "Ærin Søvik" gets `aerin-sovik.md`, and a name with
   nothing to make a slug from uses the type key. A note without an id
-  gets one in its copy. Only entities can be copied: `book.md`, an
+  gets one in its copy. Comment lines inside a block `aliases` list go
+  with it, and the result counts them. Only entities can be copied: `book.md`, an
   outline, `universe.md`, or `den.yaml` is no entity. Links in the copy stay as they
   are: one to Swales's own `#Arc` still reaches Swales, and the result
   counts it.
@@ -2091,6 +2097,7 @@ decisions, 2026-10-23 and 2026-10-26, #129). Covered by:
 `CopyEntityToolTests.AFileNameInANearerScopeThatShadowsAnotherIsRefusedUnlessAllowed`,
 `CopyEntityToolTests.ACopyKeepsLineEndingsAndAByteOrderMark`,
 `CopyEntityToolTests.OnlyEntitiesCanBeCopied`,
+`CopyEntityToolTests.CommentLinesThatGoWithTheAliasesAreSaid`,
 `CopyEntityToolTests.ACopyIntoASeriesGoesInItsTypeFolder`,
 `CopyEntityToolTests.SlugsAreMadeAsTheTemplateRuleSaysAndCompareIgnoringCase`,
 `CopyEntityToolTests.ANoteWithoutAnIdGetsOneAndAStaleOrBadCopyIsRefused`,

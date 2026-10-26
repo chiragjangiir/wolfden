@@ -59,6 +59,10 @@ public sealed class CopyCommandTests : IDisposable
         Assert.Equal(CliApp.ExitOk, Copy("Mr. Swales", "Swales the younger", "--to", "aftermath").ExitCode);
         Assert.True(_den.Exists("universes/dracula/books/aftermath/entities/characters/swales-the-younger.md"));
 
+        // So is book: or series: before it.
+        Assert.Equal(CliApp.ExitOk, Copy("Mr. Swales", "Swales the third", "--to", "book: aftermath").ExitCode);
+        Assert.True(_den.Exists("universes/dracula/books/aftermath/entities/characters/swales-the-third.md"));
+
         // 'dracula' is both the universe and its book: the error says how to name each.
         var (exitCode, output, error) = Copy("Mr. Swales", "Someone", "--to", "dracula");
         Assert.Equal(CliApp.ExitUsage, exitCode);
@@ -115,6 +119,41 @@ public sealed class CopyCommandTests : IDisposable
         Assert.Equal(CliApp.ExitUsage, unknown.ExitCode);
         Assert.Contains("Use 'wolfden query --brief' to find it.", unknown.Error, StringComparison.Ordinal);
         Assert.Contains("as <new name>", Copy("Mr. Swales", " ").Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-13")]
+    public void AKeyThatIsTheUniverseASeriesAndABookOffersEverySpelling()
+    {
+        _den.Write("universes/dracula/series/dracula/series.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY9A6\nname: Dracula series\n---\n");
+
+        var (exitCode, _, error) = Copy("Mr. Swales", "Someone", "--to", "dracula");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Equal(
+            "wolfden copy: 'dracula' is the universe and a series of it and a book of it: give --to 'dracula/' for the universe, " +
+            "or 'dracula/series:dracula' for the series, or 'dracula/book:dracula' for the book.\n",
+            error);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-13")]
+    public void ANameThatLooksLikeAParameterComesThroughAsWritten()
+    {
+        _den.Write("universes/dracula/entities/notes/whitby-dialect.md",
+            "---\nid: 01M4TF5F0EKGGWD5FNVBAEY9A2\ntype: note\nname: Whitby dialect\nstatus: draft\n---\n\nSee [[Count allow_relinks]].\n");
+
+        var (exitCode, text, _) = Copy("Mr. Swales", "Count allow_relinks");
+        var (_, output, _) = Copy("mr-swales", "Count allow_relinks", "--json", "--allow-relinks");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Contains("as 'Count allow_relinks'", text, StringComparison.Ordinal);
+        Assert.Contains("[[Count allow_relinks]] in universes/dracula/entities/notes/whitby-dialect.md (line 8) now reaches 'Count allow_relinks'", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("--allow-relinks", text, StringComparison.Ordinal);
+        using var json = JsonDocument.Parse(output);
+        Assert.Equal("Count allow_relinks", json.RootElement.GetProperty("entity").GetProperty("name").GetString());
+        Assert.Contains(json.RootElement.GetProperty("effects").EnumerateArray(), e => e.GetString()!.Contains("as 'Count allow_relinks'", StringComparison.Ordinal));
+        Assert.DoesNotContain("--allow-relinks", output, StringComparison.Ordinal);
     }
 
     [Fact]

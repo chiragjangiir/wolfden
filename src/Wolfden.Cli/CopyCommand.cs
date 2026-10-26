@@ -17,7 +17,7 @@ namespace Wolfden.Cli;
 /// scope, a final book, a file name that's taken, or links the copy would
 /// take from another entity without <c>--allow-relinks</c>).
 /// </remarks>
-internal static partial class CopyCommand
+internal static class CopyCommand
 {
     internal static readonly CommandSpec Spec = new(
         "copy",
@@ -61,6 +61,11 @@ internal static partial class CopyCommand
         2,
         "give the entity and the new name, and nothing else (quote a name with spaces).");
 
+    /// <summary>The command's options and commands, in place of the MCP tool's parameters and tools, in its messages.</summary>
+    internal static readonly ToolWords Words = new(
+        "pass --allow-relinks", "as <new name>", "--slug", "with --universe", "use 'wolfden query --brief'", "run 'wolfden check'", "run 'wolfden check'",
+        "run 'wolfden check'");
+
     public static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error)
     {
         if (CommandLine.Parse(Spec, args, output, error, out var line) is { } exit)
@@ -90,12 +95,12 @@ internal static partial class CopyCommand
         WriteResult result;
         try
         {
-            result = new DenTools(root).CopyEntity(
+            result = new DenTools(root) { Words = Words }.CopyEntity(
                 line.Arguments[0], line.Arguments[1], line.Value("--universe"), toUniverse, toSeries, toBook, line.Value("--slug"), line.Has("--allow-relinks"));
         }
         catch (DenToolException e)
         {
-            error.WriteLine($"wolfden copy: {CliWords(e.Message)}");
+            error.WriteLine($"wolfden copy: {e.Message}");
             return CliApp.ExitUsage;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or SqliteException)
@@ -104,7 +109,6 @@ internal static partial class CopyCommand
             return CliApp.ExitUsage;
         }
 
-        result = result with { Effects = result.Effects.Select(CliWords).ToList() };
         if (line.Has("--json"))
         {
             CliJson.Write(output, result);
@@ -167,13 +171,21 @@ internal static partial class CopyCommand
     {
         universe = series = book = null;
         problem = "";
-        var asUniverse = structure.FindUniverse(key);
         var only = structure.Universes.Count == 1 ? structure.Universes[0] : null;
-        var work = only is not null && (only.Series.Any(s => s.Key == key) || only.FindBook(key) is not null) ? only : null;
+        if (only is not null && (key.StartsWith("series:", StringComparison.Ordinal) || key.StartsWith("book:", StringComparison.Ordinal)))
+        {
+            universe = only.Key;
+            return TryWork(only, key, out series, out book, out problem);
+        }
+
+        var asUniverse = structure.FindUniverse(key);
+        var kinds = only is null ? [] : new[] { only.Series.Any(s => s.Key == key) ? "series" : null, only.FindBook(key) is not null ? "book" : null }.OfType<string>().ToList();
+        var work = kinds.Count > 0 ? only : null;
         if (asUniverse is not null && work is not null)
         {
-            var kind = work.FindBook(key) is not null ? "book" : "series";
-            problem = $"'{key}' is the universe and a {kind} of it: give --to '{key}/' for the universe, or '{work.Key}/{kind}:{key}' for the {kind}.";
+            var what = string.Join(" and a ", kinds.Select(k => k + " of it"));
+            var spellings = string.Join(", or ", kinds.Select(k => $"'{work.Key}/{k}:{key}' for the {k}"));
+            problem = $"'{key}' is the universe and a {what}: give --to '{key}/' for the universe, or {spellings}.";
             return false;
         }
 
@@ -233,35 +245,4 @@ internal static partial class CopyCommand
 
         return true;
     }
-
-    /// <summary>
-    /// The tool's words for an MCP client, in the command line's: its
-    /// options for the tool's parameters, and <c>wolfden</c> commands for
-    /// the tools it suggests.
-    /// </summary>
-    internal static string CliWords(string message)
-    {
-        foreach (var (tool, cli) in Words)
-        {
-            message = message.Replace(tool, cli, StringComparison.Ordinal);
-        }
-
-        return CheckWithPath().Replace(message, "Run 'wolfden check' to see them.");
-    }
-
-    private static readonly (string Tool, string Cli)[] Words =
-    [
-        ("pass allow_relinks: true", "pass --allow-relinks"),
-        ("allow_relinks", "--allow-relinks"),
-        ("in 'new_name'", "as <new name>"),
-        ("another name (or slug)", "another name (or --slug)"),
-        ("Use search or list_entities to find it.", "Use 'wolfden query --brief' to find it."),
-        ("Give its key in 'universe'", "Give its key with --universe"),
-        ("Call the check tool", "Run 'wolfden check'"),
-        ("run the check tool", "run 'wolfden check'"),
-        ("Call check to see", "Run 'wolfden check' to see"),
-    ];
-
-    [System.Text.RegularExpressions.GeneratedRegex(@"Call check with path '[^']*' to see them\.")]
-    private static partial System.Text.RegularExpressions.Regex CheckWithPath();
 }

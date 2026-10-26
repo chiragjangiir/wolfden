@@ -56,7 +56,7 @@ public sealed partial class DenTools
     {
         if (string.IsNullOrWhiteSpace(newName) || newName.Any(char.IsControl))
         {
-            throw new DenToolException(ToolErrorCodes.BadArgument, "Give the copy's name in 'new_name': one line of text.");
+            throw new DenToolException(ToolErrorCodes.BadArgument, $"Give the copy's name {Words.NewName}: one line of text.");
         }
 
         newName = newName.Trim();
@@ -68,7 +68,7 @@ public sealed partial class DenTools
         {
             var db = index.Context;
             var u = ChooseUniverse(db, toUniverse ?? universe, null, allowAll: false)!;
-            CheckFilter(db, u, filter);
+            CheckFilter(db, u, filter, Words);
             return u.Key;
         });
 
@@ -79,7 +79,7 @@ public sealed partial class DenTools
             var catalog = EntityCatalog.Load(structure, den);
             var source = catalog.FindByPath(path) ?? throw (den.FileExists(path)
                 ? new DenToolException(
-                    ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be copied. Call check with path '{path}' to see them.")
+                    ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be copied. {ToolWords.Cap(Words.CheckFile(path))} to see them.")
                 : Gone(path));
             if (hash is not null)
             {
@@ -100,9 +100,13 @@ public sealed partial class DenTools
                 ? Apply(() => file.WithId(id))
                 : Apply(() => file.WithFrontmatterValue(["id"], YamlScalarValue.String(id)));
             file = Apply(() => file.WithFrontmatterValue(["name"], YamlScalarValue.String(newName)));
+            var droppedComments = 0;
             if (source.Aliases.Count > 0)
             {
+                // Comment lines inside a block list go with it, and may hold a commented-out alias.
+                var comments = CommentLines(file);
                 file = Apply(() => file.WithoutFrontmatterValue(["aliases"]));
+                droppedComments = comments - CommentLines(file);
             }
 
             var retitled = file.Title is { } title && title.Trim() == source.Name && source.Name != newName;
@@ -132,7 +136,7 @@ public sealed partial class DenTools
                     $"{relinked.Count} link(s) would change which entity they reach: " +
                     $"{string.Join("; ", relinked.Take(ListedLinkChanges).Select(l => $"{Where(l.After)}{(InFinalBook(l.Before) ? " (in a final book)" : "")} reaches {Reached(l.Before)} and would {Outcome(l.After)}"))}" +
                     $"{(relinked.Count > ListedLinkChanges ? $"; and {relinked.Count - ListedLinkChanges} more" : "")}. Nothing was copied. " +
-                    "Choose another name (or slug), link those by id first, or pass allow_relinks: true to make the copy anyway.");
+                    $"Choose another name (or {Words.Slug}), link those by id first, or {Words.AllowRelinks} to make the copy anyway.");
             }
 
             var frozenRelinks = relinked.Where(l => InFinalBook(l.Before)).ToList();
@@ -146,7 +150,7 @@ public sealed partial class DenTools
 
             Save(files, null, created: newPath);
             var after = afterLinks.Catalog.FindByPath(newPath) ?? EntityCatalog.ReadEntityFile(check.Structure, newPath, bytes).Entity!;
-            var effects = CopyEffects(source, after, scope, id, retitled, check, links, afterLinks, changed);
+            var effects = CopyEffects(source, after, scope, id, retitled, droppedComments, check, links, afterLinks, changed);
             return new WriteResult(
                 ToolJson.Version, true, newPath, HashOf(bytes), Summary(after), effects, [], Warnings(check),
                 [new WrittenFileView(newPath, HashOf(bytes), Created: true)]);
@@ -206,8 +210,8 @@ public sealed partial class DenTools
     }
 
     /// <summary>What the copy means: where it is, what it didn't take, when it enters canon, and the links it changes or that change for it.</summary>
-    private static List<string> CopyEffects(
-        CatalogEntity source, CatalogEntity copy, Container scope, string id, bool retitled, DenWriteCheckResult check,
+    private List<string> CopyEffects(
+        CatalogEntity source, CatalogEntity copy, Container scope, string id, bool retitled, int droppedComments, DenWriteCheckResult check,
         LinkIndex links, LinkIndex afterLinks, IReadOnlyList<LinkChange> changed)
     {
         var where = scope == source.Scope ? "beside it" : $"in {Describe(scope)}";
@@ -220,6 +224,10 @@ public sealed partial class DenTools
         {
             effects.Add(
                 $"The original's aliases ({string.Join(", ", source.Aliases.Select(a => $"'{a}'"))}) weren't copied, so links by them still reach the original.");
+            if (droppedComments > 0)
+            {
+                effects.Add($"Removed {droppedComments} comment line{(droppedComments == 1 ? "" : "s")} inside aliases, which went with them.");
+            }
         }
 
         if (retitled)
@@ -276,7 +284,7 @@ public sealed partial class DenTools
                 effects.AddRange(differ.Take(ListedLinkChanges).Select(p => $"{Where(p.Second)} {Now(p.Second)}; in the original, it {Was(p.First)}."));
                 if (differ.Count > ListedLinkChanges)
                 {
-                    effects.Add($"And {differ.Count - ListedLinkChanges} more. Call check to see them.");
+                    effects.Add($"And {differ.Count - ListedLinkChanges} more. {ToolWords.Cap(Words.CheckDen)} to see them.");
                 }
             }
         }
@@ -286,7 +294,7 @@ public sealed partial class DenTools
             var unresolved = its.Count(l => l.Outcome != LinkOutcome.Resolved);
             effects.Add(
                 $"The copy has {its.Count} link(s) and the original {mine.Count}, so they can't be compared one by one: " +
-                $"{unresolved} of the copy's don't resolve where it is now. Call check to see them.");
+                $"{unresolved} of the copy's don't resolve where it is now. {ToolWords.Cap(Words.CheckDen)} to see them.");
         }
 
         var toOriginal = its.Count(l => l.Outcome == LinkOutcome.Resolved && l.Target!.Path == source.Path);
@@ -299,11 +307,14 @@ public sealed partial class DenTools
         effects.AddRange(changed.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} {Now(l.After)}; before, it {Was(l.Before)}."));
         if (changed.Count > ListedLinkChanges)
         {
-            effects.Add($"And {changed.Count - ListedLinkChanges} more link(s) resolve differently now. Call check to see them.");
+            effects.Add($"And {changed.Count - ListedLinkChanges} more link(s) resolve differently now. {ToolWords.Cap(Words.CheckDen)} to see them.");
         }
 
         return effects;
     }
+
+    /// <summary>How many lines of the frontmatter are YAML comment lines.</summary>
+    private static int CommentLines(MarkdownFile file) => file.FrontmatterText.Split('\n').Count(l => l.TrimStart().StartsWith('#'));
 
     /// <summary>The distinct positions written in the entity's file that don't resolve in its universe.</summary>
     private static IEnumerable<string> UnresolvedPositions(CatalogEntity entity) =>
