@@ -1,5 +1,8 @@
 using System.Text.Json;
 using Wolfden.Core.Documents;
+using Wolfden.Core.Editing;
+using Wolfden.Core.Entities;
+using Wolfden.Core.Links;
 using Wolfden.Core.Structure;
 using Wolfden.Core.Types;
 using Wolfden.Core.Yaml;
@@ -27,9 +30,23 @@ namespace Wolfden.Mcp;
 /// is made. That's the rule <c>rename_section</c> follows for links in a
 /// final book: what a frozen book says never changes underneath it.
 /// </para>
+/// <para>
+/// The check fails closed. Books are matched by path, not key (two books
+/// can share a key, F-KEY-5); a final book whose chapters can't be paired
+/// before and after, and a <c>book.md</c> below that the den leaves out for
+/// errors but that says <c>status: final</c> (or whose frontmatter can't be
+/// read), stop the edit. A link in a value is compared by what it reaches
+/// from the container that holds it (types.md F-CHAP-4), so the same text
+/// naming another entity counts as a change. The <c>book.md</c> and
+/// <c>series.md</c> files below are compared again just before the write,
+/// so a book frozen meanwhile isn't missed.
+/// </para>
 /// </remarks>
 public sealed partial class DenTools
 {
+    /// <summary>Runs just before <see cref="UpdateChapterDefaults"/> saves; tests use it to change a file meanwhile.</summary>
+    internal Action? BeforeDefaultsSave { get; init; }
+
     /// <summary>
     /// A universe's, series', or book's <c>chapter_defaults</c>: each field it
     /// sets, what its books would inherit from above without it, the books
@@ -43,7 +60,7 @@ public sealed partial class DenTools
         var view = DefaultsOf(container);
         return new GetChapterDefaultsResult(
             ToolJson.Version, universeKey, view.Kind, view.Key, view.Path, HashOf(container.File.ToBytes()), container is Book { Status: BookStatus.Final },
-            view.Fields, BooksBelow(container).Select(b => new BookBelowView(b.Key, b.Status == BookStatus.Final, b.Chapters.Count)).ToList());
+            view.Fields, BooksBelow(container).Select(b => new BookBelowView(b.Key, b.Status == BookStatus.Final, b.Chapters.Count, b.FilePath)).ToList());
     }
 
     /// <summary>
@@ -103,10 +120,25 @@ public sealed partial class DenTools
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal) { [path] = bytes };
             var check = Check(den, structure, files);
             var after = FindContainer(check.Structure, universeKey, series, book);
-            CheckFinalBooksBelow(target, after, touched);
-            Save(files, new Dictionary<string, byte[]>(StringComparer.Ordinal) { [path] = original }, created: null);
+            var overlay = new OverlayDenSource(den, files);
+            var edit = new DefaultsEdit(
+                target, after,
+                new Lazy<LinkResolver>(() => new LinkResolver(EntityCatalog.Load(structure, den))),
+                new Lazy<LinkResolver>(() => new LinkResolver(EntityCatalog.Load(check.Structure, overlay))));
 
-            var effects = DefaultEffects(target, after, touched);
+            // What the check below depends on, compared again just before the write.
+            var originals = new Dictionary<string, byte[]>(StringComparer.Ordinal) { [path] = original };
+            foreach (var (other, otherBytes) in FilesBelow(den, target))
+            {
+                originals.TryAdd(other, otherBytes);
+            }
+
+            CheckFinalBooksBelow(edit, touched);
+            CheckUnloadedBooksBelow(den, structure, target);
+            BeforeDefaultsSave?.Invoke();
+            Save(files, originals, created: null);
+
+            var effects = DefaultEffects(edit, touched);
             if (idAdded is not null)
             {
                 effects.Add($"The file had no id, so it was given {idAdded} (F-ID-6).");
@@ -116,6 +148,9 @@ public sealed partial class DenTools
                 ToolJson.Version, true, path, HashOf(bytes), null, effects, [], Warnings(check), IdAdded: idAdded, ChapterDefaults: DefaultsOf(after));
         }
     }
+
+    /// <summary>An edit of a container's defaults: the container before and after, and link resolvers over the den before and after.</summary>
+    private sealed record DefaultsEdit(Container Before, Container After, Lazy<LinkResolver> BeforeLinks, Lazy<LinkResolver> AfterLinks);
 
     /// <summary>The universe a <c>chapter_defaults</c> call is about, after checking that the series or book it names is there.</summary>
     private string LocateContainer(string? universe, string? series, string? book) => WithIndex(index =>
@@ -153,6 +188,41 @@ public sealed partial class DenTools
         _ => [],
     };
 
+    /// <summary>
+    /// The <c>book.md</c> and <c>series.md</c> files in a container's folder
+    /// (format.md §6), loaded or not, with their bytes now: what decides
+    /// which chapters below are final and what they inherit.
+    /// </summary>
+    private static IEnumerable<(string Path, byte[] Bytes)> FilesBelow(IDenSource den, Container container)
+    {
+        var folders = new List<string>();
+        if (container is Universe)
+        {
+            foreach (var s in den.GetDirectories($"{container.Path}/series"))
+            {
+                folders.Add($"{container.Path}/series/{s}");
+                folders.AddRange(den.GetDirectories($"{container.Path}/series/{s}/books").Select(b => $"{container.Path}/series/{s}/books/{b}"));
+            }
+
+            folders.AddRange(den.GetDirectories($"{container.Path}/books").Select(b => $"{container.Path}/books/{b}"));
+        }
+        else if (container is Series)
+        {
+            folders.AddRange(den.GetDirectories($"{container.Path}/books").Select(b => $"{container.Path}/books/{b}"));
+        }
+
+        foreach (var folder in folders)
+        {
+            foreach (var name in new[] { "book.md", "series.md" })
+            {
+                if (den.TryReadFile($"{folder}/{name}") is { } bytes)
+                {
+                    yield return ($"{folder}/{name}", bytes);
+                }
+            }
+        }
+    }
+
     private static MarkdownFile ClearDefault(MarkdownFile file, Container container, string field)
     {
         if ((file.GetFrontmatterValue("chapter_defaults") as YamlMapping)?.ContainsKey(field) != true)
@@ -167,20 +237,33 @@ public sealed partial class DenTools
 
     /// <summary>
     /// Refuses an edit of a series' or universe's defaults that would change
-    /// what a chapter of a final book has (F-BOOK-1): see the remarks on this class.
+    /// what a chapter of a final book has (F-BOOK-1), failing closed: see the
+    /// remarks on this class.
     /// </summary>
-    private static void CheckFinalBooksBelow(Container before, Container after, IReadOnlyList<string> fields)
+    private static void CheckFinalBooksBelow(DefaultsEdit edit, IReadOnlyList<string> fields)
     {
         var problems = new List<string>();
-        foreach (var book in BooksBelow(after).Where(b => b.Status == BookStatus.Final))
+        var afterPaths = BooksBelow(edit.After).Select(b => b.FilePath).ToHashSet(StringComparer.Ordinal);
+        foreach (var gone in BooksBelow(edit.Before).Where(b => b.Status == BookStatus.Final && !afterPaths.Contains(b.FilePath)))
         {
-            var was = before.Universe.FindBook(book.Key);
+            problems.Add($"{BookName(gone)} would no longer load");
+        }
+
+        foreach (var book in BooksBelow(edit.After).Where(b => b.Status == BookStatus.Final))
+        {
+            var was = BookBefore(edit, book);
+            if (was is null || was.Chapters.Count != book.Chapters.Count || book.Chapters.Any(c => ChapterBefore(was, c) is null))
+            {
+                problems.Add($"{BookName(book)}, whose chapters couldn't be compared before and after the edit");
+                continue;
+            }
+
             foreach (var field in fields)
             {
-                var changed = book.Chapters.Where(c => EffectiveKey(was?.FindChapter(c.Key), field) != EffectiveKey(c, field)).ToList();
+                var changed = book.Chapters.Where(c => Changed(edit, ChapterBefore(was, c), c, field)).ToList();
                 if (changed.Count > 0)
                 {
-                    problems.Add($"book '{book.Key}', {field} of {Chapters(book, changed)}");
+                    problems.Add($"{BookName(book)}, {field} of {Chapters(book, changed)}");
                 }
             }
         }
@@ -195,10 +278,41 @@ public sealed partial class DenTools
         }
     }
 
+    /// <summary>
+    /// Refuses the edit if a <c>book.md</c> below that the den leaves out for
+    /// errors (it, or its series, doesn't load) says <c>status: final</c>, or
+    /// its frontmatter can't be read, so it may be: its chapters would inherit
+    /// the edit once it's fixed.
+    /// </summary>
+    private static void CheckUnloadedBooksBelow(IDenSource den, DenStructure structure, Container container)
+    {
+        var loaded = structure.Universes.SelectMany(u => u.Books).Select(b => b.FilePath).ToHashSet(StringComparer.Ordinal);
+        var suspect = new List<string>();
+        foreach (var (path, bytes) in FilesBelow(den, container).Where(f => f.Path.EndsWith("/book.md", StringComparison.Ordinal) && !loaded.Contains(f.Path)))
+        {
+            // Parsing never throws; frontmatter that doesn't parse is null.
+            var frontmatter = MarkdownFile.Parse(bytes, requireFrontmatter: true).Frontmatter;
+            if (frontmatter is null || frontmatter["status"] is not (null or YamlScalar { IsNull: true } or YamlScalar { Text: "draft" }))
+            {
+                suspect.Add(path);
+            }
+        }
+
+        if (suspect.Count > 0)
+        {
+            throw new DenToolException(
+                ToolErrorCodes.Frozen,
+                $"These books have errors, so the den leaves them out, but they're marked final (or their status can't be read), and their chapters " +
+                $"would inherit this edit once they're fixed: {string.Join(", ", suspect)}. Nothing was changed. Call check to see the errors, " +
+                "and fix them first (F-BOOK-1).");
+        }
+    }
+
     /// <summary>What the edit means for the container and for each chapter below it, field by field.</summary>
-    private static List<string> DefaultEffects(Container before, Container after, IReadOnlyList<string> fields)
+    private static List<string> DefaultEffects(DefaultsEdit edit, IReadOnlyList<string> fields)
     {
         var effects = new List<string>();
+        var after = edit.After;
         var where = Capitalized(Where(after));
         foreach (var name in fields)
         {
@@ -210,6 +324,7 @@ public sealed partial class DenTools
             {
                 { IsNone: true } => $"{where} now sets {name}: [] (\"none here\"), so chapters below that don't set their own have no {name}" +
                     (aboveText is null ? "." : $", rather than inheriting {aboveText}. To inherit that again, clear the field."),
+                not null when above is not null && Describe(own) == Describe(above) => $"{where} now sets {name}: {Describe(own)}, as {Where(above.DefaultFrom!)} does.",
                 not null => $"{where} now sets {name}: {Describe(own)}" + (aboveText is null ? "." : $", in place of {aboveText}."),
                 null when written => $"{where} writes {name}, but the value doesn't fit the field, so it's ignored and chapters inherit as if it weren't there (see the warnings).",
                 null => $"{where} no longer sets {name}" + (aboveText is null ? ", and no chapter_defaults above it does." : $", so its books inherit {aboveText}."),
@@ -224,7 +339,7 @@ public sealed partial class DenTools
 
             foreach (var book in withChapters)
             {
-                effects.Add(BookEffect(before, after, book, name));
+                effects.Add(BookEffect(edit, book, name));
             }
         }
 
@@ -235,15 +350,15 @@ public sealed partial class DenTools
     /// One book's chapters after the edit, in runs: "chapters 3–9 now have
     /// pov [[mina-harker]]; chapter 12 keeps its own".
     /// </summary>
-    private static string BookEffect(Container before, Container edited, Book book, string name)
+    private static string BookEffect(DefaultsEdit edit, Book book, string name)
     {
-        var was = before.Universe.FindBook(book.Key);
+        var was = BookBefore(edit, book);
         var chain = book.ScopeChain.Select(c => c.FilePath).ToList();
-        var editedRank = chain.IndexOf(edited.FilePath);
+        var editedRank = chain.IndexOf(edit.After.FilePath);
         var labels = book.Chapters.Select(c =>
         {
             var now = c.Fields.GetValueOrDefault(name);
-            if (EffectiveKey(was?.FindChapter(c.Key), name) != EffectiveKey(c, name))
+            if (Changed(edit, was is null ? null : ChapterBefore(was, c), c, name))
             {
                 return now is null ? $"now have no {name}: nothing sets one"
                     : now.IsNone ? $"now have no {name} ([])"
@@ -273,10 +388,23 @@ public sealed partial class DenTools
             parts.Add($"{Chapters(book, chapters)} {text}");
         }
 
+        var bookName = Capitalized(BookName(book));
         return parts.Count == 0
-            ? $"Book '{book.Key}': no chapter's {name} changes."
-            : $"Book '{book.Key}': {string.Join("; ", parts)}.";
+            ? $"{bookName}: no chapter's {name} changes."
+            : $"{bookName}: {string.Join("; ", parts)}.";
     }
+
+    /// <summary>The same book before the edit, matched by path (book keys can repeat, F-KEY-5), or null.</summary>
+    private static Book? BookBefore(DefaultsEdit edit, Book after) =>
+        edit.Before.Universe.Books.FirstOrDefault(b => b.FilePath == after.FilePath);
+
+    /// <summary>The same chapter before the edit: the one at the same place with the same key, or null.</summary>
+    private static Chapter? ChapterBefore(Book before, Chapter after) =>
+        after.Index < before.Chapters.Count && before.Chapters[after.Index].Key == after.Key ? before.Chapters[after.Index] : null;
+
+    /// <summary>"book 'ash'", with its folder when another book of the universe has the same key.</summary>
+    private static string BookName(Book book) =>
+        book.Universe.Books.Count(b => b.Key == book.Key) > 1 ? $"book '{book.Key}' ({book.Path})" : $"book '{book.Key}'";
 
     /// <summary>Chapters as runs in book order: "chapter 12", "chapters 3–9, 12".</summary>
     private static string Chapters(Book book, IReadOnlyList<Chapter> chapters)
@@ -299,11 +427,42 @@ public sealed partial class DenTools
         return (chapters.Count == 1 ? "chapter " : "chapters ") + string.Join(", ", runs);
     }
 
-    /// <summary>A chapter's effective value for a field, as text to compare, or null if nothing sets it.</summary>
-    private static string? EffectiveKey(Chapter? chapter, string name) =>
-        chapter?.Fields.GetValueOrDefault(name) is { } value
-            ? value.IsNone ? "[]" : string.Join("\n", value.Items.Select(i => JsonOf(i).GetRawText()))
-            : null;
+    /// <summary>True if the chapter's effective value for the field differs after the edit; a chapter with nothing to compare to has changed.</summary>
+    private static bool Changed(DefaultsEdit edit, Chapter? before, Chapter after, string name) =>
+        before is null || EffectiveKey(before, name, edit.BeforeLinks) != EffectiveKey(after, name, edit.AfterLinks);
+
+    /// <summary>
+    /// A chapter's effective value for a field, as text to compare, or null
+    /// if nothing sets it. A link in it is compared by the entity it reaches
+    /// from the container that holds the value (types.md F-CHAP-4), since the
+    /// same text in another container's defaults can name another entity.
+    /// </summary>
+    private static string? EffectiveKey(Chapter chapter, string name, Lazy<LinkResolver> links)
+    {
+        if (chapter.Fields.GetValueOrDefault(name) is not { } value)
+        {
+            return null;
+        }
+
+        if (value.IsNone)
+        {
+            return "[]";
+        }
+
+        var scope = value.DefaultFrom ?? chapter.Book;
+        return string.Join("\n", value.Items.Select(item =>
+        {
+            var text = JsonOf(item).GetRawText();
+            if (item is not YamlScalar s || !s.Text.Contains("[[", StringComparison.Ordinal) || LinkSyntax.FindLinks(s.Text) is not { Count: > 0 } found)
+            {
+                return text;
+            }
+
+            return text + " -> " + string.Join(" ", found.Select(l => links.Value.Resolve(scope, l.Target) is { Entity: { } e }
+                ? $"{e.Path}#{l.Heading}"
+                : $"?{l.Target}@{scope.FilePath}"));
+        }));
+    }
 
     /// <summary>What a container's books inherit for a field from the containers above it.</summary>
     private static ChapterFieldValue? Above(Container container, string name) =>
@@ -311,18 +470,26 @@ public sealed partial class DenTools
 
     private static ChapterDefaultsView DefaultsOf(Container container)
     {
-        var names = container.ScopeChain.SelectMany(c => c.ChapterDefaults.Keys).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);
+        var written = container.File.Frontmatter?["chapter_defaults"] as YamlMapping;
+        var names = container.ScopeChain.SelectMany(c => c.ChapterDefaults.Keys)
+            .Concat(written?.Entries.Select(e => e.KeyText).OfType<string>() ?? [])
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);
         var fields = names.Select(name =>
         {
             var own = container.ChapterDefaults.GetValueOrDefault(name);
             var above = Above(container, name);
+
+            // Written here but ignored (F-CHAP-3): a null, or a value that doesn't fit the field.
+            var ignored = own is null && written?.ContainsKey(name) == true;
             return new ChapterDefaultFieldView(
                 name,
                 own is null ? null : JsonOf(own.Value),
                 own?.IsNone == true,
                 above is null ? null : JsonOf(above.Value),
                 above?.DefaultFrom?.Kind.ToString().ToLowerInvariant(),
-                above?.DefaultFrom?.Key);
+                above?.DefaultFrom?.Key,
+                ignored ? true : null,
+                ignored ? JsonOf(written![name]) : null);
         }).ToList();
         return new ChapterDefaultsView(container.Kind.ToString().ToLowerInvariant(), container.Key, container.FilePath, fields);
     }

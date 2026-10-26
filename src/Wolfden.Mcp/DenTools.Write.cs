@@ -889,7 +889,7 @@ public sealed partial class DenTools
         {
             throw new DenToolException(
                 ToolErrorCodes.BadArgument,
-                "Give 'expected_hash': the hash of the file your edit is based on, from get_entity (or get_chapter for book.md), or from your last write's result. The write is refused if the file has changed since.");
+                "Give 'expected_hash': the hash of the file your edit is based on, from get_entity (or get_chapter for book.md, or get_chapter_defaults for a universe.md, series.md, or book.md), or from your last write's result. The write is refused if the file has changed since.");
         }
 
         return hash.Trim().ToLowerInvariant();

@@ -421,7 +421,10 @@ public sealed record GetChapterResult(int Version, string Universe, string Book,
 /// <param name="Inherited">What the container's books would get from the containers above without this container's value, as JSON, or null if none of them sets it.</param>
 /// <param name="InheritedFrom">Where that comes from: <c>series</c> or <c>universe</c>, or null.</param>
 /// <param name="InheritedFromKey">The key of that container, or null.</param>
-public sealed record ChapterDefaultFieldView(string Name, JsonElement? Own, bool None, JsonElement? Inherited, string? InheritedFrom, string? InheritedFromKey);
+/// <param name="Ignored">True if this container writes the field but the value is null or doesn't fit the field, so it's ignored (types.md F-CHAP-3) and its books inherit as if it weren't there; null otherwise.</param>
+/// <param name="Written">For an ignored field, the value as written, as JSON.</param>
+public sealed record ChapterDefaultFieldView(
+    string Name, JsonElement? Own, bool None, JsonElement? Inherited, string? InheritedFrom, string? InheritedFromKey, bool? Ignored = null, JsonElement? Written = null);
 
 /// <summary>A container's <c>chapter_defaults</c>.</summary>
 /// <param name="Kind"><c>universe</c>, <c>series</c>, or <c>book</c>.</param>
@@ -434,7 +437,8 @@ public sealed record ChapterDefaultsView(string Kind, string Key, string Path, I
 /// <param name="Key">The book's key.</param>
 /// <param name="Final">True if the book is final (frozen): an edit that would change what its chapters have is refused.</param>
 /// <param name="Chapters">How many chapters it has.</param>
-public sealed record BookBelowView(string Key, bool Final, int Chapters);
+/// <param name="Path">Its <c>book.md</c>, relative to the den root, which tells apart books that share a key (F-KEY-5).</param>
+public sealed record BookBelowView(string Key, bool Final, int Chapters, string Path);
 
 /// <summary>The result of <c>get_chapter_defaults</c>.</summary>
 /// <param name="Version">The shape version.</param>

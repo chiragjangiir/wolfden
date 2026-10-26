@@ -1815,6 +1815,8 @@ assistant to make Mara Voss the book's default POV.
 - A value that doesn't fit the field (`tense: sideways`) is saved, as
   in `update_chapter_fields`, with the F-CHAP-3 warning, and the result
   says it's ignored, so chapters inherit as if it weren't there.
+  `get_chapter_defaults` lists it as `ignored`, with the value as
+  written. A value the same as the one above is said to be so.
 
 Spec: types.md F-CHAP-5, format.md F-CTR-5, F-RT-6 (maintainer
 decisions, 2026-10-23, 2026-10-25). Covered by:
@@ -1834,9 +1836,24 @@ decisions, 2026-10-23, 2026-10-25). Covered by:
   inherit.
 - Setting the universe's `tense` is made: `ash`'s own default shadows
   it, and the result says `ash`'s chapters keep `past`.
+- A second book named `ash`, in another series, doesn't hide the final
+  one: books are matched by folder, and the result names each `ash` by
+  its folder.
+- A universe-scope Mara Voss means `[[mara-voss]]` in the universe's
+  defaults isn't the series' Mara Voss, so setting the same text in the
+  series' defaults changes `ash`'s POV, and is refused.
+- If `ash` is frozen while the edit is being made, the write is refused
+  as `stale_file`. If `ash`'s `book.md` has errors, so the den leaves it
+  out, but it says `status: final`, the edit is refused too; a draft
+  book with errors doesn't stop it.
 
-Spec: format.md F-BOOK-1, types.md F-CHAP-5 (#151). Covered by:
-`ChapterDefaultsToolTests.ADefaultThatWouldChangeAFinalBooksChaptersIsRefused`.
+Spec: format.md F-BOOK-1, F-KEY-5, types.md F-CHAP-4, F-CHAP-5 (#151).
+Covered by:
+`ChapterDefaultsToolTests.ADefaultThatWouldChangeAFinalBooksChaptersIsRefused`,
+`ChapterDefaultsToolTests.AFinalBookIsFoundByItsPathWhenAnotherBookSharesItsKey`,
+`ChapterDefaultsToolTests.ALinkInADefaultIsComparedByTheEntityItReaches`,
+`ChapterDefaultsToolTests.ABookFrozenWhileTheEditIsMadeStopsIt`,
+`ChapterDefaultsToolTests.ABookLeftOutForErrorsThatSaysFinalStopsTheEdit`.
 
 ## STORE: Wolfden saves, moves, and deletes notes
 

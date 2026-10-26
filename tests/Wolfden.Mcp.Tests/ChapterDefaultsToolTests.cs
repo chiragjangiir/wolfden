@@ -138,7 +138,103 @@ public sealed class ChapterDefaultsToolTests : IDisposable
         var cleared = Tools.UpdateChapterDefaults(again.Hash, Json("""[{"op": "clear", "field": "narration"}]"""), "starfall", series: "long-dark");
         Assert.Equal("Series 'long-dark' chapter_defaults no longer sets narration, so its books inherit first from universe 'starfall' chapter_defaults.", cleared.Effects[0]);
         Assert.Equal("Book 'ember': chapters prologue–3 now have narration first.", cleared.Effects[1]);
+
+        // The same value as the universe's is said so, and changes no chapter.
+        var same = Tools.UpdateChapterDefaults(cleared.Hash, Json("""[{"op": "set", "field": "narration", "value": "first"}]"""), "starfall", series: "long-dark");
+        Assert.Equal("Series 'long-dark' chapter_defaults now sets narration: first, as universe 'starfall' chapter_defaults does.", same.Effects[0]);
+        Assert.Equal("Book 'ember': no chapter's narration changes.", same.Effects[1]);
     }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-25")]
+    public void AFinalBookIsFoundByItsPathWhenAnotherBookSharesItsKey()
+    {
+        WriteUniverse("chapter_defaults: { tense: past }\n");
+        _den.Write(Ash, "---\nid: 01JAQKFBF5KZNWJ47TAN9ZT24N\nname: Ash\nstatus: final\nchapters: [1, 2, 3, 4, epilogue]\n---\n");
+        _den.Write(Universe + "/series/drift-war/series.md", "---\nid: 01JA3E28JT97KB6CQ643DZVMXY\nname: The Drift War\nbooks: [ash]\n---\n");
+        _den.Write(Universe + "/series/drift-war/books/ash/book.md", "---\nid: 01JB0000000000000000000A02\nname: Ash of the Drift\nchapters: [1, 2]\n---\n");
+        var before = _den.Read(Universe + "/universe.md");
+        var universe = Tools.GetChapterDefaults("starfall");
+        Assert.Equal(2, universe.Books.Count(b => b.Key == "ash"));
+
+        var refused = Assert.Throws<DenToolException>(() => Tools.UpdateChapterDefaults(universe.Hash, Json("""[{"op": "clear", "field": "tense"}]"""), "starfall"));
+
+        Assert.Equal(ToolErrorCodes.Frozen, refused.Code);
+        Assert.Contains("book 'ash' (universes/starfall/series/long-dark/books/ash), tense of chapters 1–epilogue", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(before, _den.Read(Universe + "/universe.md"));
+
+        // Unfrozen, the edit is made, and each 'ash' is named by its folder.
+        _den.Write(Ash, "---\nid: 01JAQKFBF5KZNWJ47TAN9ZT24N\nname: Ash\nchapters: [1, 2, 3, 4, epilogue]\n---\n");
+        var cleared = Tools.UpdateChapterDefaults(universe.Hash, Json("""[{"op": "clear", "field": "tense"}]"""), "starfall");
+        Assert.Contains("Book 'ash' (universes/starfall/series/long-dark/books/ash): chapters 1–epilogue now have no tense: nothing sets one.", cleared.Effects);
+        Assert.Contains("Book 'ash' (universes/starfall/series/drift-war/books/ash): chapters 1–2 now have no tense: nothing sets one.", cleared.Effects);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-25")]
+    public void ALinkInADefaultIsComparedByTheEntityItReaches()
+    {
+        // A second Mara Voss at universe scope: [[mara-voss]] in the universe's defaults
+        // reaches her, and in the series' defaults the series' Mara Voss (F-LINK-7).
+        _den.Write(Universe + "/entities/characters/mara-voss.md", "---\nid: 01JB0000000000000000000M01\ntype: character\nname: Mara Voss\nstatus: canon\n---\n\nHer namesake.\n");
+        WriteUniverse("chapter_defaults: { pov: [\"[[mara-voss]]\"] }\n");
+        _den.Write(Ash, "---\nid: 01JAQKFBF5KZNWJ47TAN9ZT24N\nname: Ash\nstatus: final\nchapters: [1, 2, 3, 4, epilogue]\n---\n");
+        var series = Tools.GetChapterDefaults("starfall", series: "long-dark");
+        var change = Json("""[{"op": "set", "field": "pov", "value": ["[[mara-voss]]"]}]""");
+
+        var refused = Assert.Throws<DenToolException>(() => Tools.UpdateChapterDefaults(series.Hash, change, "starfall", series: "long-dark"));
+        Assert.Equal(ToolErrorCodes.Frozen, refused.Code);
+        Assert.Contains("book 'ash', pov of chapters 1–epilogue", refused.Message, StringComparison.Ordinal);
+
+        // Unfrozen, the effect lines say the chapters changed, though the text is the same.
+        _den.Write(Ash, "---\nid: 01JAQKFBF5KZNWJ47TAN9ZT24N\nname: Ash\nchapters: [1, 2, 3, 4, epilogue]\n---\n");
+        var made = Tools.UpdateChapterDefaults(series.Hash, change, "starfall", series: "long-dark");
+        Assert.Contains("Book 'ash': chapters 1–epilogue now have pov [[mara-voss]].", made.Effects);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-25")]
+    public void ABookFrozenWhileTheEditIsMadeStopsIt()
+    {
+        var series = Tools.GetChapterDefaults("starfall", series: "long-dark");
+        var before = _den.Read(LongDark + "/series.md");
+        var tools = new DenTools(_den.Root)
+        {
+            BeforeDefaultsSave = () => _den.Write(Ash, "---\nid: 01JAQKFBF5KZNWJ47TAN9ZT24N\nname: Ash\nstatus: final\nchapters: [1, 2, 3, 4, epilogue]\n---\n"),
+        };
+
+        var stale = Assert.Throws<DenToolException>(() =>
+            tools.UpdateChapterDefaults(series.Hash, Json("""[{"op": "set", "field": "tense", "value": "past"}]"""), "starfall", series: "long-dark"));
+
+        Assert.Equal(ToolErrorCodes.StaleFile, stale.Code);
+        Assert.Contains(Ash, stale.Message, StringComparison.Ordinal);
+        Assert.Equal(before, _den.Read(LongDark + "/series.md"));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-25")]
+    public void ABookLeftOutForErrorsThatSaysFinalStopsTheEdit()
+    {
+        // 'chapters' as a mapping is an error (F-BOOK-2), so the den leaves the book out.
+        _den.Write(Ash, "---\nid: 01JAQKFBF5KZNWJ47TAN9ZT24N\nname: Ash\nstatus: final\nchapters: { one: 1 }\n---\n");
+        var series = Tools.GetChapterDefaults("starfall", series: "long-dark");
+        Assert.DoesNotContain(series.Books, b => b.Key == "ash");
+        var change = Json("""[{"op": "set", "field": "tense", "value": "past"}]""");
+
+        var refused = Assert.Throws<DenToolException>(() => Tools.UpdateChapterDefaults(series.Hash, change, "starfall", series: "long-dark"));
+        Assert.Equal(ToolErrorCodes.Frozen, refused.Code);
+        Assert.Contains(Ash, refused.Message, StringComparison.Ordinal);
+
+        // A draft book with errors isn't frozen.
+        _den.Write(Ash, "---\nid: 01JAQKFBF5KZNWJ47TAN9ZT24N\nname: Ash\nchapters: { one: 1 }\n---\n");
+        Assert.True(Tools.UpdateChapterDefaults(series.Hash, change, "starfall", series: "long-dark").Changed);
+    }
+
+    private void WriteUniverse(string extra) =>
+        _den.Write(
+            Universe + "/universe.md",
+            "---\nid: 01JAM9S346Q3D25VT4F5V37E3S\nname: Starfall\nauthors: [wren-calder]\norder: [long-dark, a-quiet-moon, drift-war]\n" + extra +
+            "---\n\nThe Kessan Reach and the long war over it.\n");
 
     [Fact]
     [Trait("Scenario", "SC-MCP-25")]
@@ -196,6 +292,12 @@ public sealed class ChapterDefaultsToolTests : IDisposable
         Assert.Contains("doesn't fit the field, so it's ignored", result.Effects[0], StringComparison.Ordinal);
         Assert.Contains(result.Warnings, w => w.Rule == "F-CHAP-3");
         Assert.Equal("Book 'a-quiet-moon': no chapter's tense changes.", result.Effects[1]);
+
+        // get_chapter_defaults lists it as written but ignored.
+        var tense = Tools.GetChapterDefaults("starfall", book: "a-quiet-moon").Fields.Single(f => f.Name == "tense");
+        Assert.True(tense.Ignored);
+        Assert.Equal("\"sideways\"", tense.Written!.Value.GetRawText());
+        Assert.Null(tense.Own);
     }
 
     private static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();

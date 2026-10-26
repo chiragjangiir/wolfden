@@ -772,7 +772,14 @@ store, so an edit changes only what it means to (format.md §12):
   any chapter of a final book, and makes one the final book doesn't
   see, because its chapters or its own defaults set the field (#151; v0
   behaviour, as `rename_section` refuses to break links in a final
-  book).
+  book). The check fails closed: books are matched by path, since two
+  can share a key (F-KEY-5); a link is compared by the entity it
+  reaches from the container that holds the value (types.md F-CHAP-4),
+  not by its text; a `book.md` below that the den leaves out for errors
+  stops the edit if it says `status: final` or its frontmatter doesn't
+  parse; and the `book.md` and `series.md` files below are compared
+  again just before the write, so a book frozen meanwhile is
+  `stale_file`.
 - **Files only; commits by `checkpoint`** (maintainer decision,
   2026-10-22). Writes go to the working tree. `checkpoint` records the
   den's files (or the paths given) as one commit through the history
