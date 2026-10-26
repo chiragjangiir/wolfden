@@ -16,6 +16,7 @@ public class SpoilerTests
     private const string MinaFile = "universes/dracula/books/dracula/entities/characters/mina-harker.md";
     private const string QuinceyFile = "universes/dracula/books/dracula/entities/characters/quincey-harker.md";
     private const string MaraFile = "universes/starfall/series/long-dark/entities/characters/mara-voss.md";
+    private const string PikeFile = "universes/starfall/series/long-dark/books/ash/entities/characters/halden-pike.md";
 
     /// <summary>Members whose text the writer wrote, or (chapter titles, #26 M2) are listed whatever the position.</summary>
     private static readonly HashSet<string> Authored = ["text", "target", "heading", "label", "body", "lead", "value", "snippet", "query", "title"];
@@ -79,6 +80,8 @@ public class SpoilerTests
                 "Executive officer of the *Tessaly*.", "Executive officer of the *Tessaly*. Distrusts [[01JA7Q8M4XK3V9R2D5W8HN6TQC|the new hand]].", StringComparison.Ordinal)
                 // And a field that links him by id (#179): search matches a link's name only once he's met.
                 .Replace("  species: { value: human, from: \"ember:prologue\" }", "  species: { value: human, from: \"ember:prologue\" }\n  watch_mate: \"[[01JA7Q8M4XK3V9R2D5W8HN6TQC]]\"", StringComparison.Ordinal));
+            // And a field only Pike has, so before ash only a note the reader hasn't met has it.
+            den.Write(PikeFile, den.Read(PikeFile).Replace("from: \"ash\"\n", "from: \"ash\"\nfields:\n  debts: three stations\n", StringComparison.Ordinal));
         }
 
         await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root));
@@ -110,8 +113,34 @@ public class SpoilerTests
             await Ask($"/api/search?universe={universe}&asOf={asOf}&limit=200&query={Uri.EscapeDataString(entity.Name)}");
             foreach (var name in universe == "starfall" ? unmetNames : [])
             {
-                await Ask($"/api/search?universe={universe}&asOf={asOf}&limit=200&field=watch_mate&query={Uri.EscapeDataString(name)}");
+                // A name only a note the reader hasn't met has finds nothing in the field that links that note.
+                var path = $"/api/search?universe={universe}&asOf={asOf}&limit=200&field=watch_mate&query={Uri.EscapeDataString(name)}";
+                await Ask(path);
+                Assert.True(answers[^1].Json.GetProperty("hits").GetArrayLength() == 0, $"{path} finds '{name}', whom the reader hasn't met by {asOf}.");
             }
+        }
+
+        // A field only notes the reader hasn't met have is refused just as a made-up one is (#179).
+        var metFields = (await server.GetJsonAsync($"/api/fields?universe={universe}&asOf={asOf}", HttpStatusCode.OK))
+            .GetProperty("fields").EnumerateArray().Select(f => f.GetString()!).ToHashSet(StringComparer.Ordinal);
+        var unmetFields = (await server.GetJsonAsync($"/api/fields?universe={universe}", HttpStatusCode.OK))
+            .GetProperty("fields").EnumerateArray().Select(f => f.GetString()!).Where(f => !metFields.Contains(f)).ToList();
+        if (universe == "starfall" && asOf.StartsWith("ember", StringComparison.Ordinal))
+        {
+            Assert.Contains("debts", unmetFields);
+        }
+
+        var madeUp = await AnswerTo(server, $"/api/search?universe={universe}&asOf={asOf}&query=three&field=no_such_field");
+        Assert.Equal(HttpStatusCode.BadRequest, madeUp.Status);
+        foreach (var field in unmetFields)
+        {
+            var answer = await AnswerTo(server, $"/api/search?universe={universe}&asOf={asOf}&query=three&field={Uri.EscapeDataString(field)}");
+            Assert.Equal(madeUp.Status, answer.Status);
+            var (expected, actual) = (JsonDocument.Parse(madeUp.Body).RootElement, JsonDocument.Parse(answer.Body).RootElement);
+            Assert.Equal(expected.GetProperty("code").GetString(), actual.GetProperty("code").GetString());
+            Assert.Equal(
+                expected.GetProperty("message").GetString(),
+                actual.GetProperty("message").GetString()!.Replace($"'{field}'", "'no_such_field'", StringComparison.Ordinal));
         }
 
         foreach (var (path, json) in answers)
@@ -151,6 +180,13 @@ public class SpoilerTests
             var after = await server.GetJsonAsync("/api/search?universe=starfall&asOf=ash:1&field=watch_mate&query=Halden%20Pike", HttpStatusCode.OK);
             Assert.EndsWith("→ Halden Pike", Assert.Single(after.GetProperty("hits").EnumerateArray()).GetProperty("text").GetString(), StringComparison.Ordinal);
         }
+    }
+
+    /// <summary>The status and body the server answers <paramref name="path"/> with, whatever the status.</summary>
+    private static async Task<(HttpStatusCode Status, string Body)> AnswerTo(Server server, string path)
+    {
+        using var response = await server.Client.GetAsync(path, TestContext.Current.CancellationToken);
+        return (response.StatusCode, await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
     }
 
     /// <summary>Every string in <paramref name="json"/> that isn't text the writer wrote, with where it is.</summary>

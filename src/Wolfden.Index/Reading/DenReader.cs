@@ -215,19 +215,17 @@ public sealed class DenReader
                 CheckTypes(db, universeId, [type], listUsed: asOf is null);
             }
 
-            if (fieldName is not null)
-            {
-                CheckField(db, universeId, fieldName);
-            }
-
             // The entities (by path) a filter or position keeps, and for a
-            // position the lines of the sections in effect there.
+            // position the lines of the sections in effect there, and the
+            // whole universe's view (whatever the filter), for what's met.
             HashSet<string>? kept = null;
             Dictionary<string, HashSet<int>>? sectionsInView = null;
             CanonView? view = null;
+            CanonView? metView = null;
             if (asOf is not null)
             {
                 view = CanonView(index, one!.Key, asOf, filter);
+                metView = filter is null ? view : CanonView(index, one!.Key, asOf, null);
                 kept = view.Entities.Select(e => e.Path).ToHashSet(StringComparer.Ordinal);
                 sectionsInView = view.Entities.ToDictionary(e => e.Path, e => e.Sections.Select(s => s.Line).ToHashSet(), StringComparer.Ordinal);
             }
@@ -235,6 +233,11 @@ public sealed class DenReader
             {
                 CheckFilter(db, one!, filter, Words);
                 kept = index.Entities(one!.Key, filter).Select(e => e.Path).ToHashSet(StringComparer.Ordinal);
+            }
+
+            if (fieldName is not null)
+            {
+                CheckField(db, universeId, fieldName, metView, asOf);
             }
 
             var scopes = Scopes(db);
@@ -273,10 +276,10 @@ public sealed class DenReader
 
             // Field values come after the text hits, so they're only worth
             // matching while there's room, and while no text hit past the
-            // cap could still come before them.
+            // cap could still come before them (the result is truncated then).
             if (views.Count <= limit && !cutOff)
             {
-                var met = view is null ? null : filter is null ? kept : CanonView(index, one!.Key, asOf, null).Entities.Select(e => e.Path).ToHashSet(StringComparer.Ordinal);
+                var met = metView?.Entities.Select(e => e.Path).ToHashSet(StringComparer.Ordinal);
                 var search = new FieldSearch(index, SearchWords.Parse(query), universeId, fieldName, met);
                 var candidates = view is null
                     ? search.AllValues(e => (type is null || e.Type == type) && (status is null || e.Status == status) && (kept is null || kept.Contains(e.Path)))
@@ -313,18 +316,36 @@ public sealed class DenReader
         var u = ChooseUniverse(db, universe, asOf, allowAll: false)!;
         var names = asOf is null
             ? db.FieldValues.Where(v => v.UniverseId == u.Id).Select(v => v.Field).Distinct().ToList()
-            : CanonView(index, u.Key, asOf, null).Entities.SelectMany(e => e.Fields).Where(f => !f.IsDefault).Select(f => f.Name).Distinct().ToList();
+            : FieldsIn(CanonView(index, u.Key, asOf, null)).ToList();
         names.Sort(StringComparer.Ordinal);
         return new FieldNamesResult(ResultVersion, asOf, names.Count, names);
     });
 
+    /// <summary>The fields of the values a canon view holds, not the types' defaults.</summary>
+    private static IEnumerable<string> FieldsIn(CanonView view) =>
+        view.Entities.SelectMany(e => e.Fields).Where(f => !f.IsDefault).Select(f => f.Name).Distinct();
+
     /// <summary>
     /// Refuses a field no note of the universe (or of the den, for every
-    /// universe) gives a value for. It doesn't list the fields that are, as
-    /// some may be only later notes'.
+    /// universe) gives a value for; as of a position, none the reader has
+    /// met, judged from the same values <see cref="FieldNames"/> lists, so a
+    /// field only later notes have is refused just as a made-up one is. It
+    /// doesn't list the fields that are.
     /// </summary>
-    private static void CheckField(IndexDbContext db, int? universeId, string field)
+    private static void CheckField(IndexDbContext db, int? universeId, string field, CanonView? metView, string? asOf)
     {
+        if (metView is not null)
+        {
+            if (!FieldsIn(metView).Contains(field, StringComparer.Ordinal))
+            {
+                throw new DenToolException(
+                    ToolErrorCodes.BadArgument,
+                    $"No note the reader has met by {asOf} gives a value for a field '{field}', so there's nothing to search in it.");
+            }
+
+            return;
+        }
+
         if (!db.FieldValues.Any(v => v.Field == field && (universeId == null || v.UniverseId == universeId)))
         {
             throw new DenToolException(ToolErrorCodes.BadArgument, $"No note gives a value for a field '{field}', so there's nothing to search in it.");

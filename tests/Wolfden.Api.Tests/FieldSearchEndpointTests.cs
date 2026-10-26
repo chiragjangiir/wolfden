@@ -99,7 +99,7 @@ public class FieldSearchEndpointTests
         }
 
         // An entry counts only where it's in effect: Mara's posting to Kessan Reach starts at ash:4.
-        Assert.Empty(Hits(await server.GetJsonAsync("/api/search?universe=starfall&query=kessan&field=posting&asOf=ash:3", HttpStatusCode.OK)));
+        Assert.Empty(Hits(await server.GetJsonAsync("/api/search?universe=starfall&query=kessan&field=posting&asOf=ash:1", HttpStatusCode.OK)));
         Assert.Single(Hits(await server.GetJsonAsync("/api/search?universe=starfall&query=kessan&field=posting&asOf=ash:4", HttpStatusCode.OK)));
     }
 
@@ -121,6 +121,14 @@ public class FieldSearchEndpointTests
         Assert.DoesNotContain("debts", Fields(early));
         Assert.Contains("home", Fields(early));
         Assert.Contains("debts", Fields(await server.GetJsonAsync("/api/fields?universe=starfall&asOf=ash:1", HttpStatusCode.OK)));
+
+        // Searching a field the reader hasn't met is refused as a made-up one is, in words true of both.
+        var refused = await server.GetJsonAsync("/api/search?universe=starfall&query=three&field=debts&asOf=ember:3", HttpStatusCode.BadRequest);
+        Assert.Equal("bad_argument", refused.GetProperty("code").GetString());
+        Assert.Equal(
+            "No note the reader has met by ember:3 gives a value for a field 'debts', so there's nothing to search in it.",
+            refused.GetProperty("message").GetString());
+        Assert.Single(Hits(await server.GetJsonAsync("/api/search?universe=starfall&query=three&field=debts&asOf=ash:1", HttpStatusCode.OK)));
 
         Assert.Equal("bad_argument", (await server.GetJsonAsync("/api/fields?universe=starfall&as_of=ash:1", HttpStatusCode.BadRequest)).GetProperty("code").GetString());
     }
