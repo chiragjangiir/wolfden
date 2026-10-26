@@ -87,18 +87,12 @@ public static class WolfdenApi
                 .AddFilter("Microsoft.Extensions.Hosting.Internal.Host", LogLevel.None);
         }
 
+        // First of all, ahead of the host's own host filtering, so every
+        // response the app sends gets the headers, its errors included.
+        builder.Services.Insert(0, ServiceDescriptor.Singleton<IStartupFilter>(new SecurityHeaders(options.DenRoot)));
+
         var app = builder.Build();
         app.UseExceptionHandler(errors => errors.Run(InternalError));
-        app.Use((context, next) =>
-        {
-            context.Response.Headers[HeaderNames.XContentTypeOptions] = "nosniff";
-            context.Response.OnStarting(() =>
-            {
-                AddContentSecurityPolicy(context.Response, options.DenRoot);
-                return Task.CompletedTask;
-            });
-            return next(context);
-        });
         app.UseHostFiltering();
         app.UseWhen(context => context.Request.Path.StartsWithSegments("/api"), api => api.Use(CrossSiteGuard));
         MapWebUi(app, options.WebRoot);
@@ -146,6 +140,30 @@ public static class WolfdenApi
     }
 
     /// <summary>
+    /// Adds <c>X-Content-Type-Options: nosniff</c> and a
+    /// Content-Security-Policy to every response, just before it starts,
+    /// so an error handler that clears the headers doesn't drop them.
+    /// </summary>
+    private sealed class SecurityHeaders(string denRoot) : IStartupFilter
+    {
+        public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+        {
+            app.Use((context, rest) =>
+            {
+                var response = context.Response;
+                response.OnStarting(() =>
+                {
+                    response.Headers[HeaderNames.XContentTypeOptions] = "nosniff";
+                    AddContentSecurityPolicy(response, denRoot);
+                    return Task.CompletedTask;
+                });
+                return rest(context);
+            });
+            next(app);
+        };
+    }
+
+    /// <summary>
     /// The Content-Security-Policy of the UI's pages (#180). The built UI
     /// loads its script and stylesheet from this server and has no inline
     /// script or style. Images may come from this server or a <c>data:</c>
@@ -175,7 +193,8 @@ public static class WolfdenApi
 
     /// <summary>
     /// Adds a Content-Security-Policy to a response that hasn't one: <see
-    /// cref="PagePolicy"/> for a page, or <see cref="NonPagePolicy"/>. It's
+    /// cref="PagePolicy"/> for a page (HTML that isn't an error), or <see
+    /// cref="NonPagePolicy"/>. It's
     /// defence in depth; the UI itself shows no image from a website unless
     /// the den allows it (#180). A page reads <c>den.yaml</c> each time, so
     /// a change to <c>remote_images</c> applies on the next load.
@@ -187,7 +206,9 @@ public static class WolfdenApi
             return;
         }
 
-        var page = MediaTypeHeaderValue.TryParse(response.ContentType, out var type)
+        // An error page, such as host filtering's 400, isn't the UI: it loads nothing.
+        var page = response.StatusCode < StatusCodes.Status400BadRequest
+            && MediaTypeHeaderValue.TryParse(response.ContentType, out var type)
             && type.MediaType.Equals("text/html", StringComparison.OrdinalIgnoreCase);
         response.Headers.ContentSecurityPolicy = !page ? NonPagePolicy
             : RemoteImages(denRoot) ? PagePolicyWithRemoteImages

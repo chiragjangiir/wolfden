@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.AspNetCore.Builder;
 
 namespace Wolfden.Api.Tests;
 
@@ -58,6 +59,36 @@ public class ContentSecurityPolicyTests
             Assert.Equal(NotAPage, await PolicyAsync(server, "/api/nothing", HttpStatusCode.NotFound));
             Assert.Equal(NotAPage, await PolicyAsync(server, "/assets/app.js", HttpStatusCode.OK));
             Assert.Equal(NotAPage, await PolicyAsync(server, "/assets/missing.js", HttpStatusCode.NotFound));
+        }
+        finally
+        {
+            Directory.Delete(webRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-36")]
+    public async Task ErrorsGetThePolicyThatLoadsNothing()
+    {
+        using var den = TempDen.Dracula();
+        var webRoot = WebRoot.Built();
+        try
+        {
+            await using var server = await Server.StartAsync(
+                new WolfdenApiOptions(den.Root) { WebRoot = webRoot },
+                app => app.MapGet("/test-failure", (Func<string>)(() => throw new InvalidOperationException("Invented failure."))));
+            var token = TestContext.Current.CancellationToken;
+
+            using var crossSite = new HttpRequestMessage(HttpMethod.Get, "/api/den");
+            crossSite.Headers.Add("Origin", "https://evil.example");
+            Assert.Equal(NotAPage, await PolicyAsync(server, crossSite, HttpStatusCode.Forbidden));
+
+            using var otherHost = new HttpRequestMessage(HttpMethod.Get, "/");
+            otherHost.Headers.Host = "evil.example";
+            Assert.Equal(NotAPage, await PolicyAsync(server, otherHost, HttpStatusCode.BadRequest));
+
+            using var failure = new HttpRequestMessage(HttpMethod.Get, "/test-failure");
+            Assert.Equal(NotAPage, await PolicyAsync(server, failure, HttpStatusCode.InternalServerError));
         }
         finally
         {
@@ -144,8 +175,15 @@ public class ContentSecurityPolicyTests
 
     private static async Task<string> PolicyAsync(Server server, string path, HttpStatusCode expected)
     {
-        using var response = await server.Client.GetAsync(path, TestContext.Current.CancellationToken);
-        Assert.True(expected == response.StatusCode, $"{path}: expected {expected}, got {response.StatusCode}");
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        return await PolicyAsync(server, request, expected);
+    }
+
+    private static async Task<string> PolicyAsync(Server server, HttpRequestMessage request, HttpStatusCode expected)
+    {
+        using var response = await server.Client.SendAsync(request, TestContext.Current.CancellationToken);
+        Assert.True(expected == response.StatusCode, $"{request.RequestUri}: expected {expected}, got {response.StatusCode}");
+        Assert.Equal("nosniff", Assert.Single(response.Headers.GetValues("X-Content-Type-Options")));
         return Assert.Single(response.Headers.GetValues("Content-Security-Policy"));
     }
 }
