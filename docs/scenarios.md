@@ -2336,11 +2336,17 @@ hasn't checkpointed yet.
   checkpoints shows a moved note as a rename. A checkpoint that isn't
   in the repository is an error that says so, and a revision is never
   read as a git option.
+- A patch shows the note's text as it is. A form feed, a lone carriage
+  return, NEL, or a Unicode line or paragraph separator in a note stays
+  inside its line, and a note saved with CRLF line endings keeps them in
+  the patch (#161).
 
 Spec: design.md §6 (#19). Covered by:
 `GitHistoryTests.ADiffSinceTheLatestCheckpointShowsNewChangedAndDeletedNotesAndLeavesTheIndexAlone`,
 `GitHistoryTests.ADiffBetweenTwoCheckpointsShowsARename`,
-`GitHistoryTests.ARevisionThatIsntOneIsAHistoryException`.
+`GitHistoryTests.ARevisionThatIsntOneIsAHistoryException`,
+`GitHistoryTests.APatchKeepsCharactersThatArentLineFeedsAsTheyAre`,
+`GitHistoryTests.ALineInAPatchCantStartAnotherFilesPart`.
 
 ### SC-HIST-7. I freeze a finished book
 

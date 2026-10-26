@@ -451,7 +451,7 @@ public sealed partial class GitHistory : IHistoryProvider
             return HistoryResult<HistoryEntry?>.Done(null);
         }
 
-        var message = new StringBuilder(request.Message.Trim().ReplaceLineEndings("\n")).Append('\n');
+        var message = new StringBuilder(LineFeeds(request.Message.Trim())).Append('\n');
         if (request.CoAuthors is { Count: > 0 } coAuthors)
         {
             message.Append('\n');
@@ -657,7 +657,7 @@ public sealed partial class GitHistory : IHistoryProvider
         GitRun made;
         try
         {
-            made = Start(args, cancellationToken, input: request.Message is null ? null : request.Message.ReplaceLineEndings("\n") + "\n", kind: GitCallKind.MustFinish);
+            made = Start(args, cancellationToken, input: request.Message is null ? null : LineFeeds(request.Message) + "\n", kind: GitCallKind.MustFinish);
         }
         catch (GitTimeoutException e)
         {
@@ -835,7 +835,7 @@ public sealed partial class GitHistory : IHistoryProvider
                 header[0],
                 DateTimeOffset.Parse(header[1], CultureInfo.InvariantCulture),
                 header[2],
-                header[3].ReplaceLineEndings("\n").TrimEnd('\n'),
+                LineFeeds(header[3]).TrimEnd('\n'),
                 changes));
         }
 
@@ -1115,11 +1115,19 @@ public sealed partial class GitHistory : IHistoryProvider
     }
 
     /// <summary>A patch split into one part per file, each starting at its <c>diff --git</c> line.</summary>
+    /// <remarks>
+    /// Git ends every line of a patch with <c>\n</c> alone, so the patch is
+    /// split there and nowhere else (#161). Anything else in a note's text,
+    /// a <c>\r</c>, a form feed, NEL (U+0085), or U+2028 and U+2029, stays
+    /// in its line as it is: a line that holds one is still one line, so it
+    /// can't start a new <c>diff --git</c> part, and a note saved with CRLF
+    /// line endings shows them as git wrote them.
+    /// </remarks>
     private static List<string> SplitPatch(string patch)
     {
         var parts = new List<string>();
         StringBuilder? part = null;
-        foreach (var line in patch.ReplaceLineEndings("\n").Split('\n'))
+        foreach (var line in patch.Split('\n'))
         {
             if (line.StartsWith("diff --git ", StringComparison.Ordinal))
             {
@@ -1141,6 +1149,14 @@ public sealed partial class GitHistory : IHistoryProvider
 
         return parts;
     }
+
+    /// <summary>
+    /// <paramref name="text"/> with its <c>\r\n</c> and lone <c>\r</c> line
+    /// breaks made <c>\n</c>. Unlike <c>ReplaceLineEndings</c>, it leaves a
+    /// form feed, NEL (U+0085), U+2028, and U+2029 as they are (#161): git
+    /// doesn't take them as line breaks.
+    /// </summary>
+    private static string LineFeeds(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
     /// <summary>
     /// The pathspecs for den-relative <paramref name="paths"/>, or for the
