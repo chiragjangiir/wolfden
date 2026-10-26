@@ -38,10 +38,11 @@ internal static class McpCommand
         Runs Wolfden's MCP server over standard input and output, for an AI
         client such as an editor or a desktop assistant. Its tools read the
         den (search, get_entity, list_entities, canon_as_of, get_chapter,
-        check, and get_history, from git when the den is in a git repository)
-        and write to it (create_entity, update_fields, append_section,
-        add_idea, rename_section, and update_chapter_fields, which change the
-        files only, and checkpoint, which commits them with git). It keeps the den's index up to date as files change while it runs.
+        get_chapter_defaults, check, and get_history, from git when the den
+        is in a git repository) and write to it (create_entity, update_fields,
+        append_section, add_idea, rename_section, update_chapter_fields, and
+        update_chapter_defaults, which change the files only,
+        and checkpoint, which commits them with git). It keeps the den's index up to date as files change while it runs.
         If another Wolfden is already watching the den (such as 'wolfden index
         --watch'), it relies on that one, and on a check of the files before
         each call, and doesn't take over the watch. Log messages go to

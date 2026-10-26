@@ -362,7 +362,7 @@ public sealed record WrittenFileView(string Path, string Hash, bool Created = fa
 /// <summary>
 /// The result of a write tool (<c>create_entity</c>, <c>update_fields</c>,
 /// <c>append_section</c>, <c>add_idea</c>, <c>rename_section</c>,
-/// <c>update_chapter_fields</c>). Writes go to the files only: nothing is
+/// <c>update_chapter_fields</c>, <c>update_chapter_defaults</c>). Writes go to the files only: nothing is
 /// committed until <c>checkpoint</c>.
 /// </summary>
 /// <param name="Version">The shape version.</param>
@@ -376,9 +376,11 @@ public sealed record WrittenFileView(string Path, string Hash, bool Created = fa
 /// <param name="Files">Every file written, when there's more than one (a section rename rewrites links in other files).</param>
 /// <param name="Chapter">For <c>update_chapter_fields</c>, the chapter as it is now.</param>
 /// <param name="IdAdded">The id given to a file that had none (format.md F-ID-6), or null.</param>
+/// <param name="ChapterDefaults">For <c>update_chapter_defaults</c>, the container's <c>chapter_defaults</c> as they are now.</param>
 public sealed record WriteResult(
     int Version, bool Changed, string Path, string Hash, EntitySummary? Entity, IReadOnlyList<string> Effects, IReadOnlyList<string> PinnedCanon,
-    IReadOnlyList<DiagnosticView> Warnings, IReadOnlyList<WrittenFileView>? Files = null, ChapterView? Chapter = null, string? IdAdded = null);
+    IReadOnlyList<DiagnosticView> Warnings, IReadOnlyList<WrittenFileView>? Files = null, ChapterView? Chapter = null, string? IdAdded = null,
+    ChapterDefaultsView? ChapterDefaults = null);
 
 /// <summary>One chapter field of a chapter: its own value, and what it inherits (types.md F-CHAP-5).</summary>
 /// <param name="Name">The field name, such as <c>pov</c>.</param>
@@ -411,6 +413,45 @@ public sealed record ChapterView(string Book, string Key, long? Number, string? 
 /// <param name="Count">How many chapters this result holds.</param>
 /// <param name="Chapters">The chapter asked for, or every chapter, in book order.</param>
 public sealed record GetChapterResult(int Version, string Universe, string Book, string Path, string Hash, bool Final, int Count, IReadOnlyList<ChapterView> Chapters);
+
+/// <summary>One field of a container's <c>chapter_defaults</c> (types.md F-CHAP-5).</summary>
+/// <param name="Name">The field name, such as <c>pov</c>.</param>
+/// <param name="Own">The value this container's <c>chapter_defaults</c> sets, as JSON, or null if it doesn't set the field (and its books inherit it from above).</param>
+/// <param name="None">True for a list field this container sets to an empty list, "none here", which stops inheritance from above.</param>
+/// <param name="Inherited">What the container's books would get from the containers above without this container's value, as JSON, or null if none of them sets it.</param>
+/// <param name="InheritedFrom">Where that comes from: <c>series</c> or <c>universe</c>, or null.</param>
+/// <param name="InheritedFromKey">The key of that container, or null.</param>
+/// <param name="Ignored">True if this container writes the field but the value is null or doesn't fit the field, so it's ignored (types.md F-CHAP-3) and its books inherit as if it weren't there; null otherwise.</param>
+/// <param name="Written">For an ignored field, the value as written, as JSON.</param>
+public sealed record ChapterDefaultFieldView(
+    string Name, JsonElement? Own, bool None, JsonElement? Inherited, string? InheritedFrom, string? InheritedFromKey, bool? Ignored = null, JsonElement? Written = null);
+
+/// <summary>A container's <c>chapter_defaults</c>.</summary>
+/// <param name="Kind"><c>universe</c>, <c>series</c>, or <c>book</c>.</param>
+/// <param name="Key">The container's key.</param>
+/// <param name="Path">Its file (<c>universe.md</c>, <c>series.md</c>, or <c>book.md</c>), relative to the den root.</param>
+/// <param name="Fields">Each chapter field it or a container above it sets, in name order.</param>
+public sealed record ChapterDefaultsView(string Kind, string Key, string Path, IReadOnlyList<ChapterDefaultFieldView> Fields);
+
+/// <summary>A book whose chapters a container's <c>chapter_defaults</c> reach.</summary>
+/// <param name="Key">The book's key.</param>
+/// <param name="Final">True if the book is final (frozen): an edit that would change what its chapters have is refused.</param>
+/// <param name="Chapters">How many chapters it has.</param>
+/// <param name="Path">Its <c>book.md</c>, relative to the den root, which tells apart books that share a key (F-KEY-5).</param>
+public sealed record BookBelowView(string Key, bool Final, int Chapters, string Path);
+
+/// <summary>The result of <c>get_chapter_defaults</c>.</summary>
+/// <param name="Version">The shape version.</param>
+/// <param name="Universe">The universe's key.</param>
+/// <param name="Kind"><c>universe</c>, <c>series</c>, or <c>book</c>.</param>
+/// <param name="Key">The container's key.</param>
+/// <param name="Path">Its file, relative to the den root.</param>
+/// <param name="Hash">The SHA-256 of that file's bytes, in lowercase hex: the <c>expected_hash</c> for <c>update_chapter_defaults</c>.</param>
+/// <param name="Final">True for a final (frozen) book, whose defaults can't be edited.</param>
+/// <param name="Fields">Each chapter field it or a container above it sets, in name order.</param>
+/// <param name="Books">The books whose chapters its defaults reach, in story order.</param>
+public sealed record GetChapterDefaultsResult(
+    int Version, string Universe, string Kind, string Key, string Path, string Hash, bool Final, IReadOnlyList<ChapterDefaultFieldView> Fields, IReadOnlyList<BookBelowView> Books);
 
 /// <summary>The result of <c>checkpoint</c>.</summary>
 /// <param name="Version">The shape version.</param>
