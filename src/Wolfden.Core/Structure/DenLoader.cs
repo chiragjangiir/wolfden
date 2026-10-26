@@ -223,25 +223,50 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         return format;
     }
 
+    /// <summary>The <c>den.yaml</c> key that lets the web UI load images from websites (F-DEN-8).</summary>
+    internal const string RemoteImagesKey = "remote_images";
+
     /// <summary>
-    /// F-DEN-6 and F-DEN-7: <c>bookkeeping_sections</c> and
-    /// <c>spoiler_checks</c>. Returns false if <c>bookkeeping_sections</c>
-    /// has the wrong shape, an error that keeps the den from loading.
+    /// A boolean setting in <c>den.yaml</c>: its value, or null when it's
+    /// left out or null (the same as leaving it out, as for order and
+    /// books) or isn't a YAML boolean; then <paramref name="invalid"/> is
+    /// the node that isn't one.
+    /// </summary>
+    internal static bool? ReadBoolean(YamlFile file, string key, out YamlNode? invalid)
+    {
+        invalid = null;
+        switch (file.GetValue(key))
+        {
+            case null or YamlScalar { IsNull: true }:
+                return null;
+            case YamlScalar scalar when scalar.AsBoolean() is bool on:
+                return on;
+            case var node:
+                invalid = node;
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// F-DEN-6, F-DEN-7, and F-DEN-8: <c>bookkeeping_sections</c>,
+    /// <c>spoiler_checks</c>, and <c>remote_images</c>. Returns false if
+    /// <c>bookkeeping_sections</c> has the wrong shape, an error that keeps
+    /// the den from loading.
     /// </summary>
     private bool ReadSettings(YamlFile file)
     {
-        switch (file.GetValue("spoiler_checks"))
+        den.SpoilerChecks = ReadBoolean(file, "spoiler_checks", out var badSpoilers) ?? false;
+        if (badSpoilers is not null)
         {
-            // A null is the same as leaving it out, as for order and books.
-            case null or YamlScalar { IsNull: true }:
-                break;
-            case YamlScalar scalar when scalar.AsBoolean() is bool on:
-                den.SpoilerChecks = on;
-                break;
-            case var node:
-                den.Add(DenFile, new Diagnostic("F-DEN-7", DiagnosticSeverity.Warning, node.Line,
-                    $"spoiler_checks must be true or false, not '{Describe(node)}', so the spoiler checks stay off."));
-                break;
+            den.Add(DenFile, new Diagnostic("F-DEN-7", DiagnosticSeverity.Warning, badSpoilers.Line,
+                $"spoiler_checks must be true or false, not '{Describe(badSpoilers)}', so the spoiler checks stay off."));
+        }
+
+        den.RemoteImages = ReadBoolean(file, RemoteImagesKey, out var badImages) ?? false;
+        if (badImages is not null)
+        {
+            den.Add(DenFile, new Diagnostic("F-DEN-8", DiagnosticSeverity.Warning, badImages.Line,
+                $"remote_images must be true or false, not '{Describe(badImages)}', so images from websites stay blocked."));
         }
 
         var patterns = file.GetValue("bookkeeping_sections");

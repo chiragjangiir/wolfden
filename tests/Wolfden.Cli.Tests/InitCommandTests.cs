@@ -49,6 +49,7 @@ public class InitCommandTests
             format: 1
             # name: My Notes           # display name; defaults to the folder's name
             # spoiler_checks: true     # flag links to things the reader hasn't met yet (F-DEN-7)
+            # remote_images: true      # let the web UI load images from websites in notes (F-DEN-8)
 
             """.ReplaceLineEndings("\n"),
             folder.Read("den.yaml"));

@@ -5,7 +5,7 @@ using static Wolfden.Core.Tests.LinkDens;
 
 namespace Wolfden.Core.Tests;
 
-/// <summary>Loading a den's entities (format.md §5.1, §7) and its link settings (F-DEN-6, F-DEN-7).</summary>
+/// <summary>Loading a den's entities (format.md §5.1, §7) and its settings (F-DEN-6, F-DEN-7, F-DEN-8).</summary>
 public class EntityCatalogTests
 {
     private static (string Path, string Rule, DiagnosticSeverity Severity)[] Rules(IEnumerable<DenDiagnostic> diagnostics) =>
@@ -161,6 +161,40 @@ public class EntityCatalogTests
         Assert.True(den.IsLoaded);
         Assert.Equal(on, den.SpoilerChecks);
         Assert.Equal(warning is null ? [] : [("den.yaml", warning, DiagnosticSeverity.Warning)], Rules(den.Diagnostics));
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-WEB-37")]
+    [InlineData("remote_images: true", true, null)]
+    [InlineData("remote_images: TRUE", true, null)]
+    [InlineData("remote_images: false", false, null)]
+    [InlineData("remote_images:", false, null)]
+    [InlineData("", false, null)]
+    [InlineData("remote_images: yes", false, "F-DEN-8")]
+    [InlineData("remote_images: \"true\"", false, "F-DEN-8")]
+    [InlineData("remote_images: { https: true }", false, "F-DEN-8")]
+    public void RemoteImagesAreABooleanThatDefaultsToOff(string line, bool on, string? warning)
+    {
+        var text = $"format: 1\n{line}\n";
+        var den = DenStructure.Load(MemoryDenSource.Den().With("den.yaml", text));
+
+        Assert.True(den.IsLoaded);
+        Assert.Equal(on, den.RemoteImages);
+        Assert.Equal(warning is null ? [] : [("den.yaml", warning, DiagnosticSeverity.Warning)], Rules(den.Diagnostics));
+
+        // wolfden serve reads the setting straight from the file, the same way.
+        Assert.Equal(on, DenStructure.ReadRemoteImages(System.Text.Encoding.UTF8.GetBytes(text)));
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-WEB-37")]
+    [InlineData("format: 1\nremote_images: true\nremote_images: true\n")]
+    [InlineData("format: 1\nremote_images: [true\n")]
+    [InlineData("remote_images: true\n---\nmore: 1\n")]
+    public void ADenYamlThatDoesntParseLeavesRemoteImagesOff(string text)
+    {
+        Assert.False(DenStructure.ReadRemoteImages(System.Text.Encoding.UTF8.GetBytes(text)));
+        Assert.False(DenStructure.ReadRemoteImages([0xFF, 0xFE, 0x00]));
     }
 
     [Theory]
