@@ -1,56 +1,61 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { renderToStaticMarkup } from 'react-dom/server'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { App } from './App'
-import { ApiRequestError, count, createQueryClient, denQuery, getJson, type DenSummary } from './api'
+import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import { ApiRequestError, count, createQueryClient, getJson } from './api'
+import { den, renderApp, stubApi } from './test/harness'
 
-function render(client: QueryClient): string {
-  return renderToStaticMarkup(
-    <QueryClientProvider client={client}>
-      <App />
-    </QueryClientProvider>,
-  )
-}
-
-function withDen(den: DenSummary): string {
-  const client = new QueryClient()
-  client.setQueryData(denQuery.queryKey, den)
-  return render(client)
-}
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 describe('App', () => {
-  it('shows the den name and its universes', () => {
-    const html = withDen({
-      version: 1,
-      name: 'Dracula',
-      pinnedUniverse: null,
-      universes: [{ key: 'dracula', name: 'Dracula', id: null, series: 0, books: 1, entities: 50 }],
+  it("goes straight to the overview of a den's only universe", async () => {
+    stubApi()
+    const { history } = renderApp('/')
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Dracula' })).toBeTruthy()
+    await waitFor(() => expect(history.location.pathname).toBe('/u/dracula'))
+    expect(screen.getByText(/7 notes in all/)).toBeTruthy()
+  })
+
+  it('lists the universes of a den with several, with a switcher', async () => {
+    stubApi({
+      den: {
+        ...den,
+        name: 'Gothic',
+        universes: [...den.universes, { key: 'carmilla', name: 'Carmilla', id: null, series: 0, books: 1, entities: 1 }],
+      },
     })
+    renderApp('/')
+    const main = await screen.findByRole('main')
 
-    expect(html).toContain('<h1>Dracula</h1>')
-    expect(html).toContain('<code>dracula</code>: 0 series, 1 book, 50 notes')
+    expect(await within(main).findByRole('heading', { name: 'Gothic' })).toBeTruthy()
+    expect(main.textContent).toContain('carmilla: 0 series, 1 book, 1 note')
+    expect(screen.getByRole('combobox', { name: 'Universe' })).toBeTruthy()
   })
 
-  it('says when the den has no universes', () => {
-    expect(withDen({ version: 1, name: 'Empty', pinnedUniverse: null, universes: [] })).toContain('no universes yet')
+  it('says when the den has no universes', async () => {
+    stubApi({ den: { ...den, universes: [] } })
+    renderApp('/')
+
+    expect(await screen.findByText('This den has no universes yet.')).toBeTruthy()
   })
 
-  it('says it is loading before the den arrives', () => {
-    expect(render(new QueryClient())).toContain('Loading the den')
+  it('says it is loading before the den arrives', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    renderApp('/')
+
+    expect(await screen.findByText('Loading the den…')).toBeTruthy()
   })
 
   it("shows the API's message when the den can't be read", async () => {
-    // Rendered once, as the page shows it after the failed fetch, without fetching again on mount.
-    const client = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } })
     const message = "den.yaml doesn't load, so nothing in the den can be read. Run 'wolfden check' to see why."
-    await client
-      .fetchQuery({ queryKey: denQuery.queryKey, queryFn: () => Promise.reject(new ApiRequestError('den_not_loaded', message)), retry: false })
-      .catch(() => undefined)
+    stubApi({ override: () => new Response(JSON.stringify({ code: 'den_not_loaded', message }), { status: 503 }) })
+    renderApp('/')
 
-    const html = render(client)
-
-    expect(html).toContain('role="alert"')
-    expect(html).toContain('Run &#x27;wolfden check&#x27; to see why.')
+    const alert = await within(await screen.findByRole('main')).findByRole('alert')
+    expect(alert.textContent).toBe(message)
   })
 })
 

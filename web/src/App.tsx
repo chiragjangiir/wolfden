@@ -1,40 +1,14 @@
-import { useQuery } from '@tanstack/react-query'
-import { count, denQuery } from './api'
+import { useState } from 'react'
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { RouterProvider, type RouterHistory } from '@tanstack/react-router'
+import { createAppRouter } from './router'
 
-/** The den's name and its universes. The hierarchy browser and the rest of M3 build on this (#24 to #27). */
-export function App() {
-  const den = useQuery(denQuery)
-
-  if (den.isPending) {
-    return <main><p>Loading the den…</p></main>
-  }
-
-  if (den.isError) {
-    return (
-      <main>
-        <h1>Wolfden</h1>
-        <p role="alert">{den.error.message}</p>
-      </main>
-    )
-  }
-
-  const { name, pinnedUniverse, universes } = den.data
+/** The web UI: the den's pages (#24 to #27), routed, with the API's answers cached by TanStack Query. */
+export function App({ queryClient, history }: { queryClient: QueryClient; history?: RouterHistory }) {
+  const [router] = useState(() => createAppRouter(queryClient, history))
   return (
-    <main>
-      <h1>{name}</h1>
-      {pinnedUniverse && <p>Showing only universe <code>{pinnedUniverse}</code>.</p>}
-      {universes.length === 0 ? (
-        <p>This den has no universes yet.</p>
-      ) : (
-        <ul>
-          {universes.map((u) => (
-            <li key={u.key}>
-              <strong>{u.name}</strong> <code>{u.key}</code>: {count(u.series, 'series', 'series')},{' '}
-              {count(u.books, 'book', 'books')}, {count(u.entities, 'note', 'notes')}
-            </li>
-          ))}
-        </ul>
-      )}
-    </main>
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
   )
 }

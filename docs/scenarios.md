@@ -2492,7 +2492,8 @@ Background: `wolfden serve` (design.md §7, §9, #23) hosts the web UI and
 its API on this computer only (127.0.0.1) and opens the default browser.
 v0 has no accounts, so it never listens on the network. The browsing,
 search, and history pages come in M3 (#24 to #27); their read API comes
-first, and SC-WEB-4 to SC-WEB-10 describe what it answers.
+first, and SC-WEB-4 to SC-WEB-10 describe what it answers. SC-WEB-11
+to SC-WEB-17 describe the browsing pages.
 
 ### SC-WEB-1. I open my den in the browser
 
@@ -2696,3 +2697,105 @@ Spec: design.md §9. Covered by:
 `ReadEndpointTests.BadRequestsGetACodeAndAMessage`,
 `ReadEndpointTests.AnEmptyAsOfIsRefusedRatherThanShowingEverything`,
 `HistoryEndpointTests.ARevisionThatCantBeOneIsABadArgumentAndALongOneIsCutShort`.
+
+### SC-WEB-11. I move through the story with the position bar
+
+The writer opens Dracula in the browser. Then they open a link
+bookmarked at chapter 3.
+
+- With no position, the bar says "Everything". The pages ask the API
+  without `asOf`, and there's no reset. At `?at=dracula:3`, the slider,
+  the book menu, and the chapter menu show chapter 3, and every page
+  asks the API as of it.
+- The arrow keys on the slider and the step buttons move one chapter.
+  A step past the last chapter, or End, goes back to everything and
+  takes `at` out of the URL. The book and chapter menus jump there, and
+  "Show everything" resets. The URL reads `?at=dracula:5`.
+- The position carries to the next page through any link. A position
+  the story doesn't have, or a blank `?at=`, shows the API's message and
+  offers to show everything; a blank one is never taken for everything.
+- Each position's answers are cached on their own: while a new position
+  loads, the page says so rather than showing the last position's
+  page, and going back to everything shows its page at once.
+
+Spec: design.md §9 (#26, maintainer decision). Covered by:
+`PositionBar.test.tsx`, `Navigation.test.tsx` (web).
+
+### SC-WEB-12. As of a chapter, the tree hides what the reader hasn't met
+
+The writer sets the bar to Dracula chapter 3.
+
+- Each group in the tree lists only the notes in the view there. The
+  characters list Jonathan and Mina, but not Lucy or Quincey Morris,
+  who enter in chapter 5. "2 more appear later" shows those two greyed,
+  each with "enters at Dracula chapter 5". A note left out for its
+  status, such as an idea, says "not in canon: idea" instead. With no
+  position, every note is listed and there's no peek.
+- An open peek closes when the position changes, or when the writer
+  moves to another chapter's page.
+
+Spec: design.md §9 (#24, #26, maintainer decision). Covered by:
+`Browse.test.tsx`, `Navigation.test.tsx` (web).
+
+### SC-WEB-13. I open a note the reader hasn't met yet
+
+The writer, at Dracula chapter 3, opens Quincey Morris's page from a
+bookmark.
+
+- The page shows only a banner: "Readers first meet Quincey P. Morris in
+  Dracula chapter 5." Nothing else of the note is shown or fetched. A
+  button moves the position to chapter 5, and the page appears there.
+- "Show it anyway" fetches the note's full view and shows it below the
+  banner, greyed, still at chapter 3. Another position, another page,
+  or a reload hides it again.
+
+Spec: design.md §9 (#24, #26, maintainer decision). Covered by:
+`Browse.test.tsx` (web).
+
+### SC-WEB-14. The links on a note's page
+
+- A resolved `[[...]]` link in a section or a field value is a link to
+  that note's page, showing its label or the note's name. A broken link
+  is marked as broken, with why. An ambiguous link is marked, and its
+  tooltip lists the notes it matches. As of a position, a link to a
+  note the reader hasn't met is plain text that doesn't say what it
+  reaches. "Linked from" groups backlinks by the note or book they're
+  in, and says where each one is.
+
+Spec: design.md §9 (#24). Covered by: `Browse.test.tsx`,
+`Navigation.test.tsx` (web).
+
+### SC-WEB-15. A note holds HTML or a script link
+
+A note's lead and a section contain `<script>`, an `<img onerror>`, and
+a `javascript:` link.
+
+- The page renders the note's markdown, but no HTML from it. Nothing is
+  run, and the `javascript:` link has no address.
+
+Spec: design.md §9 (#24). Covered by: `Browse.test.tsx` (web).
+
+### SC-WEB-16. I open a chapter
+
+The writer opens Dracula chapter 5 from the book's page.
+
+- The page names the chapter by its title, "Letters—Lucy and Mina", and
+  lists the notes that enter the story there (Lucy Westenra, Quincey P.
+  Morris), hidden with a peek as of an earlier position. A button reads
+  the den as of this chapter. A chapter the book doesn't have says so.
+
+Spec: design.md §9 (#24). Covered by: `Navigation.test.tsx` (web).
+
+### SC-WEB-17. I bookmark a note that has no id yet
+
+A note without an id is named by its path, such as
+`universes/dracula/notes/the year #1893.md`.
+
+- Its page's URL holds the path, with characters such as spaces and `#`
+  encoded, and opens the note. Reloading it, or opening the bookmark,
+  serves the page, though the URL ends in `.md`. Real files and `/api`
+  are served as before.
+
+Spec: design.md §9 (#24). Covered by:
+`ApiTests.AnEntityPageNamedByItsPathIsServedWithIndexHtml`,
+`Navigation.test.tsx` (web).
