@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { entitiesQuery, positionsQuery } from './api'
@@ -21,6 +21,17 @@ export function usePosition(): { at: string | undefined; setAt: (at: string | un
     [navigate],
   )
   return { at, setAt }
+}
+
+/**
+ * Sets the browser tab's title to `title` · Wolfden, or Wolfden while it's
+ * undefined (as a page loads). Pages pass only names the reader has met at
+ * the position, so a tab never names a note met later.
+ */
+export function useDocumentTitle(title: string | undefined) {
+  useEffect(() => {
+    document.title = title ? `${title} · Wolfden` : 'Wolfden'
+  }, [title])
 }
 
 /** The universe in the URL, if the page is in one. */

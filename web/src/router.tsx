@@ -25,8 +25,9 @@ export interface StorySearch {
 }
 
 export function validateStorySearch(search: Record<string, unknown>): StorySearch {
-  const at = typeof search.at === 'string' ? search.at.trim() : ''
-  return at ? { at } : {}
+  // A blank `at` is kept as '', not taken for everything, so the pages say
+  // it isn't a position rather than quietly showing the whole story.
+  return typeof search.at === 'string' ? { at: search.at.trim() } : {}
 }
 
 /**
@@ -39,7 +40,7 @@ export function parseSearch(text: string): Record<string, unknown> {
 
 export function stringifySearch(search: Record<string, unknown>): string {
   const parts = Object.entries(search)
-    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .filter(([, value]) => value !== undefined && value !== null)
     .map(([name, value]) => `${encodeURIComponent(name)}=${encodeURIComponent(String(value)).replace(/%3A/gi, ':')}`)
   return parts.length ? `?${parts.join('&')}` : ''
 }

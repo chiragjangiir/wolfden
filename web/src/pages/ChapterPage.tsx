@@ -3,7 +3,7 @@ import { Link, getRouteApi } from '@tanstack/react-router'
 import { hierarchyQuery } from '../api'
 import { EntityList } from '../components/EntityList'
 import { ErrorState, Loading } from '../components/States'
-import { useEntitiesInView, usePosition } from '../hooks'
+import { useDocumentTitle, useEntitiesInView, usePosition } from '../hooks'
 import { entryOf } from '../story'
 import { findBook } from './BookPage'
 
@@ -18,6 +18,9 @@ export function ChapterPage() {
   const { at, setAt } = usePosition()
   const hierarchy = useQuery(hierarchyQuery(universe, undefined))
   const view = useEntitiesInView(universe)
+  const titled = hierarchy.data ? findBook(hierarchy.data.universe, book) : null
+  const titledChapter = titled?.book.chapters.find((x) => x.key === chapter)
+  useDocumentTitle(titled && titledChapter ? `${titledChapter.title ?? `Chapter ${titledChapter.key}`} · ${titled.book.name}` : undefined)
 
   if (hierarchy.isPending) {
     return <Loading what="the chapter" />
@@ -76,7 +79,13 @@ export function ChapterPage() {
       ) : view.error ? (
         <ErrorState error={view.error} />
       ) : (
-        <EntityList universe={universe} shown={shown} hidden={hidden} empty="No notes enter the story in this chapter." />
+        <EntityList
+          key={`${b.key}:${c.key}:${at ?? ''}`}
+          universe={universe}
+          shown={shown}
+          hidden={hidden}
+          empty="No notes enter the story in this chapter."
+        />
       )}
       <nav className="prev-next" aria-label="Chapters">
         {prev ? (

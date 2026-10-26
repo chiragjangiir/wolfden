@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { usePosition } from '../hooks'
 import type { EntitySummary } from '../api'
 import type { LaterEntity } from '../story'
 import { EntityLink } from './Links'
@@ -22,9 +23,16 @@ export function EntityList({
   current?: string
   empty?: string
 }) {
-  const [peek, setPeek] = useState(false)
+  // The peek is open only for the list it was opened on: another position,
+  // or another set of hidden notes (another chapter's page), starts closed,
+  // even when the router keeps this component.
+  const { at } = usePosition()
+  const signature = [at ?? '', ...hidden.map((h) => h.entity.key)].join('\n')
+  const [peekedAt, setPeekedAt] = useState<string | null>(null)
+  const peek = peekedAt === signature
   const allLater = hidden.every((h) => h.later)
   const more = `${hidden.length} more ${allLater ? (hidden.length === 1 ? 'appears later' : 'appear later') : 'not in view here'}`
+  const less = allLater ? `Hide the ${hidden.length} not met yet` : `Hide the ${hidden.length} not in view`
 
   return (
     <>
@@ -49,8 +57,8 @@ export function EntityList({
           ))}
       </ul>
       {hidden.length > 0 && (
-        <button type="button" className="peek" aria-expanded={peek} onClick={() => setPeek(!peek)}>
-          {peek ? `Hide the ${hidden.length} not met yet` : more}
+        <button type="button" className="peek" aria-expanded={peek} onClick={() => setPeekedAt(peek ? null : signature)}>
+          {peek ? less : more}
         </button>
       )}
     </>

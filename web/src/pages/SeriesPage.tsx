@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, getRouteApi } from '@tanstack/react-router'
 import { hierarchyQuery } from '../api'
 import { ErrorState, Loading } from '../components/States'
-import { usePosition } from '../hooks'
+import { useDocumentTitle, usePosition } from '../hooks'
 import { BookList, Counts } from './UniversePage'
 
 const route = getRouteApi('/u/$universe/s/$series')
@@ -12,6 +12,7 @@ export function SeriesPage() {
   const { universe, series } = route.useParams()
   const { at } = usePosition()
   const hierarchy = useQuery(hierarchyQuery(universe, at))
+  useDocumentTitle(hierarchy.data?.universe.series.find((x) => x.key === series)?.name)
 
   if (hierarchy.isPending) {
     return <Loading what="the series" />

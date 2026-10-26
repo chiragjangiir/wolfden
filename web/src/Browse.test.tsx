@@ -38,7 +38,7 @@ describe('SC-WEB-12: the tree shows what the reader has met, with a peek at the 
     expect(within(contents).queryByRole('link', { name: 'Quincey P. Morris' })).toBeNull()
     expect(within(contents).queryByRole('link', { name: 'Lucy Westenra' })).toBeNull()
 
-    const peek = within(contents).getByRole('button', { name: '2 more appear later' })
+    const peek = within(contents).getByRole('button', { name: '3 more appear later' })
     expect(peek.getAttribute('aria-expanded')).toBe('false')
     fireEvent.click(peek)
 
@@ -46,7 +46,9 @@ describe('SC-WEB-12: the tree shows what the reader has met, with a peek at the 
     const row = quincey.closest('li')!
     expect(row.className).toBe('later')
     expect(row.textContent).toContain('enters at Dracula chapter 5')
-    expect(within(contents).getByRole('button', { name: 'Hide the 2 not met yet' }).getAttribute('aria-expanded')).toBe('true')
+    expect(within(contents).getByRole('button', { name: 'Hide the 3 not met yet' }).getAttribute('aria-expanded')).toBe('true')
+    // A chapter without a number is named by its title.
+    expect(within(contents).getByRole('link', { name: 'Quincey Harker' }).closest('li')!.textContent).toContain('enters at Dracula, “Note”')
   })
 
   it('says a note out of canon for its status is not in view, rather than later', async () => {
@@ -56,6 +58,7 @@ describe('SC-WEB-12: the tree shows what the reader has met, with a peek at the 
 
     fireEvent.click(await within(contents).findByRole('button', { name: '1 more not in view here' }))
     expect(within(contents).getByRole('link', { name: 'A scene at the inn' }).closest('li')!.textContent).toContain('not in canon: idea')
+    expect(within(contents).getByRole('button', { name: 'Hide the 1 not in view' })).toBeTruthy()
   })
 
   it('compares the unfiltered list with the list as of the position', () => {
@@ -82,6 +85,39 @@ describe('SC-WEB-13: opening a note the reader hasn’t met', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Go to Dracula chapter 5' }))
     await waitFor(() => expect(atOf(history)).toBe('dracula:5'))
     expect(await screen.findByRole('heading', { level: 1, name: 'Quincey P. Morris' })).toBeTruthy()
+  })
+
+  it('"Show it anyway" fetches the full view only on the click, shows it greyed in place, and resets on navigation', async () => {
+    const { calls } = stubApi()
+    const { history } = renderApp('/u/dracula/e/E-QUINCEY?at=dracula:3')
+    const main = await screen.findByRole('main')
+    await within(main).findByText(/Readers first meet/)
+    const fullView = '/api/entity?entity=E-QUINCEY&universe=dracula'
+    expect(calls).not.toContain(fullView)
+
+    fireEvent.click(within(main).getByRole('button', { name: 'Show it anyway' }))
+    const heading = await within(main).findByRole('heading', { level: 1, name: 'Quincey P. Morris' })
+    expect(heading.closest('.revealed')).not.toBeNull()
+    expect(calls).toContain(fullView)
+    expect(within(main).getByText(/Readers first meet/)).toBeTruthy()
+    expect(atOf(history)).toBe('dracula:3')
+    expect(within(main).queryByRole('button', { name: 'Show it anyway' })).toBeNull()
+
+    // Another position starts hidden again.
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Story position' }), { key: 'ArrowLeft' })
+    await waitFor(() => expect(atOf(history)).toBe('dracula:2'))
+    expect(await within(main).findByRole('button', { name: 'Show it anyway' })).toBeTruthy()
+    expect(within(main).queryByRole('heading', { level: 1 })).toBeNull()
+
+    // So does another page, and coming back to this one.
+    fireEvent.click(within(main).getByRole('button', { name: 'Show it anyway' }))
+    await within(main).findByRole('heading', { level: 1, name: 'Quincey P. Morris' })
+    fireEvent.click(within(await screen.findByRole('navigation', { name: 'Contents' })).getAllByRole('link', { name: 'Dracula' })[0])
+    await waitFor(() => expect(history.location.pathname).toBe('/u/dracula'))
+    history.back()
+    await waitFor(() => expect(history.location.pathname).toBe('/u/dracula/e/E-QUINCEY'))
+    expect(await within(await screen.findByRole('main')).findByRole('button', { name: 'Show it anyway' })).toBeTruthy()
+    expect(within(await screen.findByRole('main')).queryByRole('heading', { level: 1, name: 'Quincey P. Morris' })).toBeNull()
   })
 
   it('shows the page itself once the reader has met it', async () => {

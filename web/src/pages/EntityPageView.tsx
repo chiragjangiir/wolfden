@@ -1,4 +1,4 @@
-import { Fragment, useMemo, type ReactNode } from 'react'
+import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, getRouteApi } from '@tanstack/react-router'
 import {
@@ -15,8 +15,8 @@ import {
 import { EntityLink, LinkedText, createLinkMatcher, sectionAnchor } from '../components/Links'
 import { Markdown } from '../components/Markdown'
 import { ErrorState, Loading, StatusBadge } from '../components/States'
-import { useEntitiesInView, usePosition } from '../hooks'
-import { describePosition, entryOf, ordinalOf } from '../story'
+import { useDocumentTitle, useEntitiesInView, usePosition } from '../hooks'
+import { chapterWords, describePosition, entryOf, ordinalOf } from '../story'
 
 const route = getRouteApi('/u/$universe/e/$')
 
@@ -32,6 +32,8 @@ export function EntityPageView() {
   const { at } = usePosition()
   const page = useQuery(entityQuery(universe, key, at))
   const view = useEntitiesInView(universe)
+  // Only the API's page names the note, and it's null when the reader hasn't met it.
+  useDocumentTitle(page.data ? (page.data.entity?.name ?? 'Not met yet') : undefined)
 
   if (page.isPending) {
     return <Loading what="the note" />
@@ -44,15 +46,49 @@ export function EntityPageView() {
   const { entity } = page.data
   if (!entity) {
     const summary = view.all?.entities.find((e) => e.key === key || e.id === key || e.path === key)
-    return <NotInView summary={summary} note={page.data.note} positions={view.positions ?? []} at={at} />
+    // Keyed by the note and the position, so "Show it anyway" resets when either changes.
+    return (
+      <NotInView
+        key={`${key}
+${at ?? ''}`}
+        universe={universe}
+        entityKey={key}
+        summary={summary}
+        note={page.data.note}
+        positions={view.positions ?? []}
+        at={at}
+      />
+    )
   }
 
   return <EntityArticle universe={universe} entity={entity} positions={view.positions ?? []} />
 }
 
-/** The banner for an entity the reader hasn't met at the position. */
-function NotInView({ summary, note, positions, at }: { summary: EntitySummary | undefined; note: string | null; positions: PositionView[]; at: string | undefined }) {
+/**
+ * The banner for an entity the reader hasn't met at the position. "Show it
+ * anyway" (maintainer decision, #26) shows the note's full view below it,
+ * greyed, at the same position; the full view is fetched only on that
+ * click, and the reveal lasts only while this page shows this note at this
+ * position.
+ */
+function NotInView({
+  universe,
+  entityKey,
+  summary,
+  note,
+  positions,
+  at,
+}: {
+  universe: string
+  entityKey: string
+  summary: EntitySummary | undefined
+  note: string | null
+  positions: PositionView[]
+  at: string | undefined
+}) {
   const { setAt } = usePosition()
+  const [revealed, setRevealed] = useState(false)
+  const full = useQuery({ ...entityQuery(universe, entityKey, undefined), enabled: revealed })
   const entry = summary ? entryOf(summary, positions) : null
   const entryOrdinal = entry === null ? -1 : ordinalOf(entry, positions)
   const here = at === undefined ? null : ordinalOf(at, positions)
@@ -82,8 +118,26 @@ function NotInView({ summary, note, positions, at }: { summary: EntitySummary | 
           <button type="button" onClick={() => setAt(undefined)}>
             Show everything
           </button>
+          {!revealed && (
+            <button type="button" onClick={() => setRevealed(true)}>
+              Show it anyway
+            </button>
+          )}
         </p>
       </div>
+      {revealed && (
+        <div className="revealed" aria-label="Shown anyway, from the full view">
+          {full.isPending ? (
+            <Loading what="the note" />
+          ) : full.isError ? (
+            <ErrorState error={full.error} />
+          ) : full.data.entity ? (
+            <EntityArticle universe={universe} entity={full.data.entity} positions={positions} />
+          ) : (
+            <p className="muted">{full.data.note}</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -180,7 +234,7 @@ function shortPosition(position: string, positions: PositionView[]): string {
   }
 
   const oneBook = positions.every((x) => x.book === p.book)
-  return `${oneBook ? '' : `${p.bookName} `}ch. ${p.number ?? p.chapter}`
+  return `${oneBook ? '' : `${p.bookName} `}${p.number !== null ? `ch. ${p.number}` : chapterWords(p)}`
 }
 
 function Span({ from, until, positions }: { from: string | null; until: string | null; positions: PositionView[] }) {

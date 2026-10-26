@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, Navigate } from '@tanstack/react-router'
 import { count, denQuery } from '../api'
 import { ErrorState, Loading } from '../components/States'
+import { useDocumentTitle } from '../hooks'
 
 /**
  * The den's home page. A den with one universe (or a server pinned to one,
@@ -10,6 +11,7 @@ import { ErrorState, Loading } from '../components/States'
  */
 export function Home() {
   const den = useQuery(denQuery)
+  useDocumentTitle(den.data?.name)
 
   if (den.isPending) {
     return <Loading what="the den" />
