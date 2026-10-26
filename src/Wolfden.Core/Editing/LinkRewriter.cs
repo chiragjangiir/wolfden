@@ -30,7 +30,18 @@ internal static class LinkRewriter
     /// <param name="newText">The text the rewrite puts in links, to tell whether a frontmatter value can keep its style.</param>
     internal static Result Rewrite(
         LinkIndex links, IDenSource den, CatalogEntity entity, IReadOnlyList<ResolvedLink> targeting, Func<string, string?, bool> matches,
-        Func<string, string?> replace, string newText, Func<MarkdownFile, MarkdownFile> editOwn)
+        Func<string, string?> replace, string newText, Func<MarkdownFile, MarkdownFile> editOwn) =>
+        Rewrite(links, den, entity, targeting, matches, (text, _) => replace(text), newText, editOwn);
+
+    /// <summary>
+    /// As the other overload, with <paramref name="replace"/> told whether
+    /// the link is in a table row of a body or an outline (a line that
+    /// starts with <c>|</c>), where a <c>|</c> it adds must be written <c>\|</c>
+    /// (F-OUT-12).
+    /// </summary>
+    internal static Result Rewrite(
+        LinkIndex links, IDenSource den, CatalogEntity entity, IReadOnlyList<ResolvedLink> targeting, Func<string, string?, bool> matches,
+        Func<string, bool, string?> replace, string newText, Func<MarkdownFile, MarkdownFile> editOwn)
     {
         var structure = links.Catalog.Structure;
         var containers = structure.Universes.SelectMany(u => new Container[] { u }.Concat(u.Series).Concat(u.Books)).ToDictionary(c => c.FilePath, StringComparer.Ordinal);
@@ -121,7 +132,7 @@ internal static class LinkRewriter
 
     /// <summary>Rewrites each link at <paramref name="places"/> (line, column, target) that passes <paramref name="matches"/>.</summary>
     private static (MarkdownFile File, int Count) RewriteFile(
-        MarkdownFile file, HashSet<(int Line, int Column, string Target)> places, Func<string, string?, bool> matches, Func<string, string?> replace, string newText)
+        MarkdownFile file, HashSet<(int Line, int Column, string Target)> places, Func<string, string?, bool> matches, Func<string, bool, string?> replace, string newText)
     {
         if (places.Count == 0)
         {
@@ -138,7 +149,7 @@ internal static class LinkRewriter
         var found = file.IsOutline ? BodyLinkScanner.ScanOutline(file) : BodyLinkScanner.ScanBody(file);
         foreach (var link in found)
         {
-            if (Matches(link) && replace(text.Substring(link.Link.Offset, link.Link.Length)) is { } replaced)
+            if (Matches(link) && replace(text.Substring(link.Link.Offset, link.Link.Length), InTableRow(text, link.Link.Offset)) is { } replaced)
             {
                 replacements.Add((link.Link.Offset, link.Link.Length, replaced));
             }
@@ -168,7 +179,7 @@ internal static class LinkRewriter
                         foreach (var link in changes.OrderByDescending(l => l.Link.Offset))
                         {
                             var linkText = value.Substring(link.Link.Offset, link.Link.Length);
-                            if (replace(linkText) is { } replaced)
+                            if (replace(linkText, false) is { } replaced)
                             {
                                 value = string.Concat(value.AsSpan(0, link.Link.Offset), replaced, value.AsSpan(link.Link.Offset + link.Link.Length));
                                 count++;
@@ -209,6 +220,18 @@ internal static class LinkRewriter
         }
 
         return (result, count);
+    }
+
+    /// <summary>True if the line that holds <paramref name="offset"/> is a table row: its first character other than spaces and tabs is <c>|</c>.</summary>
+    private static bool InTableRow(string text, int offset)
+    {
+        var start = offset == 0 ? 0 : text.LastIndexOf('\n', offset - 1) + 1;
+        while (start < offset && text[start] is ' ' or '\t')
+        {
+            start++;
+        }
+
+        return start < text.Length && text[start] == '|';
     }
 
     /// <summary>True if splicing <paramref name="text"/> into <paramref name="scalar"/> as written could change how YAML reads it, so the value is written anew instead.</summary>

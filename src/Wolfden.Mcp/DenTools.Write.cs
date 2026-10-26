@@ -947,8 +947,11 @@ public sealed partial class DenTools
     /// <summary>
     /// Writes the files, after checking that none changed since it was read
     /// (<paramref name="originals"/>), and that a new file isn't there yet.
+    /// A file to delete (<paramref name="removed"/>, the old path of a moved
+    /// file) goes last, once every write has been made, so a failure before
+    /// it leaves the old file in place and puts back the rest.
     /// </summary>
-    private void Save(Dictionary<string, byte[]> files, IReadOnlyDictionary<string, byte[]>? originals, string? created)
+    private void Save(Dictionary<string, byte[]> files, IReadOnlyDictionary<string, byte[]>? originals, string? created, string? removed = null)
     {
         foreach (var (path, original) in originals ?? new Dictionary<string, byte[]>())
         {
@@ -969,6 +972,11 @@ public sealed partial class DenTools
                 written.Add(path);
             }
 
+            if (removed is not null)
+            {
+                Store.DeleteFile(removed);
+            }
+
             // A store that failed after replacing a file would leave it written but not
             // listed here; FileSystemDenStore's write is one move, so it can't.
             foreach (var path in written)
@@ -980,7 +988,7 @@ public sealed partial class DenTools
         {
             // One change or none (format.md F-RT-5): put back what was written, newest first,
             // whatever stopped the writes, cancellation included.
-            var failed = files.Keys.Except(written).Order(StringComparer.Ordinal).First();
+            var failed = files.Keys.Except(written).Order(StringComparer.Ordinal).FirstOrDefault();
             var stuck = RollBack(written, files, originals, created);
 
             // A file put back is as the session found it; one that still holds the edit is the session's.
@@ -1001,7 +1009,7 @@ public sealed partial class DenTools
             }
 
             var code = e is DenStoreException { Error: DenStoreError.AlreadyExists } ? ToolErrorCodes.AlreadyExists : ToolErrorCodes.WriteFailed;
-            var said = e is DenStoreException ? e.Message : $"Couldn't write {failed}: {e.Message}";
+            var said = e is DenStoreException ? e.Message : failed is null ? $"Couldn't delete {removed}: {e.Message}" : $"Couldn't write {failed}: {e.Message}";
             throw new DenToolException(
                 code,
                 said + (written.Count == 0 ? " Nothing was written."
@@ -1030,8 +1038,7 @@ public sealed partial class DenTools
                 }
                 else if (path == created)
                 {
-                    // Only a single-file write creates a file, and it's the one that failed if any did,
-                    // so this isn't reached today; it's kept so a multi-file create rolls back too.
+                    // A moved file's new copy (move_entity): the old one is deleted only after every write.
                     Store.DeleteFile(path);
                 }
                 else if (originals is not null && originals.TryGetValue(path, out var original))

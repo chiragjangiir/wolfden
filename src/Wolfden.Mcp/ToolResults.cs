@@ -111,6 +111,14 @@ public static class ToolErrorCodes
     /// <summary>A file of that name is already there, or an id is already used in the den.</summary>
     public const string AlreadyExists = "already_exists";
 
+    /// <summary>
+    /// A move would change where the entity enters canon: the reader meets it
+    /// outside the scope it would move to (format.md F-ENT-6, F-RT-5). The
+    /// message names both ways forward; ask the writer, then call again with
+    /// <c>keep_entry</c> or <c>enter_at_new_scope</c>.
+    /// </summary>
+    public const string EntryOutsideScope = "entry_outside_scope";
+
     /// <summary>The den's files couldn't be written; the message says what the system said.</summary>
     public const string WriteFailed = "write_failed";
 }
@@ -357,12 +365,13 @@ public sealed record HistoryFileDiffView(HistoryChangeView Change, string Patch)
 /// <param name="Path">The file, relative to the den root.</param>
 /// <param name="Hash">The SHA-256 of its new bytes, in lowercase hex: the <c>expected_hash</c> for the next write to it.</param>
 /// <param name="Created">True for a file the write made.</param>
-public sealed record WrittenFileView(string Path, string Hash, bool Created = false);
+/// <param name="MovedFrom">For a file <c>move_entity</c> moved, its old path, which is gone now; otherwise null.</param>
+public sealed record WrittenFileView(string Path, string Hash, bool Created = false, string? MovedFrom = null);
 
 /// <summary>
 /// The result of a write tool (<c>create_entity</c>, <c>update_fields</c>,
 /// <c>append_section</c>, <c>add_idea</c>, <c>rename_section</c>,
-/// <c>rename_entity</c>, <c>change_alias</c>,
+/// <c>rename_entity</c>, <c>change_alias</c>, <c>move_entity</c>,
 /// <c>update_chapter_fields</c>, <c>update_chapter_defaults</c>). Writes go to the files only: nothing is
 /// committed until <c>checkpoint</c>.
 /// </summary>

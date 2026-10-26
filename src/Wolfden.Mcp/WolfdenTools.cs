@@ -284,6 +284,30 @@ public sealed class WolfdenTools
         [Description(RelinksHelp)] bool allow_relinks = false) =>
         Respond(() => _tools.ChangeAlias(entity, alias, expected_hash, new_alias, keep_old_alias, universe, allow_relinks));
 
+    /// <summary>The <c>move_entity</c> tool.</summary>
+    [McpServerTool(Name = "move_entity", Title = "Move an entity to another scope", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]
+    [Description(
+        "Moves an entity's file to another scope of its universe: into a series (to_series), into a book (to_book), or, with neither, " +
+        "into the universe itself. The file keeps its name and its folders under entities/. Canon views stay as they were: an entity " +
+        "with no 'from' gets the point where it entered canon written as 'from', and a link to it that would stop reaching it (scope " +
+        "breaks ties between entities with the same name) is rewritten to its id, showing the same text. If the reader meets the " +
+        "entity outside the new scope (a series character first met in Book 1, moved into Book 2), the move is refused " +
+        "(entry_outside_scope): ask the writer, then call again with keep_entry true (keep where it enters; check then warns about a " +
+        "book entity's 'from' outside its book) or enter_at_new_scope true (it enters at the start of the new scope instead). Nothing " +
+        "moves into or out of a final (frozen) book. If a link that reaches another entity would change target, nothing changes " +
+        "unless allow_relinks is true. The result's path and hash are the file's new ones, and 'files' marks the moved file with its " +
+        "old path." + WriteHelp)]
+    public CallToolResult MoveEntity(
+        [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
+        [Description(HashHelp)] string expected_hash,
+        [Description("Move it into this series (its key).")] string? to_series = null,
+        [Description("Move it into this book (its key).")] string? to_book = null,
+        [Description("If it enters canon outside the new scope: true to keep where it enters, as its 'from'.")] bool keep_entry = false,
+        [Description("If it enters canon outside the new scope: true to have it enter at the start of the new scope instead.")] bool enter_at_new_scope = false,
+        [Description(UniverseHelp)] string? universe = null,
+        [Description(RelinksHelp)] bool allow_relinks = false) =>
+        Respond(() => _tools.MoveEntity(entity, expected_hash, to_series, to_book, keep_entry, enter_at_new_scope, universe, allow_relinks));
+
     private const string RelinksHelp =
         "If true, make the change even though links that reach another entity would change target; they're listed in the result's effects. " +
         "Check them with the writer first.";

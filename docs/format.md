@@ -1470,6 +1470,23 @@ rewrite, in the same change, every reference that depends on the old name:
 - Moving an entity to another scope: any link that would no longer resolve
   to it (F-LINK-7) is rewritten to its id or another unique form. An
   entity without an `id` MUST get one in the same change (F-ID-6).
+  Positions resolve across the universe (F-POS-4), so a move changes no
+  `from` or `until`, but the default of a missing entity `from` depends
+  on scope (F-ENT-6). So an entity without `from` gets the entry point it
+  had before the move written as an explicit `from`, so every canon view
+  stays the same. That's the bare key of the first book at or after that
+  point (F-POS-7), which orders the same for every position. Nothing is
+  written when the new scope starts at that same point. If the entity
+  enters canon outside the new scope (a series-level character the reader
+  first meets in Book 1, moved into Book 2), the writer chooses: keep the
+  old entry point as `from`, accepting the F-ENT-6 warning, or enter
+  canon at the start of the new scope. The app, or a CLI at a terminal,
+  warns and asks. A non-interactive writer (an MCP tool, a script)
+  refuses, with an error that explains the entity is already in canon
+  before the new scope and names both ways forward. The same goes when
+  no position can name the old entry point (the start of a series with
+  no books, with no book after it), except that only entering at the new
+  scope is possible. (Maintainer decision, 2026-10-24, #89.)
 
 The core library's edits each change one file (`WithSectionName` renames
 a heading, for example). The den-wide rewrite belongs to the app's and

@@ -650,6 +650,7 @@ library the API uses. `wolfden mcp` runs it over stdio (§7). Tool surface:
 | `add_idea` | shipped (#21) | Record undecided material with `status: idea` |
 | `rename_section` | shipped (#21) | Rename a section and rewrite the links to it, den-wide (format.md F-RT-5) |
 | `rename_entity` / `change_alias` | shipped (#150) | Change an entity's name, or change or remove an alias, rewriting the links that used the old text den-wide, or keep the old text as an alias (F-RT-5) |
+| `move_entity` | shipped (#89) | Move an entity to another scope of its universe, keeping where it enters canon and rewriting links that would stop reaching it to its id (F-RT-5) |
 | `update_chapter_fields` | shipped (#21) | Set, add to, remove from, or clear a chapter's own fields |
 | `get_chapter_defaults` | shipped (#151) | A universe's, series', or book's `chapter_defaults`, what its books would inherit from above, the books it reaches, and its file's hash |
 | `update_chapter_defaults` | shipped (#151) | Set, add to, remove from, or clear a field of a universe's, series', or book's `chapter_defaults` |
@@ -889,7 +890,31 @@ store, so an edit changes only what it means to (format.md §12):
   reached no entity before, so it's only reported, never refused. A change that only alters case or spacing changes no link
   (F-LINK-4). Renaming an entity to one of its own aliases takes that
   alias out.
-  Moving and copying entities come later (#89, #129).
+- **Moves** (maintainer decision, 2026-10-24, #89). `move_entity`
+  moves an entity's file into a series, a book, or the universe itself,
+  within its universe, keeping its path below `entities/`. It takes the
+  file's hash, refuses a move out of or into a final book, and
+  refuses a file already at the new path (in any case). Canon views stay
+  as they were (format.md F-RT-5): an entity without `from` gets the
+  entry point it had written as `from`, unless the new scope starts at
+  that very point. If the reader meets the entity outside the new scope,
+  the move is refused (`entry_outside_scope`), since MCP can't ask; the
+  error names both ways forward, and `keep_entry` (keep it as `from`,
+  with the F-ENT-6 warning) or `enter_at_new_scope` (take `from` out, so
+  it enters at the new scope's start, which `pinned_canon` flags if it
+  holds pinned facts) makes the move. Neither changes anything when the
+  entry point is inside the new scope. Every link in the den is resolved
+  again as it would be after the move. A link to the entity that would
+  stop reaching it (F-LINK-7 tie-breaks change with scope) is rewritten
+  to its id, showing the same text (`[[id|Tessaly]]`, `\|` in a table
+  row), and the entity gets an id if it has none; if such a link is in a
+  final book, nothing moves. Any other link that would change which
+  entity it reaches, the moved file's own links included, refuses the
+  move unless `allow_relinks`, as for renames, and links that resolve
+  differently are listed in `effects`. The new file and the rewritten
+  ones are written first, and the old file is deleted last, so a
+  failure part way puts everything back, the new file deleted.
+  Copying entities comes later (#129).
 
 ## 9. Architecture
 

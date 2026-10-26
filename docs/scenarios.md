@@ -84,8 +84,8 @@ with no `from`. Later they decide to bring the character back in Book 5.
   shows under change (F-VIEW-3).
 - Moved up with no `from`: the character inherits the start of the series,
   which is the start of Book 1, and now appears from Book 1. That's the
-  specified behavior. It's why a move made by the app or MCP should write
-  the inherited `from` explicitly (#89).
+  specified behavior. It's why a move made by the app or MCP writes the
+  inherited `from` explicitly (F-RT-5, SC-MCP-28).
 - Links from Book 5 resolve in all three cases.
 
 Spec: F-VIEW-1, F-ENT-6, F-ORD-3, F-LINK-5, F-LINK-7. Covered by:
@@ -1963,6 +1963,70 @@ decisions, 2026-10-25 and 2026-10-26). Covered by:
 `RenameEntityToolTests.RemovingAnAliasWhoseLinksWouldReachAnotherEntityIsRefusedWithItsOwnHint`,
 `RenameEntityToolTests.AnAliasThatTakesAnotherEntitysLinksIsRefusedUnlessAllowed`,
 `RenameEntityToolTests.AnAmbiguousLinkThatNowResolvesIsReportedNotRefused`.
+
+### SC-MCP-28. My assistant moves a note to another scope
+
+In the invented Starfall den, The Long Dark is a series of two books,
+Ember then Ash, followed by the standalone A Quiet Moon and The Drift
+War, a series with no books yet. The assistant moves notes between them.
+
+- Ilse Brandt, filed in Ash with no `from`, moves up to the series:
+  `move_entity` moves the file to the series' `entities/characters/`
+  and writes `from: ash`, the point where she entered canon, so she's
+  still out of Ember's views and in from the start of Ash. The result
+  gives the new path and hash, and marks the file with its old path.
+  Moved from the series into Ember, its first book, a character with no
+  `from` gets none: the series starts where Ember does.
+- Mara Voss, a series character from `ember:1`, moved into Ash is
+  refused (`entry_outside_scope`): the reader has already met her when
+  Ash starts, and the error names both ways forward. With `keep_entry`
+  she moves and keeps `from: "ember:1"`, and `check` warns that it's
+  outside her book (F-ENT-6). With `enter_at_new_scope` her `from` is
+  taken out, so she enters at the start of Ash, and since she holds
+  pinned canon the result flags it. A series character with no `from`
+  kept this way gets `from: ember`. A character of The Drift War with no
+  `from` can't keep its entry point, since no position names it, so only
+  `enter_at_new_scope` moves it.
+- With a second Tessaly in A Quiet Moon, the Ember outline's
+  `[[Tessaly]]` and Mara's `[[tessaly]]` reach the series' Tessaly only
+  because it's nearer. Moving it into Ash rewrites both to its id with
+  the same text (`[[01JA...\|Tessaly]]` in the table row), in the same
+  change; a link from Ash, which still reaches it, is left alone. If
+  Ember is final, that outline can't be rewritten, so nothing moves.
+  Nothing moves into or out of a final book either.
+- The Lantern ship moved into Ash would tie with the Lantern item there,
+  so Halden Pike's `[[Lantern]]`, which reaches the item, would become
+  ambiguous: refused, naming the link, unless `allow_relinks`, and then
+  the result lists it. Pike himself moved to the universe would lose his
+  own link to the item: refused the same way. The ship moved to the
+  universe makes the Reach's ambiguous `[[Lantern]]` reach it, which is
+  only reported.
+- A file already at the new path stops the move (`already_exists`). A
+  move that fails part way, writing a file or deleting the old one, puts
+  everything back and leaves no new file. A note without an id gets one.
+  An event whose `row` ids would now resolve among other outlines
+  (moved from the series to the universe) is said in the result.
+
+Spec: format.md F-RT-5, F-ENT-6, F-POS-7, F-ORD-3, F-LINK-7, F-BOOK-1
+(maintainer decisions, 2026-10-24 and 2026-10-26). Covered by:
+`MoveEntityToolTests.ABookEntityWithNoFromMovedUpGetsTheEntryPointItHadAsItsFrom`,
+`MoveEntityToolTests.AMoveThatStartsAtTheSamePointWritesNoFrom`,
+`MoveEntityToolTests.ANarrowingMoveOutsideTheEntryPointIsRefusedNamingBothWaysForward`,
+`MoveEntityToolTests.KeepEntryKeepsTheFromAndItsWarning`,
+`MoveEntityToolTests.EnterAtNewScopeTakesTheFromOutAndFlagsPinnedCanon`,
+`MoveEntityToolTests.ASeriesEntityWithNoFromMovedIntoItsSecondBookWritesTheSeriesStartWithKeepEntry`,
+`MoveEntityToolTests.AnEntryPointNoPositionCanNameNeedsEnterAtNewScope`,
+`MoveEntityToolTests.LinksThatWouldStopReachingItAreRewrittenToItsId`,
+`MoveEntityToolTests.ALinkToRewriteInAFinalBookStopsTheMove`,
+`MoveEntityToolTests.ALinkThatWouldReachAnotherEntityIsRefusedUnlessAllowed`,
+`MoveEntityToolTests.TheMovedFilesOwnLinksCountToo`,
+`MoveEntityToolTests.AnAmbiguousLinkThatNowResolvesIsReported`,
+`MoveEntityToolTests.AFileAlreadyThereStopsTheMove`,
+`MoveEntityToolTests.AMoveThatFailsPartWayPutsBackWhatItWrote`,
+`MoveEntityToolTests.AnEntityWithoutAnIdGetsOneAndOtherArgumentsAreChecked`,
+`MoveEntityToolTests.RowIdsThatNowResolveElsewhereAreSaid`,
+`EntityMoveEditTests.ALinkRewrittenToAnIdShowsTheSameText`,
+`EntityMoveEditTests.AnOverlayCanLeaveAFileOut`.
 
 ## STORE: Wolfden saves, moves, and deletes notes
 
