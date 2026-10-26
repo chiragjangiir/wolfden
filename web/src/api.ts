@@ -256,11 +256,15 @@ function isObject(value: unknown): value is object {
   return typeof value === 'object' && value !== null
 }
 
-/** An API path with its query parameters; those left undefined are left out. */
+/**
+ * An API path with its query parameters; those left undefined are left out.
+ * An empty value is sent as it is, so the API refuses it (an empty `asOf` is
+ * `bad_argument`) rather than the page quietly showing everything.
+ */
 export function apiPath(path: string, params: Record<string, string | number | undefined>): string {
   const query = new URLSearchParams()
   for (const [name, value] of Object.entries(params)) {
-    if (value !== undefined && value !== '') {
+    if (value !== undefined) {
       query.set(name, String(value))
     }
   }

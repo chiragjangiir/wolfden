@@ -2493,7 +2493,7 @@ its API on this computer only (127.0.0.1) and opens the default browser.
 v0 has no accounts, so it never listens on the network. The browsing,
 search, and history pages come in M3 (#24 to #27); their read API comes
 first, and SC-WEB-4 to SC-WEB-10 describe what it answers. SC-WEB-11
-to SC-WEB-15 describe the browsing pages, and SC-WEB-16 and SC-WEB-17
+to SC-WEB-17 describe the browsing pages, and SC-WEB-22 and SC-WEB-23
 the history page.
 
 ### SC-WEB-1. I open my den in the browser
@@ -2713,11 +2713,14 @@ bookmarked at chapter 3.
   takes `at` out of the URL. The book and chapter menus jump there, and
   "Show everything" resets. The URL reads `?at=dracula:5`.
 - The position carries to the next page through any link. A position
-  the story doesn't have shows the API's message and offers to show
-  everything.
+  the story doesn't have, or a blank `?at=`, shows the API's message and
+  offers to show everything; a blank one is never taken for everything.
+- Each position's answers are cached on their own: while a new position
+  loads, the page says so rather than showing the last position's
+  page, and going back to everything shows its page at once.
 
 Spec: design.md §9 (#26, maintainer decision). Covered by:
-`PositionBar.test.tsx` (web).
+`PositionBar.test.tsx`, `Navigation.test.tsx` (web).
 
 ### SC-WEB-12. As of a chapter, the tree hides what the reader hasn't met
 
@@ -2729,9 +2732,11 @@ The writer sets the bar to Dracula chapter 3.
   each with "enters at Dracula chapter 5". A note left out for its
   status, such as an idea, says "not in canon: idea" instead. With no
   position, every note is listed and there's no peek.
+- An open peek closes when the position changes, or when the writer
+  moves to another chapter's page.
 
 Spec: design.md §9 (#24, #26, maintainer decision). Covered by:
-`Browse.test.tsx` (web).
+`Browse.test.tsx`, `Navigation.test.tsx` (web).
 
 ### SC-WEB-13. I open a note the reader hasn't met yet
 
@@ -2739,8 +2744,11 @@ The writer, at Dracula chapter 3, opens Quincey Morris's page from a
 bookmark.
 
 - The page shows only a banner: "Readers first meet Quincey P. Morris in
-  Dracula chapter 5." Nothing else of the note is shown. A button moves
-  the position to chapter 5, and the page appears there.
+  Dracula chapter 5." Nothing else of the note is shown or fetched. A
+  button moves the position to chapter 5, and the page appears there.
+- "Show it anyway" fetches the note's full view and shows it below the
+  banner, greyed, still at chapter 3. Another position, another page,
+  or a reload hides it again.
 
 Spec: design.md §9 (#24, #26, maintainer decision). Covered by:
 `Browse.test.tsx` (web).
@@ -2755,7 +2763,8 @@ Spec: design.md §9 (#24, #26, maintainer decision). Covered by:
   reaches. "Linked from" groups backlinks by the note or book they're
   in, and says where each one is.
 
-Spec: design.md §9 (#24). Covered by: `Browse.test.tsx` (web).
+Spec: design.md §9 (#24). Covered by: `Browse.test.tsx`,
+`Navigation.test.tsx` (web).
 
 ### SC-WEB-15. A note holds HTML or a script link
 
@@ -2767,7 +2776,32 @@ a `javascript:` link.
 
 Spec: design.md §9 (#24). Covered by: `Browse.test.tsx` (web).
 
-### SC-WEB-16. I read what changed in a note
+### SC-WEB-16. I open a chapter
+
+The writer opens Dracula chapter 5 from the book's page.
+
+- The page names the chapter by its title, "Letters—Lucy and Mina", and
+  lists the notes that enter the story there (Lucy Westenra, Quincey P.
+  Morris), hidden with a peek as of an earlier position. A button reads
+  the den as of this chapter. A chapter the book doesn't have says so.
+
+Spec: design.md §9 (#24). Covered by: `Navigation.test.tsx` (web).
+
+### SC-WEB-17. I bookmark a note that has no id yet
+
+A note without an id is named by its path, such as
+`universes/dracula/notes/the year #1893.md`.
+
+- Its page's URL holds the path, with characters such as spaces and `#`
+  encoded, and opens the note. Reloading it, or opening the bookmark,
+  serves the page, though the URL ends in `.md`. Real files and `/api`
+  are served as before.
+
+Spec: design.md §9 (#24). Covered by:
+`ApiTests.AnEntityPageNamedByItsPathIsServedWithIndexHtml`,
+`Navigation.test.tsx` (web).
+
+### SC-WEB-22. I read what changed in a note
 
 The history page shows a change to Mina Harker's note: her status
 moved from draft to canon, a line was added at the end of a file that
@@ -2775,41 +2809,48 @@ had no newline there, and the note was saved with CRLF line endings.
 
 - The change reads as a unified diff: each hunk under its `@@` header,
   each line with its old and new line numbers, removed lines in red and
-  added ones in green, and within a changed line the words that changed
-  ("draft", "canon") marked more strongly. "No newline at end of file"
-  is shown under the line it's about. A carriage return is shown as a
-  visible mark, not dropped. Long lines wrap. The frontmatter is shown
-  as any other text.
+  added ones in green (and named "Removed" and "Added" for a screen
+  reader), and within a changed line the words that changed ("draft",
+  "canon") marked more strongly. "No newline at end of file" is shown
+  under the line it's about. A carriage return, and a NEL, line
+  separator, or paragraph separator, is shown as a visible mark, not
+  dropped. Long lines wrap. The frontmatter is shown as any other text.
 - A rename shows "Renamed from" the old path, and a rename with no edit
-  says there's no change to the text.
+  says there's no change to the text. A note that became a link, or an
+  empty file, or one whose permissions changed, says so in words.
 - HTML in the note, such as `<script>` or `<img onerror>`, is shown as
   text, and nothing in it runs.
 
 Spec: design.md §9 (#27). Covered by: `History.test.tsx` (web).
 
-### SC-WEB-17. I look at a note's history in the browser
+### SC-WEB-23. I look at a note's history in the browser
 
 The writer's den is a git repository with five checkpoints that changed
 Mina Harker, and an edit since. They open her page and pick History.
 
 - The History tab goes to the same page with `?view=history`, keeping
-  the position, and works for a note named by a path. The list shows
-  the checkpoints newest first, twenty at a time, each with when (as
-  "yesterday", with the full date and time in its tooltip), who, its
-  message, and how it changed the note (added, modified, renamed, or
-  deleted). "Show older checkpoints" loads the next page.
+  the position, and works for a note named by a path. The tabs and the
+  breadcrumb are in the same place on both tabs. The list shows the
+  checkpoints newest first, twenty at a time, each with its commit date
+  (as "yesterday", with the full date and time in its tooltip), its
+  author, its message, and how it changed the note (added, modified,
+  renamed, or deleted). "Show older checkpoints" loads the next page.
 - "Uncommitted changes" is on top, and its diff is shown first. With no
   edits since the latest checkpoint, the latest checkpoint's change is
   shown instead. Picking a checkpoint shows what it changed. Ticking two
   compares them, the older as `from` and the newer as `to`, whichever
   is ticked first; ticking a checkpoint and the uncommitted changes
-  compares it with the note as it is now. The choice is kept in the URL.
+  compares it with the note as it is now. The choice is kept in the URL,
+  and a short id in it still marks its row after a reload. A tick
+  doesn't carry over to another note.
 - The page says history ignores the story position, and never asks the
   history endpoints as of one. At a position before the note enters,
-  the page shows the note page's banner and nothing of its history,
-  until the writer picks "Show its history anyway".
+  both tabs show the #26 banner and nothing of the note until "Show it
+  anyway"; the reveal covers both tabs, greyed alike, and is gone after
+  leaving the note and coming Back.
 - In a den without history, the page gives the API's reason and says
   how to start one: `git init` in the den's folder, or `wolfden init
   --git` for a new den. It isn't shown as an error.
 
-Spec: design.md §9 (#27). Covered by: `History.test.tsx` (web).
+Spec: design.md §9 (#27, the reveal as decided on #26). Covered by:
+`History.test.tsx` (web).

@@ -51,7 +51,7 @@ function UniversePositionBar({ universe }: { universe: string }) {
   const next = ordinal === null ? end : Math.floor(ordinal) + 1
   const current: PositionView | undefined = list[index]
   const unknown = at !== undefined && ordinal === null
-  const label = at === undefined ? 'Everything (the end of the story)' : unknown ? `'${at}', which isn't a position in this story` : at === current?.book ? `${current.bookName}, start` : current ? positionLabel(current) : at
+  const label = at === undefined ? 'Everything (the end of the story)' : unknown ? (at === '' ? 'an empty position, which isn’t one in this story' : `'${at}', which isn't a position in this story`) : at === current?.book ? `${current.bookName}, start` : current ? positionLabel(current) : at
 
   const go = (i: number) => setAt(i >= end ? undefined : list[Math.max(0, i)].position)
   const books = [...new Map(list.map((p) => [p.book, p.bookName])).entries()]
@@ -98,7 +98,7 @@ function UniversePositionBar({ universe }: { universe: string }) {
         {chapters.map((p) => (
           <option key={p.position} value={p.position}>
             {chapterWords(p)}
-            {p.title ? `: ${p.title}` : ''}
+            {p.title && p.number !== null ? `: ${p.title}` : ''}
           </option>
         ))}
       </select>

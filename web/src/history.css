@@ -7,10 +7,14 @@
   --diff-removed-word: #f2b8b0;
   --diff-hunk-bg: #eef2f8;
   --diff-hunk-text: #44546a;
+  --change-added: #1a6b2a;
+  --change-deleted: var(--broken);
+  --change-renamed: var(--ambiguous);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
+    --change-added: #7fd08a;
     --diff-added-bg: #1d3320;
     --diff-added-word: #2f5a34;
     --diff-removed-bg: #3c1f1c;
@@ -134,16 +138,35 @@ button.checkpoint-open {
   overflow-wrap: anywhere;
 }
 
-.change-added {
-  color: #1a6b2a;
+.badge.change-added {
+  color: var(--change-added);
+  border-color: currentColor;
 }
 
-.change-deleted {
-  color: var(--broken);
+.badge.change-deleted {
+  color: var(--change-deleted);
+  border-color: currentColor;
 }
 
-.change-renamed {
-  color: var(--ambiguous);
+.badge.change-renamed {
+  color: var(--change-renamed);
+  border-color: currentColor;
+}
+
+mark.diff-word {
+  color: inherit;
+}
+
+/* A note's history shown anyway (#26): greyed, like a note shown anyway. */
+.revealed .checkpoints,
+.revealed .diff-pane,
+.revealed .history-note {
+  filter: grayscale(1);
+  opacity: 0.8;
+}
+
+.revealed button.checkpoint-open {
+  color: var(--later);
 }
 
 .diff-file h3 {

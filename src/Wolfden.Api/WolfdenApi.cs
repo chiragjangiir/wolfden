@@ -149,8 +149,9 @@ public static class WolfdenApi
 
     /// <summary>
     /// Serves the built UI from <paramref name="webRoot"/>, with
-    /// <c>index.html</c> for any other path that isn't a file, so the UI's
-    /// own routes work on reload. Without a built UI, <c>/</c> says how to
+    /// <c>index.html</c> for any other path that isn't a file, and for any
+    /// path under <c>/u</c> (the UI's pages, which can end in a note's file
+    /// name), so the UI's own routes work on reload. Without a built UI, <c>/</c> says how to
     /// build one. Pages are sent with <c>Cache-Control: no-cache</c>, so a
     /// new build shows on the next load.
     /// </summary>
@@ -176,6 +177,12 @@ public static class WolfdenApi
         app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = files });
         app.UseStaticFiles(staticFiles);
         app.MapFallbackToFile("index.html", staticFiles);
+
+        // The UI's own pages are under /u, and an entity without an id is
+        // named by its path, such as .../e/universes/dracula/entities/x.md.
+        // The fallback above skips paths that look like files, so these get
+        // index.html whatever they end in.
+        app.MapFallbackToFile("/u/{**path}", "index.html", staticFiles);
     }
 
     private static void NoCacheForPages(StaticFileResponseContext file)

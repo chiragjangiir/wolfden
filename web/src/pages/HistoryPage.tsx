@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
-import { entityQuery } from '../api'
+import { entityQuery, type ContainerRef } from '../api'
 import { FileDiffView } from '../components/DiffView'
 import { EntityTabs } from '../components/EntityTabs'
 import { ErrorState, Loading } from '../components/States'
 import type { EntitySearch } from '../entitySearch'
-import { useEntitiesInView, usePosition } from '../hooks'
-import { historyDiffQuery, historyQuery, type DiffSelection, type HistoryEntry, type HistoryResult } from '../historyApi'
-import { NotInView } from './EntityPageView'
+import { useDocumentTitle, useEntitiesInView, usePosition } from '../hooks'
+import { historyDiffQuery, historyQuery, type DiffSelection, type HistoryDiffResult, type HistoryEntry, type HistoryResult } from '../historyApi'
+import { Breadcrumb, NotInView } from './EntityPageView'
 import '../history.css'
 
 const route = getRouteApi('/u/$universe/e/$')
@@ -23,51 +23,63 @@ const NOW = 'now'
  * of two compared.
  *
  * History isn't a story view, so it ignores the position. But a note the
- * reader hasn't met at the position stays hidden, as its page is: the page
- * shows the same banner, and the history only when the writer asks for it.
- * Nothing of it is fetched until then.
+ * reader hasn't met at the position stays hidden, as on its Note tab: the
+ * same banner, and its history, greyed, only after "Show it anyway", which
+ * the two tabs share (maintainer decision, #26). Nothing of the history is
+ * fetched until then.
  */
 export function HistoryPage() {
   const { universe, _splat: key = '' } = route.useParams()
   const { at } = usePosition()
-  const page = useQuery({ ...entityQuery(universe, key, at), enabled: at !== undefined })
+  const page = useQuery(entityQuery(universe, key, at))
   const view = useEntitiesInView(universe)
-  const [revealed, setRevealed] = useState<string | null>(null)
+  useDocumentTitle(page.data ? (page.data.entity ? `${page.data.entity.name}: history` : 'Not met yet') : undefined)
 
-  if (at !== undefined && revealed !== `${universe}/${key}`) {
-    if (page.isPending) {
-      return <Loading what="the note" />
-    }
-
-    if (page.isError) {
-      return <ErrorState error={page.error} />
-    }
-
-    if (!page.data.inView) {
-      const summary = view.all?.entities.find((e) => e.key === key || e.id === key || e.path === key)
-      return (
-        <NotInView
-          summary={summary}
-          note={page.data.note}
-          positions={view.positions ?? []}
-          at={at}
-          actions={
-            <button type="button" onClick={() => setRevealed(`${universe}/${key}`)}>
-              Show its history anyway
-            </button>
-          }
-        />
-      )
-    }
+  if (page.isPending) {
+    return <Loading what="the note" />
   }
 
-  return <History universe={universe} entityKey={key} />
+  if (page.isError) {
+    return <ErrorState error={page.error} />
+  }
+
+  if (!page.data.entity) {
+    const summary = view.all?.entities.find((e) => e.key === key || e.id === key || e.path === key)
+    return (
+      <NotInView
+        universe={universe}
+        entityKey={key}
+        summary={summary}
+        note={page.data.note}
+        positions={view.positions ?? []}
+        at={at}
+        className="page-body history"
+      >
+        <History universe={universe} entityKey={key} scope={undefined} />
+      </NotInView>
+    )
+  }
+
+  return <History universe={universe} entityKey={key} scope={page.data.entity.scope} />
 }
 
-function History({ universe, entityKey }: { universe: string; entityKey: string }) {
+/**
+ * The history itself. `scope` is the note's breadcrumb from its page at the
+ * position; for a note shown anyway it's undefined, and the full view gives
+ * it.
+ */
+function History({ universe, entityKey, scope }: { universe: string; entityKey: string; scope: ContainerRef[] | undefined }) {
   const search = route.useSearch()
   const history = useInfiniteQuery(historyQuery(universe, entityKey))
   const uncommitted = useQuery(historyDiffQuery(universe, entityKey, {}))
+  const full = useQuery({ ...entityQuery(universe, entityKey, undefined), enabled: scope === undefined })
+  const crumbs = scope ?? full.data?.entity?.scope
+
+  const entries = history.data?.pages.flatMap((p) => p.entries ?? []) ?? []
+  const hasUncommitted = uncommitted.data?.available === true && (uncommitted.data.diff?.files.length ?? 0) > 0
+  const selection = chooseSelection(search, hasUncommitted, entries, uncommitted.isPending)
+  const available = history.data?.pages[0]?.available === true
+  const diff = useQuery({ ...historyDiffQuery(universe, entityKey, selection ?? {}), enabled: selection !== null && available })
 
   if (history.isPending) {
     return <Loading what="the note's history" />
@@ -78,13 +90,15 @@ function History({ universe, entityKey }: { universe: string; entityKey: string 
   }
 
   const first = history.data.pages[0]
-  const name = first.entity.name
   const header = (
-    <header>
-      <p className="eyebrow">{first.entity.type}</p>
-      <h1>{name}</h1>
+    <>
+      {crumbs && <Breadcrumb universe={universe} scope={crumbs} />}
       <EntityTabs universe={universe} entityKey={entityKey} current="history" />
-    </header>
+      <header>
+        <p className="eyebrow">{first.entity.type}</p>
+        <h1>{first.entity.name}</h1>
+      </header>
+    </>
   )
 
   if (!first.available) {
@@ -96,10 +110,7 @@ function History({ universe, entityKey }: { universe: string; entityKey: string 
     )
   }
 
-  const entries = history.data.pages.flatMap((p) => p.entries ?? [])
-  const hasUncommitted = uncommitted.data?.available === true && (uncommitted.data.diff?.files.length ?? 0) > 0
-  const selection = chooseSelection(search, hasUncommitted, entries, uncommitted.isPending)
-
+  const resolved = resolveSelection(selection, diff.data)
   return (
     <div className="page-body history">
       {header}
@@ -113,10 +124,20 @@ function History({ universe, entityKey }: { universe: string; entityKey: string 
           hasUncommitted={hasUncommitted}
           search={search}
           selection={selection}
+          resolved={resolved}
           more={history.hasNextPage ? () => void history.fetchNextPage() : null}
           loadingMore={history.isFetchingNextPage}
         />
-        <DiffPane universe={universe} entityKey={entityKey} selection={selection} entries={entries} />
+        <div className="diff-pane">
+          {selection !== null && (
+            <DiffPane
+              title={selectionTitle(selection, entries, resolved, diff.isError)}
+              isPending={diff.isPending}
+              error={diff.error}
+              result={diff.data}
+            />
+          )}
+        </div>
       </div>
     </div>
   )
@@ -160,6 +181,34 @@ export function chooseSelection(search: EntitySearch, hasUncommitted: boolean, e
   }
 
   return entries.length > 0 ? { checkpoint: entries[0].id } : null
+}
+
+/**
+ * The commit ids the API resolved the selection's revisions to, so a short
+ * id, a tag, or `HEAD~1` in the URL still finds its row. `to` is null for the
+ * files as they are now. Undefined for a revision not resolved (yet).
+ */
+export interface ResolvedSelection {
+  checkpoint?: string
+  from?: string
+  to?: string | null
+}
+
+export function resolveSelection(selection: DiffSelection | null, result: HistoryDiffResult | undefined): ResolvedSelection {
+  const diff = result?.available ? result.diff : null
+  if (!selection || !diff) {
+    return {}
+  }
+
+  if (selection.checkpoint) {
+    return diff.to ? { checkpoint: diff.to } : {}
+  }
+
+  if (selection.from) {
+    return { from: diff.from ?? undefined, to: selection.to ? (diff.to ?? undefined) : null }
+  }
+
+  return {}
 }
 
 /** "3 days ago", or "just now". */
@@ -216,14 +265,21 @@ interface ListProps {
   hasUncommitted: boolean
   search: EntitySearch
   selection: DiffSelection | null
+  resolved: ResolvedSelection
   more: (() => void) | null
   loadingMore: boolean
 }
 
-function CheckpointList({ universe, entityKey, path, entries, hasUncommitted, search, selection, more, loadingMore }: ListProps) {
+function CheckpointList({ universe, entityKey, path, entries, hasUncommitted, search, selection, resolved, more, loadingMore }: ListProps) {
   const navigate = route.useNavigate()
   const [pending, setPending] = useState<string | null>(null)
-  const compared = search.from ? [search.from, search.to ?? NOW] : pending ? [pending] : []
+  // The rows the URL's compare names: by the ids the API resolved, else as written.
+  const compared = search.from
+    ? [resolved.from ?? search.from, search.to ? (resolved.to ?? search.to) : NOW]
+    : pending
+      ? [pending]
+      : []
+  const selectedId = selection?.checkpoint ? (resolved.checkpoint ?? selection.checkpoint) : undefined
 
   const go = (next: EntitySearch) => {
     void navigate({ to: '/u/$universe/e/$', params: { universe, _splat: entityKey }, search: (prev) => ({ at: prev.at, ...next }) })
@@ -252,16 +308,11 @@ function CheckpointList({ universe, entityKey, path, entries, hasUncommitted, se
   return (
     <div className="checkpoints">
       <h2>Checkpoints</h2>
-      <p className="muted compare-hint">Tick two to compare them.</p>
+      <p className="muted compare-hint">Tick two to compare them. Dates are when each change was written (git's author date).</p>
       <ol>
         {nowRow && (
           <li className={`checkpoint uncommitted${isUncommittedShown ? ' selected' : ''}`} aria-current={isUncommittedShown ? 'true' : undefined}>
-            <input
-              type="checkbox"
-              aria-label="Compare the note as it is now"
-              checked={compared.includes(NOW)}
-              onChange={() => toggle(NOW)}
-            />
+            <input type="checkbox" aria-label="Compare the note as it is now" checked={compared.includes(NOW)} onChange={() => toggle(NOW)} />
             <div>
               {hasUncommitted ? (
                 <button type="button" className="checkpoint-open" onClick={() => go({ view: 'history' })}>
@@ -277,12 +328,12 @@ function CheckpointList({ universe, entityKey, path, entries, hasUncommitted, se
         {entries.map((entry) => {
           const [subject, body] = splitMessage(entry.message)
           const change = entry.changes.find((c) => c.path === path) ?? entry.changes[0]
-          const selected = selection?.checkpoint === entry.id
+          const selected = selectedId === entry.id
           return (
             <li key={entry.id} className={`checkpoint${selected ? ' selected' : ''}`} aria-current={selected ? 'true' : undefined}>
               <input
                 type="checkbox"
-                aria-label={`Compare ${subject || shortId(entry.id)}`}
+                aria-label={`Compare ${subject || '(no message)'} (${shortId(entry.id)})`}
                 checked={compared.includes(entry.id)}
                 onChange={() => toggle(entry.id)}
               />
@@ -296,7 +347,7 @@ function CheckpointList({ universe, entityKey, path, entries, hasUncommitted, se
                   </span>
                 )}
                 <p className="muted checkpoint-meta">
-                  <time dateTime={entry.when} title={absoluteTime(entry.when)}>
+                  <time dateTime={entry.when} title={`Written ${absoluteTime(entry.when)}`}>
                     {relativeTime(entry.when)}
                   </time>{' '}
                   · {entry.author} · <code>{shortId(entry.id)}</code>
@@ -317,44 +368,63 @@ function CheckpointList({ universe, entityKey, path, entries, hasUncommitted, se
   )
 }
 
-/** What the diff shows, in words. */
-function selectionTitle(selection: DiffSelection, entries: HistoryEntry[]): string {
-  const label = (id: string) => {
-    const entry = entries.find((e) => e.id === id)
-    return entry ? `“${splitMessage(entry.message)[0] || shortId(id)}”` : shortId(id)
+/**
+ * What the diff shows, in words. A checkpoint is named by its message when
+ * the list has it, else by the id the API resolved it to; never by what the
+ * URL says, so a revision the API refused is "This change".
+ */
+export function selectionTitle(selection: DiffSelection, entries: HistoryEntry[], resolved: ResolvedSelection, failed: boolean): string {
+  if (!selection.checkpoint && !selection.from) {
+    return 'Uncommitted changes, since the latest checkpoint'
+  }
+
+  if (failed) {
+    return 'This change'
+  }
+
+  const label = (written: string, id: string | undefined): string | null => {
+    const entry = entries.find((e) => e.id === id) ?? entries.find((e) => e.id === written)
+    if (entry) {
+      return `“${splitMessage(entry.message)[0] || shortId(entry.id)}”`
+    }
+
+    return id ? shortId(id) : null
   }
 
   if (selection.checkpoint) {
-    return `What ${label(selection.checkpoint)} changed`
+    const name = label(selection.checkpoint, resolved.checkpoint)
+    return name ? `What ${name} changed` : 'This change'
   }
 
-  if (selection.from) {
-    return selection.to ? `From ${label(selection.from)} to ${label(selection.to)}` : `Since ${label(selection.from)}, up to now`
+  const from = label(selection.from!, resolved.from)
+  const to = selection.to ? label(selection.to, resolved.to ?? undefined) : 'now'
+  if (!from || !to) {
+    return 'This change'
   }
 
-  return 'Uncommitted changes, since the latest checkpoint'
+  return selection.to ? `From ${from} to ${to}` : `Since ${from}, up to now`
 }
 
-function DiffPane({ universe, entityKey, selection, entries }: { universe: string; entityKey: string; selection: DiffSelection | null; entries: HistoryEntry[] }) {
-  const diff = useQuery({ ...historyDiffQuery(universe, entityKey, selection ?? {}), enabled: selection !== null })
-  if (selection === null) {
-    return <div className="diff-pane" />
-  }
-
+/** The diff, under its title, with a short status line for screen readers. */
+function DiffPane({ title, isPending, error, result }: { title: string; isPending: boolean; error: Error | null; result: HistoryDiffResult | undefined }) {
+  const status = isPending ? '' : error ? '' : `Showing: ${title}`
   return (
-    <div className="diff-pane" aria-live="polite">
-      <h2>{selectionTitle(selection, entries)}</h2>
-      {diff.isPending ? (
+    <>
+      <h2>{title}</h2>
+      <p className="visually-hidden" aria-live="polite">
+        {status}
+      </p>
+      {isPending ? (
         <Loading what="the changes" />
-      ) : diff.isError ? (
-        <ErrorState error={diff.error} />
-      ) : !diff.data.available ? (
-        <p className="muted">{diff.data.reason}</p>
-      ) : diff.data.diff && diff.data.diff.files.length > 0 ? (
-        diff.data.diff.files.map((f) => <FileDiffView key={`${f.change.kind}:${f.change.path}`} file={f} />)
+      ) : error ? (
+        <ErrorState error={error} />
+      ) : !result ? null : !result.available ? (
+        <p className="muted">{result.reason}</p>
+      ) : result.diff && result.diff.files.length > 0 ? (
+        result.diff.files.map((f) => <FileDiffView key={`${f.change.kind}:${f.change.path}`} file={f} />)
       ) : (
         <p className="muted">No changes to this note.</p>
       )}
-    </div>
+    </>
   )
 }

@@ -1,5 +1,5 @@
-import { Fragment, useMemo, type ReactNode } from 'react'
-import { pairChanges, parsePatch, type DiffLine, type Segment } from '../diff'
+import { Fragment, memo, useMemo, type ReactNode } from 'react'
+import { describeHeaders, pairChanges, parsePatch, type DiffLine, type Segment } from '../diff'
 import type { FileDiff } from '../historyApi'
 
 /** "Added", "Renamed from notes/mina.md", for a file's heading. */
@@ -16,32 +16,41 @@ export function changeWords(change: FileDiff['change']): string {
   }
 }
 
-// Header lines the file's heading already says, so they aren't repeated.
-const SAID = /^(diff --git |index |--- |\+\+\+ |similarity index |dissimilarity index |rename from |rename to |new file mode |deleted file mode )/
+// Characters git keeps inside a line that would otherwise be invisible or
+// break the line on screen, each shown as a small mark.
+// (Spelled as code points: a line or paragraph separator written as itself
+// would end a line of this source file in some tools.)
+const MARKS: Record<string, { mark: string; name: string }> = {
+  [String.fromCodePoint(0x0d)]: { mark: '␍', name: 'carriage return' },
+  [String.fromCodePoint(0x85)]: { mark: 'NEL', name: 'next line (U+0085)' },
+  [String.fromCodePoint(0x2028)]: { mark: 'LS', name: 'line separator (U+2028)' },
+  [String.fromCodePoint(0x2029)]: { mark: 'PS', name: 'paragraph separator (U+2029)' },
+}
+
+const MARKED = new RegExp(`([${Object.keys(MARKS).join('')}])`)
 
 /**
- * Text as it is, with each carriage return shown as a visible mark rather
- * than dropped, so a note saved with CRLF line endings shows them. Always
- * text: nothing in a note is ever rendered as HTML.
+ * Text as it is, with each carriage return, NEL, line separator, and
+ * paragraph separator shown as a visible mark rather than dropped or taken
+ * as a line break. Always text: nothing in a note is ever rendered as HTML.
  */
 export function VisibleText({ text }: { text: string }) {
-  if (!text.includes('\r')) {
+  if (!MARKED.test(text)) {
     return <>{text}</>
   }
 
-  const pieces = text.split('\r')
   return (
     <>
-      {pieces.map((piece, i) => (
-        <Fragment key={i}>
-          {piece}
-          {i < pieces.length - 1 && (
-            <span className="diff-cr" title="A carriage return (\r)" aria-label="carriage return">
-              ␍
-            </span>
-          )}
-        </Fragment>
-      ))}
+      {text.split(MARKED).map((piece, i) => {
+        const special = i % 2 === 1 ? MARKS[piece] : undefined
+        return special ? (
+          <span key={i} className="diff-cr" title={special.name} aria-label={special.name}>
+            {special.mark}
+          </span>
+        ) : (
+          <Fragment key={i}>{piece}</Fragment>
+        )
+      })}
     </>
   )
 }
@@ -55,9 +64,9 @@ function LineText({ line, segments }: { line: DiffLine; segments: Segment[] | un
     <>
       {segments.map((s, i) =>
         s.changed ? (
-          <span key={i} className="diff-word">
+          <mark key={i} className="diff-word">
             <VisibleText text={s.text} />
-          </span>
+          </mark>
         ) : (
           <VisibleText key={i} text={s.text} />
         ),
@@ -66,15 +75,26 @@ function LineText({ line, segments }: { line: DiffLine; segments: Segment[] | un
   )
 }
 
-const MARK: Record<DiffLine['kind'], string> = { context: ' ', added: '+', removed: '-' }
+/** The +/- column: a sign to see, and a word for a screen reader. */
+function Mark({ kind }: { kind: DiffLine['kind'] }) {
+  if (kind === 'added' || kind === 'removed') {
+    return (
+      <>
+        <span aria-hidden="true">{kind === 'added' ? '+' : '-'}</span>
+        <span className="visually-hidden">{kind === 'added' ? 'Added' : 'Removed'}</span>
+      </>
+    )
+  }
 
-/** One file's change: its heading, then its patch as a unified diff, with line numbers. */
-export function FileDiffView({ file }: { file: FileDiff }) {
-  const parts = useMemo(() => parsePatch(file.patch), [file.patch])
-  const hunks = parts.flatMap((p) => p.hunks)
-  const notes = parts.flatMap((p) => p.headers.filter((h) => !SAID.test(h)))
+  return null
+}
+
+/** The table rows of a parsed patch. */
+function diffRows(patch: string): { rows: ReactNode[]; notes: string[] } {
+  const parts = parsePatch(patch)
+  const notes = describeHeaders(parts)
   const rows: ReactNode[] = []
-  for (const [h, hunk] of hunks.entries()) {
+  for (const [h, hunk] of parts.flatMap((p) => p.hunks).entries()) {
     const segments = pairChanges(hunk.lines)
     rows.push(
       <tr key={`h${h}`} className="diff-hunk">
@@ -84,12 +104,24 @@ export function FileDiffView({ file }: { file: FileDiff }) {
       </tr>,
     )
     hunk.lines.forEach((line, n) => {
+      if (line.kind === 'note') {
+        rows.push(
+          <tr key={`h${h}:${n}`} className="diff-eof">
+            <td colSpan={3} />
+            <td>
+              <VisibleText text={line.text} />
+            </td>
+          </tr>,
+        )
+        return
+      }
+
       rows.push(
         <tr key={`h${h}:${n}`} className={`diff-line diff-${line.kind}`}>
           <td className="diff-number">{line.oldNumber ?? ''}</td>
           <td className="diff-number">{line.newNumber ?? ''}</td>
-          <td className="diff-mark" aria-hidden="true">
-            {MARK[line.kind]}
+          <td className="diff-mark">
+            <Mark kind={line.kind} />
           </td>
           <td className="diff-text">
             <LineText line={line} segments={segments.get(line)} />
@@ -106,6 +138,17 @@ export function FileDiffView({ file }: { file: FileDiff }) {
       }
     })
   }
+
+  return { rows, notes }
+}
+
+/**
+ * One file's change: its heading, then its patch as a unified diff, with
+ * line numbers. Parsed and built once per patch, and not rendered again
+ * unless the file changes, since a long diff is costly to build.
+ */
+export const FileDiffView = memo(function FileDiffView({ file }: { file: FileDiff }) {
+  const { rows, notes } = useMemo(() => diffRows(file.patch), [file.patch])
 
   return (
     <section className="diff-file">
@@ -140,4 +183,4 @@ export function FileDiffView({ file }: { file: FileDiff }) {
       )}
     </section>
   )
-}
+})

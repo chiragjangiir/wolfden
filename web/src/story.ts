@@ -4,29 +4,41 @@ import type { EntitySummary, PositionView } from './api'
 // A position is what the API's asOf takes: "book:chapter", or a bare book key
 // for the start of that book (format.md §8).
 
-/** "chapter 5", or "chapter note" for a chapter without a number. */
-export function chapterWords(p: Pick<PositionView, 'chapter' | 'number'>): string {
-  return `chapter ${p.number ?? p.chapter}`
+/**
+ * A chapter in words: "chapter 5", or, for a chapter without a number (such
+ * as Dracula's closing note), its title in quotes, else "chapter <key>".
+ */
+export function chapterWords(p: Pick<PositionView, 'chapter' | 'number' | 'title'>): string {
+  if (p.number !== null) {
+    return `chapter ${p.number}`
+  }
+
+  return p.title ? `“${p.title}”` : `chapter ${p.chapter}`
 }
 
-/** "Dracula, chapter 5: Letters—Lucy and Mina", for the position bar. */
+/** "Dracula, chapter 5: Letters—Lucy and Mina", or "Dracula, “Note”", for the position bar. */
 export function positionLabel(p: PositionView): string {
   if (p.chapter === null) {
     return `${p.bookName}, start`
   }
 
-  return `${p.bookName}, ${chapterWords(p)}${p.title ? `: ${p.title}` : ''}`
+  return `${p.bookName}, ${chapterWords(p)}${p.title && p.number !== null ? `: ${p.title}` : ''}`
 }
 
 /**
- * A position in words for a sentence: "Dracula chapter 11", or "the start of
- * Dracula" for a bare book key. A position the list doesn't have is given as
+ * A position in words for a sentence: "Dracula chapter 11", "Dracula,
+ * “Note”" for a chapter without a number, or "the start of Dracula" for a
+ * bare book key. A position the list doesn't have is given as
  * written.
  */
 export function describePosition(position: string, positions: readonly PositionView[]): string {
   const exact = positions.find((p) => p.position === position)
   if (exact) {
-    return exact.chapter === null ? `the start of ${exact.bookName}` : `${exact.bookName} ${chapterWords(exact)}`
+    if (exact.chapter === null) {
+      return `the start of ${exact.bookName}`
+    }
+
+    return exact.number === null ? `${exact.bookName}, ${chapterWords(exact)}` : `${exact.bookName} ${chapterWords(exact)}`
   }
 
   const book = positions.find((p) => p.book === position)

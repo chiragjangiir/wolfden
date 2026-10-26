@@ -16,8 +16,9 @@ import { EntityTabs } from '../components/EntityTabs'
 import { EntityLink, LinkedText, createLinkMatcher, sectionAnchor } from '../components/Links'
 import { Markdown } from '../components/Markdown'
 import { ErrorState, Loading, StatusBadge } from '../components/States'
-import { useEntitiesInView, usePosition } from '../hooks'
-import { describePosition, entryOf, ordinalOf } from '../story'
+import { useDocumentTitle, useEntitiesInView, usePosition } from '../hooks'
+import { chapterWords, describePosition, entryOf, ordinalOf } from '../story'
+import { useReveal } from '../reveal'
 
 const route = getRouteApi('/u/$universe/e/$')
 
@@ -33,6 +34,8 @@ export function EntityPageView() {
   const { at } = usePosition()
   const page = useQuery(entityQuery(universe, key, at))
   const view = useEntitiesInView(universe)
+  // Only the API's page names the note, and it's null when the reader hasn't met it.
+  useDocumentTitle(page.data ? (page.data.entity?.name ?? 'Not met yet') : undefined)
 
   if (page.isPending) {
     return <Loading what="the note" />
@@ -45,27 +48,51 @@ export function EntityPageView() {
   const { entity } = page.data
   if (!entity) {
     const summary = view.all?.entities.find((e) => e.key === key || e.id === key || e.path === key)
-    return <NotInView summary={summary} note={page.data.note} positions={view.positions ?? []} at={at} />
+    // "Show it anyway" is shared with the History tab, and resets when the note or position changes (EntityRoute).
+    return (
+      <NotInView
+        universe={universe}
+        entityKey={key}
+        summary={summary}
+        note={page.data.note}
+        positions={view.positions ?? []}
+        at={at}
+      />
+    )
   }
 
   return <EntityArticle universe={universe} entity={entity} positions={view.positions ?? []} />
 }
 
-/** The banner for an entity the reader hasn't met at the position, with any `actions` a page adds. */
+/**
+ * The banner for an entity the reader hasn't met at the position. "Show it
+ * anyway" (maintainer decision, #26) shows the note below it, greyed, at the
+ * same position: by default its full view, which is fetched only on that
+ * click, or what a tab passes as `children`, such as its history. The
+ * reveal is shared by the note's tabs, and lasts only while they show this
+ * note at this position (see reveal.tsx).
+ */
 export function NotInView({
+  universe,
+  entityKey,
   summary,
   note,
   positions,
   at,
-  actions,
+  className = 'page-body',
+  children,
 }: {
+  universe: string
+  entityKey: string
   summary: EntitySummary | undefined
   note: string | null
   positions: PositionView[]
   at: string | undefined
-  actions?: ReactNode
+  className?: string
+  children?: ReactNode
 }) {
   const { setAt } = usePosition()
+  const { revealed, reveal } = useReveal()
   const entry = summary ? entryOf(summary, positions) : null
   const entryOrdinal = entry === null ? -1 : ordinalOf(entry, positions)
   const here = at === undefined ? null : ordinalOf(at, positions)
@@ -73,7 +100,7 @@ export function NotInView({
   const where = entry === null ? '' : describePosition(entry, positions)
 
   return (
-    <div className="page-body">
+    <div className={className}>
       <div className="banner" role="status">
         {later ? (
           <p>
@@ -95,10 +122,37 @@ export function NotInView({
           <button type="button" onClick={() => setAt(undefined)}>
             Show everything
           </button>
-          {actions}
+          {!revealed && (
+            <button type="button" onClick={reveal}>
+              Show it anyway
+            </button>
+          )}
         </p>
       </div>
+      {revealed && (
+        <div className="revealed" aria-label="Shown anyway, from the full view">
+          {children ?? <FullEntity universe={universe} entityKey={entityKey} positions={positions} />}
+        </div>
+      )}
     </div>
+  )
+}
+
+/** A note's full view (no position), for "Show it anyway". */
+function FullEntity({ universe, entityKey, positions }: { universe: string; entityKey: string; positions: PositionView[] }) {
+  const full = useQuery(entityQuery(universe, entityKey, undefined))
+  if (full.isPending) {
+    return <Loading what="the note" />
+  }
+
+  if (full.isError) {
+    return <ErrorState error={full.error} />
+  }
+
+  return full.data.entity ? (
+    <EntityArticle universe={universe} entity={full.data.entity} positions={positions} />
+  ) : (
+    <p className="muted">{full.data.note}</p>
   )
 }
 
@@ -140,7 +194,7 @@ export function stripTitle(lead: string | null, name: string): string {
   return lines.join('\n').trim()
 }
 
-function Breadcrumb({ universe, scope }: { universe: string; scope: ContainerRef[] }) {
+export function Breadcrumb({ universe, scope }: { universe: string; scope: ContainerRef[] }) {
   return (
     <nav className="breadcrumb" aria-label="Where this is filed">
       {scope.map((c, i) => (
@@ -195,7 +249,7 @@ function shortPosition(position: string, positions: PositionView[]): string {
   }
 
   const oneBook = positions.every((x) => x.book === p.book)
-  return `${oneBook ? '' : `${p.bookName} `}ch. ${p.number ?? p.chapter}`
+  return `${oneBook ? '' : `${p.bookName} `}${p.number !== null ? `ch. ${p.number}` : chapterWords(p)}`
 }
 
 function Span({ from, until, positions }: { from: string | null; until: string | null; positions: PositionView[] }) {

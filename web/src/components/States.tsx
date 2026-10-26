@@ -17,7 +17,7 @@ export function Loading({ what }: { what: string }) {
  */
 export function ErrorState({ error }: { error: Error }) {
   const { at, setAt } = usePosition()
-  const badPosition = error instanceof ApiRequestError && error.code === 'bad_position'
+  const badPosition = error instanceof ApiRequestError && (error.code === 'bad_position' || (error.code === 'bad_argument' && at !== undefined))
   return (
     <div className="error" role="alert">
       <p>{error.message}</p>

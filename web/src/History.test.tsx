@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { pairChanges, parsePatch, wordDiff } from './diff'
+import { describeHeaders, pairChanges, parsePatch, wordDiff } from './diff'
 import { FileDiffView } from './components/DiffView'
-import { chooseSelection, relativeTime } from './pages/HistoryPage'
+import { chooseSelection, relativeTime, resolveSelection, selectionTitle } from './pages/HistoryPage'
 import { validateEntitySearch } from './entitySearch'
-import type { FileDiff, HistoryDiffResult, HistoryEntry, HistoryResult } from './historyApi'
-import { entities, renderApp, stubApi } from './test/harness'
+import { historyDiffQuery, isCommitId, type FileDiff, type HistoryDiffResult, type HistoryEntry, type HistoryResult } from './historyApi'
+import { entities, page, renderApp, stubApi } from './test/harness'
 
 afterEach(() => {
   cleanup()
@@ -35,7 +35,7 @@ const PATCH = [
   '',
 ].join('\n')
 
-describe('SC-WEB-16: a note’s diff, read as a unified diff', () => {
+describe('SC-WEB-22: a note’s diff, read as a unified diff', () => {
   it('parses hunks into numbered context, removed, and added lines', () => {
     const [part] = parsePatch(PATCH)
     expect(part.headers).toEqual(['diff --git a/notes/mina.md b/notes/mina.md', 'index 1111111..2222222 100644', '--- a/notes/mina.md', '+++ b/notes/mina.md'])
@@ -141,6 +141,56 @@ describe('SC-WEB-16: a note’s diff, read as a unified diff', () => {
     render(<FileDiffView file={{ change: { kind: 'modified', path: 'n.md', oldPath: null }, patch: 'diff --git a/n.md b/n.md\nBinary files a/n.md and b/n.md differ\n' }} />)
     expect(screen.getByText('Binary files a/n.md and b/n.md differ')).toBeTruthy()
   })
+
+  it('names added and removed lines for a screen reader', () => {
+    const { container } = render(<FileDiffView file={{ change: { kind: 'modified', path: 'notes/mina.md', oldPath: null }, patch: PATCH }} />)
+    const removed = container.querySelector('.diff-removed .diff-mark')!
+    const added = container.querySelector('.diff-added .diff-mark')!
+    expect(removed.getAttribute('aria-hidden')).toBeNull()
+    expect(removed.querySelector('.visually-hidden')!.textContent).toBe('Removed')
+    expect(added.querySelector('.visually-hidden')!.textContent).toBe('Added')
+    expect(added.querySelector('[aria-hidden="true"]')!.textContent).toBe('+')
+    expect(container.querySelector('.diff-context .diff-mark')!.textContent).toBe('')
+  })
+
+  it('keeps a "\\" line with no line before it, rather than dropping it', () => {
+    const patch = 'diff --git a/n.md b/n.md\n--- a/n.md\n+++ b/n.md\n@@ -1 +1 @@\n\\ No newline at end of file\n-a\n+b\n'
+    const lines = parsePatch(patch)[0].hunks[0].lines
+    expect(lines.map((l) => [l.kind, l.text])).toEqual([
+      ['note', '\\ No newline at end of file'],
+      ['removed', 'a'],
+      ['added', 'b'],
+    ])
+
+    render(<FileDiffView file={{ change: { kind: 'modified', path: 'n.md', oldPath: null }, patch }} />)
+    expect(screen.getByText('\\ No newline at end of file')).toBeTruthy()
+  })
+
+  it('shows NEL, line separators, and paragraph separators as marks', () => {
+    const [nel, ls, ps] = [0x85, 0x2028, 0x2029].map((c) => String.fromCodePoint(c))
+    const patch = `diff --git a/n.md b/n.md\n--- a/n.md\n+++ b/n.md\n@@ -0,0 +1 @@\n+a${nel}b${ls}c${ps}d\n`
+    const { container } = render(<FileDiffView file={{ change: { kind: 'added', path: 'n.md', oldPath: null }, patch }} />)
+    const marks = [...container.querySelectorAll('.diff-cr')]
+    expect(marks.map((m) => m.textContent)).toEqual(['NEL', 'LS', 'PS'])
+    expect(marks.map((m) => m.getAttribute('aria-label'))).toEqual(['next line (U+0085)', 'line separator (U+2028)', 'paragraph separator (U+2029)'])
+    expect(container.querySelector('.diff-added .diff-text')!.textContent).toBe('aNELbLScPSd')
+  })
+
+  it('puts git’s mode and empty-file headers into words', () => {
+    const typeChange = (from: string, to: string) => [
+      { headers: ['diff --git a/n.md b/n.md', `deleted file mode ${from}`], hunks: [] },
+      { headers: ['diff --git a/n.md b/n.md', `new file mode ${to}`], hunks: [] },
+    ]
+    expect(describeHeaders(typeChange('100644', '120000'))).toEqual(['Became a link'])
+    expect(describeHeaders(typeChange('120000', '100644'))).toEqual(['Was a link'])
+    expect(describeHeaders(parsePatch('diff --git a/n.md b/n.md\nold mode 100644\nnew mode 100755\n'))).toEqual(['Permissions changed'])
+    expect(describeHeaders(parsePatch('diff --git a/n.md b/n.md\nnew file mode 100644\nindex 0000000..e69de29\n'))).toEqual(['Empty file'])
+    expect(describeHeaders(parsePatch('diff --git a/n.md b/n.md\nnew file mode 120000\nindex 0000000..1111111\n--- /dev/null\n+++ b/n.md\n@@ -0,0 +1 @@\n+target.md\n\\ No newline at end of file\n'))).toEqual(['A link'])
+
+    render(<FileDiffView file={{ change: { kind: 'added', path: 'n.md', oldPath: null }, patch: 'diff --git a/n.md b/n.md\nnew file mode 100644\nindex 0000000..e69de29\n' }} />)
+    expect(screen.getByText('Empty file')).toBeTruthy()
+    expect(screen.queryByText(/new file mode/)).toBeNull()
+  })
 })
 
 // A history of Mina Harker's note: three checkpoints a page, five in all.
@@ -182,6 +232,13 @@ function historyApi(options: { uncommitted?: boolean; available?: boolean } = {}
       const checkpoint = params.get('checkpoint')
       const from = params.get('from')
       const to = params.get('to')
+      // As git resolves a revision: a full or short id, or HEAD~1.
+      const resolve = (rev: string) => (rev === 'HEAD~1' ? allEntries[1].id : allEntries.find((e) => e.id.startsWith(rev))?.id)
+      const refused = [checkpoint, from, to].find((rev) => rev !== null && resolve(rev) === undefined)
+      if (refused !== undefined) {
+        return new Response(JSON.stringify({ code: 'unknown_checkpoint', message: 'There is no such checkpoint.' }), { status: 404 })
+      }
+
       let files: FileDiff[] = []
       if (checkpoint) {
         files = [{ change: { kind: 'modified', path: mina.path, oldPath: null }, patch: patchOf(`what ${checkpoint} changed`) }]
@@ -195,7 +252,10 @@ function historyApi(options: { uncommitted?: boolean; available?: boolean } = {}
         return { version: 1, entity: mina, backend: 'none', available: false, reason: 'No history.', diff: null } satisfies HistoryDiffResult
       }
 
-      return { version: 1, entity: mina, backend: 'git', available: true, reason: null, diff: { from: from ?? checkpoint, to, files } } satisfies HistoryDiffResult
+      const resolved = checkpoint
+        ? { from: allEntries[allEntries.findIndex((e) => e.id === resolve(checkpoint)) + 1]?.id ?? null, to: resolve(checkpoint)! }
+        : { from: from ? resolve(from)! : allEntries[0].id, to: to ? resolve(to)! : null }
+      return { version: 1, entity: mina, backend: 'git', available: true, reason: null, diff: { ...resolved, files } } satisfies HistoryDiffResult
     }
 
     return undefined
@@ -204,7 +264,7 @@ function historyApi(options: { uncommitted?: boolean; available?: boolean } = {}
 
 const search = (history: { location: { search: string } }) => new URLSearchParams(history.location.search)
 
-describe('SC-WEB-17: I look at a note’s history in the browser', () => {
+describe('SC-WEB-23: I look at a note’s history in the browser', () => {
   it('opens from a History tab on the note’s page, keeping the position', async () => {
     stubApi({ override: historyApi() })
     const { history } = renderApp('/u/dracula/e/E-MINA?at=dracula:3')
@@ -221,7 +281,10 @@ describe('SC-WEB-17: I look at a note’s history in the browser', () => {
   })
 
   it('works for an entity named by a path with slashes', async () => {
-    const { calls } = stubApi({ override: historyApi() })
+    const { calls } = stubApi({
+      override: historyApi(),
+      entityPage: (key, at) => ({ version: 1, view: at ? 'canon_as_of' : 'full', position: at, inView: true, note: null, entity: page({ ...mina, key, id: null, path: key }) }),
+    })
     renderApp('/u/dracula/e/universes/dracula/books/dracula/mina.md?view=history')
 
     await screen.findByRole('heading', { name: 'Checkpoints' })
@@ -288,18 +351,18 @@ describe('SC-WEB-17: I look at a note’s history in the browser', () => {
     const { history } = renderApp('/u/dracula/e/E-MINA?view=history')
 
     // Ticked newer first: the order of ticking doesn't matter.
-    fireEvent.click(await screen.findByRole('checkbox', { name: 'Compare Mina keeps a journal' }))
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Compare Fix a typo' }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Compare Mina keeps a journal (c5aaaaa)' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Compare Fix a typo (c3ccccc)' }))
 
     await screen.findByText('from c3cccccccc to c5aaaaaaaa')
     expect(search(history).get('from')).toBe('c3cccccccc')
     expect(search(history).get('to')).toBe('c5aaaaaaaa')
     expect(screen.getByRole('heading', { name: 'From “Fix a typo” to “Mina keeps a journal”' })).toBeTruthy()
     expect(calls).toContain('/api/history/diff?entity=E-MINA&universe=dracula&from=c3cccccccc&to=c5aaaaaaaa')
-    expect((screen.getByRole('checkbox', { name: 'Compare Fix a typo' }) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByRole('checkbox', { name: 'Compare Fix a typo (c3ccccc)' }) as HTMLInputElement).checked).toBe(true)
 
     // Unticking one goes back to the default view.
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Compare Fix a typo' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Compare Fix a typo (c3ccccc)' }))
     await waitFor(() => expect(search(history).get('from')).toBeNull())
   })
 
@@ -307,7 +370,7 @@ describe('SC-WEB-17: I look at a note’s history in the browser', () => {
     stubApi({ override: historyApi() })
     const { history } = renderApp('/u/dracula/e/E-MINA?view=history')
 
-    fireEvent.click(await screen.findByRole('checkbox', { name: 'Compare Rename Mina' }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Compare Rename Mina (c4bbbbb)' }))
     fireEvent.click(screen.getByRole('checkbox', { name: 'Compare the note as it is now' }))
     await screen.findByText('from c4bbbbbbbb to now')
     expect(search(history).get('from')).toBe('c4bbbbbbbb')
@@ -334,13 +397,148 @@ describe('SC-WEB-17: I look at a note’s history in the browser', () => {
     expect(banner.textContent).toBe('Readers first meet Quincey P. Morris in Dracula chapter 5.')
     expect(calls.some((c) => c.startsWith('/api/history'))).toBe(false)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show its history anyway' }))
-    await screen.findByRole('heading', { name: 'Checkpoints' })
+    fireEvent.click(screen.getByRole('button', { name: 'Show it anyway' }))
+    const heading = await screen.findByRole('heading', { name: 'Checkpoints' })
     expect(calls).toContain('/api/history?entity=E-QUINCEY&universe=dracula&limit=20')
+    // Greyed as a note shown anyway is, with the breadcrumb and tabs from the full view.
+    const revealed = heading.closest('.revealed')!
+    expect(revealed).toBeTruthy()
+    await within(revealed as HTMLElement).findByRole('navigation', { name: 'Where this is filed' })
+  })
+
+  it('shares "Show it anyway" between the Note and History tabs', async () => {
+    stubApi({ override: historyApi() })
+    const { history } = renderApp('/u/dracula/e/E-QUINCEY?at=dracula:3')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Show it anyway' }))
+    const tabs = await screen.findByRole('navigation', { name: 'Note views' })
+    fireEvent.click(within(tabs).getByRole('link', { name: 'History' }))
+
+    await screen.findByRole('heading', { name: 'Checkpoints' })
+    expect(search(history).get('view')).toBe('history')
+    expect(screen.getByText(/Readers first meet/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Show it anyway' })).toBeNull()
+
+    // And back: the note is still shown anyway.
+    fireEvent.click(within(await screen.findByRole('navigation', { name: 'Note views' })).getByRole('link', { name: 'Note' }))
+    await screen.findByRole('heading', { level: 1, name: 'Quincey P. Morris' })
+    expect(screen.queryByRole('button', { name: 'Show it anyway' })).toBeNull()
+  })
+
+  it('hides a revealed history again after leaving the note and coming Back, or changing the position', async () => {
+    const { calls } = stubApi({ override: historyApi() })
+    const { history } = renderApp('/u/dracula/e/E-QUINCEY?view=history&at=dracula:3')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Show it anyway' }))
+    await screen.findByRole('heading', { name: 'Checkpoints' })
+
+    history.push('/u/dracula/e/E-LUCY?view=history&at=dracula:3')
+    await screen.findByText('Lucy Westenra')
+    expect(screen.queryByRole('heading', { name: 'Checkpoints' })).toBeNull()
+
+    history.back()
+    await screen.findByText('Quincey P. Morris')
+    expect(screen.queryByRole('heading', { name: 'Checkpoints' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Show it anyway' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show it anyway' }))
+    await screen.findByRole('heading', { name: 'Checkpoints' })
+    history.replace('/u/dracula/e/E-QUINCEY?view=history&at=dracula:4')
+    await screen.findByRole('button', { name: 'Show it anyway' })
+    expect(screen.queryByRole('heading', { name: 'Checkpoints' })).toBeNull()
+    expect(calls.filter((c) => c.startsWith('/api/history?entity=E-LUCY'))).toEqual([])
+  })
+
+  it('doesn’t carry a compare tick over to another note', async () => {
+    stubApi({ override: historyApi() })
+    const { history } = renderApp('/u/dracula/e/E-MINA?view=history')
+
+    const box = await screen.findByRole('checkbox', { name: 'Compare Fix a typo (c3ccccc)' })
+    fireEvent.click(box)
+    expect((box as HTMLInputElement).checked).toBe(true)
+
+    history.push('/u/dracula/e/E-JONATHAN?view=history')
+    // Jonathan's page has its own breadcrumb trail; wait for it, then for his list.
+    await screen.findByRole('heading', { level: 1, name: 'Mina Harker' })
+    await waitFor(() => expect(document.title).toContain('Jonathan Harker'))
+    const other = await screen.findByRole('checkbox', { name: 'Compare Fix a typo (c3ccccc)' })
+    expect((other as HTMLInputElement).checked).toBe(false)
+    expect(screen.getAllByRole('checkbox').some((b) => (b as HTMLInputElement).checked)).toBe(false)
+  })
+
+  it('finds the rows a short id or HEAD~1 in the URL names, after a reload', async () => {
+    stubApi({ override: historyApi() })
+    renderApp('/u/dracula/e/E-MINA?view=history&checkpoint=c3cc')
+
+    await screen.findByText('what c3cc changed')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Fix a typo' }).closest('li')!.getAttribute('aria-current')).toBe('true'))
+    expect(screen.getByRole('heading', { name: 'What “Fix a typo” changed' })).toBeTruthy()
+    cleanup()
+
+    renderApp('/u/dracula/e/E-MINA?view=history&from=c3cc&to=HEAD~1')
+    await screen.findByText('from c3cc to HEAD~1')
+    await waitFor(() => expect((screen.getByRole('checkbox', { name: 'Compare Rename Mina (c4bbbbb)' }) as HTMLInputElement).checked).toBe(true))
+    expect((screen.getByRole('checkbox', { name: 'Compare Fix a typo (c3ccccc)' }) as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByRole('heading', { name: 'From “Fix a typo” to “Rename Mina”' })).toBeTruthy()
+  })
+
+  it('titles a checkpoint the API refuses "This change", never echoing the URL', async () => {
+    stubApi({ override: historyApi() })
+    renderApp('/u/dracula/e/E-MINA?view=history&checkpoint=%3Cimg%20src%3Dx%3Enasty')
+
+    await screen.findByRole('alert')
+    expect(screen.getByRole('heading', { level: 2, name: 'This change' })).toBeTruthy()
+    expect(document.querySelector('img')).toBeNull()
+  })
+
+  it('announces only a short status line, not the whole diff', async () => {
+    stubApi({ override: historyApi() })
+    const { container } = renderApp('/u/dracula/e/E-MINA?view=history')
+
+    await screen.findByText('an edit not yet checkpointed')
+    const pane = container.querySelector('.diff-pane')!
+    expect(pane.closest('[aria-live]')).toBeNull()
+    const live = [...pane.querySelectorAll('[aria-live]')]
+    expect(live.map((l) => l.textContent)).toEqual(['Showing: Uncommitted changes, since the latest checkpoint'])
+    expect(live[0].querySelector('table')).toBeNull()
+  })
+
+  it('asks for the uncommitted changes once, and a checkpoint’s diff only once', async () => {
+    const { calls } = stubApi({ override: historyApi() })
+    renderApp('/u/dracula/e/E-MINA?view=history')
+
+    await screen.findByText('an edit not yet checkpointed')
+    expect(calls.filter((c) => c === '/api/history/diff?entity=E-MINA&universe=dracula')).toHaveLength(1)
+
+    const full = 'c3cccccccc'.padEnd(40, '0')
+    expect(historyDiffQuery('dracula', 'E-MINA', { checkpoint: full }).staleTime).toBe(Infinity)
+    expect(historyDiffQuery('dracula', 'E-MINA', { from: full, to: full }).staleTime).toBe(Infinity)
+    expect(historyDiffQuery('dracula', 'E-MINA', { checkpoint: 'HEAD~1' }).staleTime).not.toBe(Infinity)
+    expect(historyDiffQuery('dracula', 'E-MINA', { from: full }).staleTime).not.toBe(Infinity)
+    expect(historyDiffQuery('dracula', 'E-MINA', {}).staleTime).toBeGreaterThan(0)
+    expect(isCommitId(full)).toBe(true)
+    expect(isCommitId('c3ccccc')).toBe(false)
+  })
+
+  it('keeps the breadcrumb and tabs in the same place on both tabs', async () => {
+    stubApi({ override: historyApi() })
+    renderApp('/u/dracula/e/E-MINA')
+    const order = async () => {
+      const crumb = await screen.findByRole('navigation', { name: 'Where this is filed' })
+      const tabs = await screen.findByRole('navigation', { name: 'Note views' })
+      const h1 = await screen.findByRole('heading', { level: 1 })
+      return [crumb.compareDocumentPosition(tabs), tabs.compareDocumentPosition(h1)]
+    }
+
+    const onNote = await order()
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Note views' })).getByRole('link', { name: 'History' }))
+    await screen.findByRole('heading', { name: 'Checkpoints' })
+    expect(await order()).toEqual(onNote)
+    expect(onNote).toEqual([Node.DOCUMENT_POSITION_FOLLOWING, Node.DOCUMENT_POSITION_FOLLOWING])
   })
 })
 
-describe('history helpers', () => {
+describe('SC-WEB-23: history helpers', () => {
   it('reads the history search params, taking to only with from', () => {
     expect(validateEntitySearch({})).toEqual({})
     expect(validateEntitySearch({ checkpoint: 'abc' })).toEqual({})
@@ -355,6 +553,21 @@ describe('history helpers', () => {
     expect(chooseSelection({ view: 'history' }, false, [], false)).toBeNull()
     expect(chooseSelection({ view: 'history' }, false, allEntries, true)).toBeNull()
     expect(chooseSelection({ view: 'history', from: 'a' }, true, allEntries, true)).toEqual({ from: 'a', to: undefined })
+  })
+
+  it('names a selection by the ids the API resolved, never by the URL', () => {
+    const result = (from: string | null, to: string | null): HistoryDiffResult => ({
+      version: 1, entity: mina, backend: 'git', available: true, reason: null, diff: { from, to, files: [] },
+    })
+    expect(resolveSelection({ checkpoint: 'c3cc' }, result('c2dddddddd', 'c3cccccccc'))).toEqual({ checkpoint: 'c3cccccccc' })
+    expect(resolveSelection({ from: 'c3cc' }, result('c3cccccccc', null))).toEqual({ from: 'c3cccccccc', to: null })
+    expect(resolveSelection({ checkpoint: 'c3cc' }, undefined)).toEqual({})
+
+    expect(selectionTitle({ checkpoint: 'zz' }, allEntries, {}, false)).toBe('This change')
+    expect(selectionTitle({ checkpoint: 'zz' }, allEntries, {}, true)).toBe('This change')
+    expect(selectionTitle({ checkpoint: 'tag' }, allEntries, { checkpoint: 'f00dfeed99' }, false)).toBe('What f00dfee changed')
+    expect(selectionTitle({ from: 'c3cc' }, allEntries, { from: 'c3cccccccc', to: null }, false)).toBe('Since “Fix a typo”, up to now')
+    expect(selectionTitle({}, allEntries, {}, false)).toBe('Uncommitted changes, since the latest checkpoint')
   })
 
   it('says when in words', () => {

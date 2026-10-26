@@ -4,7 +4,8 @@
 // Lines are split on `\n` only, so a `\r` (a note saved with CRLF line
 // endings, or a lone one) stays in its line, as git wrote it.
 
-export type DiffLineKind = 'context' | 'added' | 'removed'
+/** A hunk's line; a `note` is a `\` line with no line before it to mark, kept as written. */
+export type DiffLineKind = 'context' | 'added' | 'removed' | 'note'
 
 /** A line of a hunk: its text without the leading marker, and its numbers in the old and new file. */
 export interface DiffLine {
@@ -77,14 +78,14 @@ export function parsePatch(patch: string): DiffPart[] {
       }
 
       if (marker === '\\') {
-        markNoNewline(hunk)
+        markNoNewline(hunk, line)
         continue
       }
     }
 
     // "\ No newline at end of file" after a hunk's last line.
     if (line.startsWith('\\') && hunk && hunk.lines.length > 0) {
-      markNoNewline(hunk)
+      markNoNewline(hunk, line)
       continue
     }
 
@@ -117,11 +118,59 @@ export function parsePatch(patch: string): DiffPart[] {
   return parts
 }
 
-function markNoNewline(hunk: DiffHunk) {
+/**
+ * Marks the line before a `\` line as having no newline at its end. A `\`
+ * line with no line before it to mark (or one already marked) is kept as a
+ * note, as written, rather than dropped.
+ */
+function markNoNewline(hunk: DiffHunk, line: string) {
   const last = hunk.lines[hunk.lines.length - 1]
-  if (last) {
+  if (last && last.kind !== 'note' && !last.noNewline) {
     last.noNewline = true
+  } else {
+    hunk.lines.push({ kind: 'note', text: line, oldNumber: null, newNumber: null, noNewline: false })
   }
+}
+
+/** A git file mode, such as 100644 for a file or 120000 for a symbolic link. */
+const LINK_MODE = '120000'
+
+/**
+ * What a patch's mode and empty-file headers mean, in words, and any header
+ * lines git wrote that the file's heading doesn't already say (kept as
+ * written, such as "Binary files … differ").
+ */
+export function describeHeaders(parts: readonly DiffPart[]): string[] {
+  const headers = parts.flatMap((p) => p.headers)
+  const said = /^(diff --git |index |--- |\+\+\+ |similarity index |dissimilarity index |rename from |rename to |copy from |copy to )/
+  const mode = (prefix: string) => headers.find((h) => h.startsWith(prefix))?.slice(prefix.length).trim()
+  const oldMode = mode('old mode ') ?? mode('deleted file mode ')
+  const newMode = mode('new mode ') ?? mode('new file mode ')
+  const words: string[] = []
+
+  if (oldMode && newMode && oldMode !== newMode) {
+    if (newMode === LINK_MODE) {
+      words.push('Became a link')
+    } else if (oldMode === LINK_MODE) {
+      words.push('Was a link')
+    } else {
+      words.push('Permissions changed')
+    }
+  } else if ((newMode ?? oldMode) === LINK_MODE) {
+    words.push('A link')
+  }
+
+  const hasHunks = parts.some((p) => p.hunks.length > 0)
+  const binary = headers.some((h) => h.startsWith('Binary files ') || h === 'GIT binary patch')
+  const created = headers.some((h) => h.startsWith('new file mode '))
+  const removed = headers.some((h) => h.startsWith('deleted file mode '))
+  // A file added or deleted with no text (a type change is both, and its parts carry the text).
+  if (!hasHunks && !binary && created !== removed) {
+    words.push('Empty file')
+  }
+
+  const known = /^(old mode |new mode |new file mode |deleted file mode )/
+  return [...words, ...headers.filter((h) => !said.test(h) && !known.test(h))]
 }
 
 /** A piece of a changed line, marked when it's what changed. */
