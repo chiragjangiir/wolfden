@@ -9,6 +9,7 @@ import type {
   EntityPage,
   EntityPageResult,
   EntitySummary,
+  FieldNamesResult,
   HierarchyResult,
   PositionView,
   PositionsResult,
@@ -156,6 +157,11 @@ function answer(path: string, params: URLSearchParams, at: string | null, option
       return { version: 1, universe: 'dracula', count: positions.length, positions } satisfies PositionsResult
     case '/api/hierarchy':
       return { ...hierarchy, position: at }
+    case '/api/fields': {
+      // As of a position, only the fields of values the reader has met.
+      const fields = at ? ['occupation'] : ['home', 'occupation']
+      return { version: 1, position: at, count: fields.length, fields } satisfies FieldNamesResult
+    }
     case '/api/entities': {
       const list = at ? inViewAt(at) : entities
       return { version: 1, count: list.length, total: list.length, truncated: false, entities: list } satisfies EntityListResult

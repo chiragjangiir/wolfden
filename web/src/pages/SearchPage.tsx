@@ -6,6 +6,7 @@ import {
   SEARCH_LIMITS,
   STATUSES,
   count,
+  fieldsQuery,
   hierarchyQuery,
   positionsQuery,
   searchQuery,
@@ -19,16 +20,17 @@ import {
 import { EntityLink, sectionAnchor } from '../components/Links'
 import { ErrorState, Loading, StatusBadge } from '../components/States'
 import { useDocumentTitle } from '../hooks'
-import { snippetParts } from '../snippet'
+import { snippetParts, type TextMatch } from '../snippet'
 import { describePosition } from '../story'
 import type { SearchPageSearch } from '../router'
 
 const route = getRouteApi('/u/$universe/search')
 
 /**
- * The search page (#25): full-text search of a universe's notes, filtered
- * by type, scope, and status, or to canon text only. As of a position, it
- * finds only what the reader has met by then (the API's asOf), and says so.
+ * The search page (#25): full-text search of a universe's notes and their
+ * field values, filtered by type, scope, and status, or to canon text only,
+ * or narrowed to one field's values (#179). As of a position, it finds only
+ * what the reader has met by then (the API's asOf), and says so.
  */
 export function SearchPage() {
   const { universe } = route.useParams()
@@ -40,9 +42,18 @@ export function SearchPage() {
   // the reader has met them, so a type met later isn't named.
   const hierarchy = useQuery(hierarchyQuery(universe, undefined))
   const metHierarchy = useQuery({ ...hierarchyQuery(universe, at), enabled: at !== '' })
+  // Fields as types are: only those of values the reader has met.
+  const fields = useQuery({ ...fieldsQuery(universe, at), enabled: at !== '' })
   const positions = useQuery(positionsQuery(universe))
   const q = search.q
-  const filters: SearchFilters = { type: search.type, status: search.status, series: search.series, book: search.book, canonOnly: search.canon }
+  const filters: SearchFilters = {
+    field: search.field,
+    type: search.type,
+    status: search.status,
+    series: search.series,
+    book: search.book,
+    canonOnly: search.canon,
+  }
   const filtered = Object.values(filters).some((v) => v !== undefined && v !== false)
 
   const setFilters = (patch: Partial<SearchPageSearch>) =>
@@ -56,7 +67,7 @@ export function SearchPage() {
     <div className="page-body search-page">
       <p className="eyebrow">Search</p>
       <h1>{q ? <>Matches for “{q}”</> : 'Search'}</h1>
-      <Filters hierarchy={hierarchy.data} metHierarchy={metHierarchy.data} search={search} onChange={setFilters} />
+      <Filters hierarchy={hierarchy.data} metHierarchy={metHierarchy.data} fields={fields.data?.fields} search={search} onChange={setFilters} />
       {at === '' && !q && <ErrorState error={new ApiRequestError('bad_argument', "The story position in the address is empty, so there's nothing to search as of.")} />}
       {where !== undefined && (
         <p className="search-position">
@@ -78,11 +89,13 @@ export function SearchPage() {
 function Filters({
   hierarchy,
   metHierarchy,
+  fields,
   search,
   onChange,
 }: {
   hierarchy: HierarchyResult | undefined
   metHierarchy: HierarchyResult | undefined
+  fields: string[] | undefined
   search: SearchPageSearch
   onChange: (patch: Partial<SearchPageSearch>) => void
 }) {
@@ -95,6 +108,17 @@ function Filters({
 
   return (
     <div className="search-filters" role="group" aria-label="Filters">
+      <label>
+        <span>Field</span>
+        <select value={search.field ?? ''} onChange={(e) => onChange({ field: e.currentTarget.value || undefined })}>
+          <option value="">Anywhere</option>
+          {withCurrent(fields ?? [], search.field).map((f) => (
+            <option key={f} value={f}>
+              {f}
+            </option>
+          ))}
+        </select>
+      </label>
       <label>
         <span>Type</span>
         <select value={search.type ?? ''} onChange={(e) => onChange({ type: e.currentTarget.value || undefined })}>
@@ -223,8 +247,8 @@ function Results({
     return <ErrorState error={result.error} />
   }
 
-  // The words of the answer shown, which may be the last search's while the next loads.
-  const { hits, truncated, query: shownQuery } = result.data
+  // The answer shown may be the last search's while the next loads; its hits mark their own matches.
+  const { hits, truncated } = result.data
   if (hits.length === 0) {
     return (
       <p className="muted" role="status">
@@ -253,7 +277,7 @@ function Results({
             </p>
             <ul className="hits">
               {own.map((hit, i) => (
-                <Hit key={i} universe={universe} hit={hit} q={shownQuery} />
+                <Hit key={i} universe={universe} hit={hit} />
               ))}
             </ul>
           </li>
@@ -285,8 +309,8 @@ function Results({
   )
 }
 
-function Hit({ universe, hit, q }: { universe: string; hit: SearchHit; q: string }) {
-  const bookkeeping = !hit.inCanon && !hit.inComment && (hit.status === 'canon' || hit.status === 'draft')
+function Hit({ universe, hit }: { universe: string; hit: SearchHit }) {
+  const bookkeeping = !hit.inCanon && !hit.inComment && !hit.field && (hit.status === 'canon' || hit.status === 'draft')
   return (
     <li>
       <p className="hit-place">
@@ -295,24 +319,24 @@ function Hit({ universe, hit, q }: { universe: string; hit: SearchHit; q: string
           params={{ universe, _splat: hit.entity.key }}
           hash={hit.section ? sectionAnchor(hit.section) : undefined}
         >
-          {hit.section ?? 'Name or opening'}
+          {hit.field ? `Field: ${hit.field}` : (hit.section ?? 'Name or opening')}
         </Link>
         {hit.status !== hit.entity.status && <StatusBadge status={hit.status} />}
         {bookkeeping && <span className="badge">bookkeeping</span>}
         {hit.inComment && <span className="badge">in a comment</span>}
       </p>
       <p className="snippet">
-        <Snippet text={hit.snippet} q={q} />
+        <Snippet text={hit.text} matches={hit.matches} />
       </p>
     </li>
   )
 }
 
 /** A snippet with its matches marked, rendered as text. */
-export function Snippet({ text, q }: { text: string; q: string }) {
+export function Snippet({ text, matches }: { text: string; matches: readonly TextMatch[] }) {
   return (
     <>
-      {snippetParts(text, q).map((part, i) => (part.match ? <mark key={i}>{part.text}</mark> : part.text))}
+      {snippetParts(text, matches).map((part, i) => (part.match ? <mark key={i}>{part.text}</mark> : part.text))}
     </>
   )
 }
