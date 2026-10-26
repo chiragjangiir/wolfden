@@ -2275,7 +2275,9 @@ item, then makes a checkpoint, "End of chapter 14 session".
   commit. A checkpoint of only Mara's note records only it, and the new
   note that wasn't named stays as it was. The first checkpoint of a new
   repository works too. A checkpoint needs a message, without control
-  characters other than line breaks and tabs. If the writer's
+  characters other than line breaks and tabs. Unicode line and
+  paragraph separators (U+2028, U+2029) in a message are kept as
+  written, not turned into line breaks (#161). If the writer's
   pre-commit hook refuses the commit, the checkpoint says git refused
   it and why, nothing is recorded, and the new note is untracked again,
   as it was before.
@@ -2286,6 +2288,7 @@ Spec: design.md §6 (#19). Covered by:
 `GitHistoryTests.TheFirstCheckpointOfANewRepositoryWorks`,
 `GitHistoryTests.ACheckpointNeedsAMessage`,
 `GitHistoryTests.ACheckpointMessageCantHoldControlCharacters`,
+`GitHistoryTests.ACheckpointMessageKeepsUnicodeSeparatorsAsWritten`,
 `GitHistoryTests.ACheckpointAHookRefusesLeavesTheNewFilesUntracked`,
 `GitHistoryTests.ACheckpointCancelledAfterGitCommittedKeepsTheNewFilesTracked`.
 
@@ -2336,11 +2339,20 @@ hasn't checkpointed yet.
   checkpoints shows a moved note as a rename. A checkpoint that isn't
   in the repository is an error that says so, and a revision is never
   read as a git option.
+- A patch shows the note's text as it is. A form feed, a lone carriage
+  return, NEL, or a Unicode line or paragraph separator in a note stays
+  inside its line, and a note saved with CRLF line endings keeps them in
+  the patch as git stores them (with `core.autocrlf` on, git stores LF).
+  A note whose name holds one of those characters is listed with its
+  own patch beside the others (#161).
 
 Spec: design.md §6 (#19). Covered by:
 `GitHistoryTests.ADiffSinceTheLatestCheckpointShowsNewChangedAndDeletedNotesAndLeavesTheIndexAlone`,
 `GitHistoryTests.ADiffBetweenTwoCheckpointsShowsARename`,
-`GitHistoryTests.ARevisionThatIsntOneIsAHistoryException`.
+`GitHistoryTests.ARevisionThatIsntOneIsAHistoryException`,
+`GitHistoryTests.APatchKeepsCharactersThatArentLineFeedsAsTheyAre`,
+`GitHistoryTests.ALineInAPatchCantStartAnotherFilesPart`,
+`GitHistoryTests.ANoteNamedWithALineSeparatorGetsItsOwnPatch`.
 
 ### SC-HIST-7. I freeze a finished book
 
