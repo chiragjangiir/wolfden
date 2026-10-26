@@ -170,10 +170,22 @@ public sealed class GitHistoryTests
         repo.WriteDen(Mara, "# Mara Voss\n");
         Assert.Throws<ArgumentException>(() => repo.History.Checkpoint(new CheckpointRequest("Add\u0001 Mara"), Token));
         Assert.NotNull(repo.History.Checkpoint(new CheckpointRequest("Add Mara\r\n\n\tand more"), Token).Value);
+    }
 
+    [Fact]
+    [Trait("Scenario", "SC-HIST-3")]
+    public void ACheckpointMessageKeepsUnicodeSeparatorsAsWritten()
+    {
         // U+2028 and U+2029 aren't line breaks to git, so they stay (#161).
-        repo.WriteDen(Fen, "# Fen Harbour\n");
-        Assert.Equal("Add Fen\u2028and\u2029more", repo.History.Checkpoint(new CheckpointRequest("Add Fen\u2028and\u2029more"), Token).Value!.Message);
+        // Built from code points so no editor turns them into line breaks here.
+        var message = $"Add Mara{char.ConvertFromUtf32(0x2028)}and{char.ConvertFromUtf32(0x2029)}more";
+        using var repo = TestRepo.Create();
+        repo.WriteDen(Mara, "# Mara Voss\n");
+
+        var entry = repo.History.Checkpoint(new CheckpointRequest(message), Token).Value!;
+
+        Assert.Equal(message, entry.Message);
+        Assert.Equal(message, Assert.Single(repo.History.Log(new HistoryLogQuery(Mara), Token).Value).Message);
     }
 
     [Fact]
@@ -625,6 +637,39 @@ public sealed class GitHistoryTests
         Assert.Equal(new HistoryFileChange(HistoryChangeKind.Modified, Mara), file.Change);
         Assert.StartsWith($"diff --git a/{Mara} b/{Mara}\n", file.Patch, StringComparison.Ordinal);
         Assert.EndsWith(" # Mara Voss\n" + string.Concat(lines.Select(l => "+" + l + "\n")), file.Patch, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0x2028)]
+    [InlineData(0x2029)]
+    [InlineData(0x0085)]
+    [Trait("Scenario", "SC-HIST-6")]
+    public void ANoteNamedWithALineSeparatorGetsItsOwnPatch(int codePoint)
+    {
+        // Git writes such a name raw in the diff --git line (#161), so the
+        // line must stay whole for the patch to pair with its file.
+        var odd = $"universes/vael/odd{char.ConvertFromUtf32(codePoint)}name.md";
+        using var repo = TestRepo.Create();
+        repo.WriteDen(Mara, "# Mara Voss\n");
+        var start = repo.CommitAll("start");
+        repo.WriteDen(Mara, "# Mara Voss\n\nA pilot.\n");
+        try
+        {
+            repo.WriteDen(odd, "# Odd\n");
+        }
+        catch (IOException)
+        {
+            Assert.Skip("This file system doesn't allow the character in a name.");
+        }
+
+        var diff = repo.History.Diff(new HistoryDiffQuery(start), Token).Value;
+
+        Assert.Equal(
+            [(HistoryChangeKind.Modified, Mara), (HistoryChangeKind.Added, odd)],
+            diff.Files.Select(f => (f.Change.Kind, f.Change.Path)).OrderBy(c => c.Path, StringComparer.Ordinal));
+        var patch = diff.Files.Single(f => f.Change.Path == odd).Patch;
+        Assert.StartsWith($"diff --git a/{odd} b/{odd}\n", patch, StringComparison.Ordinal);
+        Assert.EndsWith("\n+# Odd\n", patch, StringComparison.Ordinal);
     }
 
     [Fact]
