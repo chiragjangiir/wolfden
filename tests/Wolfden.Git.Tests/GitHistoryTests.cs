@@ -433,6 +433,37 @@ public sealed class GitHistoryTests
         Assert.Equal([Mara], repo.History.Diff(new HistoryDiffQuery(Path: Mara), Token).Value.Files.Select(f => f.Change.Path));
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("sha256")]
+    [Trait("Scenario", "SC-HIST-6")]
+    public void ACheckpointsOwnDiffComparesItWithTheOneBeforeOrWithNothingForTheFirst(string? objectFormat)
+    {
+        using var repo = TestRepo.Create(objectFormat: objectFormat);
+        repo.WriteDen(Mara, "# Mara Voss\n");
+        var first = repo.CommitAll("Add Mara");
+        repo.WriteDen(Fen, "# Fen Harbour\n");
+        repo.WriteDen(Mara, "# Mara Voss\n\nA pilot.\n");
+        var second = repo.CommitAll("Mara is a pilot");
+
+        var added = repo.History.DiffCheckpoint(first, Mara, Token).Value;
+        Assert.Equal(("", first), (added.From, added.To));
+        var file = Assert.Single(added.Files);
+        Assert.Equal(new HistoryFileChange(HistoryChangeKind.Added, Mara), file.Change);
+        Assert.Contains("+# Mara Voss", file.Patch, StringComparison.Ordinal);
+
+        var changed = repo.History.DiffCheckpoint(second, Mara, Token).Value;
+        Assert.Equal((first, second), (changed.From, changed.To));
+        file = Assert.Single(changed.Files);
+        Assert.Equal(new HistoryFileChange(HistoryChangeKind.Modified, Mara), file.Change);
+        Assert.Contains("+A pilot.", file.Patch, StringComparison.Ordinal);
+
+        // Without a path, every den file the checkpoint changed.
+        Assert.Equal([Mara, Fen], repo.History.DiffCheckpoint(second, null, Token).Value.Files.Select(f => f.Change.Path).Order(StringComparer.Ordinal));
+        Assert.Throws<HistoryRevisionException>(() => repo.History.DiffCheckpoint("no-such-checkpoint", Mara, Token));
+        Assert.False(NoHistory.Instance.DiffCheckpoint(first, Mara, Token).IsAvailable);
+    }
+
     [Fact]
     [Trait("Scenario", "SC-HIST-6")]
     public void ADiffBetweenTwoCheckpointsShowsARename()

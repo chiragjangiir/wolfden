@@ -73,6 +73,20 @@ public interface IHistoryProvider
     HistoryResult<HistoryDiff> Diff(HistoryDiffQuery query, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// What one checkpoint changed, in the den or in the file or folder
+    /// <paramref name="path"/>: the checkpoint compared with the one before
+    /// it (for git, the commit's first parent). The result's
+    /// <see cref="HistoryDiff.From"/> is that checkpoint's id, or empty for
+    /// the first checkpoint, which is compared with nothing, so every file
+    /// in it is added; <see cref="HistoryDiff.To"/> is the checkpoint's id.
+    /// A <paramref name="revision"/> the history doesn't have throws a
+    /// <see cref="HistoryRevisionException"/>. A backend without it says it
+    /// isn't available.
+    /// </summary>
+    HistoryResult<HistoryDiff> DiffCheckpoint(string revision, string? path = null, CancellationToken cancellationToken = default) =>
+        HistoryResult<HistoryDiff>.Unavailable("This history backend can't show what one checkpoint changed.");
+
+    /// <summary>
     /// Records the den's files as they are now, with a message: a commit,
     /// for git. Only den files are recorded. The value is null when
     /// nothing changed since the last checkpoint, so there was nothing to record.
