@@ -1903,7 +1903,10 @@ renames him Old Swales.
   new target (and saying if it's in a final book); with
   `allow_relinks`, the rename is made and the result lists the link. A
   new name another note already has (Renfield's file name) is said in
-  the result even when the old name is kept.
+  the result even when the old name is kept. If a sailor in the
+  universe is also named Mr. Swales, keeping "Mr. Swales" only as an
+  alias would send a book note's `[[Mr. Swales]]` to the sailor, whose
+  name now wins: refused the same way, unless `allow_relinks`.
 
 Spec: format.md F-RT-5, F-LINK-1, F-LINK-4, F-LINK-6, F-LINK-7, F-SEC-2,
 F-BOOK-1 (maintainer decisions, 2026-10-25 and 2026-10-26). Covered by:
@@ -1922,6 +1925,7 @@ F-BOOK-1 (maintainer decisions, 2026-10-25 and 2026-10-26). Covered by:
 `RenameEntityToolTests.AContainerFileChangedWhileTheRenameIsMadeStopsIt`,
 `RenameEntityToolTests.ANameThatTakesAnotherEntitysLinksIsRefusedUnlessAllowed`,
 `RenameEntityToolTests.ARelinkInAFinalBookIsListedAndAllowedOnlyWithTheFlag`,
+`RenameEntityToolTests.AKeptNameThatLosesItsLinksToAnotherEntitysNameIsRefusedUnlessAllowed`,
 `EntityRenameEditTests.ALinksTargetIsReplacedKeepingItsSpacingHeadingAndLabel`,
 `EntityRenameEditTests.TheTitleChangesAndNothingElse`,
 `EntityRenameEditTests.ASetextTitleOrOneWithACommentKeepsItsForm`.
@@ -1947,14 +1951,18 @@ Count" to "the Voivode", then removes "Count de Ville".
   or file name first.
 - A new alias "Lucy" would make a note's `[[Lucy]]`, which reaches Lucy
   Westenra, ambiguous: refused, even with `keep_old_alias`, unless
-  `allow_relinks`, and then the result lists the link.
+  `allow_relinks`, and then the result lists the link. A link that was
+  ambiguous before (`[[the sailor]]`, which Swales and Young Swales
+  both go by) and reaches Young Swales once Swales's alias changes is
+  only reported.
 
 Spec: format.md F-RT-5, F-RT-6, F-ENT-4, F-LINK-7, F-BOOK-1 (maintainer
 decisions, 2026-10-25 and 2026-10-26). Covered by:
 `RenameEntityToolTests.ChangingOrRemovingAnAliasRewritesItsLinks`,
 `RenameEntityToolTests.RemovingAnAliasALinkInAFrozenBookUsesIsRefused`,
 `RenameEntityToolTests.RemovingAnAliasWhoseLinksWouldReachAnotherEntityIsRefusedWithItsOwnHint`,
-`RenameEntityToolTests.AnAliasThatTakesAnotherEntitysLinksIsRefusedUnlessAllowed`.
+`RenameEntityToolTests.AnAliasThatTakesAnotherEntitysLinksIsRefusedUnlessAllowed`,
+`RenameEntityToolTests.AnAmbiguousLinkThatNowResolvesIsReportedNotRefused`.
 
 ## STORE: Wolfden saves, moves, and deletes notes
 

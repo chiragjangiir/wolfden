@@ -870,14 +870,17 @@ store, so an edit changes only what it means to (format.md §12):
   does one that would change the target of a link that reached a
   different entity (a new name that's another entity's alias takes its
   links, since a name matches before an alias), with or without
-  keeping the old text (maintainer decision, 2026-10-26): the error
+  keeping the old text (maintainer decision, 2026-10-26), and so does
+  one that would send a link that reached the entity to another one (a
+  kept alias loses to another entity's name): the error
   lists each such link, its file, and its old and new target, and
   `allow_relinks` makes the change anyway. For now `allow_relinks`
   covers links in final books too; that case is a separate check, so
   it can become an always-refuse. Any other link that would resolve
   differently (a kept alias another entity also has makes it
   ambiguous, F-LINK-7), and any relinked link allowed, is listed in
-  `effects`. A change that only alters case or spacing changes no link
+  `effects`. A link that was ambiguous or broken and now resolves
+  reached no entity before, so it's only reported, never refused. A change that only alters case or spacing changes no link
   (F-LINK-4). Renaming an entity to one of its own aliases takes that
   alias out.
   Moving and copying entities come later (#89, #129).

@@ -427,6 +427,48 @@ public sealed class RenameEntityToolTests : IDisposable
         Assert.Contains(allowed.Effects, e => e.Contains("is now ambiguous (F-LINK-7)", StringComparison.Ordinal));
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-MCP-26")]
+    public void AKeptNameThatLosesItsLinksToAnotherEntitysNameIsRefusedUnlessAllowed()
+    {
+        // A sailor in the universe is also named Mr. Swales. From the book, [[Mr. Swales]] reaches the book's Swales,
+        // the nearer scope; kept only as his alias, the old name loses to the sailor's name (F-LINK-6).
+        const string Sailor = "universes/dracula/entities/characters/the-sailor.md";
+        const string BookNote = Book + "/entities/notes/harbour.md";
+        _den.Write(Sailor, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z6\ntype: character\nname: Mr. Swales\nstatus: draft\n---\n");
+        _den.Write(BookNote, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z7\ntype: note\nname: Harbour\nstatus: draft\n---\n\nSee [[Mr. Swales]].\n");
+        var before = _den.Read(Swales);
+        var hash = Tools.GetEntity(Swales).Entity!.Hash!;
+
+        var refused = Assert.Throws<DenToolException>(() => Tools.RenameEntity(Swales, "Old Swales", hash, keepOldName: true));
+        Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
+        Assert.Contains($"[[Mr. Swales]] in {BookNote} (line 8) reaches 'Mr. Swales' ({Swales}) and would reach 'Mr. Swales' ({Sailor})", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(before, _den.Read(Swales));
+
+        var allowed = Tools.RenameEntity(Swales, "Old Swales", hash, keepOldName: true, allowRelinks: true);
+        Assert.Contains(allowed.Effects, e => e.Contains("by alias now, except those listed below", StringComparison.Ordinal));
+        Assert.Contains(allowed.Effects, e => e.Contains($"[[Mr. Swales]] in {BookNote} (line 8) now reaches 'Mr. Swales' ({Sailor})", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-27")]
+    public void AnAmbiguousLinkThatNowResolvesIsReportedNotRefused()
+    {
+        // Swales and Young Swales both go by "the sailor", and neither is in the universe note's scope chain (F-LINK-7).
+        _den.Write(Swales, _den.Read(Swales).Replace("name: Mr. Swales\n", "name: Mr. Swales\naliases: [the sailor]\n", StringComparison.Ordinal));
+        _den.Write(Book + "/entities/characters/young-swales.md",
+            "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z4\ntype: character\nname: Young Swales\naliases: [the sailor]\nstatus: draft\n---\n");
+        WriteNote("See [[the sailor]].\n");
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        var result = Tools.ChangeAlias("Mr. Swales", "the sailor", hash, newAlias: "the old sailor");
+
+        Assert.EndsWith("See [[the sailor]].\n", _den.Read(Note), StringComparison.Ordinal);
+        Assert.Contains(
+            result.Effects,
+            e => e.Contains($"[[the sailor]] in {Note} (line 8) now reaches 'Young Swales'", StringComparison.Ordinal) && e.Contains("before, it was ambiguous", StringComparison.Ordinal));
+    }
+
     private void WriteNote(string text) =>
         _den.Write(Note, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z1\ntype: note\nname: Whitby dialect\nstatus: draft\n---\n\n" + text);
 

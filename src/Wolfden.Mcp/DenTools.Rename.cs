@@ -263,15 +263,19 @@ public sealed partial class DenTools
             }
 
             // Links that weren't rewritten but resolve differently now are reported below. Those that
-            // reached another entity and wouldn't any more (a name beats that entity's alias, say)
+            // reached another entity and wouldn't any more (a name beats that entity's alias, say), or
+            // reached this one and would reach another (a kept alias loses to another entity's name),
             // refuse the change unless allow_relinks says to go ahead (maintainer decision, 2026-10-26).
+            // A link that was ambiguous or broken and now resolves, or one of this entity's that
+            // becomes ambiguous, is only reported.
             var moved = changed.Where(l => !rewritten.Contains(l.Before)).ToList();
-            var relinked = moved.Where(l => l.Before.Outcome == Core.Links.LinkOutcome.Resolved && l.Before.Target!.Path != path).ToList();
+            var relinked = moved.Where(l => l.Before.Outcome == Core.Links.LinkOutcome.Resolved
+                && (l.Before.Target!.Path != path || (l.After.Outcome == Core.Links.LinkOutcome.Resolved && l.After.Target!.Path != path))).ToList();
             if (relinked.Count > 0 && !allowRelinks)
             {
                 throw new DenToolException(
                     ToolErrorCodes.BadArgument,
-                    $"{relinked.Count} link(s) that reach another entity would change target: " +
+                    $"{relinked.Count} link(s) would change which entity they reach: " +
                     $"{string.Join("; ", relinked.Take(ListedLinkChanges).Select(l => $"{Where(l.After)}{(InFinalBook(l.Before) ? " (in a final book)" : "")} reaches {Reached(l.Before)} and would {Outcome(l.After)}"))}" +
                     $"{(relinked.Count > ListedLinkChanges ? $"; and {relinked.Count - ListedLinkChanges} more" : "")}. Nothing was changed. " +
                     "Choose other text, link those by id or file name first, or pass allow_relinks: true to make the change anyway.");
@@ -290,7 +294,8 @@ public sealed partial class DenTools
 
             Save(files, plan.Originals, created: null);
             var after = EntityCatalog.ReadEntityFile(check.Structure, path, files[path]).Entity!;
-            var effects = new List<string> { Said(c, plan, target, files.Count) };
+            var ownMoved = moved.Any(l => l.Before.Target?.Path == path);
+            var effects = new List<string> { Said(c, plan, target, files.Count, ownMoved) };
             if (c.Kind == LinkMatchKind.Name)
             {
                 effects.Add($"The file keeps its name, {path[(path.LastIndexOf('/') + 1)..]}, so links by its file name still reach it; renaming the file is a separate change.");
@@ -346,8 +351,9 @@ public sealed partial class DenTools
     }
 
     /// <summary>The first effect: what changed, and what became of the links.</summary>
-    private static string Said(TextChange c, EntityRenamePlan plan, CatalogEntity target, int files)
+    private static string Said(TextChange c, EntityRenamePlan plan, CatalogEntity target, int files, bool ownMoved)
     {
+        var unlessSaid = ownMoved ? ", except those listed below" : "";
         var what = c.Kind == LinkMatchKind.Name ? "name" : "alias";
         var change = c.Kind == LinkMatchKind.Name ? $"Renamed '{c.OldText}' to '{c.NewText}'"
             : c.Kept is not null ? $"Added the alias '{c.NewText}' beside '{c.OldText}'"
@@ -361,8 +367,8 @@ public sealed partial class DenTools
         if (c.Kept is not null)
         {
             return c.Kind == LinkMatchKind.Name
-                ? $"{change}, and kept '{c.OldText}' as an alias, so links that use it still reach it, by alias now; none were changed."
-                : $"{change}, so links that use either reach it; none were changed.";
+                ? $"{change}, and kept '{c.OldText}' as an alias, so links that use it still reach it, by alias now{unlessSaid}; none were changed."
+                : $"{change}, so links that use either reach it{unlessSaid}; none were changed.";
         }
 
         return plan.LinksRewritten == 0
@@ -390,7 +396,7 @@ public sealed partial class DenTools
             }
 
             yield return tier == "slug"
-                ? $"'{text}' is also the file name of '{other.Name}' ({other.Path}), so a link [[{text}]] reaches '{other.Name}': a file name matches before a {mine} (F-LINK-6)."
+                ? $"'{text}' is also the file name of '{other.Name}' ({other.Path}), so a link [[{text}]] reaches '{other.Name}': a file name matches before {(mine == "alias" ? "an alias" : "a name")} (F-LINK-6)."
                 : tier == mine
                 ? $"'{text}' is also the {tier} of '{other.Name}' ({other.Path}), so a link [[{text}]] is ambiguous between them unless one is in a nearer scope (F-LINK-7)."
                 : tier == "name"
