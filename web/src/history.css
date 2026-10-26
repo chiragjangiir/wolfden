@@ -1,0 +1,259 @@
+/* An entity's history (#27): the tabs, the checkpoint list, and the diff. */
+
+:root {
+  --diff-added-bg: #e6f4e6;
+  --diff-added-word: #b7e1b7;
+  --diff-removed-bg: #fbe9e7;
+  --diff-removed-word: #f2b8b0;
+  --diff-hunk-bg: #eef2f8;
+  --diff-hunk-text: #44546a;
+  --change-added: #1a6b2a;
+  --change-deleted: var(--broken);
+  --change-renamed: var(--ambiguous);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --change-added: #7fd08a;
+    --diff-added-bg: #1d3320;
+    --diff-added-word: #2f5a34;
+    --diff-removed-bg: #3c1f1c;
+    --diff-removed-word: #6b2f29;
+    --diff-hunk-bg: #1f2633;
+    --diff-hunk-text: #a9b8cf;
+  }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.entity-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0.75rem 0 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+
+.entity-tabs > * {
+  padding: 0.3rem 0.8rem;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  margin-bottom: -1px;
+  text-decoration: none;
+}
+
+.entity-tabs [aria-current='page'] {
+  border-color: var(--border);
+  background: var(--bg);
+  font-weight: 600;
+}
+
+.page-body.history {
+  max-width: 72rem;
+}
+
+.history-note {
+  font-size: 0.875rem;
+}
+
+.history-columns {
+  display: grid;
+  grid-template-columns: minmax(14rem, 20rem) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 64rem) {
+  .history-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.checkpoints h2,
+.diff-pane h2 {
+  font-size: 1.05rem;
+  margin: 0 0 0.5rem;
+}
+
+.compare-hint {
+  font-size: 0.8rem;
+  margin: 0 0 0.5rem;
+}
+
+.checkpoints ol {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+}
+
+.checkpoint {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  padding: 0.45rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+
+.checkpoint input {
+  margin-top: 0.3rem;
+}
+
+.checkpoint > div {
+  min-width: 0;
+}
+
+.checkpoint.selected {
+  background: var(--bg-sunken);
+  border-color: var(--border);
+}
+
+button.checkpoint-open {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--link);
+  text-align: left;
+  font-size: 0.9rem;
+  margin-right: 0.35rem;
+  overflow-wrap: anywhere;
+}
+
+.checkpoint-meta,
+.checkpoint-body {
+  margin: 0.1rem 0 0;
+  font-size: 0.8rem;
+}
+
+.checkpoint-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.badge.change-added {
+  color: var(--change-added);
+  border-color: currentColor;
+}
+
+.badge.change-deleted {
+  color: var(--change-deleted);
+  border-color: currentColor;
+}
+
+.badge.change-renamed {
+  color: var(--change-renamed);
+  border-color: currentColor;
+}
+
+mark.diff-word {
+  color: inherit;
+}
+
+/* A note's history shown anyway (#26): greyed, like a note shown anyway. */
+.revealed .checkpoints,
+.revealed .diff-pane,
+.revealed .history-note {
+  filter: grayscale(1);
+  opacity: 0.8;
+}
+
+.revealed button.checkpoint-open {
+  color: var(--later);
+}
+
+.diff-file h3 {
+  font-size: 0.95rem;
+  margin: 1rem 0 0.4rem;
+  overflow-wrap: anywhere;
+}
+
+.diff-note {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 0.8rem;
+  margin: 0.2rem 0;
+}
+
+table.diff {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  border: 1px solid var(--border);
+  tab-size: 4;
+}
+
+table.diff td {
+  vertical-align: top;
+  padding: 0 0.4rem;
+}
+
+.diff-col-number {
+  width: 3.2rem;
+}
+
+.diff-col-mark {
+  width: 1.2rem;
+}
+
+.diff-number {
+  text-align: right;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.diff-mark {
+  user-select: none;
+}
+
+.diff-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff-added {
+  background: var(--diff-added-bg);
+}
+
+.diff-removed {
+  background: var(--diff-removed-bg);
+}
+
+.diff-added .diff-word {
+  background: var(--diff-added-word);
+}
+
+.diff-removed .diff-word {
+  background: var(--diff-removed-word);
+}
+
+.diff-hunk td {
+  background: var(--diff-hunk-bg);
+  color: var(--diff-hunk-text);
+  padding: 0.15rem 0.4rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff-eof td {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.diff-cr {
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 0.1rem;
+  margin: 0 0.05rem;
+  font-size: 0.85em;
+}

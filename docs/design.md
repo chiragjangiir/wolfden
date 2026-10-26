@@ -1182,6 +1182,42 @@ docs/
   full-text only: the API has no search of one field's value (such as
   every character whose `occupation:` holds physician), and field
   values aren't in the full-text index.
+- **The history page** (#27; v0 behaviour, not a recorded decision,
+  except the reveal, which applies the #26 decision). An entity page
+  has Note and History tabs, below the breadcrumb on both. History is
+  the same route with `?view=history`, since the entity's name, slashes
+  and all, ends the path; the diff shown is in the URL too
+  (`checkpoint`, or `from` and `to`).
+  - **The list.** The page lists the entity's checkpoints from
+    `/api/history`, newest first, twenty at a time, each with when it
+    was written, its author, its message, and how it changed the file,
+    under "Uncommitted changes" when the file differs from the latest
+    checkpoint. The date is git's author date, which is what the API
+    gives; the page says "written", without the jargon, and gives the
+    exact time in a tooltip.
+  - **The diff.** The page shows the uncommitted changes first, or else
+    the latest checkpoint's. Picking a checkpoint shows its own change;
+    ticking two compares them (ticking the uncommitted changes as one
+    compares with the file now). A short id, tag, or `HEAD~1` in the
+    URL is matched to its row through the commit the API resolved it
+    to. The UI parses the patch itself, with no diff library: line
+    numbers, added and removed lines (named for screen readers too),
+    hunk headers, "No newline at end of file", a visible mark for each
+    `\r`, U+0085, U+2028, and U+2029, git's mode and empty-file headers
+    in words, and the changed words within a line that replaced one. It
+    renders text only. A checkpoint's diff, or one between two, can't
+    change, so it's fetched once; the uncommitted one is fetched again
+    after a few seconds at most.
+  - **Position.** History isn't a story view, so it ignores the
+    position, and says so. At a position where the reader hasn't met
+    the entity, both tabs show the #26 banner and fetch nothing of it
+    until "Show it anyway". The reveal is one per note, at that
+    position, shared by both tabs, and greyed alike; leaving the note,
+    changing the position, or a reload hides it again.
+  - **Limits.** Since the log follows the file's current path (§6), a
+    checkpoint that renamed it is listed as adding it, and its own diff
+    shows the rename. Without history, the page gives the API's reason
+    and how to start one.
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and
   unknown content. This gets heavy test coverage, since it decides whether
   people trust the tool with their notes.

@@ -2493,8 +2493,8 @@ its API on this computer only (127.0.0.1) and opens the default browser.
 v0 has no accounts, so it never listens on the network. The browsing,
 search, and history pages come in M3 (#24 to #27); their read API comes
 first, and SC-WEB-4 to SC-WEB-10 describe what it answers. SC-WEB-11
-to SC-WEB-17 describe the browsing pages, and SC-WEB-18 to SC-WEB-21
-the search page.
+to SC-WEB-17 describe the browsing pages, SC-WEB-18 to SC-WEB-21 the
+search page, and SC-WEB-22 and SC-WEB-23 the history page.
 
 ### SC-WEB-1. I open my den in the browser
 
@@ -2864,3 +2864,57 @@ Spec: design.md §9 (#25, #26). Covered by: `Search.test.tsx` (web).
   `[[...]]` link or other brackets stay as written.
 
 Spec: design.md §9 (#25). Covered by: `Search.test.tsx` (web).
+
+### SC-WEB-22. I read what changed in a note
+
+The history page shows a change to Mina Harker's note: her status
+moved from draft to canon, a line was added at the end of a file that
+had no newline there, and the note was saved with CRLF line endings.
+
+- The change reads as a unified diff: each hunk under its `@@` header,
+  each line with its old and new line numbers, removed lines in red and
+  added ones in green (and named "Removed" and "Added" for a screen
+  reader), and within a changed line the words that changed ("draft",
+  "canon") marked more strongly. "No newline at end of file" is shown
+  under the line it's about. A carriage return, and a NEL, line
+  separator, or paragraph separator, is shown as a visible mark, not
+  dropped. Long lines wrap. The frontmatter is shown as any other text.
+- A rename shows "Renamed from" the old path, and a rename with no edit
+  says there's no change to the text. A note that became a link, or an
+  empty file, or one whose permissions changed, says so in words.
+- HTML in the note, such as `<script>` or `<img onerror>`, is shown as
+  text, and nothing in it runs.
+
+Spec: design.md §9 (#27). Covered by: `History.test.tsx` (web).
+
+### SC-WEB-23. I look at a note's history in the browser
+
+The writer's den is a git repository with five checkpoints that changed
+Mina Harker, and an edit since. They open her page and pick History.
+
+- The History tab goes to the same page with `?view=history`, keeping
+  the position, and works for a note named by a path. The tabs and the
+  breadcrumb are in the same place on both tabs. The list shows the
+  checkpoints newest first, twenty at a time, each with when it was
+  written ("yesterday", with the exact time in its tooltip), its
+  author, its message, and how it changed the note (added, modified,
+  renamed, or deleted). "Show older checkpoints" loads the next page.
+- "Uncommitted changes" is on top, and its diff is shown first. With no
+  edits since the latest checkpoint, the latest checkpoint's change is
+  shown instead. Picking a checkpoint shows what it changed. Ticking two
+  compares them, the older as `from` and the newer as `to`, whichever
+  is ticked first; ticking a checkpoint and the uncommitted changes
+  compares it with the note as it is now. The choice is kept in the
+  URL, and a short id in it still marks its row after a reload. A tick
+  doesn't carry over to another note.
+- The page says history ignores the story position, and never asks the
+  history endpoints as of one. At a position before the note enters,
+  both tabs show the #26 banner and nothing of the note until "Show it
+  anyway"; the reveal covers both tabs, greyed alike, and is gone after
+  leaving the note and coming Back.
+- In a den without history, the page gives the API's reason and says
+  how to start one: `git init` in the den's folder, or `wolfden init
+  --git` for a new den. It isn't shown as an error.
+
+Spec: design.md §9 (#27, the reveal as decided on #26). Covered by:
+`History.test.tsx` (web).
