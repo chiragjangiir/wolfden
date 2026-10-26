@@ -4,6 +4,7 @@ import { Link, Outlet, useRouterState } from '@tanstack/react-router'
 import { denQuery } from '../api'
 import { useUniverseKey } from '../hooks'
 import { PositionBar } from './PositionBar'
+import { SearchBox } from './SearchBox'
 import { Sidebar } from './Sidebar'
 
 /**
@@ -29,6 +30,7 @@ export function Layout() {
         <Link to="/" className="den-name">
           {den.data?.name ?? 'Wolfden'}
         </Link>
+        <SearchBox universe={universe} />
         <PositionBar universe={universe} />
       </header>
       <div className="body">

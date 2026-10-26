@@ -571,3 +571,103 @@ button.peek {
   padding: 0.25rem 1rem;
   background: var(--bg-sunken);
 }
+
+/* Search: the box in the top bar, and the search page. */
+
+.search-box {
+  flex: 0 1 14rem;
+  min-width: 8rem;
+}
+
+.search-box input {
+  width: 100%;
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+}
+
+.search-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem 1rem;
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  background: var(--bg-sunken);
+  border-radius: 8px;
+  font-size: 0.875rem;
+}
+
+.search-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  color: var(--text-muted);
+}
+
+.search-filters label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text);
+}
+
+.search-position {
+  background: var(--banner-bg);
+  border: 1px solid var(--banner-border);
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+}
+
+.search-results.stale {
+  opacity: 0.6;
+}
+
+.hit-groups {
+  list-style: none;
+  padding: 0;
+}
+
+.hit-groups > li {
+  margin: 1rem 0;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.hit-entity {
+  margin: 0;
+  font-weight: 600;
+}
+
+.hit-entity .muted {
+  font-weight: 400;
+  font-size: 0.875rem;
+}
+
+.hits {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0 0 0 1rem;
+}
+
+.hit-place {
+  margin: 0.4rem 0 0;
+  font-size: 0.875rem;
+}
+
+.snippet {
+  margin: 0.1rem 0 0;
+  font-family: var(--font-body);
+  overflow-wrap: anywhere;
+}
+
+.snippet mark {
+  background: var(--banner-bg);
+  color: inherit;
+  border-bottom: 2px solid var(--banner-border);
+  padding: 0 0.1em;
+}

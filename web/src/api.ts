@@ -327,3 +327,49 @@ export function entityQuery(universe: string, entity: string, at: string | undef
 export function count(n: number, one: string, many: string): string {
   return `${n} ${n === 1 ? one : many}`
 }
+
+export interface SearchHit {
+  entity: EntitySummary
+  /** The section the match is in, or null for the name, aliases, or lead. */
+  section: string | null
+  line: number | null
+  /** An excerpt with each match in square brackets. */
+  snippet: string
+  status: string
+  inCanon: boolean
+  inComment: boolean
+}
+
+export interface SearchResult {
+  version: number
+  query: string
+  count: number
+  truncated: boolean
+  hits: SearchHit[]
+}
+
+/** What a search asks for besides its words: the filters /api/search takes. */
+export interface SearchFilters {
+  type?: string
+  status?: string
+  series?: string
+  book?: string
+  canonOnly?: boolean
+}
+
+/** The statuses /api/search's `status` takes (DenReader.Statuses). */
+export const STATUSES = ['idea', 'undecided', 'candidate', 'draft', 'canon', 'retconned'] as const
+
+/** How many hits a search asks for at first, then on each "Show more", up to the API's own limit. */
+export const SEARCH_LIMITS = [20, 50, 100, 200] as const
+
+export function searchQuery(universe: string, query: string, filters: SearchFilters, at: string | undefined, limit: number) {
+  const { type, status, series, book, canonOnly } = filters
+  return queryOptions({
+    queryKey: ['search', universe, query, type ?? null, status ?? null, series ?? null, book ?? null, canonOnly ?? false, at ?? null, limit],
+    queryFn: () =>
+      getJson<SearchResult>(
+        apiPath('/api/search', { query, universe, type, status, series, book, canonOnly: canonOnly ? 'true' : undefined, asOf: at, limit }),
+      ),
+  })
+}

@@ -13,6 +13,7 @@ import { SeriesPage } from './pages/SeriesPage'
 import { BookPage } from './pages/BookPage'
 import { ChapterPage } from './pages/ChapterPage'
 import { EntityPageView } from './pages/EntityPageView'
+import { SearchPage } from './pages/SearchPage'
 import { NotFound } from './components/States'
 
 /**
@@ -74,7 +75,50 @@ const chapterRoute = createRoute({
 // rest of the URL is the name, slashes and all.
 const entityRoute = createRoute({ getParentRoute: () => rootRoute, path: '/u/$universe/e/$', component: EntityPageView })
 
-const routeTree = rootRoute.addChildren([homeRoute, universeRoute, seriesRoute, bookRoute, chapterRoute, entityRoute])
+/**
+ * The search page's params (#25): the words (`q`), and the filters, each
+ * left out when unset. A series and a book don't go together, so a book
+ * wins.
+ */
+export interface SearchPageSearch {
+  q?: string
+  type?: string
+  status?: string
+  series?: string
+  book?: string
+  canon?: boolean
+}
+
+export function validateSearchPageSearch(search: Record<string, unknown>): SearchPageSearch {
+  const text = (name: string) => (typeof search[name] === 'string' ? (search[name] as string).trim() : '') || undefined
+  const result: SearchPageSearch = {}
+  for (const name of ['q', 'type', 'status', 'book'] as const) {
+    const value = text(name)
+    if (value) {
+      result[name] = value
+    }
+  }
+
+  const series = text('series')
+  if (series && !result.book) {
+    result.series = series
+  }
+
+  if (search.canon === true || search.canon === 'true') {
+    result.canon = true
+  }
+
+  return result
+}
+
+const searchRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/u/$universe/search',
+  validateSearch: validateSearchPageSearch,
+  component: SearchPage,
+})
+
+const routeTree = rootRoute.addChildren([homeRoute, universeRoute, seriesRoute, bookRoute, chapterRoute, entityRoute, searchRoute])
 
 export function createAppRouter(queryClient: QueryClient, history?: RouterHistory) {
   return createRouter({

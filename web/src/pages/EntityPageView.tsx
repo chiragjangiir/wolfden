@@ -1,6 +1,6 @@
-import { Fragment, useMemo, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link, getRouteApi } from '@tanstack/react-router'
+import { Link, getRouteApi, useRouterState } from '@tanstack/react-router'
 import {
   entityQuery,
   type BacklinkView,
@@ -90,6 +90,14 @@ function NotInView({ summary, note, positions, at }: { summary: EntitySummary | 
 
 function EntityArticle({ universe, entity, positions }: { universe: string; entity: EntityPage; positions: PositionView[] }) {
   const lead = stripTitle(entity.lead, entity.name)
+  // A link to a section (#section-...) arrives before the page has loaded,
+  // so the router can't scroll to it; scroll once the section is here.
+  const hash = useRouterState({ select: (s) => s.location.hash })
+  useEffect(() => {
+    if (hash) {
+      document.getElementById(hash)?.scrollIntoView?.()
+    }
+  }, [hash, entity.key])
   return (
     <article className="page-body entity">
       <Breadcrumb universe={universe} scope={entity.scope} />
