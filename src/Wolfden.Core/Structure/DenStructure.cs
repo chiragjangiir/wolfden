@@ -71,14 +71,17 @@ public sealed class DenStructure
     /// <summary>
     /// Reads <c>remote_images</c> (F-DEN-8) straight from <c>den.yaml</c>'s
     /// bytes, without loading the den, as <c>wolfden serve</c> does for each
-    /// page it sends. True only when the file parses and the value is the
-    /// YAML boolean <c>true</c>; anything else, a broken file included,
-    /// leaves remote images off.
+    /// page it sends. True only when the file parses, its <c>format</c> is
+    /// one this reader supports (F-DEN-1, as the loader requires before it
+    /// reads any setting), and the value is the YAML boolean <c>true</c>;
+    /// anything else, a broken file included, leaves remote images off.
     /// </summary>
     public static bool ReadRemoteImages(ReadOnlySpan<byte> denYaml)
     {
         var file = YamlFile.Parse(denYaml);
-        return !file.HasErrors && DenLoader.ReadBoolean(file, DenLoader.RemoteImagesKey, out _) == true;
+        return !file.HasErrors
+            && DenLoader.ReadFormat(file, out _) is not null
+            && DenLoader.ReadBoolean(file, DenLoader.RemoteImagesKey, out _) == true;
     }
 
     /// <summary>

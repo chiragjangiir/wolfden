@@ -191,7 +191,12 @@ public class EntityCatalogTests
     [InlineData("format: 1\nremote_images: true\nremote_images: true\n")]
     [InlineData("format: 1\nremote_images: [true\n")]
     [InlineData("remote_images: true\n---\nmore: 1\n")]
-    public void ADenYamlThatDoesntParseLeavesRemoteImagesOff(string text)
+    [InlineData("remote_images: true\n")]
+    [InlineData("format: 2\nremote_images: true\n")]
+    [InlineData("format: 0\nremote_images: true\n")]
+    [InlineData("format: one\nremote_images: true\n")]
+    [InlineData("format: \"1\"\nremote_images: true\n")]
+    public void ADenYamlWithoutAFormatItCanReadLeavesRemoteImagesOff(string text)
     {
         Assert.False(DenStructure.ReadRemoteImages(System.Text.Encoding.UTF8.GetBytes(text)));
         Assert.False(DenStructure.ReadRemoteImages([0xFF, 0xFE, 0x00]));

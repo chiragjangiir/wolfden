@@ -196,11 +196,27 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
     /// <summary>F-DEN-1: <c>format</c> is a required integer, from 1 up to the highest this reader supports.</summary>
     private int? ReadFormat(YamlFile file)
     {
+        var format = ReadFormat(file, out var error);
+        if (error is not null)
+        {
+            den.Add(DenFile, error);
+        }
+
+        return format;
+    }
+
+    /// <summary>
+    /// F-DEN-1 without a den to report to: the format, or null with the
+    /// <paramref name="error"/> that says why there's none.
+    /// </summary>
+    internal static int? ReadFormat(YamlFile file, out Diagnostic? error)
+    {
+        error = null;
         var node = file.GetValue("format");
         if (node is not YamlScalar { IsNull: false, Style: YamlScalarStyle.Plain } scalar || !IsDecimalInteger(scalar.Text))
         {
-            den.Add(DenFile, new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node?.Line ?? 1,
-                node is null ? "den.yaml has no format. Add 'format: 1'." : "format must be an integer, such as 'format: 1'."));
+            error = new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node?.Line ?? 1,
+                node is null ? "den.yaml has no format. Add 'format: 1'." : "format must be an integer, such as 'format: 1'.");
             return null;
         }
 
@@ -208,15 +224,15 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         var tooBig = !int.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var format);
         if (tooBig ? !text.StartsWith('-') : format > DenStructure.SupportedFormat)
         {
-            den.Add(DenFile, new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node.Line,
-                $"den format {text} is newer than this version of Wolfden, which reads format {DenStructure.SupportedFormat}."));
+            error = new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node.Line,
+                $"den format {text} is newer than this version of Wolfden, which reads format {DenStructure.SupportedFormat}.");
             return null;
         }
 
         if (tooBig || format < 1)
         {
-            den.Add(DenFile, new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node.Line,
-                $"den format {text} doesn't exist: formats start at 1."));
+            error = new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node.Line,
+                $"den format {text} doesn't exist: formats start at 1.");
             return null;
         }
 
