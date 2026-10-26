@@ -473,7 +473,8 @@ from the files:
 
 - Tables for entities, field values (with from/until positions), sections
   (with positions), links, outline rows, and positions, plus FTS5 for
-  full-text search.
+  full-text search of names, aliases, leads, and sections. Field values
+  are searched from their own table (#179, see the search page in §9).
 - **Rebuilt** fully on demand and incrementally through a file watcher, so
   edits made outside the app show up within moments.
 - **Self-healing.** A full rebuild writes a new file and swaps it in, so a
@@ -653,7 +654,7 @@ it to Claude Code, Claude Desktop, and other clients is in
 
 | Tool | Status | Purpose |
 |---|---|---|
-| `search` | shipped (#20) | Full-text search across the den, or one universe or type |
+| `search` | shipped (#20) | Full-text search across the den, or one universe or type; field values too, or one field's (#179) |
 | `get_entity` | shipped (#20) | One entity, optionally `as_of` a position |
 | `list_entities` | shipped (#20) | By universe, type, status, series, or book |
 | `canon_as_of` | shipped (#20) | Canon at a position, with an optional series or book filter |
@@ -1074,7 +1075,8 @@ docs/
   | `/api/entities` | `universe`, `type`, `status`, `series`, `book`, `asOf`, `limit` | `list_entities`; with `asOf`, only the entities in the canon view there, in its order. |
   | `/api/entity` | `entity`, `universe`, `asOf` | `get_entity`, as a page: each field value or entry and each section lists its links, resolved from the index (the entity reached, or broken or ambiguous); also the scope's container chain, where the entity enters canon (its `from`, or its scope's start, inherited, format.md F-ENT-6), and its backlinks (which entity, field, section, chapter, or outline row). As of a position, a link to an entity the reader hasn't met doesn't say what it reaches, and only links in what the reader has met count as backlinks. |
   | `/api/canon` | `universe`, `asOf`, `series`, `book`, `type`, `brief` | `canon_as_of`. |
-  | `/api/search` | `query`, `universe`, `type`, `canonOnly`, `limit`, `status`, `series`, `book`, `asOf` | `search`, with snippets; it can also keep entities of one status, those a series or book filter covers (as in a canon view), or, as of a position, hits in the entities and sections in the canon view there. |
+  | `/api/search` | `query`, `universe`, `type`, `canonOnly`, `limit`, `status`, `series`, `book`, `asOf`, `field` | `search`, with snippets; it can also keep entities of one status, those a series or book filter covers (as in a canon view), or, as of a position, hits in the entities, sections, and field values in the canon view there. Each hit adds `text`, the snippet without marks, and `matches`, the `start` and `length` of each match in it (UTF-16 code units), so the page never mistakes a note's own brackets for a match (#179). |
+  | `/api/fields` | `universe`, `asOf` | The names of the fields notes give values for, for the search page's Field filter (#179); as of a position, only those of values in the canon view there. |
   | `/api/history` | `entity`, `universe`, `limit`, `before` | `get_history`'s checkpoints, a page at a time. |
   | `/api/history/diff` | `entity`, `universe`, and `checkpoint`, or `from` and `to` | The entity file's unified diff: what one checkpoint changed (against the one before it, or for the first, against nothing, through the history provider's `DiffCheckpoint`), the change between two (`from` and `to`), or since one (`from`, or by default the latest) up to the file as it is now. |
 
@@ -1166,22 +1168,47 @@ docs/
   search box sits in the top bar; `/` focuses it from anywhere but a
   text box. Typing searches once it pauses (300 ms), on
   `/u/<universe>/search?q=<words>`, which also keeps the filters
-  (`type`, `series` or `book`, `status`, `canon=true`) and `at`. The
-  page sends them to `/api/search` and lists the hits by note, with
-  the note's type and scope, the section (linked to its anchor on the
-  note's page), and the snippet with the matched words marked. The
-  snippet is rendered as text; a bracketed run is marked only when its
-  words are the query's, since a note's own text can hold brackets.
+  (`field`, `type`, `series` or `book`, `status`, `canon=true`) and
+  `at`. The page sends them to `/api/search` and lists the hits by note,
+  with the note's type and scope, the section (linked to its anchor on
+  the note's page) or field, and the snippet with the matched words
+  marked. The snippet is rendered as text, and the matches are marked
+  from the ranges the API gives (#179), so a note's own brackets, such
+  as a `[[link]]`, are never taken for a match.
   "Show more matches" asks again with a bigger `limit` (20, 50, 100,
   200), as the API has no offset. As of a position the search sends
   `asOf`, says so ("Searching as of Dracula chapter 9"), and offers to
   search everything; hits the reader hasn't met aren't shown or
   peeked at. The Type filter lists only the types the reader has met,
   which applies the maintainer's hidden-by-default decision (#26) as
-  the tree does. A blank `at` fails closed, as on every page. Search is
-  full-text only: the API has no search of one field's value (such as
-  every character whose `occupation:` holds physician), and field
-  values aren't in the full-text index.
+  the tree does. A blank `at` fails closed, as on every page.
+- **Field search** (#179; the semantics are the maintainer's decision
+  of 2026-10-26, the page and API shape are v0 behaviour). Search also
+  finds words in field values, and a Field filter (`field=<name>` in
+  the URL and the API) searches one field's values only, such as every
+  character whose `occupation:` holds "physician". A value matches when
+  it holds every word of the query, ignoring case and accents, as the
+  main search does: `home: Saltmarsh Docks` matches "saltmarsh". A
+  list's items and a mapping's keys and values are its words. A link in
+  a value matches by the linked note's name and aliases as well as by
+  the text as written, so `home: [[saltmarsh]]` still matches "old
+  saltmarsh" after the place is renamed "Old Saltmarsh". As of a
+  position, only the values in the canon view there count, and a link
+  matches by name or alias only when the reader has met the linked
+  note, so a search never confirms the name of a note they haven't. A
+  field hit says which field matched ("Field: home"), and its snippet is
+  the value as written, then `→` and the linked note's name or alias
+  where that's what matched. The Field filter lists the fields notes
+  give values for (`/api/fields`); as of a position, only those of
+  values in view, as the Type filter lists only met types. A field no
+  note gives a value for is `bad_argument`. Types' defaults aren't
+  searched: they aren't the note's writing. Field values aren't in the
+  FTS5 table: a link's name changes when its note is renamed, without
+  the linking file changing, and what counts depends on the position,
+  so values are matched when a search asks (they're few next to
+  sections), and field hits come after the full-text hits. Phrase
+  search (`"a note"`) isn't supported yet: each word is matched on its
+  own.
 - **The history page** (#27; v0 behaviour, not a recorded decision,
   except the reveal, which applies the #26 decision). An entity page
   has Note and History tabs, below the breadcrumb on both. History is

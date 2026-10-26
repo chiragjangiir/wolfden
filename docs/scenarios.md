@@ -2194,6 +2194,35 @@ Spec: format.md F-RT-5, F-ENT-6, F-POS-7, F-ORD-3, F-LINK-7, F-BOOK-1
 `EntityMoveEditTests.ATableRowIsFoundWithOrWithoutItsOuterPipes`,
 `EntityMoveEditTests.AnOverlayCanLeaveAFileOut`.
 
+### SC-MCP-30. My assistant searches field values
+
+The assistant searches the Starfall den for "Lieutenant", then for
+"saltmarsh" in the `home` field, then for "the reach" in a `berth`
+field that links Kessan Reach by its id.
+
+- `search` finds Mara's rank entry, says it's in field `rank` (with the
+  entry's line), and brackets the match in the snippet. A candidate
+  entry is found but not as canon, and `canon_only` leaves it out.
+- With `field`, only that field's values are searched, every word
+  matching, ignoring case and accents: `home: Saltmarsh Docks` matches
+  "saltmarsh" and "DOCKS saltm*", not "saltmarsh harbour"; "Voss" in
+  `home` finds nothing, though her name holds it.
+- A link matches its note's name and aliases as well as the text as
+  written, and the snippet adds the one that matched after `→`:
+  `[[<id>]] → [the] [Reach]`. After a rename, the new name matches.
+- A field no note gives a value for is `bad_argument`. The tool's JSON
+  gains `field` on a field hit; snippets keep their brackets, and the
+  web API's match ranges aren't in it.
+
+Spec: design.md §8, §9 (#179; the semantics are the maintainer's
+decision of 2026-10-26). Covered by:
+`FieldSearchToolTests.OrdinarySearchFindsWordsInFieldValuesAndSaysWhichField`,
+`FieldSearchToolTests.OneFieldSearchMatchesTheValuesWordsIgnoringCase`,
+`FieldSearchToolTests.ALinkMatchesItsNotesNameAndAliasesAndTheTextAsWritten`,
+`FieldSearchToolTests.AFieldNoNoteHasIsABadArgument`,
+`FieldSearchToolTests.TheToolsJsonNamesTheFieldAndKeepsBracketedSnippets`,
+`SearchTests.SearchWordsMatchFieldTextAsTheSearchTableDoes`.
+
 ## STORE: Wolfden saves, moves, and deletes notes
 
 Background: the den store (design.md §6, #121) is how Wolfden writes a
@@ -2494,7 +2523,8 @@ v0 has no accounts, so it never listens on the network. The browsing,
 search, and history pages come in M3 (#24 to #27); their read API comes
 first, and SC-WEB-4 to SC-WEB-10 describe what it answers. SC-WEB-11
 to SC-WEB-17 describe the browsing pages, SC-WEB-18 to SC-WEB-21 the
-search page, and SC-WEB-22 and SC-WEB-23 the history page.
+search page, and SC-WEB-22 and SC-WEB-23 the history page. SC-WEB-24
+and SC-WEB-25 describe field search (#179).
 
 ### SC-WEB-1. I open my den in the browser
 
@@ -2652,8 +2682,9 @@ Spec: design.md §9 (#24, #26). Covered by:
 - `/api/search` gives what the MCP `search` gives, with snippets. It can
   also keep only entities of one status, those a series or book filter
   covers (as in a canon view), or, as of a position, hits in the
-  entities and sections the reader has met: "flechette" finds nothing
-  at `ember:2` and Mara's injury at `ember:2b`.
+  entities, sections, and field values the reader has met: "flechette"
+  finds nothing at `ember:2` and Mara's injury at `ember:2b`. Field
+  search is SC-WEB-24 and SC-WEB-25.
 
 Spec: design.md §9 (#25). Covered by:
 `ReadEndpointTests.ListsAndSearchesWithoutAPositionGiveWhatTheToolsGive`,
@@ -2858,12 +2889,12 @@ Spec: design.md §9 (#25, #26). Covered by: `Search.test.tsx` (web).
 ### SC-WEB-21. A snippet holds HTML or brackets of its own
 
 - A snippet is rendered as text: `<script>` or `<img onerror>` in a note
-  shows as written and never runs. The API marks matches in square
-  brackets, so a bracketed run is marked only when its words are the
-  query's words (ignoring case and accents, `word*` as a prefix); a
-  `[[...]]` link or other brackets stay as written.
+  shows as written and never runs. The page marks the match ranges the
+  API gives with the hit's text (#179), so a `[[...]]` link or other
+  brackets stay as written, and a word inside one is marked only where
+  the API matched it.
 
-Spec: design.md §9 (#25). Covered by: `Search.test.tsx` (web).
+Spec: design.md §9 (#25, #179). Covered by: `Search.test.tsx` (web).
 
 ### SC-WEB-22. I read what changed in a note
 
@@ -2918,3 +2949,62 @@ Mina Harker, and an edit since. They open her page and pick History.
 
 Spec: design.md §9 (#27, the reveal as decided on #26). Covered by:
 `History.test.tsx` (web).
+
+### SC-WEB-24. I search one field
+
+The writer's notes give characters an `occupation:`, and Lucy a
+`home: Hillingham`.
+
+- Searching "hillingham" with no field finds Lucy's home among the
+  other hits: search finds words in field values too. Picking "home" in
+  the Field filter searches only that field's values; it's kept in the
+  URL (`field=home`) and sent to `/api/search`. A value matches when it
+  holds every word of the query, ignoring case and accents, as the main
+  search does: `home: Saltmarsh Docks` matches "saltmarsh". A list's
+  items are its words.
+- A link in a value matches by the linked note's name and aliases as
+  well as by the text as written: a berth written as Kessan Reach's id
+  matches "kessan reach" and "the reach", and after the place is
+  renamed "Old Kessan", it matches "old kessan" though the linking note
+  didn't change.
+- The hit says which field matched ("Field: home", linked to the note),
+  and its snippet is the value as written, then `→` and the linked
+  note's name or alias where that's what matched. The Field filter
+  lists the fields notes give values for, from `/api/fields`. A field
+  no note gives a value for is `bad_argument`.
+- Each hit carries its excerpt as plain `text` and its `matches` as
+  ranges, so the page marks matches without guessing: a `[[link]]` or
+  other brackets in a note are never taken for one. The index keeps
+  control characters out of the search table, so the marks it puts in
+  snippets can't be the note's own text.
+
+Spec: design.md §9 (#179; the semantics are the maintainer's decision
+of 2026-10-26). Covered by:
+`FieldSearchEndpointTests.AFieldSearchGivesWhatTheToolGivesWithTextAndMatchRanges`,
+`FieldSearchEndpointTests.MatchRangesTellTheSearchsMarksFromTheNotesOwnBrackets`,
+`SearchTests.MatchesAreRangesInTheTextSoTheNotesOwnBracketsAndControlCharactersCantPassForThem`,
+`Search.test.tsx` (web).
+
+### SC-WEB-25. I search a field as of a story position
+
+Mara Voss, met in *Ember*, has a `watch_mate:` that links Halden Pike by
+his id; the reader meets Pike in *Ash*.
+
+- As of `ember:3`, searching "Halden Pike" finds nothing, with or
+  without the field: a link matches by name or alias only when the
+  reader has met the linked note, so search never confirms the name of
+  a note they haven't. The id as written is the writer's text in a note
+  the reader has met, so it still matches. As of `ash:1`, and with no
+  position, "pike" finds the watch mate, and the snippet reads
+  `[[<id>]] → Halden Pike`.
+- Only the values in the canon view count: Mara's posting to Kessan
+  Reach, from `ash:4`, isn't found at `ash:3`.
+- The Field filter lists only the fields of values the reader has met
+  (`/api/fields` with `asOf`), as the Type filter lists only met types,
+  and keeps one already chosen.
+
+Spec: design.md §9 (#179, #26). Covered by:
+`FieldSearchEndpointTests.AsOfAPositionALinkMatchesByNameOnlyWhenTheReaderHasMetItsNote`,
+`FieldSearchEndpointTests.TheFieldsAreThoseNotesGiveValuesForAndAsOfAPositionOnlyThoseInView`,
+`SpoilerTests.NothingAsOfAPositionNamesAnEntityTheReaderHasntMet`,
+`Search.test.tsx` (web).
