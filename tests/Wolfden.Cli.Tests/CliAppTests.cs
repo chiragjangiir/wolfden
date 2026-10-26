@@ -36,6 +36,7 @@ public class CliAppTests
     [InlineData("check")]
     [InlineData("index")]
     [InlineData("query")]
+    [InlineData("copy")]
     [InlineData("new-id")]
     public void EveryCommandHasHelpThatStartsWithItsUsage(string command)
     {
@@ -51,6 +52,7 @@ public class CliAppTests
     [InlineData("check")]
     [InlineData("index")]
     [InlineData("query")]
+    [InlineData("copy")]
     public void EveryCommandThatReadsADenTakesDenAndJson(string command)
     {
         var (_, output, _) = Cli.Run(command, "--help");
