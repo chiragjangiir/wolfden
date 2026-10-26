@@ -634,25 +634,73 @@ public sealed class GitHistoryTests
         Assert.Contains("2 patches headed 'diff --git a/c/a.md b/c/a.md'", error.Message, StringComparison.Ordinal);
         Assert.Throws<HistoryException>(() => GitHistory.ReadDiff(":100644 100644 3333333 4444444 M\0c/a.md\0\0"));
         Assert.Throws<HistoryException>(() => GitHistory.ReadDiff(":100644 100644 3333333 4444444 M\0c/a.md\0\0" + part + part.Replace("a.md", "z.md", StringComparison.Ordinal)));
+
+        // A type change needs exactly its two parts: the old side deleted, then the new side created (#158 review, M1 and L3).
+        var deleted = "diff --git a/c/b.md b/c/b.md\ndeleted file mode 100644\nindex 1111111..0000000\n--- a/c/b.md\n+++ /dev/null\n@@ -1 +0,0 @@\n-hello\n";
+        var created = "diff --git a/c/b.md b/c/b.md\nnew file mode 120000\nindex 0000000..2222222\n--- /dev/null\n+++ b/c/b.md\n@@ -0,0 +1 @@\n+target.md\n";
+        var typeChange = ":100644 120000 1111111 2222222 T\0c/b.md\0\0";
+        Assert.Single(GitHistory.ReadDiff(typeChange + deleted + created));
+        foreach (var parts in new[] { deleted, created, created + deleted, deleted + deleted, deleted + created + created })
+        {
+            Assert.Contains("didn't give its patch as the old side deleted", Assert.Throws<HistoryException>(() => GitHistory.ReadDiff(typeChange + parts)).Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-6")]
+    public void ASubmoduleIsntADenFile()
+    {
+        static string Part(string path, string body) => $"diff --git a/{path} b/{path}\n{body}";
+        var output =
+            ":000000 160000 0000000 1111111 A\0u/new\0:160000 000000 2222222 0000000 D\0u/old\0:160000 160000 3333333 4444444 M\0u/moved\0" +
+            ":100644 100644 5555555 6666666 M\0u/a.md\0\0" +
+            Part("u/new", "new file mode 160000\nindex 0000000..1111111\n--- /dev/null\n+++ b/u/new\n@@ -0,0 +1 @@\n+Subproject commit 1111111\n") +
+            Part("u/old", "deleted file mode 160000\nindex 2222222..0000000\n--- a/u/old\n+++ /dev/null\n@@ -1 +0,0 @@\n-Subproject commit 2222222\n") +
+            Part("u/moved", "index 3333333..4444444 160000\n--- a/u/moved\n+++ b/u/moved\n@@ -1 +1 @@\n-Subproject commit 3333333\n+Subproject commit 4444444\n") +
+            Part("u/a.md", "index 5555555..6666666 100644\n--- a/u/a.md\n+++ b/u/a.md\n@@ -1 +1 @@\n-a\n+b\n");
+
+        var file = Assert.Single(GitHistory.ReadDiff(output));
+
+        Assert.Equal(new HistoryFileChange(HistoryChangeKind.Modified, "u/a.md"), file.Change);
+        Assert.StartsWith("diff --git a/u/a.md b/u/a.md\n", file.Patch, StringComparison.Ordinal);
     }
 
     /// <summary>
     /// A note that became a symbolic link or a submodule between two
     /// checkpoints, and back (#158). Git records a link's mode whether or not
-    /// the OS can make links, so this runs everywhere.
+    /// the OS can make links, so this runs everywhere. Submodules added,
+    /// moved to another commit, or deleted aren't den files, and the user's
+    /// <c>diff.submodule</c> setting doesn't change any of it (#158 review,
+    /// M1 and L1).
     /// </summary>
-    [Fact]
+    [Theory]
+    [InlineData(null)]
+    [InlineData("log")]
+    [InlineData("diff")]
     [Trait("Scenario", "SC-HIST-6")]
-    public void ADiffBetweenCheckpointsShowsANoteThatBecameALinkOrASubmodule()
+    public void ADiffBetweenCheckpointsShowsANoteThatBecameALinkOrASubmodule(string? diffSubmodule)
     {
         using var repo = TestRepo.Create();
+        if (diffSubmodule is not null)
+        {
+            repo.Git("config", "diff.submodule", diffSubmodule);
+        }
+
         repo.WriteDen(Mara, "# Mara Voss\n");
         repo.WriteDen(Fen, "# Fen Harbour\n");
-        var start = repo.CommitAll("start");
+        var first = repo.CommitAll("first");
+        repo.Git("update-index", "--add", "--cacheinfo", $"160000,{first},universes/maps");
+        repo.Git("update-index", "--add", "--cacheinfo", $"160000,{first},universes/old-maps");
+        repo.Git("commit", "--quiet", "-m", "start");
+        var start = repo.Git("rev-parse", "HEAD").Trim();
+
         // The link's blob is its target's path; Fen's blob stands in for one.
         var target = repo.Git("rev-parse", $"HEAD:{Fen}").Trim();
         repo.Git("update-index", "--cacheinfo", $"120000,{target},{Mara}");
         repo.Git("update-index", "--cacheinfo", $"160000,{start},{Fen}");
+        repo.Git("update-index", "--cacheinfo", $"160000,{start},universes/maps");
+        repo.Git("update-index", "--force-remove", "universes/old-maps");
+        repo.Git("update-index", "--add", "--cacheinfo", $"160000,{start},universes/new-maps");
         repo.Git("commit", "--quiet", "-m", "linked");
         var linked = repo.Git("rev-parse", "HEAD").Trim();
 
@@ -662,6 +710,11 @@ public sealed class GitHistoryTests
         Assert.Equal(
             [new HistoryFileChange(HistoryChangeKind.Modified, Mara), new HistoryFileChange(HistoryChangeKind.Deleted, Fen)],
             forward.Select(f => f.Change).OrderBy(c => c.Path, StringComparer.Ordinal));
+        Assert.Equal(
+            [new HistoryFileChange(HistoryChangeKind.Modified, Mara), new HistoryFileChange(HistoryChangeKind.Deleted, Fen)],
+            repo.History.Log(new HistoryLogQuery(Limit: 1), Token).Value.Single().Changes.OrderBy(c => c.Path, StringComparer.Ordinal));
+        Assert.Empty(repo.History.Log(new HistoryLogQuery(Limit: 2), Token).Value[1].Changes);
+        Assert.All(forward.Concat(back), f => Assert.DoesNotContain("Submodule", f.Patch, StringComparison.Ordinal));
         var mara = forward.Single(f => f.Change.Path == Mara).Patch;
         Assert.Matches($"^diff --git a/{Mara} b/{Mara}\ndeleted file mode 100644\n(.*\n)*-# Mara Voss\ndiff --git a/{Mara} b/{Mara}\nnew file mode 120000\n(.*\n)*\\+# Fen Harbour\n$", mara);
         var fen = forward.Single(f => f.Change.Path == Fen).Patch;
