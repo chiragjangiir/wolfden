@@ -1009,9 +1009,10 @@ docs/
   of its own, so `wolfden serve` hosts it in the same process. v0 is
   single-user with no accounts or authentication, so the server guards
   the den from everything but its own pages on this computer. It listens
-  on 127.0.0.1 only, never on another network interface, and reads no
-  configuration (environment variables, `appsettings.json`) that could add
-  a listener; `serve` also checks the addresses after starting and stops
+  on 127.0.0.1 only, never on another network interface, and no
+  configuration can add a listener: Kestrel endpoints in environment
+  variables or an `appsettings.json` are ignored, and `ASPNETCORE_URLS`
+  is overridden, with a warning; `serve` also checks the addresses after starting and stops
   if one isn't loopback. It answers only requests addressed to
   `localhost` or `127.0.0.1`, so a web page on another site can't reach
   the den through a DNS name that points at this machine (DNS rebinding).
@@ -1037,8 +1038,10 @@ docs/
   never runs npm, so .NET work doesn't need Node. Paths that aren't files
   get `index.html`, so the UI's own routes survive a reload. For UI work,
   `npm run dev` serves the UI with hot reload and passes `/api` to a
-  running `wolfden serve --no-open` (port 9653, or `WOLFDEN_PORT`),
-  dropping the page's `Origin`, since its port is Vite's.
+  running `wolfden serve --no-open` (port 9653, or `WOLFDEN_PORT`). The
+  proxy drops the `Origin` of the dev server's own page, since its port
+  is Vite's, and passes any other `Origin` on, so the API still refuses
+  a request from another site that comes through the dev server.
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and
   unknown content. This gets heavy test coverage, since it decides whether
   people trust the tool with their notes.

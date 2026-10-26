@@ -77,4 +77,7 @@ jobs:
           DOTNET_CLI_TELEMETRY_OPTOUT: "1"
           DOTNET_NOLOGO: "1"
           WOLFDEN_REQUIRE_BUILT_UI: "1"
-        run: dotnet test tests/Wolfden.Cli.Tests -c Release --filter "FullyQualifiedName~ServeCommandTests.TheBuiltUiIsServedFromWwwroot"
+        # A filter that matches nothing passes, so check that the one test ran and passed.
+        run: |
+          dotnet test tests/Wolfden.Cli.Tests -c Release --filter "FullyQualifiedName~ServeCommandTests.TheBuiltUiIsServedFromWwwroot" | tee serve-ui-test.log
+          grep -Eq 'Failed: +0, Passed: +1, Skipped: +0, Total: +1' serve-ui-test.log || { echo "::error::The built-UI test didn't run exactly once and pass."; exit 1; }

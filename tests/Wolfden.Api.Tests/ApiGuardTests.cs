@@ -207,7 +207,7 @@ public class ListenerConfigurationTests
         using var den = TempDen.Dracula();
         string[] variables = ["Kestrel__Endpoints__Extra__Url", "ASPNETCORE_URLS", "ASPNETCORE_HTTP_PORTS", "URLS"];
         var settings = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
-        Assert.False(File.Exists(settings));
+        File.Delete(settings); // left over from a run that crashed
         try
         {
             Environment.SetEnvironmentVariable(variables[0], "http://0.0.0.0:0");

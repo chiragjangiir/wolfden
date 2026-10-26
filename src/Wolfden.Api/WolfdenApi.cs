@@ -22,9 +22,9 @@ namespace Wolfden.Api;
 /// <para>
 /// v0 is local-first and single-user, with no accounts and no
 /// authentication, so the server listens on 127.0.0.1 only, never on
-/// another network interface. Configuration can't add a listener: the
-/// server reads no environment variables, command line, or
-/// <c>appsettings.json</c>. It answers only requests addressed to
+/// another network interface. No configuration can add a listener: not
+/// environment variables (<c>ASPNETCORE_URLS</c> is overridden, with a
+/// warning), a command line, or an <c>appsettings.json</c>. It answers only requests addressed to
 /// <c>localhost</c> or <c>127.0.0.1</c>, which keeps a web page on another
 /// site from reaching the den through a DNS name that resolves to this
 /// machine (DNS rebinding), and the API refuses requests a browser marks as
@@ -61,8 +61,10 @@ public static class WolfdenApi
             EnvironmentName = Environments.Production,
         });
 
-        // No configuration from the environment (ASPNETCORE_URLS, Kestrel__Endpoints__…)
-        // or an appsettings.json next to wolfden: none of it may add a listener.
+        // No configuration may add a listener: drop the environment (Kestrel__Endpoints__…)
+        // and an appsettings.json next to wolfden. The host has already read
+        // ASPNETCORE_URLS and its kin by now; the Listen below overrides them,
+        // and Kestrel says so in a warning.
         builder.Configuration.Sources.Clear();
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
@@ -112,8 +114,8 @@ public static class WolfdenApi
     /// this server (<c>localhost</c> or <c>127.0.0.1</c> on the port the
     /// request came in on). Requests without either header, such as
     /// <c>curl</c>'s, and the browser's same-origin requests pass. The Vite
-    /// dev server's proxy drops <c>Origin</c> (web/vite.config.ts), since its
-    /// page has another port.
+    /// dev server's proxy drops the <c>Origin</c> of its own page, which has
+    /// another port, and passes any other on (web/vite.config.ts).
     /// </summary>
     internal static Task CrossSiteGuard(HttpContext context, RequestDelegate next)
     {
