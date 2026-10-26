@@ -28,11 +28,11 @@ namespace Wolfden.Mcp;
 /// <para>
 /// Before anything is written, every link in the den is resolved again as
 /// it would be with the copy there. One that reached an entity and would
-/// reach another (the copy's name or file name wins in a nearer scope)
-/// refuses the copy, unless <c>allow_relinks</c> says to go ahead, as for
-/// a rename (maintainer decision, 2026-10-26). A link that would only
-/// become ambiguous, or one that was broken and now reaches the copy, is
-/// reported. So are the copy's own links that don't reach what they reach
+/// reach another (the copy's name or file name wins in a nearer scope), or
+/// become ambiguous (it ties with the copy), refuses the copy, unless
+/// <c>allow_relinks</c> says to go ahead, as for a rename (maintainer
+/// decision, 2026-10-26). A link that was broken or ambiguous and now
+/// reaches the copy reached nothing before, so it's only reported. So are the copy's own links that don't reach what they reach
 /// in the original, such as those that break in another universe (F-LINK-5,
 /// F-LINK-8): copying is allowed, and they're the writer's to-do list
 /// (maintainer decision, 2026-10-23).
@@ -120,13 +120,16 @@ public sealed partial class DenTools
             var overlay = new OverlayDenSource(den, files);
             var afterLinks = LinkIndex.Build(EntityCatalog.Load(check.Structure, overlay), overlay);
             var changed = LinkChanges.Between(links, afterLinks);
-            var relinked = changed.Where(l => l.Before.Outcome == LinkOutcome.Resolved && l.After.Outcome == LinkOutcome.Resolved
-                && l.After.Target!.Path != l.Before.Target!.Path).ToList();
+            // A link that reached an entity and would reach another, or become ambiguous, refuses the copy
+            // unless allow_relinks, as for a rename (maintainer decision, 2026-10-26). A broken or ambiguous
+            // link that now reaches the copy reached nothing before, so it's only reported.
+            var relinked = changed.Where(l => l.Before.Outcome == LinkOutcome.Resolved
+                && (l.After.Outcome != LinkOutcome.Resolved || l.After.Target!.Path != l.Before.Target!.Path)).ToList();
             if (relinked.Count > 0 && !allowRelinks)
             {
                 throw new DenToolException(
                     ToolErrorCodes.BadArgument,
-                    $"{relinked.Count} link(s) would reach the copy instead of the entity they reach now: " +
+                    $"{relinked.Count} link(s) would change which entity they reach: " +
                     $"{string.Join("; ", relinked.Take(ListedLinkChanges).Select(l => $"{Where(l.After)}{(InFinalBook(l.Before) ? " (in a final book)" : "")} reaches {Reached(l.Before)} and would {Outcome(l.After)}"))}" +
                     $"{(relinked.Count > ListedLinkChanges ? $"; and {relinked.Count - ListedLinkChanges} more" : "")}. Nothing was copied. " +
                     "Choose another name (or slug), link those by id first, or pass allow_relinks: true to make the copy anyway.");
@@ -235,16 +238,15 @@ public sealed partial class DenTools
         {
             effects.Add($"It has no 'from', so it enters canon at {scope.StartDescription} (F-ENT-6); the original enters at {source.Scope.StartDescription}.");
         }
-        else if (scope != source.Scope && copy.FromResolution?.IsResolved == true)
-        {
-            effects.Add($"Its 'from' is still {copy.From}, so it enters canon there, as the original does (F-ENT-6).");
-        }
-
-        if (scope != source.Scope && scope is Book book && copy.FromResolution?.Resolved is { } from && from.Book.Path != book.Path)
+        else if (scope != source.Scope && scope is Book book && copy.FromResolution?.Resolved is { } from && from.Book.Path != book.Path)
         {
             effects.Add(
                 $"Its 'from', {copy.From}, is in book '{from.Book.Key}', outside book '{book.Key}', where it's filed now: check reports that (F-ENT-6). " +
                 "Change it to where the reader meets it in this book, or file the copy elsewhere.");
+        }
+        else if (scope != source.Scope && copy.FromResolution?.IsResolved == true)
+        {
+            effects.Add($"Its 'from' is still {copy.From}, so it enters canon there, as the original does (F-ENT-6).");
         }
 
         // Positions that resolved in the original and don't where the copy is (F-POS-4), such as those of another universe's books.
@@ -277,6 +279,14 @@ public sealed partial class DenTools
                     effects.Add($"And {differ.Count - ListedLinkChanges} more. Call check to see them.");
                 }
             }
+        }
+        else
+        {
+            // The copy's links can't be paired with the original's (a bug, or a link in an alias), so they're counted instead.
+            var unresolved = its.Count(l => l.Outcome != LinkOutcome.Resolved);
+            effects.Add(
+                $"The copy has {its.Count} link(s) and the original {mine.Count}, so they can't be compared one by one: " +
+                $"{unresolved} of the copy's don't resolve where it is now. Call check to see them.");
         }
 
         var toOriginal = its.Count(l => l.Outcome == LinkOutcome.Resolved && l.Target!.Path == source.Path);

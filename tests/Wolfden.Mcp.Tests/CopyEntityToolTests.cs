@@ -88,7 +88,7 @@ public sealed class CopyEntityToolTests : IDisposable
         Assert.Equal(Aftermath + "/entities/characters/young-swales.md", swales.Path);
         Assert.Contains("from: \"dracula:6\"\n", _den.Read(swales.Path), StringComparison.Ordinal);
         Assert.Contains(swales.Effects, e => e.Contains("in book 'aftermath' of universe 'dracula'", StringComparison.Ordinal));
-        Assert.Contains(swales.Effects, e => e.Contains("Its 'from' is still dracula:6", StringComparison.Ordinal));
+        Assert.DoesNotContain(swales.Effects, e => e.Contains("Its 'from' is still dracula:6", StringComparison.Ordinal));
         Assert.Contains(swales.Effects, e => e.Contains("is in book 'dracula', outside book 'aftermath'", StringComparison.Ordinal) && e.Contains("F-ENT-6", StringComparison.Ordinal));
         Assert.Contains(Tools.Check().Diagnostics, d => d.Rule == "F-ENT-6" && d.Path == swales.Path);
 
@@ -113,7 +113,7 @@ public sealed class CopyEntityToolTests : IDisposable
     public void NothingIsCopiedIntoAFinalBookButACopyOutOfOneIsFine()
     {
         WriteAftermath("final");
-        var before = Directory.GetFiles(_den.Root, "*", SearchOption.AllDirectories).Length;
+        var before = DenFiles();
 
         var refused = Assert.Throws<DenToolException>(() => Tools.CopyEntity("Mr. Swales", "Young Swales", toBook: "aftermath"));
 
@@ -126,7 +126,7 @@ public sealed class CopyEntityToolTests : IDisposable
         Assert.Equal(ToolErrorCodes.Frozen, Assert.Throws<DenToolException>(() => Tools.CopyEntity("Mr. Swales", "Young Swales")).Code);
         var copy = Tools.CopyEntity("Mr. Swales", "Young Swales", toUniverse: "dracula");
         Assert.Equal("universes/dracula/entities/characters/young-swales.md", copy.Path);
-        Assert.Equal(before + 1, Directory.GetFiles(_den.Root, "*", SearchOption.AllDirectories).Count(f => !f.Contains(".wolfden", StringComparison.Ordinal)));
+        Assert.Equal(before + 1, DenFiles());
     }
 
     [Fact]
@@ -157,7 +157,7 @@ public sealed class CopyEntityToolTests : IDisposable
     public void ACopyThatWouldTakeAnotherEntitysLinksIsRefusedUnlessAllowed()
     {
         _den.Write(Note, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY9A2\ntype: note\nname: Whitby dialect\nstatus: draft\n---\n\nSee [[the Count]].\n");
-        var before = Directory.GetFiles(_den.Root, "*.md", SearchOption.AllDirectories).Length;
+        var before = DenFiles();
 
         // A name matches before an alias, so a copy named "the Count" would take the note's link.
         var refused = Assert.Throws<DenToolException>(() => Tools.CopyEntity("Mr. Swales", "the Count"));
@@ -165,7 +165,7 @@ public sealed class CopyEntityToolTests : IDisposable
         Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
         Assert.Contains($"[[the Count]] in {Note} (line 8) reaches 'Count Dracula'", refused.Message, StringComparison.Ordinal);
         Assert.Contains("allow_relinks", refused.Message, StringComparison.Ordinal);
-        Assert.Equal(before, Directory.GetFiles(_den.Root, "*.md", SearchOption.AllDirectories).Length);
+        Assert.Equal(before, DenFiles());
 
         var allowed = Tools.CopyEntity("Mr. Swales", "the Count", allowRelinks: true);
 
@@ -174,11 +174,20 @@ public sealed class CopyEntityToolTests : IDisposable
 
     [Fact]
     [Trait("Scenario", "SC-MCP-28")]
-    public void ANameThatOnlyMakesLinksAmbiguousOrMendsABrokenOneIsReported()
+    public void ANameThatMakesALinkAmbiguousIsRefusedUnlessAllowedButMendingABrokenOneIsReported()
     {
         _den.Write(Note, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY9A2\ntype: note\nname: Whitby dialect\nstatus: draft\n---\n\nSee [[Mr. Swales]] and [[Old Gale]].\n");
+        var before = DenFiles();
 
-        var same = Tools.CopyEntity("Mr. Swales", "Mr. Swales");
+        // A second Mr. Swales beside the first would leave the note's link reaching neither (F-LINK-7).
+        var refused = Assert.Throws<DenToolException>(() => Tools.CopyEntity("Mr. Swales", "Mr. Swales"));
+
+        Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
+        Assert.StartsWith("1 link(s) would change which entity they reach: ", refused.Message, StringComparison.Ordinal);
+        Assert.Contains($"[[Mr. Swales]] in {Note} (line 8) reaches 'Mr. Swales' ({Swales}) and would be ambiguous", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(before, DenFiles());
+
+        var same = Tools.CopyEntity("Mr. Swales", "Mr. Swales", allowRelinks: true);
 
         Assert.Equal(Book + "/entities/characters/mr-swales-2.md", same.Path);
         Assert.Contains(same.Effects, e => e.Contains("also the name of 'Mr. Swales'", StringComparison.Ordinal) && e.Contains("F-LINK-7", StringComparison.Ordinal));
@@ -233,6 +242,102 @@ public sealed class CopyEntityToolTests : IDisposable
 
         Assert.StartsWith("---\nid: 01M4TF5F0EKGGWD5FNVBAEY9A9\n", _den.Read(result.Path), StringComparison.Ordinal);
     }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-28")]
+    public void AFileNameThatTiesInTheSameScopeIsRefusedUnlessAllowed()
+    {
+        // A universe note filed as notes/whitby.md would tie with the location whitby.md for every [[whitby]].
+        var before = DenFiles();
+
+        var refused = Assert.Throws<DenToolException>(() => Tools.CopyEntity("Dates and the year", "Whitby notes", slug: "whitby"));
+
+        Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
+        Assert.Contains($"[[whitby]] in {Swales} (line 17) reaches 'Whitby' (universes/dracula/entities/locations/whitby.md) and would be ambiguous", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(before, DenFiles());
+
+        var allowed = Tools.CopyEntity("Dates and the year", "Whitby notes", slug: "whitby", allowRelinks: true);
+
+        Assert.Equal("universes/dracula/entities/notes/whitby.md", allowed.Path);
+        Assert.Contains(allowed.Effects, e => e.Contains($"[[whitby]] in {Swales} (line 17) is now ambiguous (F-LINK-7)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-28")]
+    public void AFileNameInANearerScopeThatShadowsAnotherIsRefusedUnlessAllowed()
+    {
+        // Filed in the book as whitby.md, the copy would take the book's [[whitby]] links from the universe's Whitby.
+        var refused = Assert.Throws<DenToolException>(() => Tools.CopyEntity("Mr. Swales", "Whitby Swales", slug: "whitby"));
+
+        Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
+        Assert.Contains($"[[whitby]] in {Swales} (line 17) reaches 'Whitby' (universes/dracula/entities/locations/whitby.md) and would reach 'Whitby Swales'", refused.Message, StringComparison.Ordinal);
+
+        var allowed = Tools.CopyEntity("Mr. Swales", "Whitby Swales", slug: "whitby", allowRelinks: true);
+        Assert.Contains(allowed.Effects, e => e.Contains($"[[whitby]] in {Swales} (line 17) now reaches 'Whitby Swales' ({allowed.Path})", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-28")]
+    public void ACopyKeepsLineEndingsAndAByteOrderMark()
+    {
+        var bom = new byte[] { 0xEF, 0xBB, 0xBF };
+        var text = "---\r\nid: 01M4TF5F0EKGGWD5FNVBAEY9A3\r\ntype: note\r\nname: Whitby dialect\r\naliases: [Dialect]\r\nstatus: draft\r\n---\r\n\r\n# Whitby dialect\r\n\r\nSee [[whitby]].";
+        var full = Path.Combine(_den.Root, Note.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+        File.WriteAllBytes(full, [.. bom, .. System.Text.Encoding.UTF8.GetBytes(text)]);
+
+        var result = Tools.CopyEntity("Whitby dialect", "Yorkshire dialect");
+
+        var bytes = File.ReadAllBytes(Path.Combine(_den.Root, result.Path.Replace('/', Path.DirectorySeparatorChar)));
+        var id = result.Entity!.Id!;
+        var expected = text.Replace("01M4TF5F0EKGGWD5FNVBAEY9A3", id, StringComparison.Ordinal)
+            .Replace("name: Whitby dialect\r\naliases: [Dialect]\r\n", "name: Yorkshire dialect\r\n", StringComparison.Ordinal)
+            .Replace("# Whitby dialect", "# Yorkshire dialect", StringComparison.Ordinal);
+        Assert.Equal([.. bom, .. System.Text.Encoding.UTF8.GetBytes(expected)], bytes);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-28")]
+    public void OnlyEntitiesCanBeCopied()
+    {
+        foreach (var path in new[] { Book + "/book.md", Book + "/outline.md", "universes/dracula/universe.md", "den.yaml" })
+        {
+            Assert.Equal(ToolErrorCodes.UnknownEntity, Assert.Throws<DenToolException>(() => Tools.CopyEntity(path, "Copy")).Code);
+        }
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-28")]
+    public void ACopyIntoASeriesGoesInItsTypeFolder()
+    {
+        _den.Write("universes/dracula/series/sequels/series.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY9A4\nname: Sequels\n---\n");
+
+        var result = Tools.CopyEntity("Count Dracula", "Count Varga", toSeries: "sequels");
+
+        Assert.Equal("universes/dracula/series/sequels/entities/characters/count-varga.md", result.Path);
+        Assert.Contains(result.Effects, e => e.Contains("in series 'sequels' of universe 'dracula'", StringComparison.Ordinal));
+        Assert.Contains(result.Effects, e => e.Contains("Its 'from' is still dracula:1", StringComparison.Ordinal));
+        Assert.Equal("series", Tools.GetEntity("Count Varga").Entity!.ScopeKind);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-28")]
+    public void SlugsAreMadeAsTheTemplateRuleSaysAndCompareIgnoringCase()
+    {
+        // A file whose name differs only in case takes the slug (F-TPL-6).
+        _den.Write(Book + "/entities/characters/Old-Gale.md", _den.Read(Swales).Replace("01M4TF5F0EKGGWD5FNVBAEY8X7", "01M4TF5F0EKGGWD5FNVBAEY9A5", StringComparison.Ordinal)
+            .Replace("name: Mr. Swales", "name: Gale the elder", StringComparison.Ordinal));
+
+        Assert.Equal(Book + "/entities/characters/old-gale-2.md", Tools.CopyEntity("Mr. Swales", "Old Gale").Path);
+        Assert.Equal(ToolErrorCodes.AlreadyExists, Assert.Throws<DenToolException>(() => Tools.CopyEntity("Mr. Swales", "Old Gale", slug: "old-gale")).Code);
+        Assert.Equal(Book + "/entities/characters/aerin-sovik.md", Tools.CopyEntity("Mr. Swales", "Ærin Søvik").Path);
+
+        // A name with nothing to make a slug from uses the type key.
+        Assert.Equal(Book + "/entities/characters/character.md", Tools.CopyEntity("Mr. Swales", "東京").Path);
+    }
+
+    private int DenFiles() =>
+        Directory.GetFiles(_den.Root, "*", SearchOption.AllDirectories).Count(f => !Path.GetRelativePath(_den.Root, f).StartsWith(".wolfden", StringComparison.Ordinal));
 
     private void WriteAftermath(string status) =>
         _den.Write(Aftermath + "/book.md", $"---\nid: 01M4TF5F0EKGGWD5FNVBAEY9A0\nname: Aftermath\nstatus: {status}\nchapters: [1, 2]\n---\n");

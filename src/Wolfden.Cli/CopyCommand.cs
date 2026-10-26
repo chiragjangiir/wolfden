@@ -17,7 +17,7 @@ namespace Wolfden.Cli;
 /// scope, a final book, a file name that's taken, or links the copy would
 /// take from another entity without <c>--allow-relinks</c>).
 /// </remarks>
-internal static class CopyCommand
+internal static partial class CopyCommand
 {
     internal static readonly CommandSpec Spec = new(
         "copy",
@@ -33,16 +33,20 @@ internal static class CopyCommand
           <entity>            the entity to copy, named as a link would name it:
                               by name, alias, file name, or id; or by its path
           <new name>          the copy's name
-          --to <scope>        where the copy goes: '<universe>' for universe scope,
-                              or '<universe>/<key>' for a series or book of it
-                              ('<universe>/series:<key>' or '<universe>/book:<key>'
-                              if a series and a book share the key); by default,
-                              beside the original. Never into a final book.
+          --to <scope>        where the copy goes: '<universe>' (or '<universe>/')
+                              for universe scope, or '<universe>/<key>' for a
+                              series or book of it ('<universe>/series:<key>' or
+                              '<universe>/book:<key>' if a series and a book share
+                              the key); in a den with one universe, a bare series
+                              or book key will do, unless it's the universe's key
+                              too. By default, beside the original. Never into a
+                              final book.
           --universe <key>    the original's universe, when the den has several
           --slug <slug>       the copy's file name without .md; by default, made
                               from the new name
-          --allow-relinks     make the copy even if links that reach another
-                              entity would reach the copy instead (they're listed)
+          --allow-relinks     make the copy even if links that reach an entity
+                              would reach another or become ambiguous (they're
+                              listed)
           --den <den>         the den's folder; by default, the current folder or
                               the nearest folder above it with a den.yaml
           --json              print one JSON document instead of text
@@ -91,7 +95,7 @@ internal static class CopyCommand
         }
         catch (DenToolException e)
         {
-            error.WriteLine($"wolfden copy: {e.Message}");
+            error.WriteLine($"wolfden copy: {CliWords(e.Message)}");
             return CliApp.ExitUsage;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or SqliteException)
@@ -100,6 +104,7 @@ internal static class CopyCommand
             return CliApp.ExitUsage;
         }
 
+        result = result with { Effects = result.Effects.Select(CliWords).ToList() };
         if (line.Has("--json"))
         {
             CliJson.Write(output, result);
@@ -121,65 +126,142 @@ internal static class CopyCommand
     }
 
     /// <summary>
-    /// Reads <c>--to</c>: <c>&lt;universe&gt;</c>, or <c>&lt;universe&gt;/&lt;key&gt;</c>
-    /// for a series or book of it, or with <c>series:</c> or <c>book:</c>
-    /// before the key to say which. A bare key that's a series or book of a
-    /// universe, not a universe, gets a hint.
+    /// Reads <c>--to</c>: <c>&lt;universe&gt;</c> (or <c>&lt;universe&gt;/</c>),
+    /// or <c>&lt;universe&gt;/&lt;key&gt;</c> for a series or book of it, with
+    /// <c>series:</c> or <c>book:</c> before the key to say which. In a den
+    /// with one universe, a bare series or book key is enough (as for
+    /// <c>check</c>, #127), unless it's also the universe's key.
     /// </summary>
     private static bool TryScope(string root, string to, out string? universe, out string? series, out string? book, out string problem)
     {
         universe = series = book = null;
         problem = "";
-        var slash = to.IndexOf('/', StringComparison.Ordinal);
-        var u = (slash < 0 ? to : to[..slash]).Trim();
-        var rest = slash < 0 ? null : to[(slash + 1)..].Trim();
         var structure = DenStructure.Load(root);
+        if (!structure.IsLoaded)
+        {
+            problem = "den.yaml doesn't load, so --to can't be read and nothing can be copied. Run 'wolfden check' to see why.";
+            return false;
+        }
+
+        var slash = to.IndexOf('/', StringComparison.Ordinal);
+        if (slash < 0)
+        {
+            return TryBareKey(structure, to.Trim(), out universe, out series, out book, out problem);
+        }
+
+        var u = to[..slash].Trim();
+        var rest = to[(slash + 1)..].Trim();
         var found = structure.FindUniverse(u);
         if (found is null)
         {
-            var holders = structure.Universes.Where(x => x.Series.Any(s => s.Key == u) || x.FindBook(u) is not null).Select(x => $"'{x.Key}/{u}'").ToList();
-            problem = $"the den has no universe '{u}', so --to '{to}' doesn't name a scope." +
-                (holders.Count > 0 ? $" To copy into the series or book '{u}', give --to {string.Join(" or ", holders)}." : "") +
-                " Give --to '<universe>' or '<universe>/<series or book>'.";
+            problem = $"the den has no universe '{u}', so --to '{to}' doesn't name a scope. Give --to '<universe>' or '<universe>/<series or book>'.";
             return false;
         }
 
         universe = found.Key;
-        if (string.IsNullOrEmpty(rest))
+        return rest.Length == 0 || TryWork(found, rest, out series, out book, out problem);
+    }
+
+    /// <summary>A <c>--to</c> without <c>/</c>: a universe, or in a den with one universe, a series or book of it.</summary>
+    private static bool TryBareKey(DenStructure structure, string key, out string? universe, out string? series, out string? book, out string problem)
+    {
+        universe = series = book = null;
+        problem = "";
+        var asUniverse = structure.FindUniverse(key);
+        var only = structure.Universes.Count == 1 ? structure.Universes[0] : null;
+        var work = only is not null && (only.Series.Any(s => s.Key == key) || only.FindBook(key) is not null) ? only : null;
+        if (asUniverse is not null && work is not null)
         {
+            var kind = work.FindBook(key) is not null ? "book" : "series";
+            problem = $"'{key}' is the universe and a {kind} of it: give --to '{key}/' for the universe, or '{work.Key}/{kind}:{key}' for the {kind}.";
+            return false;
+        }
+
+        if (asUniverse is not null)
+        {
+            universe = asUniverse.Key;
             return true;
         }
 
-        if (rest.StartsWith("series:", StringComparison.Ordinal))
+        if (work is not null)
         {
-            series = rest["series:".Length..];
+            universe = work.Key;
+            return TryWork(work, key, out series, out book, out problem);
+        }
+
+        var holders = structure.Universes.Where(x => x.Series.Any(s => s.Key == key) || x.FindBook(key) is not null).Select(x => $"'{x.Key}/{key}'").ToList();
+        problem = $"the den has no universe '{key}'" + (only is null ? "" : $", and universe '{only.Key}' has no series or book '{key}'") +
+            $", so --to '{key}' doesn't name a scope." +
+            (holders.Count > 0 ? $" To copy into the series or book '{key}', give --to {string.Join(" or ", holders)}." : "") +
+            " Give --to '<universe>' or '<universe>/<series or book>'.";
+        return false;
+    }
+
+    /// <summary>A series or book key of <paramref name="universe"/>, with <c>series:</c> or <c>book:</c> before it to say which.</summary>
+    private static bool TryWork(Universe universe, string key, out string? series, out string? book, out string problem)
+    {
+        series = book = null;
+        problem = "";
+        if (key.StartsWith("series:", StringComparison.Ordinal))
+        {
+            series = key["series:".Length..].Trim();
             return true;
         }
 
-        if (rest.StartsWith("book:", StringComparison.Ordinal))
+        if (key.StartsWith("book:", StringComparison.Ordinal))
         {
-            book = rest["book:".Length..];
+            book = key["book:".Length..].Trim();
             return true;
         }
 
-        var isSeries = found.Series.Any(s => s.Key == rest);
-        var isBook = found.FindBook(rest) is not null;
-        if (isSeries && isBook)
+        var isSeries = universe.Series.Any(s => s.Key == key);
+        if (isSeries && universe.FindBook(key) is not null)
         {
-            problem = $"universe '{u}' has a series and a book named '{rest}': give --to '{u}/series:{rest}' or '{u}/book:{rest}'.";
+            problem = $"universe '{universe.Key}' has a series and a book named '{key}': give --to '{universe.Key}/series:{key}' or '{universe.Key}/book:{key}'.";
             return false;
         }
 
         if (isSeries)
         {
-            series = rest;
+            series = key;
         }
         else
         {
             // A key that's neither: the copy reports the unknown book, with the books it has.
-            book = rest;
+            book = key;
         }
 
         return true;
     }
+
+    /// <summary>
+    /// The tool's words for an MCP client, in the command line's: its
+    /// options for the tool's parameters, and <c>wolfden</c> commands for
+    /// the tools it suggests.
+    /// </summary>
+    internal static string CliWords(string message)
+    {
+        foreach (var (tool, cli) in Words)
+        {
+            message = message.Replace(tool, cli, StringComparison.Ordinal);
+        }
+
+        return CheckWithPath().Replace(message, "Run 'wolfden check' to see them.");
+    }
+
+    private static readonly (string Tool, string Cli)[] Words =
+    [
+        ("pass allow_relinks: true", "pass --allow-relinks"),
+        ("allow_relinks", "--allow-relinks"),
+        ("in 'new_name'", "as <new name>"),
+        ("another name (or slug)", "another name (or --slug)"),
+        ("Use search or list_entities to find it.", "Use 'wolfden query --brief' to find it."),
+        ("Give its key in 'universe'", "Give its key with --universe"),
+        ("Call the check tool", "Run 'wolfden check'"),
+        ("run the check tool", "run 'wolfden check'"),
+        ("Call check to see", "Run 'wolfden check' to see"),
+    ];
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"Call check with path '[^']*' to see them\.")]
+    private static partial System.Text.RegularExpressions.Regex CheckWithPath();
 }

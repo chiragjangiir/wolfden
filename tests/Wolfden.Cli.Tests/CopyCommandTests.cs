@@ -51,16 +51,41 @@ public sealed class CopyCommandTests : IDisposable
         Assert.True(_den.Exists("universes/dracula/books/aftermath/entities/characters/young-swales.md"));
         Assert.Equal(CliApp.ExitOk, Copy("Mr. Swales", "Elder Swales", "--to", "dracula/book:aftermath", "--slug", "elder").ExitCode);
         Assert.True(_den.Exists("universes/dracula/books/aftermath/entities/characters/elder.md"));
-        Assert.Equal(CliApp.ExitOk, Copy("Mr. Swales", "Swales of Whitby", "--to", "dracula").ExitCode);
+        Assert.Equal(CliApp.ExitOk, Copy("Mr. Swales", "Swales of Whitby", "--to", "dracula/").ExitCode);
         Assert.True(_den.Exists("universes/dracula/entities/characters/swales-of-whitby.md"));
+        Assert.Contains("has no book 'sequel'", Copy("Mr. Swales", "Someone", "--to", "dracula/sequel").Error, StringComparison.Ordinal);
 
-        // A book key alone isn't a universe: the error says how to name it.
-        var (exitCode, output, error) = Copy("Mr. Swales", "Someone", "--to", "aftermath");
+        // With one universe, a book key alone will do (#127).
+        Assert.Equal(CliApp.ExitOk, Copy("Mr. Swales", "Swales the younger", "--to", "aftermath").ExitCode);
+        Assert.True(_den.Exists("universes/dracula/books/aftermath/entities/characters/swales-the-younger.md"));
+
+        // 'dracula' is both the universe and its book: the error says how to name each.
+        var (exitCode, output, error) = Copy("Mr. Swales", "Someone", "--to", "dracula");
         Assert.Equal(CliApp.ExitUsage, exitCode);
         Assert.Empty(output);
-        Assert.Contains("no universe 'aftermath'", error, StringComparison.Ordinal);
-        Assert.Contains("give --to 'dracula/aftermath'", error, StringComparison.Ordinal);
-        Assert.Contains("has no book 'sequel'", Copy("Mr. Swales", "Someone", "--to", "dracula/sequel").Error, StringComparison.Ordinal);
+        Assert.Equal(
+            "wolfden copy: 'dracula' is the universe and a book of it: give --to 'dracula/' for the universe, or 'dracula/book:dracula' for the book.\n", error);
+
+        // With two universes, a bare book key isn't one: the error says how to name it.
+        _den.Write("universes/legend/universe.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY9A1\nname: Legend\n---\n");
+        var two = Copy("Mr. Swales", "Someone", "--universe", "dracula", "--to", "aftermath");
+        Assert.Equal(CliApp.ExitUsage, two.ExitCode);
+        Assert.Contains("no universe 'aftermath'", two.Error, StringComparison.Ordinal);
+        Assert.Contains("give --to 'dracula/aftermath'", two.Error, StringComparison.Ordinal);
+        Assert.Equal(CliApp.ExitOk, Copy("Mr. Swales", "Someone", "--universe", "dracula", "--to", "dracula/ book: aftermath").ExitCode);
+        Assert.True(_den.Exists("universes/dracula/books/aftermath/entities/characters/someone.md"));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-13")]
+    public void ADenWhoseDenYamlDoesntLoadSaysSo()
+    {
+        _den.Write("den.yaml", "format: [\n");
+
+        var (exitCode, _, error) = Copy("Mr. Swales", "Someone", "--to", "dracula/");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.StartsWith("wolfden copy: den.yaml doesn't load", error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -78,12 +103,18 @@ public sealed class CopyCommandTests : IDisposable
         Assert.Equal(CliApp.ExitUsage, frozen.ExitCode);
         Assert.StartsWith("wolfden copy: Book 'aftermath' is final (frozen)", frozen.Error, StringComparison.Ordinal);
         Assert.Equal(CliApp.ExitUsage, relink.ExitCode);
-        Assert.Contains("allow_relinks", relink.Error, StringComparison.Ordinal);
+        Assert.Contains("would change which entity they reach", relink.Error, StringComparison.Ordinal);
+        Assert.Contains("or pass --allow-relinks to make the copy anyway", relink.Error, StringComparison.Ordinal);
+        Assert.Contains("another name (or --slug)", relink.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain("allow_relinks", relink.Error, StringComparison.Ordinal);
         Assert.Equal(before, Cli.Snapshot(_den.Root));
 
         Assert.Equal(CliApp.ExitOk, Copy("Mr. Swales", "the Count", "--allow-relinks").ExitCode);
         Assert.Equal(CliApp.ExitUsage, Copy("Mr. Swales").ExitCode);
-        Assert.Equal(CliApp.ExitUsage, Copy("Mr. Nobody", "Someone").ExitCode);
+        var unknown = Copy("Mr. Nobody", "Someone");
+        Assert.Equal(CliApp.ExitUsage, unknown.ExitCode);
+        Assert.Contains("Use 'wolfden query --brief' to find it.", unknown.Error, StringComparison.Ordinal);
+        Assert.Contains("as <new name>", Copy("Mr. Swales", " ").Error, StringComparison.Ordinal);
     }
 
     [Fact]

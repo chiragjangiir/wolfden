@@ -554,7 +554,7 @@ commands, and `wolfden <command> --help` describes each one:
 | `wolfden check [<den>] [--universe <key>] [--no-index] [--fix]` | The continuity lint above. It reads the files directly, not the index. It checks the whole den, every universe included, since it validates files rather than a story view; `--universe` checks only that universe's files and the den-level ones (see "Which universe" below), and `*` means the whole den. Without `--fix` it never writes the den's own files; `--universe` writes only the index (derived data, `.wolfden/`), and `--no-index` keeps it from doing even that. `--fix` first gives every container and entity file that loads without an `id` a new one (format.md F-ID-2, F-ID-6), skipping files in a final book (F-BOOK-1), and then checks the den as it is after the fix. |
 | `wolfden index [<den>] [--watch]` | Rebuilds `.wolfden/index.db` from the files and says what it holds. `--watch` then keeps it up to date as files change (#14), printing one line for each batch of changes it applies (with `--json`, one JSON object per line), until Ctrl+C. Only one watcher runs per den; a second exits 2. |
 | `wolfden query [<universe>] [--universe <key>] [--at <position>]` | Canon as of a position (format.md F-VIEW-1), from the index, of one universe (see "Which universe" below; `*` is refused, since a view is of one universe). `--series` or `--book` narrows the view, `--type` (any type an enabled pack defines) and `--entity` (matched as a link is, F-LINK-6, among the entities in the view, so one the reader meets later can't shadow one they've met) pick entities out of it, `--pinned` gives pinned canon (F-VIEW-2), and `--brief` lists one line per entity. |
-| `wolfden copy <entity> <new name> [--to <scope>] [--universe <key>] [--slug <slug>] [--allow-relinks]` | Copies an entity under a new name, with a new id, as the MCP tool `copy_entity` does (§8, #129): beside the original, or `--to` a universe (`<universe>`) or one of its series or books (`<universe>/<key>`, or `<universe>/series:<key>` or `<universe>/book:<key>` when a series and a book share the key). It writes the den's files only. It exits 2 when the copy is refused. |
+| `wolfden copy <entity> <new name> [--to <scope>] [--universe <key>] [--slug <slug>] [--allow-relinks]` | Copies an entity under a new name, with a new id, as the MCP tool `copy_entity` does (§8, #129): beside the original, or `--to` a universe (`<universe>`, or `<universe>/`) or one of its series or books (`<universe>/<key>`, or `<universe>/series:<key>` or `<universe>/book:<key>` when a series and a book share the key). In a den with one universe, a bare series or book key will do (as for `check`, #127), unless it's also the universe's key, which is refused with both forms suggested. It writes the den's files only. Its messages name its options (`--allow-relinks`, `--slug`) and commands (`wolfden check`), not the tool's parameters. It exits 2 when the copy is refused. |
 | `wolfden new-id [<count>]` | Prints new ids for files made by hand (format.md F-ID-5). |
 | `wolfden mcp [<den>] [--universe <key>] [--no-watch]` | Runs the MCP server over stdio for an AI client (§8, #20) until the client disconnects or Ctrl+C. `--universe` pins the session to one universe (§8); a key the den doesn't have exits 2. Standard output carries only the protocol; log messages go to standard error. It exits 2 if there's no den and 3 if it stops because of a failure after it started, but serves a den whose `den.yaml` doesn't load, so the client can call `check` to find out why. |
 
@@ -902,21 +902,22 @@ store, so an edit changes only what it means to (format.md §12):
   byte for byte: the type, fields, sections, status, and `from` and
   `until` values, and the links in it, which still reach what they
   reached. It goes beside the original, or into another universe,
-  series, or book, in the same folder below `entities/` (its type's
-  folder). Nothing is copied into a final book (`frozen`); copying out
+  series, or book, at the original's folder path under `entities/`
+  (its type's folder, and any folders below it). Nothing is copied into a final book (`frozen`); copying out
   of one is fine. The copy is written as a new file only, and checked as
   the den reads it. Before it's written, every link is resolved again
-  with the copy there: one that reached another entity and would reach
-  the copy (its name, in a nearer scope, or beating an alias) refuses
-  the copy unless `allow_relinks`, as for a rename, and a link that
-  would only become ambiguous, or a broken one that now reaches the
-  copy, is listed in `effects`. Copied into another universe, links in
+  with the copy there: one that reached an entity and would reach the
+  copy instead (its name or file name, in a nearer scope, or a name
+  beating an alias) or become ambiguous (a tie with the copy, F-LINK-7)
+  refuses the copy unless `allow_relinks`, as for a rename; the error
+  lists each one. A link that was broken or ambiguous and now reaches
+  the copy reached nothing before, so it's only listed in `effects`. Copied into another universe, links in
   the copy can break (F-LINK-5, F-LINK-8): that's allowed, and `effects`
   lists each link in the copy that doesn't reach what it reaches in the
   original, and the positions in it that don't resolve there (F-POS-4).
   A copy in another scope without a `from` enters canon at that scope's
   start (F-ENT-6), and `effects` say so; a `from` outside the book it's
-  filed in is said too. `effects` also count the links in the copy that
+  filed in is said instead. `effects` also count the links in the copy that
   still reach the original, such as its own `[[Name#Section]]` links.
   Moving entities comes later (#89).
 

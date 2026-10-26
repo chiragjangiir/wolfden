@@ -290,11 +290,11 @@ public sealed class WolfdenTools
         "Copies an entity to start a new one from it, such as another character like this one. The copy gets a new id that no file in " +
         "the den uses, new_name as its name, and a file name made from it (-2, -3 if taken), and no aliases (they stay the original's); a " +
         "title heading that reads the old name takes the new one. Its type, fields, sections, status, and from and until are kept, and " +
-        "links in it are left as they are. It's filed beside the original, or in to_universe, to_series, or to_book, in the same type " +
-        "folder; never into a final (frozen) book. Copied into another universe, links that break there are listed in effects, not " +
+        "links in it are left as they are. It's filed beside the original, or in to_universe, to_series, or to_book, in the original's " +
+        "folder path under entities/; never into a final (frozen) book. Copied into another universe, links that break there are listed in effects, not " +
         "refused. A copy without 'from' enters canon at the start of where it's filed: effects say so. If the copy's name or file name " +
-        "would take a link that reaches another entity, nothing is copied unless allow_relinks is true; links that would only become " +
-        "ambiguous are listed in effects. Use create_entity to start from the type's template instead." + WriteHelp)]
+        "would change which entity an existing link reaches (another one, or none because it becomes ambiguous), nothing is copied unless " +
+        "allow_relinks is true; a broken link the copy now mends is listed in effects. Use create_entity to start from the type's template instead." + WriteHelp)]
     public CallToolResult CopyEntity(
         [Description("The entity to copy: its name, an alias, its file name, its id, its key, or its path.")] string entity,
         [Description("The copy's name.")] string new_name,

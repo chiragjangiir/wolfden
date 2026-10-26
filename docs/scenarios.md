@@ -1180,16 +1180,22 @@ sequel book.
   id. The output names the new file and says what the copy means, as
   `copy_entity` does (SC-MCP-28). `--to` takes a universe, or
   `<universe>/<key>` for one of its series or books
-  (`<universe>/book:<key>` when a series shares the key); a bare book key
-  isn't a universe, and the error says how to name it. `--json` prints
-  the write result.
+  (`<universe>/book:<key>` when a series shares the key). With one
+  universe, `--to aftermath` is enough, but `--to dracula` names both
+  the universe and its book, so it's refused, suggesting `dracula/` or
+  `dracula/book:dracula`. With two universes, a bare book key isn't a
+  universe, and the error says how to name it. A `den.yaml` that
+  doesn't load is said as such. `--json` prints the write result.
 - A copy into a final book, or one that would take another note's
-  links without `--allow-relinks`, exits 2 and writes nothing.
+  links without `--allow-relinks`, exits 2 and writes nothing. Errors
+  name the command's options and commands (`--allow-relinks`,
+  `--slug`, `wolfden query`), not the MCP tool's parameters.
 
 Spec: format.md F-ID-3, F-ID-4, design.md §7, §8 (#129). Covered by:
 `CopyCommandTests.ACopyGoesBesideTheOriginalWithANewIdAndSaysWhatItMeans`,
 `CopyCommandTests.ToNamesTheUniverseOrOneOfItsSeriesOrBooks`,
 `CopyCommandTests.ARefusedCopyExitsTwoAndWritesNothing`,
+`CopyCommandTests.ADenWhoseDenYamlDoesntLoadSaysSo`,
 `CopyCommandTests.JsonPrintsTheWriteResult`.
 
 ## WATCH: keeping the index up to date while notes change
@@ -1997,14 +2003,19 @@ legend universe and want a Swales there too.
   no note in the den uses (one that clashes is tried again), the name
   Count Varga, his title heading, and no aliases, which stay the
   Count's ("Dracula", "the Count", "Count de Ville"), and the result
-  says so. Everything else is the Count's, byte for byte, and the
-  Count's own file is unchanged. A second Count Varga gets
-  `count-varga-2.md`; a slug asked for that's taken is refused. A note
-  without an id gets one in its copy. Links in the copy stay as they
+  says so. Everything else is the Count's, byte for byte, line endings
+  and byte order mark included, and the Count's own file is unchanged.
+  A second Count Varga gets `count-varga-2.md`, as does one whose file
+  name another file has in a different case; a slug asked for that's
+  taken is refused. "Ærin Søvik" gets `aerin-sovik.md`, and a name with
+  nothing to make a slug from uses the type key. A note without an id
+  gets one in its copy. Only entities can be copied: `book.md`, an
+  outline, `universe.md`, or `den.yaml` is no entity. Links in the copy stay as they
   are: one to Swales's own `#Arc` still reaches Swales, and the result
   counts it.
 - Copied into Aftermath, Swales's son lands in
-  `aftermath/entities/characters/`. His `from`, `dracula:6`, is in
+  `aftermath/entities/characters/`, and copied into a series, Count
+  Varga lands in its `entities/characters/`. His `from`, `dracula:6`, is in
   another book, which the result says and `check` reports (F-ENT-6). A
   note without `from` copied there enters at the start of Aftermath,
   not of the story, and the result says so. Nothing is copied into a
@@ -2017,10 +2028,14 @@ legend universe and want a Swales there too.
 - Named "the Count", a copy of Swales would take a note's `[[the
   Count]]` from Count Dracula, since a name matches before an alias:
   refused, naming the link, unless `allow_relinks`, and then the result
-  lists it. Named "Mr. Swales" beside the original, the copy only makes
-  the note's `[[Mr. Swales]]` ambiguous (F-LINK-7), which the result
-  reports; and a broken `[[Old Gale]]` that a copy named Old Gale now
-  mends is reported too. A stale `expected_hash` is refused.
+  lists it. Named "Mr. Swales" beside the original, the copy would
+  leave the note's `[[Mr. Swales]]` ambiguous (F-LINK-7), reaching
+  neither: refused the same way. So is a universe note's copy filed as
+  `notes/whitby.md`, which would tie with the location `whitby.md` for
+  every `[[whitby]]`, and a copy of Swales filed in the book as
+  `whitby.md`, whose nearer scope would take the book's `[[whitby]]`
+  from the location. A broken `[[Old Gale]]` that a copy named Old Gale
+  now mends is only reported. A stale `expected_hash` is refused.
 
 Spec: format.md F-ID-3, F-ID-4, F-ID-6, F-LINK-5, F-LINK-6, F-LINK-7,
 F-LINK-8, F-ENT-6, F-POS-4, F-BOOK-1, types.md F-TPL-6 (maintainer
@@ -2031,7 +2046,13 @@ decisions, 2026-10-23 and 2026-10-26, #129). Covered by:
 `CopyEntityToolTests.NothingIsCopiedIntoAFinalBookButACopyOutOfOneIsFine`,
 `CopyEntityToolTests.ACopyIntoAnotherUniverseListsTheLinksThatBreak`,
 `CopyEntityToolTests.ACopyThatWouldTakeAnotherEntitysLinksIsRefusedUnlessAllowed`,
-`CopyEntityToolTests.ANameThatOnlyMakesLinksAmbiguousOrMendsABrokenOneIsReported`,
+`CopyEntityToolTests.ANameThatMakesALinkAmbiguousIsRefusedUnlessAllowedButMendingABrokenOneIsReported`,
+`CopyEntityToolTests.AFileNameThatTiesInTheSameScopeIsRefusedUnlessAllowed`,
+`CopyEntityToolTests.AFileNameInANearerScopeThatShadowsAnotherIsRefusedUnlessAllowed`,
+`CopyEntityToolTests.ACopyKeepsLineEndingsAndAByteOrderMark`,
+`CopyEntityToolTests.OnlyEntitiesCanBeCopied`,
+`CopyEntityToolTests.ACopyIntoASeriesGoesInItsTypeFolder`,
+`CopyEntityToolTests.SlugsAreMadeAsTheTemplateRuleSaysAndCompareIgnoringCase`,
 `CopyEntityToolTests.ANoteWithoutAnIdGetsOneAndAStaleOrBadCopyIsRefused`,
 `CopyEntityToolTests.APinnedSessionCantCopyIntoAnotherUniverse`,
 `CopyEntityToolTests.ANewIdThatClashesIsTriedAgain`.
