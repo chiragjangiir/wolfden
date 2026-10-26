@@ -1144,6 +1144,27 @@ docs/
   is plain text. Markdown is rendered with react-markdown, which builds
   React elements and never HTML strings. Raw HTML in a note is dropped,
   and unsafe URLs such as `javascript:` are removed.
+- **The history page** (#27; v0 behaviour, not a recorded decision). An
+  entity page has Note and History tabs. History is the same route with
+  `?view=history`, since the entity's name, slashes and all, ends the
+  path; the diff shown is in the URL too (`checkpoint`, or `from` and
+  `to`). The page lists the entity's checkpoints from `/api/history`,
+  newest first, twenty at a time, each with when, who, its message, and
+  how it changed the file, under "Uncommitted changes" when the file
+  differs from the latest checkpoint. It shows that diff first, or else
+  the latest checkpoint's. Picking a checkpoint shows its own change;
+  ticking two compares them (ticking the uncommitted changes as one
+  compares with the file now). The UI parses the patch itself, with no
+  diff library: line numbers, added and removed lines, hunk headers,
+  "No newline at end of file", a visible mark for each `\r`, and the
+  changed words within a line that replaced one. It renders text only.
+  History isn't a story view, so it ignores the position, and says so.
+  At a position where the reader hasn't met the entity, the page shows
+  the entity page's banner and fetches nothing of its history until the
+  writer asks for it. Since the log follows the file's current path
+  (§6), a checkpoint that renamed it is listed as adding it, and its own
+  diff shows the rename. Without history, the page gives the API's
+  reason and how to start one.
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and
   unknown content. This gets heavy test coverage, since it decides whether
   people trust the tool with their notes.
