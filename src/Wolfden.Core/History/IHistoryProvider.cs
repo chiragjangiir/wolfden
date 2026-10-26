@@ -65,11 +65,17 @@ public interface IHistoryProvider
 
     /// <summary>
     /// The checkpoints that changed the den, or <paramref name="query"/>'s
-    /// file or folder, newest first.
+    /// file or folder, newest first, and never a checkpoint before one that
+    /// came from it (#181). A checkpoint that renamed a file into or out of
+    /// the path lists the rename.
     /// </summary>
     HistoryResult<IReadOnlyList<HistoryEntry>> Log(HistoryLogQuery query, CancellationToken cancellationToken = default);
 
-    /// <summary>What changed between two revisions, or between one and the files as they are now.</summary>
+    /// <summary>
+    /// What changed between two revisions, or between one and the files as
+    /// they are now. A file renamed into or out of the query's path shows
+    /// as a rename, as in a diff of the whole den (#181).
+    /// </summary>
     HistoryResult<HistoryDiff> Diff(HistoryDiffQuery query, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -80,7 +86,10 @@ public interface IHistoryProvider
     /// the first checkpoint, which has no parent and is compared with
     /// nothing, so every file in it is added; <see cref="HistoryDiff.To"/>
     /// is the checkpoint's id. A file the checkpoint renamed into or out of
-    /// <paramref name="path"/> shows as a rename.
+    /// <paramref name="path"/> shows as a rename. A <paramref name="path"/>
+    /// that can't be a den file or folder (a hidden one, say) matches
+    /// nothing, so the result has no files, as for a path the checkpoint
+    /// didn't change (#175).
     /// A <paramref name="revision"/> the history doesn't have throws a
     /// <see cref="HistoryRevisionException"/>. A backend without it says it
     /// isn't available.

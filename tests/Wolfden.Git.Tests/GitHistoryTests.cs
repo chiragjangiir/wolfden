@@ -118,6 +118,37 @@ public sealed class GitHistoryTests
         Assert.Throws<HistoryRevisionException>(() => history.Log(new HistoryLogQuery(Mara, Limit: 1, Before: c), Token));
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-HIST-9")]
+    public void TheLogNeverListsACheckpointBeforeOneThatCameFromIt()
+    {
+        // A (main, 9:10), then S on a side branch from A, whose clock was
+        // wrong (9:01), M (main, 9:20), and the merge of S. By date alone, A
+        // comes before S, its own child.
+        using var repo = TestRepo.Create();
+        repo.WriteDen(Mara, "a\n");
+        var a = repo.CommitAt("A", 10);
+        repo.Git("checkout", "--quiet", "-b", "side");
+        repo.WriteDen(Fen, "s\n");
+        var s = repo.CommitAt("S", 1);
+        repo.Git("checkout", "--quiet", "main");
+        repo.WriteDen(Mara, "m\n");
+        var m = repo.CommitAt("M", 20);
+        repo.Git("merge", "--quiet", "--no-ff", "-m", "merge side", "side");
+        var merge = repo.Git("rev-parse", "HEAD").Trim();
+        Assert.Equal([merge, m, a, s], repo.Git("log", "--format=%H").Split('\n', StringSplitOptions.RemoveEmptyEntries));
+
+        var history = repo.History;
+        Assert.Equal([merge, m, s, a], history.Log(new HistoryLogQuery(), Token).Value.Select(e => e.Id));
+        for (var limit = 1; limit <= 4; limit++)
+        {
+            Assert.Equal([merge, m, s, a], Pages(history, limit));
+        }
+
+        // A diff since the latest checkpoint starts at the merge.
+        Assert.Equal(merge, history.Diff(new HistoryDiffQuery(), Token).Value.From);
+    }
+
     private static List<string> Pages(IHistoryProvider history, int limit)
     {
         var ids = new List<string>();
@@ -484,6 +515,103 @@ public sealed class GitHistoryTests
         // The checkpoint's own diff, narrowed to the new path, still sees the old one.
         var own = Assert.Single(repo.History.DiffCheckpoint(after, Mara, Token).Value.Files);
         Assert.Equal(file.Change, own.Change);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-10")]
+    public void ACompareOfOneNoteAcrossARenameShowsTheRename()
+    {
+        const string old = "universes/vael/entities/characters/mara.md";
+        using var repo = TestRepo.Create();
+        repo.WriteDen(old, "# Mara Voss\n\nA pilot who flies the night run to the outer moons.\n");
+        repo.WriteDen(Fen, "# Fen Harbour\n");
+        var before = repo.CommitAll("start");
+        repo.WriteDen(old, "# Mara Voss\n\nA pilot who flies the night run to the outer moons.\nShe keeps a compass.\n");
+        var edited = repo.CommitAll("edit");
+        repo.Git("mv", old, Mara);
+        var after = repo.CommitAll("rename");
+        var renamed = new HistoryFileChange(HistoryChangeKind.Renamed, Mara, old);
+
+        // Between two checkpoints, by the new path or the old one.
+        var diff = Assert.Single(repo.History.Diff(new HistoryDiffQuery(before, after, Mara), Token).Value.Files);
+        Assert.Equal(renamed, diff.Change);
+        Assert.Contains("rename from ", diff.Patch, StringComparison.Ordinal);
+        Assert.Contains("+She keeps a compass.", diff.Patch, StringComparison.Ordinal);
+        Assert.Equal(renamed, Assert.Single(repo.History.Diff(new HistoryDiffQuery(before, after, old), Token).Value.Files).Change);
+
+        // From a checkpoint to the file as it is now, before and after the rename is checkpointed.
+        Assert.Equal(renamed, Assert.Single(repo.History.Diff(new HistoryDiffQuery(edited, null, Mara), Token).Value.Files).Change);
+        repo.Git("reset", "--quiet", "--soft", "HEAD~1");
+        repo.Git("reset", "--quiet");
+        Assert.Equal(renamed, Assert.Single(repo.History.Diff(new HistoryDiffQuery(edited, null, Mara), Token).Value.Files).Change);
+        Assert.Equal(renamed, Assert.Single(repo.History.Diff(new HistoryDiffQuery(null, null, Mara), Token).Value.Files).Change);
+        repo.CommitAll("rename again");
+
+        // The note's log lists the renaming checkpoint as a rename. Its older
+        // checkpoints, made under the old name, aren't listed (the log follows
+        // the current path).
+        var log = repo.History.Log(new HistoryLogQuery(Mara), Token).Value;
+        Assert.Equal([renamed], Assert.Single(log).Changes);
+
+        // A folder's view: renamed in from another folder, and out to it.
+        const string people = "universes/vael/entities/people";
+        Directory.CreateDirectory(Path.Combine(repo.DenRoot, "universes", "vael", "entities", "people"));
+        repo.Git("mv", Mara, $"{people}/mara-voss.md");
+        var moved = repo.CommitAll("move to people");
+        Assert.Equal(
+            new HistoryFileChange(HistoryChangeKind.Renamed, $"{people}/mara-voss.md", Mara),
+            Assert.Single(repo.History.DiffCheckpoint(moved, people, Token).Value.Files).Change);
+        Assert.Equal(
+            new HistoryFileChange(HistoryChangeKind.Renamed, $"{people}/mara-voss.md", Mara),
+            Assert.Single(repo.History.DiffCheckpoint(moved, "universes/vael/entities/characters", Token).Value.Files).Change);
+        Assert.Equal(
+            [new HistoryFileChange(HistoryChangeKind.Renamed, $"{people}/mara-voss.md", Mara)],
+            repo.History.Log(new HistoryLogQuery(people), Token).Value[0].Changes);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-10")]
+    public void ACheckpointThatRenamedAWholeFolderShowsEveryRename()
+    {
+        // More renames into the folder than one command line names: the whole den's patch, narrowed.
+        using var repo = TestRepo.Create();
+        for (var i = 0; i < 105; i++)
+        {
+            repo.WriteDen($"universes/vael/entities/crew/sailor-{i:D3}.md", $"# Sailor {i}\n\nOne of the crew of the night run, number {i}.\n");
+        }
+
+        repo.CommitAll("crew");
+        repo.Git("mv", "universes/vael/entities/crew", "universes/vael/entities/characters");
+        var moved = repo.CommitAll("crew are characters");
+
+        var files = repo.History.DiffCheckpoint(moved, "universes/vael/entities/characters", Token).Value.Files;
+
+        Assert.Equal(105, files.Count);
+        Assert.All(files, f => Assert.Equal(HistoryChangeKind.Renamed, f.Change.Kind));
+        Assert.Equal(
+            new HistoryFileChange(HistoryChangeKind.Renamed, "universes/vael/entities/characters/sailor-007.md", "universes/vael/entities/crew/sailor-007.md"),
+            files.Single(f => f.Change.Path.EndsWith("sailor-007.md", StringComparison.Ordinal)).Change);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-6")]
+    public void ACheckpointsOwnDiffOfAPathThatCantBeADenFileIsEmpty()
+    {
+        using var repo = TestRepo.Create();
+        repo.WriteDen(Mara, "# Mara Voss\n");
+        repo.WriteRepo(".wolfden/notes.md", "hidden\n");
+        var first = repo.CommitAll("Add Mara");
+
+        foreach (var path in new[] { ".wolfden/notes.md", ".wolfden", "universes/../den.yaml", "C:/den.yaml", "universes//vael" })
+        {
+            var diff = repo.History.DiffCheckpoint(first, path, Token).Value;
+            Assert.Equal(("", first), (diff.From, diff.To));
+            Assert.Empty(diff.Files);
+        }
+
+        // A leading or trailing '/' is only trimmed, and a path the checkpoint didn't change is empty too.
+        Assert.Single(repo.History.DiffCheckpoint(first, "/" + Mara + "/", Token).Value.Files);
+        Assert.Empty(repo.History.DiffCheckpoint(first, Fen, Token).Value.Files);
     }
 
     [Fact]

@@ -70,7 +70,9 @@ namespace Wolfden.Git;
 /// <b>Known v0 limit:</b> the log of a file is the log of its current path.
 /// It doesn't follow the file back through a rename, as <c>git log
 /// --follow</c> would, since <c>--follow</c> can't be paged with a
-/// <c>before</c> revision once the path changes.
+/// <c>before</c> revision once the path changes. The checkpoint that
+/// renamed it is listed as a rename, and diffs of a path show a rename
+/// into or out of it as one (#181).
 /// </para>
 /// </remarks>
 public sealed partial class GitHistory : IHistoryProvider
@@ -125,6 +127,19 @@ public sealed partial class GitHistory : IHistoryProvider
 
     /// <summary>The mode in git's raw output of a side that isn't there: an add's old side, or a delete's new one.</summary>
     private const string NoMode = "000000";
+
+    /// <summary>
+    /// The order of every log (#181): no commit before any of its children,
+    /// so a checkpoint is never listed below the one it came from, even
+    /// when a commit's clock was wrong. Git's default order is by commit
+    /// date alone, so a merged commit dated in the past can come after its
+    /// own parent. <c>--date-order</c> keeps the date order wherever
+    /// ancestry allows, so a history without merges, or with honest clocks,
+    /// is listed as before; <c>--topo-order</c> would also group each
+    /// branch's commits together, moving a merged branch's checkpoints away
+    /// from the ones made at the same time on the main line.
+    /// </summary>
+    private const string LogOrder = "--date-order";
 
     // Fields of a log entry: start, separator, end of the header. %B is the raw message.
     private const string LogFormat = "--format=%x01%H%x02%aI%x02%an%x02%B%x03";
@@ -204,7 +219,7 @@ public sealed partial class GitHistory : IHistoryProvider
             // would list only its ancestors: after a page that ends on a
             // merged branch's commit, the main line's older commits would
             // be lost.
-            var ids = Git(["log", "--format=%H", head, "--", .. specs], cancellationToken)
+            var ids = Git(["log", LogOrder, "--format=%H", head, "--", .. specs], cancellationToken)
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var at = Array.IndexOf(ids, before);
             if (at < 0)
@@ -221,7 +236,13 @@ public sealed partial class GitHistory : IHistoryProvider
             return HistoryResult<IReadOnlyList<HistoryEntry>>.Done([]);
         }
 
-        return HistoryResult<IReadOnlyList<HistoryEntry>>.Done(ReadLog(head, query.Limit, specs, cancellationToken, skip));
+        var entries = ReadLog(head, query.Limit, specs, cancellationToken, skip);
+        if (query.Path is not null)
+        {
+            PairRenames(entries, CheckPath(query.Path), cancellationToken);
+        }
+
+        return HistoryResult<IReadOnlyList<HistoryEntry>>.Done(entries);
 
         static HistoryRevisionException NotInLog(string revision) => new(
             revision,
@@ -232,7 +253,7 @@ public sealed partial class GitHistory : IHistoryProvider
     public HistoryResult<HistoryDiff> Diff(HistoryDiffQuery query, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(query);
-        var specs = Pathspecs(query.Path is null ? null : [query.Path]);
+        var limit = query.Path is null ? null : CheckPath(query.Path);
         string from;
         if (query.From is null)
         {
@@ -252,10 +273,10 @@ public sealed partial class GitHistory : IHistoryProvider
         if (query.To is not null)
         {
             var to = Resolve(query.To, cancellationToken);
-            return HistoryResult<HistoryDiff>.Done(new HistoryDiff(from, to, CompareFiles([from, to], specs, null, cancellationToken)));
+            return HistoryResult<HistoryDiff>.Done(new HistoryDiff(from, to, CompareFiles([from, to], limit, null, null, cancellationToken)));
         }
 
-        return DiffWithFiles(from, specs, cancellationToken);
+        return DiffWithFiles(from, limit, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -268,22 +289,28 @@ public sealed partial class GitHistory : IHistoryProvider
         var parent = Run(["rev-parse", "--verify", "--quiet", to + "^1^{commit}"], cancellationToken);
         var from = parent.Succeeded ? CommitId(parent) : null;
 
-        // The whole den is compared and then narrowed to the path, so rename
-        // detection (-M) sees a file's old path too: a pathspec of the new
-        // path alone would hide it, and a renamed file would show as added.
-        var files = CompareFiles([from ?? (to.Length == 64 ? EmptyTreeSha256 : EmptyTreeSha1), to], Pathspecs(null), null, cancellationToken);
-        if (path?.Replace('\\', '/').Trim('/') is { Length: > 0 } limit)
+        // A path that can't be a den file's matches none, so nothing changed
+        // there (#175): the same answer as for a den file the checkpoint
+        // didn't touch.
+        string? limit = null;
+        if (path?.Replace('\\', '/').Trim('/') is { Length: > 0 } wanted)
         {
-            files = files.Where(f => Under(f.Change.Path) || (f.Change.OldPath is { } old && Under(old))).ToList();
-            bool Under(string p) => p == limit || p.StartsWith(limit + "/", StringComparison.Ordinal);
+            if (!IsDenPath(wanted))
+            {
+                return HistoryResult<HistoryDiff>.Done(new HistoryDiff(from ?? "", to, []));
+            }
+
+            limit = wanted;
         }
 
+        var files = CompareFiles([from ?? (to.Length == 64 ? EmptyTreeSha256 : EmptyTreeSha1), to], limit, null, null, cancellationToken);
         return HistoryResult<HistoryDiff>.Done(new HistoryDiff(from ?? "", to, files));
     }
 
-    /// <summary>What changed between <paramref name="from"/> and the den's files as they are now.</summary>
-    private HistoryResult<HistoryDiff> DiffWithFiles(string from, IReadOnlyList<string> specs, CancellationToken cancellationToken)
+    /// <summary>What changed between <paramref name="from"/> and the den's files as they are now, in <paramref name="limit"/> or the whole den.</summary>
+    private HistoryResult<HistoryDiff> DiffWithFiles(string from, string? limit, CancellationToken cancellationToken)
     {
+        var specs = Pathspecs(limit is null ? null : [limit]);
         // The files as they are now, new ones included (#142): a temporary
         // index lists HEAD's files and the new ones, and git compares the
         // files on disk with 'from' through it. The user's index is left
@@ -300,9 +327,21 @@ public sealed partial class GitHistory : IHistoryProvider
             // which are as committed, and writes only the temporary index.
             // It fails if no file in the index matches the pathspecs, and
             // then there's nothing to refresh.
+            var emptyBlob = from.Length == 64 ? EmptyBlobSha256 : EmptyBlobSha1;
             _ = Run([.. TempIndexSettings, "add", "--refresh", "--", .. specs], cancellationToken, environment: environment);
-            ListNewFiles(specs, from.Length == 64 ? EmptyBlobSha256 : EmptyBlobSha1, environment, cancellationToken);
-            return HistoryResult<HistoryDiff>.Done(new HistoryDiff(from, null, CompareFiles([from], specs, environment, cancellationToken)));
+            ListNewFiles(specs, emptyBlob, environment, cancellationToken);
+
+            // Finding a rename's other side takes the whole den, which means
+            // reading every den file once; that's done only when the path's
+            // own diff has a file added, deleted, or renamed.
+            void WholeDen()
+            {
+                var den = Pathspecs(null);
+                _ = Run([.. TempIndexSettings, "add", "--refresh", "--", .. den], cancellationToken, environment: environment);
+                ListNewFiles(den, emptyBlob, environment, cancellationToken);
+            }
+
+            return HistoryResult<HistoryDiff>.Done(new HistoryDiff(from, null, CompareFiles([from], limit, environment, WholeDen, cancellationToken)));
         }
         finally
         {
@@ -765,7 +804,7 @@ public sealed partial class GitHistory : IHistoryProvider
             return null;
         }
 
-        var id = Git(["log", "--max-count=1", "--format=%H", head, "--", .. Pathspecs(null)], cancellationToken).Trim();
+        var id = Git(["log", LogOrder, "--max-count=1", "--format=%H", head, "--", .. Pathspecs(null)], cancellationToken).Trim();
         return id.Length == 0 ? null : id;
     }
 
@@ -832,7 +871,7 @@ public sealed partial class GitHistory : IHistoryProvider
     {
         List<string> args =
         [
-            "--no-optional-locks", "log", "--no-color", "--no-show-signature", "--encoding=UTF-8", "--relative", "-z", "--raw", "-M",
+            "--no-optional-locks", "log", LogOrder, "--no-color", "--no-show-signature", "--encoding=UTF-8", "--relative", "-z", "--raw", "-M",
             "--diff-merges=first-parent", LogFormat,
         ];
         if (skip > 0)
@@ -883,13 +922,140 @@ public sealed partial class GitHistory : IHistoryProvider
     /// saved in between differently. Each patch is matched to its file by
     /// its <c>diff --git</c> line, never by position alone.
     /// </remarks>
-    private List<HistoryFileDiff> CompareFiles(
+    private List<HistoryFileDiff> CompareSpecs(
         IReadOnlyList<string> revisions, IReadOnlyList<string> specs, IReadOnlyDictionary<string, string?>? environment, CancellationToken cancellationToken)
     {
         var output = Git(
             [.. TempIndexSettings, "diff", .. DiffOptions, "--raw", "--patch", "-z", .. revisions, "--", .. specs], cancellationToken, environment: environment);
         return ReadDiff(output);
     }
+
+    /// <summary>The most paths a rename pairs with <c>limit</c> before a diff takes the whole den instead: the command line stays well inside Windows' limit.</summary>
+    private const int MostPairedPaths = 100;
+
+    /// <summary>
+    /// The den files in <paramref name="limit"/> (a file or folder), or in
+    /// the whole den, that differ between <paramref name="revisions"/>, each
+    /// with its patch. A file renamed into or out of <paramref name="limit"/>
+    /// shows as a rename, as in a diff of the whole den (#175, #181).
+    /// </summary>
+    /// <param name="revisions">One revision, compared with the files on disk through <paramref name="environment"/>'s index, or two.</param>
+    /// <param name="limit">A den-relative file or folder, or null for the whole den.</param>
+    /// <param name="environment">The temporary index for a diff with the files on disk, or null.</param>
+    /// <param name="wholeDen">Readies <paramref name="environment"/>'s index for a diff of the whole den, or null if it's ready.</param>
+    /// <param name="cancellationToken">Stops git.</param>
+    /// <remarks>
+    /// A pathspec of <paramref name="limit"/> alone hides a rename's other
+    /// side, so git would show the file added or deleted. Patching the whole
+    /// den and keeping the path's files is right, but slow on a big
+    /// checkpoint, such as a den's first, which holds every file. So:
+    /// <list type="number">
+    /// <item>The path's own diff. If it adds, deletes, or renames nothing,
+    /// no rename can involve it (without <c>-B</c>, a file that's on both
+    /// sides is never a rename's side), and that's the answer.</item>
+    /// <item>Otherwise <c>git diff -M --raw</c> of the whole den, which
+    /// writes no patches, gives each change that touches the path, with
+    /// both sides of each rename. If they're the changes the path's own diff
+    /// gave, that's the answer.</item>
+    /// <item>Otherwise one diff of the path and the other sides of its
+    /// renames, each a literal pathspec, which <c>-M</c> pairs again. If it
+    /// gives the same changes as the whole den, that's the answer; if not
+    /// (rename detection among fewer files paired them otherwise), or there
+    /// are too many other sides for one command line, the whole den's
+    /// patch, narrowed to the path.</item>
+    /// </list>
+    /// Every answer comes from one git run that gives the changes and their
+    /// patches together (#142 review, H2).
+    /// </remarks>
+    private List<HistoryFileDiff> CompareFiles(
+        IReadOnlyList<string> revisions,
+        string? limit,
+        IReadOnlyDictionary<string, string?>? environment,
+        Action? wholeDen,
+        CancellationToken cancellationToken)
+    {
+        if (limit is null)
+        {
+            return CompareSpecs(revisions, Pathspecs(null), environment, cancellationToken);
+        }
+
+        var own = CompareSpecs(revisions, Pathspecs([limit]), environment, cancellationToken);
+        if (own.All(f => f.Change.Kind == HistoryChangeKind.Modified))
+        {
+            return own;
+        }
+
+        wholeDen?.Invoke();
+        var raw = Git([.. TempIndexSettings, "diff", .. DiffOptions, "--raw", "-z", .. revisions, "--", .. Pathspecs(null)], cancellationToken, environment: environment);
+        var touching = ParseChanges(SplitRawAndPatch(raw).Tokens)
+            .Select(c => c.Change)
+            .OfType<HistoryFileChange>()
+            .Where(c => Touches(c, limit))
+            .ToList();
+        if (SameChanges(own.Select(f => f.Change), touching))
+        {
+            return own;
+        }
+
+        var others = touching.SelectMany(c => new[] { c.Path, c.OldPath }).OfType<string>()
+            .Where(p => !Under(p, limit)).Distinct(StringComparer.Ordinal).ToList();
+        if (others.Count <= MostPairedPaths && others.All(IsDenPath))
+        {
+            var paired = CompareSpecs(revisions, Pathspecs([limit, .. others]), environment, cancellationToken)
+                .Where(f => Touches(f.Change, limit))
+                .ToList();
+            if (SameChanges(paired.Select(f => f.Change), touching))
+            {
+                return paired;
+            }
+        }
+
+        return CompareSpecs(revisions, Pathspecs(null), environment, cancellationToken).Where(f => Touches(f.Change, limit)).ToList();
+    }
+
+    /// <summary>
+    /// Makes the changes of each log entry of <paramref name="limit"/> that
+    /// adds or deletes a file there what the whole den's diff of that
+    /// checkpoint says, so a checkpoint that renamed a file into or out of
+    /// it is listed as a rename, not as an add or a delete (#181). The log's
+    /// pathspec hides a rename's other side, as a diff's does.
+    /// </summary>
+    private void PairRenames(List<HistoryEntry> entries, string limit, CancellationToken cancellationToken)
+    {
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+            if (!entry.Changes.Any(c => c.Kind is HistoryChangeKind.Added or HistoryChangeKind.Deleted))
+            {
+                continue;
+            }
+
+            // The log compares a merge with its first parent; the first checkpoint, which has none, renamed nothing.
+            var parent = Run(["rev-parse", "--verify", "--quiet", entry.Id + "^1^{commit}"], cancellationToken);
+            if (!parent.Succeeded)
+            {
+                continue;
+            }
+
+            var raw = Git(["diff", .. DiffOptions, "--raw", "-z", CommitId(parent), entry.Id, "--", .. Pathspecs(null)], cancellationToken);
+            var touching = ParseChanges(SplitRawAndPatch(raw).Tokens).Select(c => c.Change).OfType<HistoryFileChange>().Where(c => Touches(c, limit)).ToList();
+            if (touching.Count > 0)
+            {
+                entries[i] = entry with { Changes = touching };
+            }
+        }
+    }
+
+    /// <summary>True if <paramref name="change"/>'s file is, or was before a rename, <paramref name="limit"/> or in it.</summary>
+    private static bool Touches(HistoryFileChange change, string limit) => Under(change.Path, limit) || (change.OldPath is { } old && Under(old, limit));
+
+    /// <summary>True if <paramref name="path"/> is <paramref name="limit"/>, or in it as a folder.</summary>
+    private static bool Under(string path, string limit) => path == limit || path.StartsWith(limit + "/", StringComparison.Ordinal);
+
+    /// <summary>True if two lists hold the same changes, in any order.</summary>
+    private static bool SameChanges(IEnumerable<HistoryFileChange> a, IEnumerable<HistoryFileChange> b) =>
+        a.OrderBy(c => c.Path, StringComparer.Ordinal).ThenBy(c => c.OldPath, StringComparer.Ordinal)
+            .SequenceEqual(b.OrderBy(c => c.Path, StringComparer.Ordinal).ThenBy(c => c.OldPath, StringComparer.Ordinal));
 
     /// <summary>
     /// The den files and their patches from the output of one
@@ -1221,8 +1387,7 @@ public sealed partial class GitHistory : IHistoryProvider
     {
         ArgumentNullException.ThrowIfNull(path);
         var trimmed = path.TrimEnd('/');
-        if (trimmed.Length == 0 || trimmed.StartsWith('/') || trimmed.Contains('\\', StringComparison.Ordinal) || trimmed.Contains(':', StringComparison.Ordinal)
-            || trimmed.Split('/').Any(name => name.Length == 0 || name.StartsWith('.')))
+        if (!IsDenPath(trimmed))
         {
             throw new ArgumentException(
                 $"'{path}' isn't a path in the den: give one relative to the den's folder, with '/' between names, and nothing hidden (no name starting with '.').",
@@ -1231,6 +1396,11 @@ public sealed partial class GitHistory : IHistoryProvider
 
         return trimmed;
     }
+
+    /// <summary>True if <paramref name="path"/>, without a trailing <c>/</c>, is a den-relative path a pathspec can name (<see cref="CheckPath"/>).</summary>
+    private static bool IsDenPath(string path) =>
+        path.Length > 0 && !path.StartsWith('/') && !path.Contains('\\', StringComparison.Ordinal) && !path.Contains(':', StringComparison.Ordinal)
+        && !path.Split('/').Any(name => name.Length == 0 || name.StartsWith('.'));
 
     private static bool IsHidden(string path) => path.Split('/').Any(name => name.StartsWith('.'));
 
