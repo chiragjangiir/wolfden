@@ -592,6 +592,124 @@ public sealed class GitHistoryTests
         Assert.Equal("a/universes/a b é.md", GitHistory.QuotePath("a/universes/a b é.md"));
     }
 
+    /// <summary>
+    /// A type change (#158) as <c>git diff --raw --patch -z</c> writes it:
+    /// one raw record, and two patch parts under one header. Canned, so it
+    /// runs on every OS; the real-git tests below check the shape.
+    /// </summary>
+    [Theory]
+    [InlineData("100644", "120000", HistoryChangeKind.Modified)]
+    [InlineData("120000", "100644", HistoryChangeKind.Modified)]
+    [InlineData("100644", "160000", HistoryChangeKind.Deleted)]
+    [InlineData("160000", "100644", HistoryChangeKind.Added)]
+    [Trait("Scenario", "SC-HIST-6")]
+    public void ATypeChangesTwoPatchPartsMakeOneChange(string oldMode, string newMode, HistoryChangeKind kind)
+    {
+        static string Side(string mode) => mode == "100644" ? "hello" : mode == "120000" ? "target.md" : "Subproject commit 1234567";
+        var deleted = $"diff --git a/c/b.md b/c/b.md\ndeleted file mode {oldMode}\nindex 1111111..0000000\n--- a/c/b.md\n+++ /dev/null\n@@ -1 +0,0 @@\n-{Side(oldMode)}\n";
+        var created = $"diff --git a/c/b.md b/c/b.md\nnew file mode {newMode}\nindex 0000000..2222222\n--- /dev/null\n+++ b/c/b.md\n@@ -0,0 +1 @@\n+{Side(newMode)}\n";
+        var modified = "diff --git a/c/a.md b/c/a.md\nindex 3333333..4444444 100644\n--- a/c/a.md\n+++ b/c/a.md\n@@ -1 +1 @@\n-a\n+b\n";
+        var output =
+            $":{oldMode} {newMode} 1111111 2222222 T\0c/b.md\0:100644 100644 3333333 4444444 M\0c/a.md\0\0" +
+            deleted + created + modified;
+
+        var files = GitHistory.ReadDiff(output);
+
+        Assert.Equal(
+            [new HistoryFileChange(kind, "c/b.md"), new HistoryFileChange(HistoryChangeKind.Modified, "c/a.md")],
+            files.Select(f => f.Change));
+        // A link's part stays (the den reads it as a file); a submodule's doesn't.
+        Assert.Equal(kind switch { HistoryChangeKind.Deleted => deleted, HistoryChangeKind.Added => created, _ => deleted + created }, files[0].Patch);
+        Assert.Equal(modified, files[1].Patch);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-6")]
+    public void TwoPatchesUnderOneHeaderAreAnErrorUnlessItsATypeChange()
+    {
+        var part = "diff --git a/c/a.md b/c/a.md\nindex 3333333..4444444 100644\n--- a/c/a.md\n+++ b/c/a.md\n@@ -1 +1 @@\n-a\n+b\n";
+
+        var error = Assert.Throws<HistoryException>(() => GitHistory.ReadDiff(":100644 100644 3333333 4444444 M\0c/a.md\0\0" + part + part));
+
+        Assert.Contains("2 patches headed 'diff --git a/c/a.md b/c/a.md'", error.Message, StringComparison.Ordinal);
+        Assert.Throws<HistoryException>(() => GitHistory.ReadDiff(":100644 100644 3333333 4444444 M\0c/a.md\0\0"));
+        Assert.Throws<HistoryException>(() => GitHistory.ReadDiff(":100644 100644 3333333 4444444 M\0c/a.md\0\0" + part + part.Replace("a.md", "z.md", StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// A note that became a symbolic link or a submodule between two
+    /// checkpoints, and back (#158). Git records a link's mode whether or not
+    /// the OS can make links, so this runs everywhere.
+    /// </summary>
+    [Fact]
+    [Trait("Scenario", "SC-HIST-6")]
+    public void ADiffBetweenCheckpointsShowsANoteThatBecameALinkOrASubmodule()
+    {
+        using var repo = TestRepo.Create();
+        repo.WriteDen(Mara, "# Mara Voss\n");
+        repo.WriteDen(Fen, "# Fen Harbour\n");
+        var start = repo.CommitAll("start");
+        // The link's blob is its target's path; Fen's blob stands in for one.
+        var target = repo.Git("rev-parse", $"HEAD:{Fen}").Trim();
+        repo.Git("update-index", "--cacheinfo", $"120000,{target},{Mara}");
+        repo.Git("update-index", "--cacheinfo", $"160000,{start},{Fen}");
+        repo.Git("commit", "--quiet", "-m", "linked");
+        var linked = repo.Git("rev-parse", "HEAD").Trim();
+
+        var forward = repo.History.Diff(new HistoryDiffQuery(start, linked), Token).Value.Files;
+        var back = repo.History.Diff(new HistoryDiffQuery(linked, start), Token).Value.Files;
+
+        Assert.Equal(
+            [new HistoryFileChange(HistoryChangeKind.Modified, Mara), new HistoryFileChange(HistoryChangeKind.Deleted, Fen)],
+            forward.Select(f => f.Change).OrderBy(c => c.Path, StringComparer.Ordinal));
+        var mara = forward.Single(f => f.Change.Path == Mara).Patch;
+        Assert.Matches($"^diff --git a/{Mara} b/{Mara}\ndeleted file mode 100644\n(.*\n)*-# Mara Voss\ndiff --git a/{Mara} b/{Mara}\nnew file mode 120000\n(.*\n)*\\+# Fen Harbour\n$", mara);
+        var fen = forward.Single(f => f.Change.Path == Fen).Patch;
+        Assert.StartsWith($"diff --git a/{Fen} b/{Fen}\ndeleted file mode 100644\n", fen, StringComparison.Ordinal);
+        Assert.DoesNotContain("Subproject", fen, StringComparison.Ordinal);
+
+        Assert.Equal(
+            [new HistoryFileChange(HistoryChangeKind.Modified, Mara), new HistoryFileChange(HistoryChangeKind.Added, Fen)],
+            back.Select(f => f.Change).OrderBy(c => c.Path, StringComparer.Ordinal));
+        Assert.Contains("\n+# Mara Voss\n", back.Single(f => f.Change.Path == Mara).Patch, StringComparison.Ordinal);
+        var fenBack = back.Single(f => f.Change.Path == Fen).Patch;
+        Assert.StartsWith($"diff --git a/{Fen} b/{Fen}\nnew file mode 100644\n", fenBack, StringComparison.Ordinal);
+        Assert.DoesNotContain("Subproject", fenBack, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A note replaced on disk by a symbolic link (#158). Skipped where the
+    /// OS can't make one (Windows without developer mode).
+    /// </summary>
+    [Fact]
+    [Trait("Scenario", "SC-HIST-6")]
+    public void ADiffWithTheFilesOnDiskShowsANoteReplacedByALink()
+    {
+        using var repo = TestRepo.Create();
+        repo.Git("config", "core.symlinks", "true");
+        repo.WriteDen(Mara, "# Mara Voss\n");
+        repo.WriteDen(Fen, "# Fen Harbour\n");
+        var start = repo.CommitAll("start");
+        var mara = Path.Combine(repo.DenRoot, Mara.Replace('/', Path.DirectorySeparatorChar));
+        File.Delete(mara);
+        try
+        {
+            File.CreateSymbolicLink(mara, "../locations/fen-harbour.md");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            Assert.Skip("This system doesn't allow file links to be created.");
+        }
+
+        var diff = repo.History.Diff(new HistoryDiffQuery(start), Token).Value;
+
+        var file = Assert.Single(diff.Files);
+        Assert.Equal(new HistoryFileChange(HistoryChangeKind.Modified, Mara), file.Change);
+        Assert.Contains("\n-# Mara Voss\n", file.Patch, StringComparison.Ordinal);
+        Assert.Contains("\nnew file mode 120000\n", file.Patch, StringComparison.Ordinal);
+        Assert.Contains("\n+../locations/fen-harbour.md\n", file.Patch, StringComparison.Ordinal);
+    }
+
     [Fact]
     [Trait("Scenario", "SC-HIST-6")]
     public void ADiffInASha256RepositoryWritesNothing()

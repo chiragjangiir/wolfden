@@ -108,7 +108,10 @@ public sealed partial class GitHistory : IHistoryProvider
     /// <summary>The empty blob's id with SHA-1, and with SHA-256: what an entry for a new file names in the temporary index.</summary>
     private const string EmptyBlobSha1 = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
 
-    private const string EmptyBlobSha256 = "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
+    /// <summary>A submodule's mode in git's raw diff output.</summary>
+    private const string GitlinkMode = "160000";
+
+    private const string EmptyBlobSha256 ="473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
 
     // Fields of a log entry: start, separator, end of the header. %B is the raw message.
     private const string LogFormat = "--format=%x01%H%x02%aI%x02%an%x02%B%x03";
@@ -843,36 +846,80 @@ public sealed partial class GitHistory : IHistoryProvider
     {
         var output = Git(
             [.. TempIndexSettings, "diff", .. DiffOptions, "--raw", "--patch", "-z", .. revisions, "--", .. specs], cancellationToken, environment: environment);
+        return ReadDiff(output);
+    }
+
+    /// <summary>
+    /// The den files and their patches from the output of one
+    /// <c>git diff --raw --patch -z</c>.
+    /// </summary>
+    /// <remarks>
+    /// A type change (status <c>T</c>, #158) is one raw record, but git
+    /// writes its patch as two parts under the same <c>diff --git</c> line:
+    /// the old side deleted, then the new side created. Between a file and
+    /// a symbolic link, both sides are den files (the den reads a link to a
+    /// file as that file, #112), so the change is a modification and its
+    /// patch is both parts, as git wrote them; <c>git apply</c> takes them
+    /// so. Between a file and a submodule (mode 160000), only the file side
+    /// is a den file: the change is the file deleted or added, and its patch
+    /// is that side's part alone. Any other header that comes twice is an
+    /// error.
+    /// </remarks>
+    internal static List<HistoryFileDiff> ReadDiff(string output)
+    {
         var (tokens, patch) = SplitRawAndPatch(output);
         var changes = ParseChanges(tokens, raw: true);
-        var patches = new Dictionary<string, string>(StringComparer.Ordinal);
+        var patches = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var part in SplitPatch(patch))
         {
             var header = part[..part.IndexOf('\n', StringComparison.Ordinal)];
-            if (!patches.TryAdd(header, part))
+            if (patches.TryGetValue(header, out var parts))
             {
-                throw new HistoryException($"Git's diff gave two patches headed '{header}'.");
+                parts.Add(part);
+            }
+            else
+            {
+                patches.Add(header, [part]);
             }
         }
 
-        if (patches.Count != changes.Count)
-        {
-            throw new HistoryException($"Git's diff listed {changes.Count} files but gave {patches.Count} patches.");
-        }
-
         var files = new List<HistoryFileDiff>();
-        foreach (var (change, _, from, to) in changes)
+        foreach (var (change, status, from, to) in changes)
         {
             var header = $"diff --git {QuotePath("a/" + from)} {QuotePath("b/" + to)}";
-            if (!patches.TryGetValue(header, out var part))
+            if (!patches.Remove(header, out var parts))
             {
                 throw new HistoryException($"Git's diff listed '{to}' but gave no patch for it.");
+            }
+
+            string part;
+            if (status[0] == 'T' && parts.Count == 2)
+            {
+                part = change?.Kind switch
+                {
+                    HistoryChangeKind.Deleted => parts[0],
+                    HistoryChangeKind.Added => parts[1],
+                    _ => parts[0] + parts[1],
+                };
+            }
+            else if (parts.Count == 1)
+            {
+                part = parts[0];
+            }
+            else
+            {
+                throw new HistoryException($"Git's diff gave {parts.Count} patches headed '{header}'.");
             }
 
             if (change is not null)
             {
                 files.Add(new HistoryFileDiff(change, part));
             }
+        }
+
+        if (patches.Count > 0)
+        {
+            throw new HistoryException($"Git's diff gave a patch headed '{patches.Keys.First()}' for a file it didn't list.");
         }
 
         return files;
@@ -993,7 +1040,18 @@ public sealed partial class GitHistory : IHistoryProvider
             var path = tokens[i + 1];
             var newPath = two ? tokens[i + 2] : null;
             i += two ? 3 : 2;
-            changes.Add((Change(status[0], path, newPath), status, path, newPath ?? path));
+
+            // A type change to or from a submodule (#158): the submodule
+            // isn't a den file, so only the file side counts. Name-status
+            // output has no modes, and leaves this a modification.
+            var kind = status[0];
+            if (raw && kind == 'T')
+            {
+                var modes = token[1..].Split(' ');
+                kind = modes[0] == GitlinkMode ? 'A' : modes[1] == GitlinkMode ? 'D' : kind;
+            }
+
+            changes.Add((Change(kind, path, newPath), status, path, newPath ?? path));
         }
 
         return changes;
