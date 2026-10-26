@@ -40,7 +40,8 @@ public static class ReadEndpoints
     /// <summary>The words the API's messages use for what to do next (<see cref="ToolWords"/>).</summary>
     public static readonly ToolWords Words = new(
         "add allowRelinks=true", "in 'newName'", "slug", "in 'universe'", "use /api/search or /api/entities", "run 'wolfden check'",
-        "run 'wolfden check'", "run 'wolfden check' and look at '{0}'", "This server is pinned to universe '{0}' (wolfden serve --universe)");
+        "run 'wolfden check'", "run 'wolfden check' and look at '{0}'", "This server is pinned to universe '{0}' (wolfden serve --universe)",
+        "/api/search and /api/entities", "Ask again with one of the candidates' keys.");
 
     /// <summary>Maps the read endpoints onto <paramref name="api"/>.</summary>
     public static void Map(RouteGroupBuilder api, WolfdenApiOptions options)
@@ -136,11 +137,8 @@ public static class ReadEndpoints
         }
         catch (DenToolException e)
         {
-            // The tools' advice names their parameters; the API's candidates carry the keys to ask with.
-            var message = e.Code == ToolErrorCodes.AmbiguousEntity
-                ? e.Message.Replace("Ask again with one's key or path, or name its universe.", "Ask again with one of the candidates' keys.", StringComparison.Ordinal)
-                : e.Message.Replace("is only for search and list_entities", "is only for /api/search and /api/entities", StringComparison.Ordinal);
-            return Results.Json(new ApiError(e.Code, message, e.Candidates), statusCode: StatusOf(e.Code));
+            // The reader's messages are in the API's own words (Words).
+            return Results.Json(new ApiError(e.Code, e.Message, e.Candidates), statusCode: StatusOf(e.Code));
         }
     }
 

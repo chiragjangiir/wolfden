@@ -1,12 +1,14 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Wolfden.Mcp;
 
 namespace Wolfden.Api.Tests;
 
 /// <summary>
 /// As of a position, nothing the API answers names an entity the reader
-/// hasn't met (#26): not its name, an alias, its key or id, or its path.
+/// hasn't met (#26): not its name, an alias, its key or id, or its path,
+/// anywhere in a string, a longer message included (#175).
 /// Only text the writer wrote in what the reader has met can hold such a
 /// name (a link as written, a section's body, a field's value), and it's
 /// left out of the check.
@@ -112,8 +114,8 @@ public class SpoilerTests
             {
                 foreach (var (entity, unmetNames) in unmet)
                 {
-                    var leaked = unmetNames.Any(n => text == n || text.Contains($"'{n}'", StringComparison.Ordinal))
-                        || text == entity.Key
+                    var leaked = unmetNames.Any(n => Names(text, n))
+                        || Names(text, entity.Key)
                         || text.Contains(entity.Path, StringComparison.Ordinal)
                         || (entity.Id is { } id && text.Contains(id, StringComparison.Ordinal));
                     Assert.False(leaked, $"{path} at {at} names '{entity.Name}', whom the reader hasn't met by {asOf}: {text}");
@@ -121,6 +123,14 @@ public class SpoilerTests
             }
         }
     }
+
+    /// <summary>
+    /// True if <paramref name="text"/> holds <paramref name="name"/> anywhere,
+    /// as a whole word or words, ignoring case (#175): alone, quoted, or
+    /// inside a longer message.
+    /// </summary>
+    private static bool Names(string text, string name) =>
+        Regex.IsMatch(text, $@"(?<![\p{{L}}\p{{N}}]){Regex.Escape(name)}(?![\p{{L}}\p{{N}}])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     /// <summary>Every string in <paramref name="json"/> that isn't text the writer wrote, with where it is.</summary>
     private static IEnumerable<(string At, string Text)> Strings(JsonElement json, string at)

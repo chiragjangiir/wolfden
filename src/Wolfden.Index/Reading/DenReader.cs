@@ -145,7 +145,7 @@ public sealed class DenReader
             return matches.Count switch
             {
                 0 => throw UnknownEntity(entity, u.Key),
-                > 1 => throw Ambiguous(entity, matches, universes, scopes),
+                > 1 => throw Ambiguous(entity, matches, universes, scopes, Words),
                 _ => Summary(matches[0], universes, scopes),
             };
         });
@@ -303,7 +303,7 @@ public sealed class DenReader
 
             if (matches.Count > 1)
             {
-                throw Ambiguous(entity, matches, universes, scopes);
+                throw Ambiguous(entity, matches, universes, scopes, Words);
             }
 
             return new GetEntityResult(
@@ -318,7 +318,7 @@ public sealed class DenReader
         var met = Match(index, u.Id, name, found.Entities.Select(x => x.Path).ToHashSet(StringComparer.Ordinal));
         if (met.Count > 1)
         {
-            throw Ambiguous(entity, met, universes, scopes);
+            throw Ambiguous(entity, met, universes, scopes, Words);
         }
 
         if (met.Count == 0)
@@ -483,7 +483,7 @@ public sealed class DenReader
             {
                 throw new DenToolException(
                     ToolErrorCodes.BadArgument,
-                    $"'{AllUniverses}' (every universe) is only for search and list_entities; name one universe here.");
+                    $"'{AllUniverses}' (every universe) is only for {Words.AllUniverseReads}; name one universe here.");
             }
 
             if (position is not null)
@@ -669,12 +669,12 @@ public sealed class DenReader
 
     /// <summary>An <c>ambiguous_entity</c> error for <paramref name="name"/>, listing its matches.</summary>
     public static DenToolException Ambiguous(
-        string name, IReadOnlyList<EntityRecord> matches, Dictionary<int, string> universes, Dictionary<int, ContainerRecord> scopes)
+        string name, IReadOnlyList<EntityRecord> matches, Dictionary<int, string> universes, Dictionary<int, ContainerRecord> scopes, ToolWords? words = null)
     {
         ArgumentNullException.ThrowIfNull(matches);
         return new(
             ToolErrorCodes.AmbiguousEntity,
-            $"'{name}' matches {matches.Count} entities. Ask again with one's key or path, or name its universe.",
+            $"'{name}' matches {matches.Count} entities. {(words ?? ToolWords.Mcp).AskAgain}",
             matches.Select(m => Summary(m, universes, scopes)).ToList());
     }
 

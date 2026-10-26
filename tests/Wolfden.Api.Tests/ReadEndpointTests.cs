@@ -468,6 +468,12 @@ public class ReadEndpointTests
         Assert.Equal("ambiguous_entity", ambiguous.GetProperty("code").GetString());
         Assert.Equal(2, ambiguous.GetProperty("candidates").GetArrayLength());
         Assert.DoesNotContain("name its universe", ambiguous.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.EndsWith("Ask again with one of the candidates' keys.", ambiguous.GetProperty("message").GetString(), StringComparison.Ordinal);
+
+        // Advice names the API's endpoints, not the MCP tools (#175).
+        var every = await server.GetJsonAsync("/api/entity?universe=*&entity=Mara%20Voss", HttpStatusCode.BadRequest);
+        Assert.Contains("is only for /api/search and /api/entities;", every.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("list_entities", every.GetProperty("message").GetString(), StringComparison.Ordinal);
 
         // The reader hasn't met Halden Pike at ember:1: not an error, but not in the view.
         var unmet = await server.GetJsonAsync("/api/entity?universe=starfall&entity=Halden%20Pike&asOf=ember:1", HttpStatusCode.OK);
