@@ -414,7 +414,10 @@ The den store and the history provider are interfaces in `Wolfden.Core`
   files. A diff against the files as they
   are now includes new files git doesn't track yet (not ignored ones),
   through a temporary index, so it never changes the user's index, and
-  it writes nothing into the repository's objects (#142). The
+  it writes nothing into the repository's objects (#142). Clean filters
+  still run on the files compared, and Git LFS's stores what it cleans in
+  `.git/lfs/objects`. Files a sparse checkout keeps off the disk count as
+  unchanged, and edits inside a submodule aren't the den's. The
   log of a file follows its current path, not back through renames
   (`--follow` can't be paged). The log pages by position: each page
   walks the same log from HEAD with the same path filter and starts

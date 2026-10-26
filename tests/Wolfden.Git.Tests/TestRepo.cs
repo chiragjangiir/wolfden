@@ -47,13 +47,23 @@ public sealed class TestRepo : IDisposable
     public IHistoryProvider History => GitHistory.ForDen(DenRoot, Options);
 
     /// <summary>A new repository whose den is at <paramref name="denFolder"/> inside it (repository-relative), or at its root.</summary>
-    public static TestRepo Create(string? denFolder = null)
+    /// <param name="denFolder">The den's folder, repository-relative, or null for the repository's top folder.</param>
+    /// <param name="objectFormat">The repository's hash, such as <c>sha256</c>, or null for git's default.</param>
+    public static TestRepo Create(string? denFolder = null, string? objectFormat = null)
     {
         var root = NewFolder();
         var den = denFolder is null ? root : Path.Combine(root, denFolder.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(den);
         var repo = new TestRepo(root, den);
-        repo.Git("init", "--quiet");
+        if (objectFormat is null)
+        {
+            repo.Git("init", "--quiet");
+        }
+        else
+        {
+            repo.Git("init", "--quiet", $"--object-format={objectFormat}");
+        }
+
         repo.WriteDen("den.yaml", "format: 1\n");
         return repo;
     }

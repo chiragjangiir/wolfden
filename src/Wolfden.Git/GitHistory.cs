@@ -37,7 +37,10 @@ namespace Wolfden.Git;
 /// doesn't track yet (but not ignored ones). They're compared through a
 /// temporary index, so the user's own index is never changed by a diff,
 /// and git compares the files on disk without storing them, so a diff
-/// writes nothing into the repository's objects (#142).
+/// writes nothing into the repository's objects (#142). Clean filters still
+/// run on the files compared, and Git LFS's stores what it cleans in
+/// <c>.git/lfs/objects</c>. Files a sparse checkout keeps off the disk count
+/// as unchanged, and edits inside a submodule aren't the den's.
 /// </para>
 /// <para>
 /// <b>Revisions</b> from callers are resolved to commit hashes first
@@ -73,17 +76,37 @@ public sealed partial class GitHistory : IHistoryProvider
     /// <summary>The pathspecs that leave hidden files and folders out, at any depth of the den (F-LAY-2).</summary>
     private static readonly string[] HiddenExcludes = [":(exclude,glob)**/.*", ":(exclude,glob)**/.*/**"];
 
-    /// <summary>The options every diff takes, so the user's diff settings can't change what Wolfden parses.</summary>
+    /// <summary>
+    /// The options every diff takes, so the user's diff settings can't change
+    /// what Wolfden parses. A submodule counts as changed only when the
+    /// commit it's at does: edits inside it aren't the den's (#142 review, L2).
+    /// </summary>
     private static readonly string[] DiffOptions =
-        ["--no-color", "--no-ext-diff", "--no-textconv", "--relative", "-M", "--src-prefix=a/", "--dst-prefix=b/"];
+        ["--no-color", "--no-ext-diff", "--no-textconv", "--relative", "-M", "--src-prefix=a/", "--dst-prefix=b/", "--ignore-submodules=dirty"];
 
     /// <summary>
-    /// Comparing with the files on disk, a file whose stat data doesn't
-    /// match the index but whose content does isn't a change. Git drops
-    /// those only while <c>diff.autoRefreshIndex</c> is on (its default), so
-    /// a user who turned it off would see unchanged files as modified.
+    /// Settings for every git command that uses Wolfden's temporary index
+    /// (#142 review):
+    /// <list type="bullet">
+    /// <item><c>core.ignoreStat=false</c>: otherwise git marks the entries
+    /// it adds as unchanged, and then trusts their recorded content (the
+    /// empty blob, for a new file) instead of reading the file.</item>
+    /// <item><c>core.splitIndex=false</c>: otherwise git splits the
+    /// temporary index and leaves the shared part in the user's
+    /// <c>.git</c> folder.</item>
+    /// <item><c>diff.autoRefreshIndex=true</c>: comparing with the files on
+    /// disk, git drops a file whose stat data doesn't match but whose
+    /// content does only while this is on (its default), so a user who
+    /// turned it off would see unchanged files as modified.</item>
+    /// </list>
     /// </summary>
-    private static readonly string[] NoStatOnlyChanges = ["-c", "diff.autoRefreshIndex=true"];
+    private static readonly string[] TempIndexSettings =
+        ["-c", "core.ignoreStat=false", "-c", "core.splitIndex=false", "-c", "diff.autoRefreshIndex=true"];
+
+    /// <summary>The empty blob's id with SHA-1, and with SHA-256: what an entry for a new file names in the temporary index.</summary>
+    private const string EmptyBlobSha1 = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
+
+    private const string EmptyBlobSha256 = "473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813";
 
     // Fields of a log entry: start, separator, end of the header. %B is the raw message.
     private const string LogFormat = "--format=%x01%H%x02%aI%x02%an%x02%B%x03";
@@ -222,15 +245,16 @@ public sealed partial class GitHistory : IHistoryProvider
         var environment = new Dictionary<string, string?> { ["GIT_INDEX_FILE"] = index };
         try
         {
-            Git(["read-tree", Head(cancellationToken) ?? "--empty"], cancellationToken, environment: environment);
+            Git([.. TempIndexSettings, "read-tree", Head(cancellationToken) ?? "--empty"], cancellationToken, environment: environment);
+            KeepSparseCheckout(specs, environment, cancellationToken);
 
             // read-tree leaves no stat data, so git would read every den file
-            // in each of the two diffs below to tell which ones changed.
-            // Refreshing reads them once and records which are as committed.
-            // It writes only the temporary index. It fails if no file in the
-            // index matches the pathspecs, and then there's nothing to refresh.
-            _ = Run(["add", "--refresh", "--", .. specs], cancellationToken, environment: environment);
-            ListNewFiles(specs, environment, cancellationToken);
+            // to tell which ones changed. Refreshing reads them once, records
+            // which are as committed, and writes only the temporary index.
+            // It fails if no file in the index matches the pathspecs, and
+            // then there's nothing to refresh.
+            _ = Run([.. TempIndexSettings, "add", "--refresh", "--", .. specs], cancellationToken, environment: environment);
+            ListNewFiles(specs, from.Length == 64 ? EmptyBlobSha256 : EmptyBlobSha1, environment, cancellationToken);
             return HistoryResult<HistoryDiff>.Done(new HistoryDiff(from, null, CompareFiles([from], specs, environment, cancellationToken)));
         }
         finally
@@ -241,25 +265,65 @@ public sealed partial class GitHistory : IHistoryProvider
     }
 
     /// <summary>
+    /// Marks the den files the user's sparse checkout leaves off the disk
+    /// (skip-worktree, in the user's index) the same way in the temporary
+    /// index, so they're taken as recorded, not as deleted (#142 review, L1).
+    /// </summary>
+    private void KeepSparseCheckout(IReadOnlyList<string> specs, IReadOnlyDictionary<string, string?> environment, CancellationToken cancellationToken)
+    {
+        // The user's index: 'S <path>' is a skip-worktree file. Paths are den-relative.
+        var skipped = Git(["ls-files", "-z", "-t", "--", .. specs], cancellationToken)
+            .Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .Where(entry => entry.StartsWith("S ", StringComparison.Ordinal))
+            .Select(entry => entry[2..])
+            .ToList();
+        if (skipped.Count == 0)
+        {
+            return;
+        }
+
+        // Only those HEAD has too: update-index refuses a path that isn't in the index.
+        var inHead = Git([.. TempIndexSettings, "ls-files", "-z", "--", .. specs], cancellationToken, environment: environment)
+            .Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .ToHashSet(StringComparer.Ordinal);
+        var marks = new StringBuilder();
+        foreach (var path in skipped.Where(inHead.Contains))
+        {
+            marks.Append(path).Append('\0');
+        }
+
+        if (marks.Length > 0)
+        {
+            Git([.. TempIndexSettings, "update-index", "-z", "--skip-worktree", "--stdin"], cancellationToken, input: marks.ToString(), environment: environment);
+        }
+    }
+
+    /// <summary>
     /// Adds the den's new files at <paramref name="specs"/> (untracked, not
     /// ignored) to the temporary index <paramref name="environment"/> names,
     /// without their content, so a diff against the files on disk includes
     /// them.
     /// </summary>
+    /// <param name="specs">The pathspecs.</param>
+    /// <param name="emptyBlob">The empty blob's id, in the repository's hash.</param>
+    /// <param name="environment">Names the temporary index.</param>
+    /// <param name="cancellationToken">Stops git.</param>
     /// <remarks>
-    /// Each entry names the empty blob and has no stat data, so git never
-    /// takes it as up to date and always reads the file itself; the empty
-    /// blob is never read, so it needn't exist. That's the shape
+    /// Each entry names the empty blob and has no stat data, and
+    /// <see cref="TempIndexSettings"/> keeps git from marking it unchanged,
+    /// so git never takes it as up to date and always reads the file itself;
+    /// the empty blob is never read, so it needn't exist. That's the shape
     /// <c>git add --intent-to-add</c> gives an entry, but <c>add</c> also
     /// writes the empty blob into the repository's objects, and
     /// <c>update-index --index-info</c> writes nothing there.
     /// </remarks>
-    private void ListNewFiles(IReadOnlyList<string> specs, IReadOnlyDictionary<string, string?> environment, CancellationToken cancellationToken)
+    private void ListNewFiles(IReadOnlyList<string> specs, string emptyBlob, IReadOnlyDictionary<string, string?> environment, CancellationToken cancellationToken)
     {
         // Listed against the temporary index, so a file the user has staged
         // but not committed counts as new. Repository-relative, as
         // update-index takes them.
-        var untracked = Git(["ls-files", "-z", "--full-name", "--others", "--exclude-standard", "--", .. specs], cancellationToken, environment: environment)
+        var untracked = Git(
+                [.. TempIndexSettings, "ls-files", "-z", "--full-name", "--others", "--exclude-standard", "--", .. specs], cancellationToken, environment: environment)
             .Split('\0', StringSplitOptions.RemoveEmptyEntries)
             // A folder (ending in '/') is a nested repository, not a den file.
             .Where(path => !path.EndsWith('/'))
@@ -269,20 +333,13 @@ public sealed partial class GitHistory : IHistoryProvider
             return;
         }
 
-        // The empty blob's id, which depends on the repository's hash (SHA-1 or SHA-256); without -w, nothing is written.
-        var empty = Git(["hash-object", "-t", "blob", "--stdin"], cancellationToken, input: string.Empty).Trim();
-        if (empty.Length < 40 || !empty.All(char.IsAsciiHexDigitLower))
-        {
-            throw new HistoryException($"git hash-object didn't give an object id (it gave '{empty}').");
-        }
-
         var entries = new StringBuilder();
         foreach (var path in untracked)
         {
-            entries.Append("100644 ").Append(empty).Append('\t').Append(path).Append('\0');
+            entries.Append("100644 ").Append(emptyBlob).Append('\t').Append(path).Append('\0');
         }
 
-        Git(["update-index", "-z", "--add", "--index-info"], cancellationToken, input: entries.ToString(), environment: environment);
+        Git([.. TempIndexSettings, "update-index", "-z", "--add", "--index-info"], cancellationToken, input: entries.ToString(), environment: environment);
     }
 
     /// <inheritdoc />
@@ -748,22 +805,132 @@ public sealed partial class GitHistory : IHistoryProvider
     }
 
     /// <summary>The den files that differ between <paramref name="revisions"/>, each with its patch.</summary>
+    /// <remarks>
+    /// One git run gives the list and the patches (#142 review, H2):
+    /// comparing with the files on disk, two runs could each see a file
+    /// saved in between differently. Each patch is matched to its file by
+    /// its <c>diff --git</c> line, never by position alone.
+    /// </remarks>
     private List<HistoryFileDiff> CompareFiles(
         IReadOnlyList<string> revisions, IReadOnlyList<string> specs, IReadOnlyDictionary<string, string?>? environment, CancellationToken cancellationToken)
     {
-        var raw = Git([.. NoStatOnlyChanges, "diff", .. DiffOptions, "--raw", "-z", .. revisions, "--", .. specs], cancellationToken, environment: environment);
-        var patch = Git([.. NoStatOnlyChanges, "diff", .. DiffOptions, "--patch", .. revisions, "--", .. specs], cancellationToken, environment: environment);
-        var changes = ParseChanges(raw.Split('\0'), raw: true);
-        var patches = SplitPatch(patch);
+        var output = Git(
+            [.. TempIndexSettings, "diff", .. DiffOptions, "--raw", "--patch", "-z", .. revisions, "--", .. specs], cancellationToken, environment: environment);
+        var (tokens, patch) = SplitRawAndPatch(output);
+        var changes = ParseChanges(tokens, raw: true);
+        var patches = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var part in SplitPatch(patch))
+        {
+            var header = part[..part.IndexOf('\n', StringComparison.Ordinal)];
+            if (!patches.TryAdd(header, part))
+            {
+                throw new HistoryException($"Git's diff gave two patches headed '{header}'.");
+            }
+        }
+
         if (patches.Count != changes.Count)
         {
             throw new HistoryException($"Git's diff listed {changes.Count} files but gave {patches.Count} patches.");
         }
 
-        return changes
-            .Select((c, i) => c.Change is null ? null : new HistoryFileDiff(c.Change, patches[i]))
-            .OfType<HistoryFileDiff>()
-            .ToList();
+        var files = new List<HistoryFileDiff>();
+        foreach (var (change, _, from, to) in changes)
+        {
+            var header = $"diff --git {QuotePath("a/" + from)} {QuotePath("b/" + to)}";
+            if (!patches.TryGetValue(header, out var part))
+            {
+                throw new HistoryException($"Git's diff listed '{to}' but gave no patch for it.");
+            }
+
+            if (change is not null)
+            {
+                files.Add(new HistoryFileDiff(change, part));
+            }
+        }
+
+        return files;
+    }
+
+    /// <summary>
+    /// The raw records (as <c>-z</c> tokens) and the patch from one
+    /// <c>git diff --raw --patch -z</c>: the records come first, each field
+    /// ending in a NUL, then one more NUL, then the patch.
+    /// </summary>
+    private static (List<string> Tokens, string Patch) SplitRawAndPatch(string output)
+    {
+        var tokens = new List<string>();
+        var at = 0;
+        while (at < output.Length)
+        {
+            if (output[at] == '\0')
+            {
+                return (tokens, output[(at + 1)..]);
+            }
+
+            if (output[at] != ':')
+            {
+                throw new HistoryException("Git's diff didn't have the shape Wolfden asked for.");
+            }
+
+            // ':<old mode> <new mode> <old id> <new id> <status>', then one path, or two for a rename or copy.
+            var record = Field();
+            var status = record[(record.LastIndexOf(' ') + 1)..];
+            tokens.Add(record);
+            tokens.Add(Field());
+            if (status.Length > 0 && status[0] is 'R' or 'C')
+            {
+                tokens.Add(Field());
+            }
+        }
+
+        return (tokens, string.Empty);
+
+        string Field()
+        {
+            var end = output.IndexOf('\0', at);
+            if (end < 0)
+            {
+                throw new HistoryException("Git's list of changed files ended part way.");
+            }
+
+            var field = output[at..end];
+            at = end + 1;
+            return field;
+        }
+    }
+
+    /// <summary>
+    /// A path as git writes it in a <c>diff --git</c> line, with
+    /// <c>core.quotepath</c> off: as it is, or in double quotes, C-style,
+    /// if it holds a control character, a <c>"</c>, or a <c>\</c>.
+    /// </summary>
+    internal static string QuotePath(string path)
+    {
+        if (!path.Any(c => c < ' ' || c is '"' or '\\' or '\x7f'))
+        {
+            return path;
+        }
+
+        var quoted = new StringBuilder("\"");
+        foreach (var c in path)
+        {
+            quoted.Append(c switch
+            {
+                '\a' => "\\a",
+                '\b' => "\\b",
+                '\t' => "\\t",
+                '\n' => "\\n",
+                '\v' => "\\v",
+                '\f' => "\\f",
+                '\r' => "\\r",
+                '"' => "\\\"",
+                '\\' => "\\\\",
+                _ when c < ' ' || c == '\x7f' => string.Create(CultureInfo.InvariantCulture, $"\\{Convert.ToString(c, 8).PadLeft(3, '0')}"),
+                _ => c.ToString(),
+            });
+        }
+
+        return quoted.Append('"').ToString();
     }
 
     /// <summary>
@@ -771,10 +938,10 @@ public sealed partial class GitHistory : IHistoryProvider
     /// change to a hidden path has a null change, so lists stay in step with
     /// the patches; a rename from or to a hidden path is an add or a delete.
     /// </summary>
-    private static List<(HistoryFileChange? Change, string Status)> ParseChanges(string[] tokens, bool raw)
+    private static List<(HistoryFileChange? Change, string Status, string From, string To)> ParseChanges(IReadOnlyList<string> tokens, bool raw)
     {
-        var changes = new List<(HistoryFileChange?, string)>();
-        for (var i = 0; i < tokens.Length;)
+        var changes = new List<(HistoryFileChange?, string, string, string)>();
+        for (var i = 0; i < tokens.Count;)
         {
             var token = tokens[i].Trim('\n', '\r');
             if (token.Length == 0)
@@ -791,7 +958,7 @@ public sealed partial class GitHistory : IHistoryProvider
             }
 
             var two = status[0] is 'R' or 'C';
-            if (i + (two ? 2 : 1) >= tokens.Length)
+            if (i + (two ? 2 : 1) >= tokens.Count)
             {
                 throw new HistoryException("Git's list of changed files ended part way.");
             }
@@ -799,7 +966,7 @@ public sealed partial class GitHistory : IHistoryProvider
             var path = tokens[i + 1];
             var newPath = two ? tokens[i + 2] : null;
             i += two ? 3 : 2;
-            changes.Add((Change(status[0], path, newPath), status));
+            changes.Add((Change(status[0], path, newPath), status, path, newPath ?? path));
         }
 
         return changes;
