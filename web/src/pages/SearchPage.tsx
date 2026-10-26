@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link, getRouteApi } from '@tanstack/react-router'
 import {
+  ApiRequestError,
   SEARCH_LIMITS,
   STATUSES,
   count,
@@ -11,11 +12,13 @@ import {
   type HierarchyResult,
   type SearchFilters,
   type SearchHit,
+  type SearchKey,
+  type SearchResult,
   type EntitySummary,
 } from '../api'
 import { EntityLink, sectionAnchor } from '../components/Links'
 import { ErrorState, Loading, StatusBadge } from '../components/States'
-import { usePosition } from '../hooks'
+import { useDocumentTitle } from '../hooks'
 import { snippetParts } from '../snippet'
 import { describePosition } from '../story'
 import type { SearchPageSearch } from '../router'
@@ -31,8 +34,12 @@ export function SearchPage() {
   const { universe } = route.useParams()
   const search = route.useSearch() as SearchPageSearch
   const navigate = route.useNavigate()
-  const { at } = usePosition()
+  // A blank `at` is '' (it fails closed, as on every page), never everything.
+  const at = search.at
+  // Scopes are books and series, shown whatever the position; types only as
+  // the reader has met them, so a type met later isn't named.
   const hierarchy = useQuery(hierarchyQuery(universe, undefined))
+  const metHierarchy = useQuery({ ...hierarchyQuery(universe, at), enabled: at !== '' })
   const positions = useQuery(positionsQuery(universe))
   const q = search.q
   const filters: SearchFilters = { type: search.type, status: search.status, series: search.series, book: search.book, canonOnly: search.canon }
@@ -41,13 +48,16 @@ export function SearchPage() {
   const setFilters = (patch: Partial<SearchPageSearch>) =>
     void navigate({ search: (prev: SearchPageSearch) => ({ ...prev, ...patch }), replace: true })
 
-  const where = at === undefined ? undefined : describePosition(at, positions.data?.positions ?? [])
+  const where = at === undefined || at === '' ? undefined : describePosition(at, positions.data?.positions ?? [])
+
+  useDocumentTitle(q ? `Search: ${q}` : 'Search')
 
   return (
     <div className="page-body search-page">
       <p className="eyebrow">Search</p>
       <h1>{q ? <>Matches for “{q}”</> : 'Search'}</h1>
-      <Filters hierarchy={hierarchy.data} search={search} onChange={setFilters} />
+      <Filters hierarchy={hierarchy.data} metHierarchy={metHierarchy.data} search={search} onChange={setFilters} />
+      {at === '' && !q && <ErrorState error={new ApiRequestError('bad_argument', "The story position in the address is empty, so there's nothing to search as of.")} />}
       {where !== undefined && (
         <p className="search-position">
           Searching as of <strong>{where}</strong>: only what the reader has met by then.{' '}
@@ -67,18 +77,18 @@ export function SearchPage() {
 
 function Filters({
   hierarchy,
+  metHierarchy,
   search,
   onChange,
 }: {
   hierarchy: HierarchyResult | undefined
+  metHierarchy: HierarchyResult | undefined
   search: SearchPageSearch
   onChange: (patch: Partial<SearchPageSearch>) => void
 }) {
   const u = hierarchy?.universe
   const books = u ? [...u.series.flatMap((s) => s.books), ...u.books] : []
-  const types = u
-    ? [...new Set([u.entities, ...u.series.map((s) => s.entities), ...books.map((b) => b.entities)].flatMap((c) => Object.keys(c.byType)))].sort()
-    : []
+  const types = typesIn(metHierarchy)
   // A filter the lists don't have yet (still loading, or typed into the URL) stays chosen.
   const withCurrent = (list: string[], current: string | undefined) => (current && !list.includes(current) ? [...list, current] : list)
   const scope = search.book ? `book:${search.book}` : search.series ? `series:${search.series}` : ''
@@ -144,6 +154,29 @@ function Filters({
   )
 }
 
+/** The types of the notes a hierarchy counts: as of a position, only those the reader has met. */
+function typesIn(hierarchy: HierarchyResult | undefined): string[] {
+  const u = hierarchy?.universe
+  if (!u) {
+    return []
+  }
+
+  const books = [...u.series.flatMap((s) => s.books), ...u.books]
+  const counts = [u.entities, ...u.series.map((s) => s.entities), ...books.map((b) => b.entities)]
+  return [...new Set(counts.flatMap((c) => Object.entries(c.byType).filter(([, n]) => n > 0).map(([type]) => type)))].sort()
+}
+
+/**
+ * Keeps the last answer while the next one loads, but only at the same
+ * position: one from a later position could show what the reader hasn't met.
+ */
+export function keepAtSamePosition(at: string | undefined) {
+  return (previous: SearchResult | undefined, previousQuery: { queryKey: readonly unknown[] } | undefined): SearchResult | undefined => {
+    const key = previousQuery?.queryKey[1] as SearchKey | undefined
+    return key && key.at === (at ?? null) ? previous : undefined
+  }
+}
+
 function Results({
   universe,
   q,
@@ -167,10 +200,20 @@ function Results({
   const step = more.key === searchKey ? more.step : 0
   const result = useQuery({
     ...searchQuery(universe, q, filters, at, SEARCH_LIMITS[step]),
-    // While the next answer loads, keep the last one, but only at the same
-    // position: one from a later position could show what the reader hasn't met.
-    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[8] === (at ?? null) ? keepPreviousData(previous) : undefined),
+    placeholderData: keepAtSamePosition(at),
   })
+  // After "Show more", when the button goes (every match is shown, or the
+  // API's limit is reached), focus moves to the line that says so.
+  const askedForMore = useRef(false)
+  const end = useRef<HTMLParagraphElement>(null)
+  const showsButton = result.data?.truncated === true && step < SEARCH_LIMITS.length - 1
+  const settled = result.isSuccess && !result.isPlaceholderData
+  useEffect(() => {
+    if (askedForMore.current && settled && !showsButton) {
+      askedForMore.current = false
+      end.current?.focus()
+    }
+  }, [settled, showsButton])
 
   if (result.isPending) {
     return <Loading what="matches" />
@@ -180,7 +223,8 @@ function Results({
     return <ErrorState error={result.error} />
   }
 
-  const { hits, truncated } = result.data
+  // The words of the answer shown, which may be the last search's while the next loads.
+  const { hits, truncated, query: shownQuery } = result.data
   if (hits.length === 0) {
     return (
       <p className="muted" role="status">
@@ -209,20 +253,34 @@ function Results({
             </p>
             <ul className="hits">
               {own.map((hit, i) => (
-                <Hit key={i} universe={universe} hit={hit} q={q} />
+                <Hit key={i} universe={universe} hit={hit} q={shownQuery} />
               ))}
             </ul>
           </li>
         ))}
       </ol>
-      {truncated &&
-        (last ? (
-          <p className="muted">Only the first {hits.length} matches are shown. Add words or a filter to narrow the search.</p>
-        ) : (
-          <button type="button" onClick={() => setMore({ key: searchKey, step: step + 1 })} disabled={result.isFetching}>
-            Show more matches
-          </button>
-        ))}
+      {truncated && !last ? (
+        <button
+          type="button"
+          onClick={() => {
+            askedForMore.current = true
+            setMore({ key: searchKey, step: step + 1 })
+          }}
+          disabled={result.isFetching}
+        >
+          Show more matches
+        </button>
+      ) : truncated ? (
+        <p className="muted" ref={end} tabIndex={-1}>
+          Only the first {hits.length} matches are shown. Add words or a filter to narrow the search.
+        </p>
+      ) : (
+        step > 0 && (
+          <p className="muted" ref={end} tabIndex={-1}>
+            That's every match.
+          </p>
+        )
+      )}
     </div>
   )
 }

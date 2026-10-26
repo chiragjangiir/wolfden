@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { useMatch, useNavigate } from '@tanstack/react-router'
-import type { SearchPageSearch, StorySearch } from '../router'
+import { useMatch, useNavigate, useRouterState } from '@tanstack/react-router'
+import type { SearchPageSearch } from '../router'
 
 /** How long typing pauses before the search runs, in milliseconds. */
 export const SEARCH_DEBOUNCE_MS = 300
@@ -39,47 +39,60 @@ function UniverseSearchBox({ universe }: { universe: string }) {
   const match = useMatch({ from: '/u/$universe/search', shouldThrow: false })
   const onSearchPage = match !== undefined
   const q = onSearchPage ? (match.search as SearchPageSearch).q : undefined
+  const href = useRouterState({ select: (s) => s.location.href })
   const [text, setText] = useState(q ?? '')
   const input = useRef<HTMLInputElement>(null)
-  // Set while the writer has typed something not yet searched for.
-  const typed = useRef(false)
+  // The pending search while typing pauses, if any.
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // The words this box last sent, so the URL catching up doesn't overwrite newer typing.
   const sent = useRef(q)
+  // What a pending search reads when it runs: this render's, not the one it was typed in.
+  const current = useRef({ universe, onSearchPage })
+  current.current = { universe, onSearchPage }
 
-  // The URL's words changed from elsewhere (Back, a link): show them.
-  useEffect(() => {
-    if (onSearchPage && q !== sent.current) {
-      sent.current = q
-      typed.current = false
-      setText(q ?? '')
-    }
-  }, [q, onSearchPage])
+  const cancel = () => {
+    clearTimeout(timer.current)
+    timer.current = undefined
+  }
 
   const go = (words: string) => {
-    typed.current = false
-    if (!words && !onSearchPage) {
+    cancel()
+    const { universe: u, onSearchPage: on } = current.current
+    if (!words && !on) {
       return
     }
 
     sent.current = words || undefined
     void navigate({
       to: '/u/$universe/search',
-      params: { universe },
-      search: (prev: SearchPageSearch & StorySearch) => (onSearchPage ? { ...prev, q: words || undefined } : { at: prev.at, q: words }),
+      params: { universe: u },
+      search: (prev: SearchPageSearch) => (on ? { ...prev, q: words || undefined } : { at: prev.at, q: words }),
       // Typing on the search page refines it rather than adding to history.
-      replace: onSearchPage,
+      replace: on,
     })
   }
 
+  // Going anywhere else (a link, Back) drops a search still waiting to run.
+  // Only this box's own search, or a filter changed beside it, keeps it:
+  // when it runs, it reads the URL as it is then.
   useEffect(() => {
-    if (!typed.current) {
-      return
+    if (!(onSearchPage && q === sent.current)) {
+      cancel()
     }
+    // Runs on each change of address; q and onSearchPage are read as they are then.
+  }, [href])
 
-    const timer = setTimeout(() => go(text.trim()), SEARCH_DEBOUNCE_MS)
-    return () => clearTimeout(timer)
-    // `go` is made anew each render; only the text starts the wait.
-  }, [text])
+  // The URL's words changed from elsewhere (Back, a link): show them. Leaving
+  // the search page clears the box.
+  useEffect(() => {
+    if (!onSearchPage) {
+      sent.current = undefined
+      setText('')
+    } else if (q !== sent.current) {
+      sent.current = q
+      setText(q ?? '')
+    }
+  }, [q, onSearchPage])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -91,7 +104,10 @@ function UniverseSearchBox({ universe }: { universe: string }) {
     }
 
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      cancel()
+    }
   }, [])
 
   return (
@@ -111,8 +127,10 @@ function UniverseSearchBox({ universe }: { universe: string }) {
         placeholder="Search  /"
         value={text}
         onChange={(e) => {
-          typed.current = true
-          setText(e.currentTarget.value)
+          const value = e.currentTarget.value
+          setText(value)
+          cancel()
+          timer.current = setTimeout(() => go(value.trim()), SEARCH_DEBOUNCE_MS)
         }}
         onKeyDown={(e) => {
           if (e.key === 'Escape') {

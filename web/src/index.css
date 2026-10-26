@@ -18,6 +18,9 @@
   --banner-bg: #fff5d6;
   --banner-border: #e5c76b;
   --focus: #2563eb;
+  /* A search match: at least 3:1 against the page, 4.5:1 for its text. */
+  --mark-bg: #cf7a12;
+  --mark-text: #22201c;
   --font-body: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif;
   --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --measure: 42rem;
@@ -44,6 +47,8 @@
     --banner-bg: #3a3220;
     --banner-border: #7a6430;
     --focus: #8ab4f8;
+    --mark-bg: #e3b341;
+    --mark-text: #171614;
   }
 }
 
@@ -693,8 +698,8 @@ button.peek {
 }
 
 .snippet mark {
-  background: var(--banner-bg);
-  color: inherit;
-  border-bottom: 2px solid var(--banner-border);
+  background: var(--mark-bg);
+  color: var(--mark-text);
+  border-radius: 2px;
   padding: 0 0.1em;
 }

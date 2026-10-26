@@ -367,10 +367,34 @@ export const STATUSES = ['idea', 'undecided', 'candidate', 'draft', 'canon', 're
 /** How many hits a search asks for at first, then on each "Show more", up to the API's own limit. */
 export const SEARCH_LIMITS = [20, 50, 100, 200] as const
 
+/** What a search's cache key holds: everything it was asked with, the position as `at` (null for everything). */
+export interface SearchKey {
+  universe: string
+  query: string
+  type: string | null
+  status: string | null
+  series: string | null
+  book: string | null
+  canonOnly: boolean
+  at: string | null
+  limit: number
+}
+
 export function searchQuery(universe: string, query: string, filters: SearchFilters, at: string | undefined, limit: number) {
   const { type, status, series, book, canonOnly } = filters
+  const key: SearchKey = {
+    universe,
+    query,
+    type: type ?? null,
+    status: status ?? null,
+    series: series ?? null,
+    book: book ?? null,
+    canonOnly: canonOnly ?? false,
+    at: at ?? null,
+    limit,
+  }
   return queryOptions({
-    queryKey: ['search', universe, query, type ?? null, status ?? null, series ?? null, book ?? null, canonOnly ?? false, at ?? null, limit],
+    queryKey: ['search', key] as const,
     queryFn: () =>
       getJson<SearchResult>(
         apiPath('/api/search', { query, universe, type, status, series, book, canonOnly: canonOnly ? 'true' : undefined, asOf: at, limit }),
