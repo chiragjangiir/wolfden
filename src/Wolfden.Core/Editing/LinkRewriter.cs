@@ -11,7 +11,7 @@ namespace Wolfden.Core.Editing;
 /// link to rewrite is spliced in place in its file, in a body, an outline,
 /// or a frontmatter value, so everything else stays as written.
 /// </summary>
-internal static class LinkRewriter
+internal static partial class LinkRewriter
 {
     /// <summary>What a rewrite changes, none of it written yet.</summary>
     /// <param name="Files">The new contents of each file that changes, by den-relative path: the entity's file first.</param>
@@ -30,7 +30,18 @@ internal static class LinkRewriter
     /// <param name="newText">The text the rewrite puts in links, to tell whether a frontmatter value can keep its style.</param>
     internal static Result Rewrite(
         LinkIndex links, IDenSource den, CatalogEntity entity, IReadOnlyList<ResolvedLink> targeting, Func<string, string?, bool> matches,
-        Func<string, string?> replace, string newText, Func<MarkdownFile, MarkdownFile> editOwn)
+        Func<string, string?> replace, string newText, Func<MarkdownFile, MarkdownFile> editOwn) =>
+        Rewrite(links, den, entity, targeting, matches, (text, _) => replace(text), newText, editOwn);
+
+    /// <summary>
+    /// As the other overload, with <paramref name="replace"/> told whether
+    /// the link is in a table row of a body or an outline (a line that
+    /// starts with <c>|</c>), where a <c>|</c> it adds must be written <c>\|</c>
+    /// (F-OUT-12).
+    /// </summary>
+    internal static Result Rewrite(
+        LinkIndex links, IDenSource den, CatalogEntity entity, IReadOnlyList<ResolvedLink> targeting, Func<string, string?, bool> matches,
+        Func<string, bool, string?> replace, string newText, Func<MarkdownFile, MarkdownFile> editOwn)
     {
         var structure = links.Catalog.Structure;
         var containers = structure.Universes.SelectMany(u => new Container[] { u }.Concat(u.Series).Concat(u.Books)).ToDictionary(c => c.FilePath, StringComparer.Ordinal);
@@ -74,7 +85,7 @@ internal static class LinkRewriter
 
             originals[path] = file.ToBytes();
             var places = found.Select(l => (l.Occurrence.Link.Line, l.Occurrence.Link.Column, l.Occurrence.Link.Target)).ToHashSet();
-            var (edited, count) = RewriteFile(file, places, matches, replace, newText);
+            var (edited, count) = RewriteFile(file, places, matches, (_, text, inTableRow) => replace(text, inTableRow), newText);
             rewritten += count;
             if (path == entity.Path)
             {
@@ -119,9 +130,21 @@ internal static class LinkRewriter
         return result;
     }
 
+    /// <summary>
+    /// Rewrites the links of one file at the given places (line, column,
+    /// target), each with its own replacement, which is told whether the
+    /// link is in a table row: links in a moved file to different entities,
+    /// say, each to its own target's id. Returns the file and how many were rewritten.
+    /// </summary>
+    internal static (MarkdownFile File, int Count) RewritePlaces(
+        MarkdownFile file, IReadOnlyDictionary<(int Line, int Column, string Target), Func<string, bool, string?>> replacements, string newText) =>
+        RewriteFile(
+            file, replacements.Keys.ToHashSet(), (_, _) => true,
+            (link, text, inTableRow) => replacements[(link.Line, link.Column, link.Link.Target)](text, inTableRow), newText);
+
     /// <summary>Rewrites each link at <paramref name="places"/> (line, column, target) that passes <paramref name="matches"/>.</summary>
     private static (MarkdownFile File, int Count) RewriteFile(
-        MarkdownFile file, HashSet<(int Line, int Column, string Target)> places, Func<string, string?, bool> matches, Func<string, string?> replace, string newText)
+        MarkdownFile file, HashSet<(int Line, int Column, string Target)> places, Func<string, string?, bool> matches, Func<FoundLink, string, bool, string?> replace, string newText)
     {
         if (places.Count == 0)
         {
@@ -136,9 +159,10 @@ internal static class LinkRewriter
         // The body first, by offset, then the frontmatter, whose offsets the body's edits don't move.
         var replacements = new List<(int Start, int Length, string Text)>();
         var found = file.IsOutline ? BodyLinkScanner.ScanOutline(file) : BodyLinkScanner.ScanBody(file);
+        Lines? lines = null;
         foreach (var link in found)
         {
-            if (Matches(link) && replace(text.Substring(link.Link.Offset, link.Link.Length)) is { } replaced)
+            if (Matches(link) && replace(link, text.Substring(link.Link.Offset, link.Link.Length), (lines ??= new Lines(text)).InTableRow(link.Link.Offset)) is { } replaced)
             {
                 replacements.Add((link.Link.Offset, link.Link.Length, replaced));
             }
@@ -168,7 +192,7 @@ internal static class LinkRewriter
                         foreach (var link in changes.OrderByDescending(l => l.Link.Offset))
                         {
                             var linkText = value.Substring(link.Link.Offset, link.Link.Length);
-                            if (replace(linkText) is { } replaced)
+                            if (replace(link, linkText, false) is { } replaced)
                             {
                                 value = string.Concat(value.AsSpan(0, link.Link.Offset), replaced, value.AsSpan(link.Link.Offset + link.Link.Length));
                                 count++;
@@ -210,6 +234,99 @@ internal static class LinkRewriter
 
         return (result, count);
     }
+
+    /// <summary>
+    /// True if the line that holds <paramref name="offset"/> is a table row
+    /// (GFM tables), where a <c>|</c> splits the cell. See <see cref="Lines"/>.
+    /// </summary>
+    internal static bool InTableRow(string text, int offset) => new Lines(text).InTableRow(offset);
+
+    /// <summary>A text's lines, split once, to ask of several offsets whether each is in a table row.</summary>
+    internal sealed class Lines
+    {
+        private readonly string[] _lines;
+        private readonly int[] _starts;
+
+        public Lines(string text)
+        {
+            _lines = text.Split('\n');
+            _starts = new int[_lines.Length];
+            for (int i = 1, at = 0; i < _lines.Length; i++)
+            {
+                at += _lines[i - 1].Length + 1;
+                _starts[i] = at;
+            }
+        }
+
+        /// <summary>
+        /// True if the line that holds <paramref name="offset"/> is a table
+        /// row: one that starts with <c>|</c>; one with a <c>|</c> whose next
+        /// line is a delimiter row (<c>---|---</c>), so it's the header; or
+        /// one with a <c>|</c> below a delimiter row in the same run of
+        /// non-blank lines, for a table written without the outer pipes.
+        /// Only lines above are looked at, as GFM makes only a paragraph's
+        /// last line a header, and the walk stops at a code fence or an HTML
+        /// comment's marker. A blockquote's <c>&gt;</c> markers are skipped
+        /// first, for a table in a quote.
+        /// </summary>
+        public bool InTableRow(int offset)
+        {
+            var at = Array.BinarySearch(_starts, offset);
+            at = at >= 0 ? at : ~at - 1;
+            var line = Unquoted(_lines[at]);
+            if (line.StartsWith('|'))
+            {
+                return true;
+            }
+
+            if (!line.Contains('|', StringComparison.Ordinal) || IsMarker(line))
+            {
+                return false;
+            }
+
+            if (at + 1 < _lines.Length && Unquoted(_lines[at + 1]) is var next && !IsMarker(next) && DelimiterRow().IsMatch(next))
+            {
+                return true;
+            }
+
+            for (var i = at - 1; i >= 0; i--)
+            {
+                var above = Unquoted(_lines[i]);
+                if (above.Length == 0 || IsMarker(above))
+                {
+                    return false;
+                }
+
+                if (DelimiterRow().IsMatch(above))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>True for a line that opens or closes a code fence or an HTML comment, where a table can't continue.</summary>
+        private static bool IsMarker(string line) =>
+            line.StartsWith("```", StringComparison.Ordinal) || line.StartsWith("~~~", StringComparison.Ordinal)
+            || line.Contains("<!--", StringComparison.Ordinal) || line.Contains("-->", StringComparison.Ordinal);
+    }
+
+    /// <summary>The line without its indent, any blockquote markers, or a carriage return.</summary>
+    private static string Unquoted(string line)
+    {
+        var s = line.TrimEnd('\r').TrimStart();
+        while (s.StartsWith('>'))
+        {
+            s = s[1..].TrimStart();
+        }
+
+        return s;
+    }
+
+    /// <summary>A GFM table's delimiter row, with at least one <c>|</c>: <c>---|:--:</c> or <c>| --- | --- |</c>.</summary>
+    [System.Text.RegularExpressions.GeneratedRegex(@"^(?=.*\|)\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex DelimiterRow();
 
     /// <summary>True if splicing <paramref name="text"/> into <paramref name="scalar"/> as written could change how YAML reads it, so the value is written anew instead.</summary>
     private static bool NeedsQuoting(YamlScalar scalar, string text) => scalar.Style switch

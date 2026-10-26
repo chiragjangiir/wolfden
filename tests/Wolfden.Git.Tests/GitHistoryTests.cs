@@ -173,6 +173,22 @@ public sealed class GitHistoryTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-HIST-3")]
+    public void ACheckpointMessageKeepsUnicodeSeparatorsAsWritten()
+    {
+        // U+2028 and U+2029 aren't line breaks to git, so they stay (#161).
+        // Built from code points so no editor turns them into line breaks here.
+        var message = $"Add Mara{char.ConvertFromUtf32(0x2028)}and{char.ConvertFromUtf32(0x2029)}more";
+        using var repo = TestRepo.Create();
+        repo.WriteDen(Mara, "# Mara Voss\n");
+
+        var entry = repo.History.Checkpoint(new CheckpointRequest(message), Token).Value!;
+
+        Assert.Equal(message, entry.Message);
+        Assert.Equal(message, Assert.Single(repo.History.Log(new HistoryLogQuery(Mara), Token).Value).Message);
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-HIST-7")]
     public void ALightweightTagWorksWhenGitSignsTags()
     {
@@ -590,6 +606,85 @@ public sealed class GitHistoryTests
         Assert.All(diff.Files, f => Assert.Contains($"+{f.Change.Path}\n", f.Patch, StringComparison.Ordinal));
         Assert.Equal("\"a/universes/tab\\there.md\"", GitHistory.QuotePath("a/universes/tab\there.md"));
         Assert.Equal("a/universes/a b é.md", GitHistory.QuotePath("a/universes/a b é.md"));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-6")]
+    public void APatchKeepsCharactersThatArentLineFeedsAsTheyAre()
+    {
+        // Only \n ends a line in a patch (#161). NEL, U+2028, U+2029, a form
+        // feed, and a lone \r stay inside their lines, a CRLF line keeps its
+        // \r, and a line can't pass for a diff --git header after one.
+        using var repo = TestRepo.Create();
+        repo.WriteDen(Mara, "# Mara Voss\n");
+        repo.WriteDen(Fen, "# Fen Harbour\n");
+        var start = repo.CommitAll("start");
+        string[] lines =
+        [
+            "nel\u0085here",
+            "line\u2028separator",
+            "paragraph\u2029separator",
+            "form\ffeed",
+            "lone\rreturn",
+            "crlf\r",
+            $"spoof\u2028diff --git a/{Fen} b/{Fen}",
+            $"spoof\rdiff --git a/{Fen} b/{Fen}",
+        ];
+        repo.WriteDen(Mara, "# Mara Voss\n" + string.Concat(lines.Select(l => l + "\n")));
+
+        var file = Assert.Single(repo.History.Diff(new HistoryDiffQuery(start), Token).Value.Files);
+
+        Assert.Equal(new HistoryFileChange(HistoryChangeKind.Modified, Mara), file.Change);
+        Assert.StartsWith($"diff --git a/{Mara} b/{Mara}\n", file.Patch, StringComparison.Ordinal);
+        Assert.EndsWith(" # Mara Voss\n" + string.Concat(lines.Select(l => "+" + l + "\n")), file.Patch, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0x2028)]
+    [InlineData(0x2029)]
+    [InlineData(0x0085)]
+    [Trait("Scenario", "SC-HIST-6")]
+    public void ANoteNamedWithALineSeparatorGetsItsOwnPatch(int codePoint)
+    {
+        // Git writes such a name raw in the diff --git line (#161), so the
+        // line must stay whole for the patch to pair with its file.
+        var odd = $"universes/vael/odd{char.ConvertFromUtf32(codePoint)}name.md";
+        using var repo = TestRepo.Create();
+        repo.WriteDen(Mara, "# Mara Voss\n");
+        var start = repo.CommitAll("start");
+        repo.WriteDen(Mara, "# Mara Voss\n\nA pilot.\n");
+        try
+        {
+            repo.WriteDen(odd, "# Odd\n");
+        }
+        catch (IOException)
+        {
+            Assert.Skip("This file system doesn't allow the character in a name.");
+        }
+
+        var diff = repo.History.Diff(new HistoryDiffQuery(start), Token).Value;
+
+        Assert.Equal(
+            [(HistoryChangeKind.Modified, Mara), (HistoryChangeKind.Added, odd)],
+            diff.Files.Select(f => (f.Change.Kind, f.Change.Path)).OrderBy(c => c.Path, StringComparer.Ordinal));
+        var patch = diff.Files.Single(f => f.Change.Path == odd).Patch;
+        Assert.StartsWith($"diff --git a/{odd} b/{odd}\n", patch, StringComparison.Ordinal);
+        Assert.EndsWith("\n+# Odd\n", patch, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-6")]
+    public void ALineInAPatchCantStartAnotherFilesPart()
+    {
+        // Canned, so the line separators reach the parser exactly as written.
+        var modified = "diff --git a/c/a.md b/c/a.md\nindex 3333333..4444444 100644\n--- a/c/a.md\n+++ b/c/a.md\n@@ -1 +1,4 @@\n-a\n"
+            + "+b\u2028diff --git a/c/b.md b/c/b.md\n+c\u0085diff --git a/c/b.md b/c/b.md\n+d\u2029diff --git a/c/b.md b/c/b.md\n+e\r\n";
+        var output = ":100644 100644 3333333 4444444 M\0c/a.md\0\0" + modified;
+
+        var file = Assert.Single(GitHistory.ReadDiff(output));
+
+        Assert.Equal(new HistoryFileChange(HistoryChangeKind.Modified, "c/a.md"), file.Change);
+        Assert.Equal(modified, file.Patch);
     }
 
     /// <summary>

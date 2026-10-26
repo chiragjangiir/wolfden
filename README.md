@@ -50,6 +50,8 @@ The first command checks the sample den and should find nothing wrong. The
 second lists everything a reader knows by chapter 9 of *Dracula*.
 `wolfden init` starts a den of your own. The commands are described in
 [design.md §7](docs/design.md).
+To connect Claude or another AI assistant, see
+[Connecting MCP clients](docs/mcp-clients.md).
 
 ## Planned features
 

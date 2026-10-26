@@ -167,6 +167,32 @@ public static partial class LinkSyntax
         return end <= start ? null : string.Concat(linkText.AsSpan(0, start), target, linkText.AsSpan(end));
     }
 
+    /// <summary>
+    /// <paramref name="linkText"/>, a whole link such as <c>[[Voss#Arc]]</c>,
+    /// with its target replaced by <paramref name="id"/>, so it reaches its
+    /// entity by id (F-LINK-6), and showing what it showed before: a link
+    /// without a label gets its target and heading as written as its label
+    /// (<c>[[01JA...#Arc|Voss#Arc]]</c>). In a table row the label goes
+    /// after <c>\|</c>, so the cell isn't split (F-OUT-12). Null if it isn't
+    /// one link with a target.
+    /// </summary>
+    internal static string? WithIdTarget(string linkText, string id, bool inTableRow)
+    {
+        var m = LinkPattern().Match(linkText);
+        if (!m.Success || m.Index != 0 || m.Length != linkText.Length || WithTarget(linkText, id) is not { } retargeted)
+        {
+            return null;
+        }
+
+        if (m.Groups["l"].Success)
+        {
+            return retargeted;
+        }
+
+        var shown = linkText[2..^2].Trim();
+        return string.Concat(retargeted.AsSpan(0, retargeted.Length - 2), inTableRow ? "\\|" : "|", shown, "]]");
+    }
+
     private static bool IsEmbed(string text, int index, int floor) =>
         index - 1 >= floor && text[index - 1] == '!' && !IsEscaped(text, index - 1, floor);
 

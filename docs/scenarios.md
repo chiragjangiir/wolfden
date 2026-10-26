@@ -85,8 +85,8 @@ with no `from`. Later they decide to bring the character back in Book 5.
   shows under change (F-VIEW-3).
 - Moved up with no `from`: the character inherits the start of the series,
   which is the start of Book 1, and now appears from Book 1. That's the
-  specified behavior. It's why a move made by the app or MCP should write
-  the inherited `from` explicitly (#89).
+  specified behavior. It's why a move made by the app or MCP writes the
+  inherited `from` explicitly (F-RT-5, SC-MCP-29).
 - Links from Book 5 resolve in all three cases.
 
 Spec: F-VIEW-1, F-ENT-6, F-ORD-3, F-LINK-5, F-LINK-7. Covered by:
@@ -2105,6 +2105,95 @@ decisions, 2026-10-23 and 2026-10-26, #129). Covered by:
 `CopyEntityToolTests.APinnedSessionCantCopyIntoAnotherUniverse`,
 `CopyEntityToolTests.ANewIdThatClashesIsTriedAgain`.
 
+### SC-MCP-29. My assistant moves a note to another scope
+
+In the invented Starfall den, The Long Dark is a series of two books,
+Ember then Ash, followed by the standalone A Quiet Moon and The Drift
+War, a series with no books yet. The assistant moves notes between them.
+
+- Ilse Brandt, filed in Ash with no `from`, moves up to the series:
+  `move_entity` moves the file to the series' `entities/characters/`
+  and writes `from: ash`, the point where she entered canon, so she's
+  still out of Ember's views and in from the start of Ash. The result
+  gives the new path and hash, and marks the file with its old path.
+  Moved from the series into Ember, its first book, a character with no
+  `from` gets none: the series starts where Ember does.
+- Mara Voss, a series character from `ember:1`, moved into Ash is
+  refused (`entry_outside_scope`): the reader has already met her when
+  Ash starts, and the error names both ways forward. With `keep_entry`
+  she moves and keeps `from: "ember:1"`, and `check` warns that it's
+  outside her book (F-ENT-6). With `enter_at_new_scope` her `from` is
+  taken out, so she enters at the start of Ash, and since she holds
+  pinned canon the result flags it. A series character with no `from`
+  kept this way gets `from: ember`. A character of The Drift War with no
+  `from` can't keep its entry point, since no position names it, so only
+  `enter_at_new_scope` moves it. Sash Orel, met at `ash:2`, moved into
+  Ember is refused too, and the error says that `enter_at_new_scope`
+  would bring her in earlier than the reader meets her now; with it, she
+  is in Ember's views.
+- With a second Tessaly in A Quiet Moon, the Ember outline's
+  `[[Tessaly]]` and Mara's `[[tessaly]]` reach the series' Tessaly only
+  because it's nearer. Moving it into Ash rewrites both to its id with
+  the same text (`[[01JA...\|Tessaly]]` in the table row), in the same
+  change; a link from Ash, which still reaches it, is left alone. If
+  Ember is final, that outline can't be rewritten, so nothing moves.
+  Nothing moves into or out of a final book either.
+- The Lantern ship moved into Ash would tie with the Lantern item there,
+  so Halden Pike's `[[Lantern]]`, which reaches the item, would become
+  ambiguous: refused, naming the link, unless `allow_relinks`, and then
+  the result lists it. Pike himself moved to the universe would lose his
+  own links to the item, since they'd tie there: each is rewritten to the
+  item's id, keeping its `#Overview` anchor or its "the lamp" label, and
+  listed in the result, so his canon views read as before. A note in Ash
+  whose `[[Lantern]]` would reach the ship once moved into A Quiet Moon
+  keeps the item the same way, and its broken `[[Nobody we know]]`
+  stays as written. With `allow_relinks` its links are left to follow
+  the new scope, and the result lists the one that now reaches the ship.
+  A move with such rewrites that fails puts the note back byte for byte.
+  The ship moved to the
+  universe makes the Reach's ambiguous `[[Lantern]]` reach it, which is
+  only reported.
+- A file already at the new path stops the move (`already_exists`). The
+  file is rewritten in place, then moved whole, so the den never holds
+  two copies of it, or none. A move that fails part way, at a link
+  rewrite, the move itself, or the last write at the new path, puts
+  everything back and leaves no new file. A note without an id gets one.
+  A checkpoint after the move counts the old path as the session's,
+  even when git sees a delete and an add, and even when the session
+  edited the note before moving it.
+  An event whose `row` ids would now resolve among other outlines
+  (moved from the series to the universe) is said in the result.
+
+Spec: format.md F-RT-5, F-ENT-6, F-POS-7, F-ORD-3, F-LINK-7, F-BOOK-1
+(maintainer decisions, 2026-10-24 and 2026-10-26). Covered by:
+`MoveEntityToolTests.ABookEntityWithNoFromMovedUpGetsTheEntryPointItHadAsItsFrom`,
+`MoveEntityToolTests.AMoveThatStartsAtTheSamePointWritesNoFrom`,
+`MoveEntityToolTests.ANarrowingMoveOutsideTheEntryPointIsRefusedNamingBothWaysForward`,
+`MoveEntityToolTests.KeepEntryKeepsTheFromAndItsWarning`,
+`MoveEntityToolTests.EnterAtNewScopeTakesTheFromOutAndFlagsPinnedCanon`,
+`MoveEntityToolTests.ASeriesEntityWithNoFromMovedIntoItsSecondBookWritesTheSeriesStartWithKeepEntry`,
+`MoveEntityToolTests.AnEntryPointNoPositionCanNameNeedsEnterAtNewScope`,
+`MoveEntityToolTests.LinksThatWouldStopReachingItAreRewrittenToItsId`,
+`MoveEntityToolTests.ALinkToRewriteInAFinalBookStopsTheMove`,
+`MoveEntityToolTests.ALinkThatWouldReachAnotherEntityIsRefusedUnlessAllowed`,
+`MoveEntityToolTests.TheMovedFilesOwnLinksThatWouldBeAmbiguousAreRewrittenToTheirTargetsIds`,
+`MoveEntityToolTests.TheMovedFilesOwnLinkThatWouldReachAnotherEntityKeepsItsTarget`,
+`MoveEntityToolTests.WithAllowRelinksTheMovedFilesOwnLinksFollowTheNewScope`,
+`MoveEntityToolTests.AMoveWhoseOwnLinksWereRewrittenRollsBackWhole`,
+`MoveEntityToolTests.AnAmbiguousLinkThatNowResolvesIsReported`,
+`MoveEntityToolTests.AFileAlreadyThereStopsTheMove`,
+`MoveEntityToolTests.AMoveThatFailsPartWayPutsBackWhatItWrote`,
+`MoveEntityToolTests.AnEntityWithoutAnIdGetsOneAndOtherArgumentsAreChecked`,
+`MoveEntityToolTests.RowIdsThatNowResolveElsewhereAreSaid`,
+`MoveEntityToolTests.TheDenNeverHoldsTwoCopiesOrNoneWhileItMoves`,
+`MoveEntityToolTests.EnterAtNewScopeForAnEntryAfterItSaysItEntersEarlier`,
+`HistoryToolTests.AMovedFilesOldPathIsTheSessionsWhenGitSeesADeleteAndAnAdd`,
+`HistoryToolTests.AFileTheSessionEditedThenMovedIsntChangedOutsideIt`,
+`HistoryToolTests.AMoveTheWriterCommittedElsewhereIsForgottenAtTheNextCheckpoint`,
+`EntityMoveEditTests.ALinkRewrittenToAnIdShowsTheSameText`,
+`EntityMoveEditTests.ATableRowIsFoundWithOrWithoutItsOuterPipes`,
+`EntityMoveEditTests.AnOverlayCanLeaveAFileOut`.
+
 ## STORE: Wolfden saves, moves, and deletes notes
 
 Background: the den store (design.md §6, #121) is how Wolfden writes a
@@ -2276,7 +2365,9 @@ item, then makes a checkpoint, "End of chapter 14 session".
   commit. A checkpoint of only Mara's note records only it, and the new
   note that wasn't named stays as it was. The first checkpoint of a new
   repository works too. A checkpoint needs a message, without control
-  characters other than line breaks and tabs. If the writer's
+  characters other than line breaks and tabs. Unicode line and
+  paragraph separators (U+2028, U+2029) in a message are kept as
+  written, not turned into line breaks (#161). If the writer's
   pre-commit hook refuses the commit, the checkpoint says git refused
   it and why, nothing is recorded, and the new note is untracked again,
   as it was before.
@@ -2287,6 +2378,7 @@ Spec: design.md §6 (#19). Covered by:
 `GitHistoryTests.TheFirstCheckpointOfANewRepositoryWorks`,
 `GitHistoryTests.ACheckpointNeedsAMessage`,
 `GitHistoryTests.ACheckpointMessageCantHoldControlCharacters`,
+`GitHistoryTests.ACheckpointMessageKeepsUnicodeSeparatorsAsWritten`,
 `GitHistoryTests.ACheckpointAHookRefusesLeavesTheNewFilesUntracked`,
 `GitHistoryTests.ACheckpointCancelledAfterGitCommittedKeepsTheNewFilesTracked`.
 
@@ -2337,11 +2429,20 @@ hasn't checkpointed yet.
   checkpoints shows a moved note as a rename. A checkpoint that isn't
   in the repository is an error that says so, and a revision is never
   read as a git option.
+- A patch shows the note's text as it is. A form feed, a lone carriage
+  return, NEL, or a Unicode line or paragraph separator in a note stays
+  inside its line, and a note saved with CRLF line endings keeps them in
+  the patch as git stores them (with `core.autocrlf` on, git stores LF).
+  A note whose name holds one of those characters is listed with its
+  own patch beside the others (#161).
 
 Spec: design.md §6 (#19). Covered by:
 `GitHistoryTests.ADiffSinceTheLatestCheckpointShowsNewChangedAndDeletedNotesAndLeavesTheIndexAlone`,
 `GitHistoryTests.ADiffBetweenTwoCheckpointsShowsARename`,
-`GitHistoryTests.ARevisionThatIsntOneIsAHistoryException`.
+`GitHistoryTests.ARevisionThatIsntOneIsAHistoryException`,
+`GitHistoryTests.APatchKeepsCharactersThatArentLineFeedsAsTheyAre`,
+`GitHistoryTests.ALineInAPatchCantStartAnotherFilesPart`,
+`GitHistoryTests.ANoteNamedWithALineSeparatorGetsItsOwnPatch`.
 
 ### SC-HIST-7. I freeze a finished book
 
