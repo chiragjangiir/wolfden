@@ -647,7 +647,10 @@ library the API uses. `wolfden mcp` runs it over stdio (§7). Tool surface:
 | `update_fields` / `append_section` | shipped (#21) | Structured edits that keep everything else intact |
 | `add_idea` | shipped (#21) | Record undecided material with `status: idea` |
 | `rename_section` | shipped (#21) | Rename a section and rewrite the links to it, den-wide (format.md F-RT-5) |
+| `rename_entity` / `change_alias` | shipped (#150) | Change an entity's name, or change or remove an alias, rewriting the links that used the old text den-wide, or keep the old text as an alias (F-RT-5) |
 | `update_chapter_fields` | shipped (#21) | Set, add to, remove from, or clear a chapter's own fields |
+| `get_chapter_defaults` | shipped (#151) | A universe's, series', or book's `chapter_defaults`, what its books would inherit from above, the books it reaches, and its file's hash |
+| `update_chapter_defaults` | shipped (#151) | Set, add to, remove from, or clear a field of a universe's, series', or book's `chapter_defaults` |
 | `checkpoint` | shipped (#21) | Commit with a message, naming the agent as co-author |
 
 Writes go through the same validation as the UI. An agent can't save a file
@@ -728,8 +731,9 @@ and `wolfden check` do:
   `wolfden mcp` looks for the den's repository on each call, so a den
   made a repository while it runs gets history.
 - **Hashes.** `get_entity` gives the SHA-256 of the entity's file as
-  the index read it (`hash`), and `get_chapter` the hash of `book.md`:
-  the `expected_hash` the write tools take.
+  the index read it (`hash`), `get_chapter` the hash of `book.md`, and
+  `get_chapter_defaults` the hash of the container's file: the
+  `expected_hash` the write tools take.
 - **Serve first, watcher in the background.** The server answers the
   client before the watcher's first build of the index is done, so a
   slow build never delays the handshake. A client that waits too long
@@ -766,7 +770,23 @@ store, so an edit changes only what it means to (format.md §12):
 - **Frozen and pinned** (maintainer decision, 2026-10-22). Nothing in
   a final book's scope is written (`frozen`): its entities, `book.md`,
   or outline (format.md F-BOOK-1). Edits to pinned canon are made, and
-  `pinned_canon` in the result lists each pinned fact touched.
+  `pinned_canon` in the result lists each pinned fact touched. A
+  series' or universe's `chapter_defaults` isn't in a book's scope, but
+  reaches its chapters, so `update_chapter_defaults` refuses an edit
+  there that would change the effective value (types.md F-CHAP-5) of
+  any chapter of a final book, and makes one the final book doesn't
+  see, because its chapters or its own defaults set the field (#151; v0
+  behaviour, as `rename_section` refuses to break links in a final
+  book). The check fails closed: books are matched by path, since two
+  can share a key (F-KEY-5); links are compared by their text and by
+  the entity they reach from the container that holds the value
+  (types.md F-CHAP-4), so a different spelling of the same link also
+  counts as a change; a `book.md` below that the den leaves out for
+  errors stops the edit if it says `status: final` or its frontmatter
+  doesn't parse, and a draft one is named in the `effects`; and the
+  `book.md` and `series.md` files below are compared again just before
+  the write, so a book frozen meanwhile is `stale_file`, with a message
+  to call `get_chapter_defaults` again.
 - **Files only; commits by `checkpoint`** (maintainer decision,
   2026-10-22). Writes go to the working tree. `checkpoint` records the
   den's files (or the paths given) as one commit through the history
@@ -790,7 +810,7 @@ store, so an edit changes only what it means to (format.md §12):
 - **Ids** (maintainer decision, 2026-10-23). `create_entity` gives a
   new id that no file in the den uses, checked through the index even
   in a session pinned to one universe. `update_fields` refuses an `id`
-  edit (F-ID-4). An edited entity or `book.md` without an id gets one
+  edit (F-ID-4). An edited entity or container file without an id gets one
   in the same write (F-ID-6), unless the edit changes nothing, which
   writes nothing. Files a rename rewrites only for their links don't.
 - **Effects, not just bytes** (maintainer decision, 2026-10-23). A
@@ -801,6 +821,14 @@ store, so an edit changes only what it means to (format.md §12):
   takes it out of canon views; a new standard section that hands over
   from, or overlaps, an earlier one. `update_chapter_fields`'s `clear`
   goes back to inheriting (format.md F-RT-6, types.md F-CHAP-5).
+  `update_chapter_defaults` (maintainer decision, 2026-10-25, #151)
+  works the same way on a universe's, series', or book's
+  `chapter_defaults`: removing a list's last item leaves `[]`, and
+  `clear` goes back to inheriting from the container above. Its
+  `effects` give each book below in runs of chapters, such as "Book
+  'ember': chapters 1–2b now have pov [[mara-voss]]; chapters prologue,
+  3 keep their own", and name a nearer default that keeps chapters as
+  they were.
 - **Creating** follows types.md F-TPL-6: the path from the type's
   folder, a slug made from the name (`-2`, `-3` when it's taken; a
   slug asked for that's taken is `already_exists`), and frontmatter in
@@ -824,9 +852,41 @@ store, so an edit changes only what it means to (format.md §12):
   name the section. Files the den leaves out for errors can't be
   edited, so an entity or container file whose text looks like it
   links to the section is named in `effects` for the writer to fix by
-  hand (outlines with errors aren't searched). Renaming an entity, or changing or removing an
-  alias, needs the same rewrite for names (F-RT-5), so `update_fields`
-  refuses them for now (`unsupported_edit`); aliases can be added.
+  hand (outlines with errors aren't searched).
+- **Entity renames** (maintainer decision, 2026-10-25, #150).
+  `rename_entity` changes an entity's `name`, and `change_alias`
+  changes or removes one of its aliases; `update_fields` refuses both
+  (`unsupported_edit`) and only adds aliases. By default every link that
+  reached the entity by the old text (by name for a name, by alias for
+  an alias) is rewritten, in any file, with the same machinery and
+  guarantees as `rename_section`: links in bodies, frontmatter values,
+  `book.md`, and outline rows, spliced in place with their spacing,
+  `#heading`, and label kept. A removed alias's links get the name.
+  Links by id or file name don't depend on the text and are left
+  alone, as is the file's name; a title heading that reads the old name
+  follows. Instead, `keep_old_name` (or `keep_old_alias`) keeps the old
+  text as an alias and changes no link, which suits an in-story name
+  change. If a link to rewrite is in a final book, nothing changes and
+  the error suggests keeping the old text. Before anything is written,
+  every link in the den is resolved again as it would be after the
+  change: a rewritten link that would no longer reach the entity (the
+  new text is another entity's file name, say) refuses the change. So
+  does one that would change the target of a link that reached a
+  different entity (a new name that's another entity's alias takes its
+  links, since a name matches before an alias), with or without
+  keeping the old text (maintainer decision, 2026-10-26), and so does
+  one that would send a link that reached the entity to another one (a
+  kept alias loses to another entity's name): the error
+  lists each such link, its file, and its old and new target, and
+  `allow_relinks` makes the change anyway. For now `allow_relinks`
+  covers links in final books too; that case is a separate check, so
+  it can become an always-refuse. Any other link that would resolve
+  differently (a kept alias another entity also has makes it
+  ambiguous, F-LINK-7), and any relinked link allowed, is listed in
+  `effects`. A link that was ambiguous or broken and now resolves
+  reached no entity before, so it's only reported, never refused. A change that only alters case or spacing changes no link
+  (F-LINK-4). Renaming an entity to one of its own aliases takes that
+  alias out.
   Moving and copying entities come later (#89, #129).
 
 ## 9. Architecture

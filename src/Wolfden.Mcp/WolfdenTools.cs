@@ -178,8 +178,8 @@ public sealed class WolfdenTools
         "(add an item to a list: an alias, or an entry of a field that changes over time; at the end without index), or " +
         "{\"op\": \"remove\", \"path\": ...} (a key or list item). A path is dotted: 'status', 'from', 'aliases', 'fields.born', " +
         "'fields.rank.1.from' (item numbers from 0). An entry is {\"value\": x, \"from\": \"book:chapter\", \"until\": ..., \"status\": ..., \"pin\": true}. " +
-        "The id never changes. The name, and existing aliases, can't be changed here, since links that matched the old text would break; " +
-        "aliases can be added." + WriteHelp)]
+        "The id never changes. Aliases can be added here; to rename the entity, or change or remove an alias, use rename_entity or " +
+        "change_alias, which rewrite the links that used the old text." + WriteHelp)]
     public CallToolResult UpdateFields(
         [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
         [Description(HashHelp)] string expected_hash,
@@ -247,6 +247,47 @@ public sealed class WolfdenTools
         [Description("When several sections have the name, the line of the heading you mean.")] int? section_line = null) =>
         Respond(() => _tools.RenameSection(entity, section, new_name, expected_hash, universe, section_line));
 
+    /// <summary>The <c>rename_entity</c> tool.</summary>
+    [McpServerTool(Name = "rename_entity", Title = "Rename an entity", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]
+    [Description(
+        "Changes an entity's name, and in the same change rewrites every link that reached it by the old name ([[Old name]], with any " +
+        "#heading and label kept) in any file of the den, so they use the new name. A title heading that reads the old name follows; " +
+        "the file isn't renamed, so links by file name or id are untouched. With keep_old_name true, the old name becomes an alias " +
+        "instead and no link changes, which suits a name that changes in the story. If a link to rewrite is in a final (frozen) book, " +
+        "nothing changes: keep the old name instead. A new name that would send a rewritten link elsewhere is refused. The result lists " +
+        "every file written, with its new hash, and any other link that now resolves differently. If a link that reaches another " +
+        "entity would change target (a new name that is its alias takes its links), nothing changes unless allow_relinks is true." + WriteHelp)]
+    public CallToolResult RenameEntity(
+        [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
+        [Description("The new name: one line, and without [, ], |, or # if links use the old name.")] string new_name,
+        [Description(HashHelp)] string expected_hash,
+        [Description("If true, keep the old name as an alias and leave links as they are.")] bool keep_old_name = false,
+        [Description(UniverseHelp)] string? universe = null,
+        [Description(RelinksHelp)] bool allow_relinks = false) =>
+        Respond(() => _tools.RenameEntity(entity, new_name, expected_hash, keep_old_name, universe, allow_relinks));
+
+    /// <summary>The <c>change_alias</c> tool.</summary>
+    [McpServerTool(Name = "change_alias", Title = "Change or remove an alias", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]
+    [Description(
+        "Changes one of an entity's aliases to new_alias, or removes it when new_alias is left out, and in the same change rewrites " +
+        "every link that reached the entity by the old alias, in any file of the den: to the new alias, or to the entity's name for a " +
+        "removed one. With keep_old_alias true, the new alias is added beside the old one instead and no link changes. If a link to " +
+        "rewrite is in a final (frozen) book, nothing changes. If a link that reaches another entity would change target, nothing " +
+        "changes unless allow_relinks is true. To add an alias, update_fields is enough." + WriteHelp)]
+    public CallToolResult ChangeAlias(
+        [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
+        [Description("The alias to change or remove, as it's written.")] string alias,
+        [Description(HashHelp)] string expected_hash,
+        [Description("The new alias; leave it out to remove the alias.")] string? new_alias = null,
+        [Description("If true, add new_alias beside the old one and leave links as they are.")] bool keep_old_alias = false,
+        [Description(UniverseHelp)] string? universe = null,
+        [Description(RelinksHelp)] bool allow_relinks = false) =>
+        Respond(() => _tools.ChangeAlias(entity, alias, expected_hash, new_alias, keep_old_alias, universe, allow_relinks));
+
+    private const string RelinksHelp =
+        "If true, make the change even though links that reach another entity would change target; they're listed in the result's effects. " +
+        "Check them with the writer first.";
+
     /// <summary>The <c>get_chapter</c> tool.</summary>
     [McpServerTool(Name = "get_chapter", Title = "Read a book's chapters", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]
     [Description(
@@ -276,6 +317,39 @@ public sealed class WolfdenTools
         [Description("The changes, in order: a list of {op, field, value, index, item}.")] JsonElement changes,
         [Description(UniverseHelp)] string? universe = null) =>
         Respond(() => _tools.UpdateChapterFields(book, chapter, expected_hash, changes, universe));
+
+    /// <summary>The <c>get_chapter_defaults</c> tool.</summary>
+    [McpServerTool(Name = "get_chapter_defaults", Title = "Read chapter defaults", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]
+    [Description(
+        "The chapter_defaults of a universe, a series (with 'series'), or a book (with 'book'): the chapter field values (such as pov, " +
+        "narration, tense) its books' chapters inherit, field by field, unless a nearer container or the chapter sets its own. Each " +
+        "field gives this container's own value and what its books would inherit from above without it. A list field set to [] means " +
+        "'none here' and stops inheritance. Also lists the books it reaches (and which are final), and gives the hash of its file " +
+        "(universe.md, series.md, or book.md), for update_chapter_defaults.")]
+    public CallToolResult GetChapterDefaults(
+        [Description(UniverseHelp)] string? universe = null,
+        [Description("A series' key, for that series' defaults.")] string? series = null,
+        [Description("A book's key, for that book's defaults.")] string? book = null) =>
+        Respond(() => _tools.GetChapterDefaults(universe, series, book));
+
+    /// <summary>The <c>update_chapter_defaults</c> tool.</summary>
+    [McpServerTool(Name = "update_chapter_defaults", Title = "Change chapter defaults", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]
+    [Description(
+        "Changes the chapter_defaults of a universe, a series (with 'series'), or a book (with 'book'), such as 'make Mina the default POV " +
+        "for this book'. 'changes' is a list of {\"op\": \"set\", \"field\": \"tense\", \"value\": \"past\"}, {\"op\": \"add\", \"field\": \"pov\", " +
+        "\"value\": \"[[mina-harker]]\"}, {\"op\": \"remove\", \"field\": \"pov\", \"item\": 0} (or \"value\": the item's text), and " +
+        "{\"op\": \"clear\", \"field\": \"pov\"}. Removing a list's last item leaves [], 'none here', which stops the books below inheriting " +
+        "the field from further up; 'clear' removes the value so they inherit from the container above again. The result says, book by " +
+        "book, which chapters now have what, and which keep their own value or a nearer default, so check with the writer that's what " +
+        "they meant. A final (frozen) book's defaults can't be changed, nor a series' or universe's where that would change what a " +
+        "final book's chapters have." + WriteHelp)]
+    public CallToolResult UpdateChapterDefaults(
+        [Description("The hash of the file your edit is based on: 'hash' from get_chapter_defaults (or get_chapter for a book), or from your last write's result.")] string expected_hash,
+        [Description("The changes, in order: a list of {op, field, value, index, item}.")] JsonElement changes,
+        [Description(UniverseHelp)] string? universe = null,
+        [Description("A series' key, to change that series' defaults.")] string? series = null,
+        [Description("A book's key, to change that book's defaults.")] string? book = null) =>
+        Respond(() => _tools.UpdateChapterDefaults(expected_hash, changes, universe, series, book));
 
     /// <summary>The <c>checkpoint</c> tool.</summary>
     [McpServerTool(Name = "checkpoint", Title = "Make a checkpoint", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]

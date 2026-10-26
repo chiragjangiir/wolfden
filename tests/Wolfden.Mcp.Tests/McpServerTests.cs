@@ -12,10 +12,10 @@ namespace Wolfden.Mcp.Tests;
 /// </summary>
 public sealed class McpServerTests : IAsyncLifetime
 {
-    private static readonly string[] ReadToolNames = ["canon_as_of", "check", "get_chapter", "get_entity", "get_history", "list_entities", "search"];
+    private static readonly string[] ReadToolNames = ["canon_as_of", "check", "get_chapter", "get_chapter_defaults", "get_entity", "get_history", "list_entities", "search"];
 
     private static readonly string[] WriteToolNames =
-        ["add_idea", "append_section", "checkpoint", "create_entity", "rename_section", "update_chapter_fields", "update_fields"];
+        ["add_idea", "append_section", "change_alias", "checkpoint", "create_entity", "rename_entity", "rename_section", "update_chapter_defaults", "update_chapter_fields", "update_fields"];
 
     private readonly TempDen _den = TempDen.Dracula();
     private readonly StringWriter _log = new();
@@ -93,6 +93,7 @@ public sealed class McpServerTests : IAsyncLifetime
             // This den has no history backend: that's an answer, not an error.
             ("get_history", new() { ["entity"] = "Lucy" }, "\"available\":false"),
             ("get_chapter", new() { ["book"] = "dracula", ["chapter"] = "5" }, "\"hash\":"),
+            ("get_chapter_defaults", new() { ["book"] = "dracula" }, "\"books\":"),
         };
         foreach (var (tool, args, expect) in calls)
         {

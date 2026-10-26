@@ -1333,8 +1333,9 @@ Spec: design.md §7 (#116). Covered by:
 
 Background: `wolfden mcp` (design.md §8, #20) runs an MCP server over
 stdio, so an AI assistant can read the den with `search`, `get_entity`,
-`list_entities`, `canon_as_of`, `get_chapter`, `check`, and
-`get_history`, and write to it with the write tools (#21, SC-MCP-15 on).
+`list_entities`, `canon_as_of`, `get_chapter`, `get_chapter_defaults`,
+`check`, and `get_history`, and write to it with the write tools (#21,
+SC-MCP-15 on).
 Without a story position, a reading tool gives the author's full view;
 with one, it gives canon as the reader knows it there. Pinned canon comes
 first. The examples use the Dracula sample, whose book is `dracula`.
@@ -1622,8 +1623,9 @@ pinned species.
   the result's hash works. An edit that would leave an error
   (`status: maybe`, `from: dracula:7.2`) is refused as `invalid_edit`
   with the rule, and the file is unchanged. An `id` edit is refused
-  (F-ID-4); renaming the entity or changing an alias is refused until
-  links can follow (F-RT-5). The change to the pinned species is made,
+  (F-ID-4); renaming the entity or changing an alias is left to
+  `rename_entity` and `change_alias`, so links follow (F-RT-5,
+  SC-MCP-26, SC-MCP-27). The change to the pinned species is made,
   and `pinned_canon` says it touched pinned canon, as it does for a
   status change on the Count, whose pinned facts take his status. An
   edit that changes nothing writes nothing, not even a missing id. An
@@ -1787,6 +1789,180 @@ happens to be one a note in `starfall` uses.
 
 Spec: F-ID-3 (maintainer decision, 2026-10-23). Covered by:
 `WriteToolTests.APinnedSessionChecksNewIdsAcrossTheWholeDen`.
+
+### SC-MCP-24. My assistant makes Mara the default POV for a book
+
+In the Starfall den, `ember`'s prologue says `pov: []` and its chapter 3
+has Tomas Reyes's POV; its other chapters set none. The writer asks the
+assistant to make Mara Voss the book's default POV.
+
+- `get_chapter_defaults` for the book gives `book.md`'s hash (the same
+  as `get_chapter`'s), its defaults, and the books they reach. After
+  `update_chapter_defaults` adds `[[mara-voss]]` to `pov`, the result
+  says "Book 'ember': chapters 1–2b now have pov [[mara-voss]];
+  chapters prologue, 3 keep their own". Removing the item leaves
+  `pov: []` and says those chapters now have no POV; clearing the field
+  goes back to inheriting, here from nothing. Clearing a field that
+  isn't set, and an old hash, are refused, and asking for what the file
+  already says writes nothing.
+- A series' defaults reach both its books: the result names each book's
+  chapters, and a book whose own defaults set the field keeps that
+  value, named with where it comes from. A universe's defaults reach the
+  standalone book too, and chapters of the series' books keep the
+  series' value. Clearing the series' value hands its books the
+  universe's.
+- A series with no books yet can have defaults ("no chapter's tense
+  changes now"), and a series file without an id gets one (F-ID-6).
+- A value that doesn't fit the field (`tense: sideways`) is saved, as
+  in `update_chapter_fields`, with the F-CHAP-3 warning, and the result
+  says it's ignored, so chapters inherit as if it weren't there.
+  `get_chapter_defaults` lists it as `ignored`, with the value as
+  written. A value the same as the one above is said to be so.
+
+Spec: types.md F-CHAP-5, format.md F-CTR-5, F-RT-6 (maintainer
+decisions, 2026-10-23, 2026-10-25). Covered by:
+`ChapterDefaultsToolTests.ABooksDefaultPovReachesTheChaptersThatDontSetTheirOwn`,
+`ChapterDefaultsToolTests.ASeriesDefaultSaysWhichBooksAndChaptersItReaches`,
+`ChapterDefaultsToolTests.ASeriesWithNoBooksYetCanHaveDefaultsAndGetsAnId`,
+`ChapterDefaultsToolTests.AValueThatDoesntFitTheFieldIsSavedWithAWarningAndSaysItsIgnored`.
+
+### SC-MCP-25. My assistant changes a default a finished book inherits
+
+`ash` is final, and its own `chapter_defaults` set `tense: past`.
+
+- Adding a default POV to the series `long-dark` would change what
+  `ash`'s chapters have, so it's refused as `frozen`, naming the book
+  and chapters, and nothing changes. So is any edit of `ash`'s own
+  defaults, and setting the universe's `narration`, which `ash` would
+  inherit.
+- Setting the universe's `tense` is made: `ash`'s own default shadows
+  it, and the result says `ash`'s chapters keep `past`.
+- A second book named `ash`, in another series, doesn't hide the final
+  one: books are matched by folder, and the result names each `ash` by
+  its folder.
+- A universe-scope Mara Voss means `[[mara-voss]]` in the universe's
+  defaults isn't the series' Mara Voss, so setting the same text in the
+  series' defaults changes `ash`'s POV, and is refused. Links are
+  compared by their text and by the entity they reach, so a different
+  spelling of the same link counts as a change too.
+- If `ash` is frozen while the edit is being made, the write is refused
+  as `stale_file`, saying to call `get_chapter_defaults` again. If
+  `ash`'s `book.md` has errors, so the den leaves it out, but it says
+  `status: final`, the edit is refused too; a draft book with errors
+  doesn't stop it, and the result says its chapters will inherit the
+  edit once it's fixed.
+
+Spec: format.md F-BOOK-1, F-KEY-5, types.md F-CHAP-4, F-CHAP-5 (#151).
+Covered by:
+`ChapterDefaultsToolTests.ADefaultThatWouldChangeAFinalBooksChaptersIsRefused`,
+`ChapterDefaultsToolTests.AFinalBookIsFoundByItsPathWhenAnotherBookSharesItsKey`,
+`ChapterDefaultsToolTests.ALinkInADefaultIsComparedByTheEntityItReaches`,
+`ChapterDefaultsToolTests.ABookFrozenWhileTheEditIsMadeStopsIt`,
+`ChapterDefaultsToolTests.ABookLeftOutForErrorsThatSaysFinalStopsTheEdit`.
+
+### SC-MCP-26. My assistant renames a character
+
+A note on Whitby dialect links `[[Mr. Swales]]`, `[[mr. swales # voice
+|how he talks]]`, and `[[mr-swales]]`, and a field links
+`[[Mr. Swales#Voice]]`; a chapter's `pov` in `book.md` and a row of the
+outline (`[[Mr. Swales\|Swales]]`) link him by name too. The assistant
+renames him Old Swales.
+
+- `rename_entity` changes his `name`, and his title heading, which read
+  the old name, and rewrites every link that reached him by the old
+  name to `[[Old Swales]]`, keeping each link's spacing, heading, and
+  label, in the same change. The link by file name is left alone, and
+  so is the file's name. The result lists every file written with its
+  new hash, and `check` finds no broken or ambiguous link.
+- With `keep_old_name`, "Mr. Swales" becomes an alias instead and no
+  link changes, which suits a name that changes in the story. If
+  another character in the book goes by "Mr. Swales" too, the result
+  says that links by it are now ambiguous (F-LINK-7), naming the link
+  in the note. A new name that only changes case or spacing changes no
+  link.
+- If a note in a final book uses the old name, nothing is renamed
+  (`frozen`), and the error suggests `keep_old_name`, which leaves the
+  frozen book alone. Swales in a final book isn't renamed at all. A new
+  name that would send the rewritten links elsewhere ("Renfield", R. M.
+  Renfield's file name) is refused, and so is one a link can't hold
+  (`#`). A file with errors that uses the old name is named in the
+  result for the writer to fix by hand, and a write that fails part way
+  puts back what it wrote, as does one where `book.md` changed after
+  the rename was planned. The id still never changes.
+- Links in code, HTML comments, embeds, and escaped links are left
+  alone. A link in a block or folded scalar, or a quoted value, is
+  spliced in place; a plain value the new name ("Swales: the elder")
+  would make read differently is written anew, quoted. Renamed in the
+  universe, a character whose new name a character in the book has
+  ("Mr. Swales") would lose the book's links to that one, so the
+  rename is refused, naming them. Renaming the Count to his own alias
+  "Dracula" takes it out of his aliases.
+- Renamed "the Count", Swales would take a note's `[[the Count]]` from
+  Count Dracula, since a name matches before an alias, even with
+  `keep_old_name`. That's refused, listing the link with its old and
+  new target (and saying if it's in a final book); with
+  `allow_relinks`, the rename is made and the result lists the link. A
+  new name another note already has (Renfield's file name) is said in
+  the result even when the old name is kept. If a sailor in the
+  universe is also named Mr. Swales, keeping "Mr. Swales" only as an
+  alias would send a book note's `[[Mr. Swales]]` to the sailor, whose
+  name now wins: refused the same way, unless `allow_relinks`.
+
+Spec: format.md F-RT-5, F-LINK-1, F-LINK-4, F-LINK-6, F-LINK-7, F-SEC-2,
+F-BOOK-1 (maintainer decisions, 2026-10-25 and 2026-10-26). Covered by:
+`RenameEntityToolTests.RenamingAnEntityRewritesTheLinksThatUsedTheOldName`,
+`RenameEntityToolTests.KeepingTheOldNameAsAnAliasLeavesTheLinksAlone`,
+`RenameEntityToolTests.ALinkInAFrozenBookStopsTheRewriteButNotKeepingTheOldName`,
+`RenameEntityToolTests.AKeptAliasThatAnotherEntityHasIsSaidToBeAmbiguous`,
+`RenameEntityToolTests.ANewNameThatWouldSendARewrittenLinkElsewhereIsRefused`,
+`RenameEntityToolTests.AFileWithErrorsThatUsesTheOldNameIsNamed`,
+`RenameEntityToolTests.ARenameThatFailsPartWayPutsBackWhatItWrote`,
+`RenameEntityToolTests.RenamingToOneOfItsOwnAliasesTakesThatAliasOut`,
+`RenameEntityToolTests.ANewNameThatCollidesIsSaidEvenWhenTheOldNameIsKept`,
+`RenameEntityToolTests.ABookEntityWithTheNewNameShadowsItForLinksInTheBook`,
+`RenameEntityToolTests.LinksInCodeCommentsAndEmbedsAreLeftAlone`,
+`RenameEntityToolTests.LinksInFrontmatterValuesKeepTheirStyleOrAreQuotedAnew`,
+`RenameEntityToolTests.AContainerFileChangedWhileTheRenameIsMadeStopsIt`,
+`RenameEntityToolTests.ANameThatTakesAnotherEntitysLinksIsRefusedUnlessAllowed`,
+`RenameEntityToolTests.ARelinkInAFinalBookIsListedAndAllowedOnlyWithTheFlag`,
+`RenameEntityToolTests.AKeptNameThatLosesItsLinksToAnotherEntitysNameIsRefusedUnlessAllowed`,
+`EntityRenameEditTests.ALinksTargetIsReplacedKeepingItsSpacingHeadingAndLabel`,
+`EntityRenameEditTests.TheTitleChangesAndNothingElse`,
+`EntityRenameEditTests.ASetextTitleOrOneWithACommentKeepsItsForm`.
+
+### SC-MCP-27. My assistant changes one of the Count's aliases
+
+A note links `[[the Count]]`, `[[The  count|him]]`, `[[Count de
+Ville]]`, and `[[Dracula]]`. The assistant changes the alias "the
+Count" to "the Voivode", then removes "Count de Ville".
+
+- `change_alias` changes the alias in place and rewrites the two links
+  that used it to `[[the Voivode]]`, label kept. Removing "Count de
+  Ville" takes it out of `aliases` and rewrites its link to the
+  Count's name. With `keep_old_alias`, the new alias goes in beside the
+  old one and no link changes. An alias he doesn't have, a new alias
+  that's already his name or another of his aliases, and
+  `keep_old_alias` without a new alias are refused.
+- If a note in a final book uses the alias, it isn't removed or
+  changed (`frozen`); a change suggests `keep_old_alias`. If a legend
+  note in the universe is also named Count Dracula, a universe note's
+  `[[the Count]]` rewritten to his name would reach the legend, so
+  removing the alias is refused, suggesting keeping it or linking by id
+  or file name first.
+- A new alias "Lucy" would make a note's `[[Lucy]]`, which reaches Lucy
+  Westenra, ambiguous: refused, even with `keep_old_alias`, unless
+  `allow_relinks`, and then the result lists the link. A link that was
+  ambiguous before (`[[the sailor]]`, which Swales and Young Swales
+  both go by) and reaches Young Swales once Swales's alias changes is
+  only reported.
+
+Spec: format.md F-RT-5, F-RT-6, F-ENT-4, F-LINK-7, F-BOOK-1 (maintainer
+decisions, 2026-10-25 and 2026-10-26). Covered by:
+`RenameEntityToolTests.ChangingOrRemovingAnAliasRewritesItsLinks`,
+`RenameEntityToolTests.RemovingAnAliasALinkInAFrozenBookUsesIsRefused`,
+`RenameEntityToolTests.RemovingAnAliasWhoseLinksWouldReachAnotherEntityIsRefusedWithItsOwnHint`,
+`RenameEntityToolTests.AnAliasThatTakesAnotherEntitysLinksIsRefusedUnlessAllowed`,
+`RenameEntityToolTests.AnAmbiguousLinkThatNowResolvesIsReportedNotRefused`.
 
 ## STORE: Wolfden saves, moves, and deletes notes
 

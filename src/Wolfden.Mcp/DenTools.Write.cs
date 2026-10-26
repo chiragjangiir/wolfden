@@ -141,8 +141,9 @@ public sealed partial class DenTools
     /// time), or <c>remove</c> a key or item, each at a path such as
     /// <c>fields.rank.1.from</c>. The changes are made in order, and saved
     /// together or not at all. <c>id</c> never changes (F-ID-4); the
-    /// <c>name</c>, and existing aliases, can't be changed here, since links
-    /// that matched the old text would have to follow (F-RT-5).
+    /// <c>name</c>, and existing aliases, are changed by
+    /// <see cref="RenameEntity"/> and <see cref="ChangeAlias"/>, since links
+    /// that matched the old text have to follow (F-RT-5).
     /// </summary>
     public WriteResult UpdateFields(string entity, string expectedHash, JsonElement changes, string? universe = null)
     {
@@ -889,7 +890,7 @@ public sealed partial class DenTools
         {
             throw new DenToolException(
                 ToolErrorCodes.BadArgument,
-                "Give 'expected_hash': the hash of the file your edit is based on, from get_entity (or get_chapter for book.md), or from your last write's result. The write is refused if the file has changed since.");
+                "Give 'expected_hash': the hash of the file your edit is based on, from get_entity (or get_chapter for book.md, or get_chapter_defaults for a universe.md, series.md, or book.md), or from your last write's result. The write is refused if the file has changed since.");
         }
 
         return hash.Trim().ToLowerInvariant();
@@ -1204,11 +1205,11 @@ public sealed partial class DenTools
             case "name":
                 throw new DenToolException(
                     ToolErrorCodes.UnsupportedEdit,
-                    "Renaming an entity means rewriting the links that match the old name (F-RT-5), which the write tools don't do yet. Ask the writer to rename it, or add the new name as an alias.");
+                    "Renaming an entity means rewriting the links that match the old name (F-RT-5): use rename_entity, which does that.");
             case "aliases" when op != "add" || path.Count != 1:
                 throw new DenToolException(
                     ToolErrorCodes.UnsupportedEdit,
-                    "Aliases can be added here, but not changed or removed: links that matched the old alias would break (F-RT-5). Ask the writer to make that change.");
+                    "Aliases can be added here, but not changed or removed: links that matched the old alias must follow (F-RT-5). Use change_alias, which rewrites them.");
             case "fields" when path.Count == 1 && op != "set":
                 throw new DenToolException(ToolErrorCodes.BadArgument, "Name a field: 'fields.<name>'.");
             case "fields" when path.Count == 1:
@@ -1357,22 +1358,22 @@ public sealed partial class DenTools
 
     // ------------------------------------------------------------- chapters
 
-    private static int ItemToRemove(MarkdownFile file, string[] fieldPath, Change op)
+    private static int ItemToRemove(MarkdownFile file, string[] fieldPath, Change op, string owner = "The chapter's")
     {
         if (file.GetFrontmatterValue(fieldPath) is not YamlSequence list)
         {
-            throw new DenToolException(ToolErrorCodes.BadArgument, $"The chapter's '{op.Field}' isn't a list, so it has no item to remove. To unset it, use 'clear'.");
+            throw new DenToolException(ToolErrorCodes.BadArgument, $"{owner} '{op.Field}' isn't a list, so it has no item to remove. To unset it, use 'clear'.");
         }
 
         if (op.Item is { } item)
         {
-            return item < list.Items.Count ? item : throw new DenToolException(ToolErrorCodes.BadArgument, $"The chapter's '{op.Field}' has {list.Items.Count} item(s), so there's no item {item}.");
+            return item < list.Items.Count ? item : throw new DenToolException(ToolErrorCodes.BadArgument, $"{owner} '{op.Field}' has {list.Items.Count} item(s), so there's no item {item}.");
         }
 
         if (op.Value is YamlScalarValue value)
         {
             var i = list.Items.ToList().FindIndex(n => value.Matches(n) || (n is YamlScalar s && LinkText.Matches(s.Text, value.ToString())));
-            return i >= 0 ? i : throw new DenToolException(ToolErrorCodes.BadArgument, $"The chapter's '{op.Field}' has no item '{value}'.");
+            return i >= 0 ? i : throw new DenToolException(ToolErrorCodes.BadArgument, $"{owner} '{op.Field}' has no item '{value}'.");
         }
 
         throw new DenToolException(ToolErrorCodes.BadArgument, "A 'remove' change names the item to remove: 'item' (its number from 0) or 'value'.");
@@ -1421,9 +1422,6 @@ public sealed partial class DenTools
         }
 
         return effects;
-
-        static string Describe(ChapterFieldValue value) =>
-            value.IsNone ? "none ([])" : string.Join(", ", value.Items.Select(i => i is YamlScalar s ? s.Text : JsonOf(i).GetRawText()));
     }
 
     /// <summary>What a chapter would inherit for a field without its own value: the nearest <c>chapter_defaults</c> that sets it.</summary>

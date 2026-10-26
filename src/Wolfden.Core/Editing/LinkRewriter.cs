@@ -1,0 +1,253 @@
+using Wolfden.Core.Documents;
+using Wolfden.Core.Entities;
+using Wolfden.Core.Links;
+using Wolfden.Core.Structure;
+using Wolfden.Core.Yaml;
+
+namespace Wolfden.Core.Editing;
+
+/// <summary>
+/// The den-wide link rewrite that renames share (format.md F-RT-5): each
+/// link to rewrite is spliced in place in its file, in a body, an outline,
+/// or a frontmatter value, so everything else stays as written.
+/// </summary>
+internal static class LinkRewriter
+{
+    /// <summary>What a rewrite changes, none of it written yet.</summary>
+    /// <param name="Files">The new contents of each file that changes, by den-relative path: the entity's file first.</param>
+    /// <param name="Originals">What each of those files held when the rewrite was planned.</param>
+    /// <param name="Count">How many links were rewritten, in all files.</param>
+    /// <param name="Frozen">Files with links to rewrite that are in a final book (F-BOOK-1), so they weren't rewritten.</param>
+    internal sealed record Result(Dictionary<string, byte[]> Files, Dictionary<string, byte[]> Originals, int Count, List<string> Frozen);
+
+    /// <summary>
+    /// Rewrites each of <paramref name="targeting"/> (links that resolve to
+    /// <paramref name="entity"/>) whose target and heading pass
+    /// <paramref name="matches"/>, with <paramref name="replace"/> applied to
+    /// its text. The entity's own file is always in the result, with
+    /// <paramref name="editOwn"/> applied after its links are rewritten.
+    /// </summary>
+    /// <param name="newText">The text the rewrite puts in links, to tell whether a frontmatter value can keep its style.</param>
+    internal static Result Rewrite(
+        LinkIndex links, IDenSource den, CatalogEntity entity, IReadOnlyList<ResolvedLink> targeting, Func<string, string?, bool> matches,
+        Func<string, string?> replace, string newText, Func<MarkdownFile, MarkdownFile> editOwn)
+    {
+        var structure = links.Catalog.Structure;
+        var containers = structure.Universes.SelectMany(u => new Container[] { u }.Concat(u.Series).Concat(u.Books)).ToDictionary(c => c.FilePath, StringComparer.Ordinal);
+        var files = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        var originals = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        var frozen = new List<string>();
+        var rewritten = 0;
+
+        var byPath = targeting.GroupBy(l => l.Occurrence.Path, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.ToList(), StringComparer.Ordinal);
+        if (!byPath.ContainsKey(entity.Path))
+        {
+            byPath[entity.Path] = [];
+        }
+
+        foreach (var (path, found) in byPath.OrderBy(p => p.Key == entity.Path ? 0 : 1).ThenBy(p => p.Key, StringComparer.Ordinal))
+        {
+            MarkdownFile file;
+            Book? book;
+            if (links.Catalog.FindByPath(path) is { } holder)
+            {
+                file = holder.File;
+                book = holder.Scope as Book;
+            }
+            else if (containers.TryGetValue(path, out var container))
+            {
+                file = container.File;
+                book = container as Book;
+            }
+            else
+            {
+                var bytes = den.ReadFile(path);
+                file = MarkdownFile.ParseOutline(bytes);
+                book = structure.FindScope(path) as Book;
+            }
+
+            if (book is { Status: BookStatus.Final })
+            {
+                frozen.Add(path);
+                continue;
+            }
+
+            originals[path] = file.ToBytes();
+            var places = found.Select(l => (l.Occurrence.Link.Line, l.Occurrence.Link.Column, l.Occurrence.Link.Target)).ToHashSet();
+            var (edited, count) = RewriteFile(file, places, matches, replace, newText);
+            rewritten += count;
+            if (path == entity.Path)
+            {
+                edited = editOwn(edited);
+            }
+
+            files[path] = edited.ToBytes();
+        }
+
+        return new Result(files, originals, rewritten, frozen);
+    }
+
+    /// <summary>
+    /// The files of the entity's universe that the den leaves out for errors
+    /// and whose text holds a link that passes <paramref name="looksLikeLink"/>
+    /// (given its target and heading). Their links can't be resolved, so
+    /// they're found by their text.
+    /// </summary>
+    internal static List<string> Skipped(LinkIndex links, IDenSource den, CatalogEntity entity, Func<string, string?, bool> looksLikeLink)
+    {
+        var universe = $"{entity.Universe.Path}/";
+        var broken = links.Catalog.Diagnostics.Concat(links.Catalog.Structure.Diagnostics)
+            .Where(d => d.Diagnostic.Severity == DiagnosticSeverity.Error && d.Path.StartsWith(universe, StringComparison.Ordinal) && d.Path.EndsWith(".md", StringComparison.Ordinal))
+            .Select(d => d.Path)
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal);
+        var result = new List<string>();
+        foreach (var path in broken)
+        {
+            if (den.TryReadFile(path) is not { } bytes)
+            {
+                continue;
+            }
+
+            var text = System.Text.Encoding.UTF8.GetString(bytes);
+            if (LinkSyntax.Scan(text, 0, text.Length, null).Any(l => !l.IsEmpty && looksLikeLink(l.Target, l.Heading)))
+            {
+                result.Add(path);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Rewrites each link at <paramref name="places"/> (line, column, target) that passes <paramref name="matches"/>.</summary>
+    private static (MarkdownFile File, int Count) RewriteFile(
+        MarkdownFile file, HashSet<(int Line, int Column, string Target)> places, Func<string, string?, bool> matches, Func<string, string?> replace, string newText)
+    {
+        if (places.Count == 0)
+        {
+            return (file, 0);
+        }
+
+        bool Matches(FoundLink link) => places.Contains((link.Line, link.Column, link.Link.Target)) && matches(link.Link.Target, link.Link.Heading);
+
+        var count = 0;
+        var text = file.Text;
+
+        // The body first, by offset, then the frontmatter, whose offsets the body's edits don't move.
+        var replacements = new List<(int Start, int Length, string Text)>();
+        var found = file.IsOutline ? BodyLinkScanner.ScanOutline(file) : BodyLinkScanner.ScanBody(file);
+        foreach (var link in found)
+        {
+            if (Matches(link) && replace(text.Substring(link.Link.Offset, link.Link.Length)) is { } replaced)
+            {
+                replacements.Add((link.Link.Offset, link.Link.Length, replaced));
+            }
+        }
+
+        var result = file.WithBodyTextReplaced(replacements);
+        count += replacements.Count;
+
+        if (file.Frontmatter is { } frontmatter && file.SourceForReading is { } source)
+        {
+            // A link written verbatim in the source is spliced in place, so the
+            // value keeps its style (a block scalar, quotes, escapes elsewhere in
+            // it). A value whose link the YAML escapes or folds is written anew.
+            var splices = new List<(int Start, int Length, string Text)>();
+            var spliced = new List<(IReadOnlyList<string> Path, string Value)>();
+            var rewritten = new List<(IReadOnlyList<string> Path, string Value)>();
+            foreach (var key in new[] { "fields", "chapter_defaults", "chapters" })
+            {
+                if (frontmatter[key] is { } node)
+                {
+                    foreach (var (path, scalar) in Scalars([key], node))
+                    {
+                        var value = scalar.Text;
+                        var verbatim = true;
+                        var here = new List<(int Start, int Length, string Text)>();
+                        var changes = LinkScanner.ScalarLinkPlaces(source, scalar).Where(Matches).ToList();
+                        foreach (var link in changes.OrderByDescending(l => l.Link.Offset))
+                        {
+                            var linkText = value.Substring(link.Link.Offset, link.Link.Length);
+                            if (replace(linkText) is { } replaced)
+                            {
+                                value = string.Concat(value.AsSpan(0, link.Link.Offset), replaced, value.AsSpan(link.Link.Offset + link.Link.Length));
+                                count++;
+                                if (link.Offset + linkText.Length <= source.Text.Length && string.CompareOrdinal(source.Text, link.Offset, linkText, 0, linkText.Length) == 0)
+                                {
+                                    here.Add((link.Offset, linkText.Length, replaced));
+                                }
+                                else
+                                {
+                                    verbatim = false;
+                                }
+                            }
+                        }
+
+                        if (value == scalar.Text)
+                        {
+                            continue;
+                        }
+
+                        if (verbatim && !NeedsQuoting(scalar, newText))
+                        {
+                            splices.AddRange(here);
+                            spliced.Add((path, value));
+                        }
+                        else
+                        {
+                            rewritten.Add((path, value));
+                        }
+                    }
+                }
+            }
+
+            result = result.WithFrontmatterTextReplaced(splices, spliced);
+            foreach (var (path, value) in rewritten)
+            {
+                result = result.WithFrontmatterValue(path, YamlScalarValue.String(value));
+            }
+        }
+
+        return (result, count);
+    }
+
+    /// <summary>True if splicing <paramref name="text"/> into <paramref name="scalar"/> as written could change how YAML reads it, so the value is written anew instead.</summary>
+    private static bool NeedsQuoting(YamlScalar scalar, string text) => scalar.Style switch
+    {
+        YamlScalarStyle.Literal or YamlScalarStyle.Folded => false,
+        YamlScalarStyle.DoubleQuoted => text.IndexOfAny(['"', '\\']) >= 0,
+        YamlScalarStyle.SingleQuoted => text.Contains('\''),
+        _ => text.IndexOfAny([':', ',', '"', '\'', '{', '}', '\\']) >= 0,
+    };
+
+    /// <summary>Every non-null scalar under <paramref name="node"/>, with its path.</summary>
+    private static IEnumerable<(IReadOnlyList<string> Path, YamlScalar Scalar)> Scalars(IReadOnlyList<string> path, YamlNode node)
+    {
+        switch (node)
+        {
+            case YamlScalar { IsNull: false } scalar:
+                yield return (path, scalar);
+                break;
+            case YamlSequence list:
+                for (var i = 0; i < list.Items.Count; i++)
+                {
+                    foreach (var s in Scalars([.. path, i.ToString(System.Globalization.CultureInfo.InvariantCulture)], list.Items[i]))
+                    {
+                        yield return s;
+                    }
+                }
+
+                break;
+            case YamlMapping map:
+                foreach (var entry in map.Entries.Where(e => e.KeyText is not null))
+                {
+                    foreach (var s in Scalars([.. path, entry.KeyText!], entry.Value))
+                    {
+                        yield return s;
+                    }
+                }
+
+                break;
+        }
+    }
+}
