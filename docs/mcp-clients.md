@@ -216,6 +216,7 @@ prompts. This list is for knowing what the assistant can do.
 | `rename_entity` | Rename an entity and rewrite the links that used the old name, or keep the old name as an alias. |
 | `change_alias` | Change or remove an alias, rewriting its links the same way. |
 | `copy_entity` | Copy an entity under a new name and id, beside it or into another scope or universe. |
+| `move_entity` | Move an entity's file to another scope of its universe (a series, a book, or the universe itself), keeping canon views as they were. Links to it that would stop reaching it, and its own links that would change target, are rewritten to ids. |
 | `update_chapter_fields` | Change one chapter's own fields. |
 | `update_chapter_defaults` | Change a universe's, series', or book's `chapter_defaults`. |
 | `checkpoint` | Commit the den (or some paths) to git, with the assistant as co-author. |
