@@ -558,7 +558,12 @@ public sealed class GitHistoryTests
 
         var diff = repo.History.Diff(new HistoryDiffQuery(), Token).Value;
 
-        Assert.All(diff.Files, f => Assert.StartsWith($"diff --git a/{f.Change.Path} b/{f.Change.Path}\n", f.Patch, StringComparison.Ordinal));
+        // The diff decided on the unchanged text, so nothing is listed. The
+        // filter ran for the refresh and at least twice in the diff, so the
+        // text did change under it.
+        Assert.Empty(diff.Files);
+        var runs = int.Parse(File.ReadAllText(Path.Combine(repo.Root, ".git", "wolfden-flip")).Trim(), System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(runs >= 3, $"The filter ran {runs} times.");
     }
 
     [Fact]
@@ -623,6 +628,29 @@ public sealed class GitHistoryTests
         var diff = repo.History.Diff(new HistoryDiffQuery(start), Token).Value;
 
         Assert.Equal([new HistoryFileChange(HistoryChangeKind.Modified, Mara)], diff.Files.Select(f => f.Change));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(Fen)]
+    [InlineData(Mara)]
+    [Trait("Scenario", "SC-HIST-6")]
+    public void ADiffWithASparseIndexWritesNothing(string? path)
+    {
+        using var repo = TestRepo.Create();
+        repo.WriteDen(Mara, "# Mara Voss\n");
+        repo.WriteDen(Fen, "# Fen Harbour\n");
+        var start = repo.CommitAll("start");
+        repo.Git("sparse-checkout", "set", "--sparse-index", "universes/vael/entities/characters");
+        repo.WriteDen(Mara, "# Mara Voss\n\nA pilot.\n");
+        var objects = Objects(repo);
+
+        var diff = repo.History.Diff(new HistoryDiffQuery(start, Path: path), Token).Value;
+
+        Assert.Equal(
+            path == Fen ? [] : [new HistoryFileChange(HistoryChangeKind.Modified, Mara)],
+            diff.Files.Select(f => f.Change));
+        Assert.Equal(objects, Objects(repo));
     }
 
     [Fact]

@@ -39,8 +39,10 @@ namespace Wolfden.Git;
 /// and git compares the files on disk without storing them, so a diff
 /// writes nothing into the repository's objects (#142). Clean filters still
 /// run on the files compared, and Git LFS's stores what it cleans in
-/// <c>.git/lfs/objects</c>. Files a sparse checkout keeps off the disk count
-/// as unchanged, and edits inside a submodule aren't the den's.
+/// <c>.git/lfs/objects</c>. In a sparse checkout, files marked skip-worktree
+/// (the ones it keeps off the disk, or any marked by hand) count as
+/// unchanged; without one, a file marked by hand is compared as it is on
+/// disk. Edits inside a submodule aren't the den's.
 /// </para>
 /// <para>
 /// <b>Revisions</b> from callers are resolved to commit hashes first
@@ -246,7 +248,7 @@ public sealed partial class GitHistory : IHistoryProvider
         try
         {
             Git([.. TempIndexSettings, "read-tree", Head(cancellationToken) ?? "--empty"], cancellationToken, environment: environment);
-            KeepSparseCheckout(specs, environment, cancellationToken);
+            KeepSparseCheckout(environment, cancellationToken);
 
             // read-tree leaves no stat data, so git would read every den file
             // to tell which ones changed. Refreshing reads them once, records
@@ -265,14 +267,34 @@ public sealed partial class GitHistory : IHistoryProvider
     }
 
     /// <summary>
-    /// Marks the den files the user's sparse checkout leaves off the disk
-    /// (skip-worktree, in the user's index) the same way in the temporary
-    /// index, so they're taken as recorded, not as deleted (#142 review, L1).
+    /// In a sparse checkout, marks the den files the user's index marks
+    /// skip-worktree (the ones the sparse checkout leaves off the disk, or
+    /// any marked by hand) the same way in the temporary index, so they're
+    /// taken as recorded, not as deleted (#142 review, L1). Without a sparse
+    /// checkout, nothing is read: a file marked by hand is compared as it
+    /// is on disk.
     /// </summary>
-    private void KeepSparseCheckout(IReadOnlyList<string> specs, IReadOnlyDictionary<string, string?> environment, CancellationToken cancellationToken)
+    private void KeepSparseCheckout(IReadOnlyDictionary<string, string?> environment, CancellationToken cancellationToken)
     {
-        // The user's index: 'S <path>' is a skip-worktree file. Paths are den-relative.
-        var skipped = Git(["ls-files", "-z", "-t", "--", .. specs], cancellationToken)
+        var sparse = Run(["config", "--bool", "core.sparseCheckout"], cancellationToken);
+        if (!sparse.Succeeded || OutputOf(sparse, "config").Trim() != "true")
+        {
+            return;
+        }
+
+        // The user's index: 'S <path>' is a skip-worktree file, and 'S
+        // <folder>/' a folder a sparse index keeps as one entry. Paths are
+        // den-relative. With --sparse (git 2.35 and later), git doesn't
+        // expand a sparse index, which can write a tree into the user's
+        // objects; and the whole den is listed, since a path in a folder
+        // entry doesn't match it.
+        var listed = Run(["ls-files", "-z", "-t", "--sparse", "--", .. Pathspecs(null)], cancellationToken);
+        if (!listed.Succeeded)
+        {
+            listed = Run(["ls-files", "-z", "-t", "--", .. Pathspecs(null)], cancellationToken);
+        }
+
+        var skipped = (listed.Succeeded ? OutputOf(listed, "ls-files") : throw Failed("ls-files", listed))
             .Split('\0', StringSplitOptions.RemoveEmptyEntries)
             .Where(entry => entry.StartsWith("S ", StringComparison.Ordinal))
             .Select(entry => entry[2..])
@@ -282,14 +304,19 @@ public sealed partial class GitHistory : IHistoryProvider
             return;
         }
 
-        // Only those HEAD has too: update-index refuses a path that isn't in the index.
-        var inHead = Git([.. TempIndexSettings, "ls-files", "-z", "--", .. specs], cancellationToken, environment: environment)
-            .Split('\0', StringSplitOptions.RemoveEmptyEntries)
-            .ToHashSet(StringComparer.Ordinal);
+        var files = skipped.Where(path => !path.EndsWith('/')).ToHashSet(StringComparer.Ordinal);
+        var folders = skipped.Where(path => path.EndsWith('/')).ToList();
+
+        // Only paths the temporary index has: update-index refuses one that
+        // isn't in the index. The whole den, as above.
         var marks = new StringBuilder();
-        foreach (var path in skipped.Where(inHead.Contains))
+        foreach (var path in Git([.. TempIndexSettings, "ls-files", "-z", "--", .. Pathspecs(null)], cancellationToken, environment: environment)
+            .Split('\0', StringSplitOptions.RemoveEmptyEntries))
         {
-            marks.Append(path).Append('\0');
+            if (files.Contains(path) || folders.Any(folder => path.StartsWith(folder, StringComparison.Ordinal)))
+            {
+                marks.Append(path).Append('\0');
+            }
         }
 
         if (marks.Length > 0)
