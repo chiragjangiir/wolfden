@@ -11,30 +11,48 @@ namespace Wolfden.Core.Editing;
 public sealed class OverlayDenSource : IDenSource
 {
     private readonly IDenSource _den;
+    private readonly HashSet<string> _removed;
 
     /// <summary>The den read through <paramref name="den"/>, with <paramref name="files"/> written over it, by den-relative path.</summary>
     public OverlayDenSource(IDenSource den, IReadOnlyDictionary<string, byte[]> files)
+        : this(den, files, [])
+    {
+    }
+
+    /// <summary>
+    /// The den read through <paramref name="den"/>, with <paramref name="files"/>
+    /// written over it and the files at <paramref name="removed"/> deleted,
+    /// by den-relative path: a file moved to another folder, say.
+    /// </summary>
+    public OverlayDenSource(IDenSource den, IReadOnlyDictionary<string, byte[]> files, IEnumerable<string> removed)
     {
         ArgumentNullException.ThrowIfNull(den);
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(removed);
         _den = den;
         Files = files;
+        _removed = removed.Where(p => !files.ContainsKey(p)).ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>The files written over the den, by den-relative path.</summary>
     public IReadOnlyDictionary<string, byte[]> Files { get; }
 
     /// <inheritdoc />
-    public bool FileExists(string path) => Files.ContainsKey(path) || _den.FileExists(path);
+    public bool FileExists(string path) => Files.ContainsKey(path) || (!_removed.Contains(path) && _den.FileExists(path));
 
     /// <inheritdoc />
-    public byte[] ReadFile(string path) => Files.TryGetValue(path, out var bytes) ? (byte[])bytes.Clone() : _den.ReadFile(path);
+    public byte[] ReadFile(string path) =>
+        Files.TryGetValue(path, out var bytes) ? (byte[])bytes.Clone()
+        : _removed.Contains(path) ? throw new FileNotFoundException($"'{path}' is deleted in this overlay.", path)
+        : _den.ReadFile(path);
 
     /// <inheritdoc />
-    public byte[]? TryReadFile(string path) => Files.TryGetValue(path, out var bytes) ? (byte[])bytes.Clone() : _den.TryReadFile(path);
+    public byte[]? TryReadFile(string path) =>
+        Files.TryGetValue(path, out var bytes) ? (byte[])bytes.Clone() : _removed.Contains(path) ? null : _den.TryReadFile(path);
 
     /// <inheritdoc />
-    public byte[]? TryReadListedFile(string path) => Files.TryGetValue(path, out var bytes) ? (byte[])bytes.Clone() : _den.TryReadListedFile(path);
+    public byte[]? TryReadListedFile(string path) =>
+        Files.TryGetValue(path, out var bytes) ? (byte[])bytes.Clone() : _removed.Contains(path) ? null : _den.TryReadListedFile(path);
 
     /// <inheritdoc />
     public IEnumerable<string> GetDirectories(string path) =>
@@ -42,7 +60,7 @@ public sealed class OverlayDenSource : IDenSource
 
     /// <inheritdoc />
     public IEnumerable<string> GetFiles(string path) =>
-        _den.GetFiles(path).Union(Below(path).Where(rest => !rest.Contains('/')), StringComparer.Ordinal);
+        _den.GetFiles(path).Where(name => !_removed.Contains(path.Length == 0 ? name : $"{path}/{name}")).Union(Below(path).Where(rest => !rest.Contains('/')), StringComparer.Ordinal);
 
     /// <inheritdoc />
     public bool FolderExists(string path) => _den.FolderExists(path) || Below(path).Any();
