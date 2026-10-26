@@ -2493,8 +2493,8 @@ its API on this computer only (127.0.0.1) and opens the default browser.
 v0 has no accounts, so it never listens on the network. The browsing,
 search, and history pages come in M3 (#24 to #27); their read API comes
 first, and SC-WEB-4 to SC-WEB-10 describe what it answers. SC-WEB-11
-to SC-WEB-17 describe the browsing pages, and SC-WEB-22 and SC-WEB-23
-the history page.
+to SC-WEB-17 describe the browsing pages, SC-WEB-18 to SC-WEB-21 the
+search page, and SC-WEB-22 and SC-WEB-23 the history page.
 
 ### SC-WEB-1. I open my den in the browser
 
@@ -2801,6 +2801,70 @@ Spec: design.md §9 (#24). Covered by:
 `ApiTests.AnEntityPageNamedByItsPathIsServedWithIndexHtml`,
 `Navigation.test.tsx` (web).
 
+### SC-WEB-18. I search from the top bar
+
+The writer, at Dracula chapter 3, presses `/` and types "blood".
+
+- `/` focuses the search box from anywhere but a text box, where it's
+  just typed. Once typing pauses, the search page opens at
+  `/u/dracula/search?q=blood&at=dracula:3`, searching only for the
+  words typing paused on; Enter searches at once. Further typing there
+  replaces the history entry. Opening that URL shows "blood" in the box,
+  and leaving the search page empties it.
+- A search still waiting on a pause is dropped by Enter or by going to
+  another page, such as opening a hit, so it never pulls the writer back
+  to search. Moving the position or changing a filter on the same page
+  keeps it, and when it runs it reads them as they are then.
+
+Spec: design.md §9 (#25). Covered by: `Search.test.tsx` (web).
+
+### SC-WEB-19. I filter my search
+
+- The page lists the hits by note, best first, each note with its type
+  and the universe, series, or book it's filed in. Each hit names its
+  section, linked to that section on the note's page
+  (`#section-illness`), or "Name or opening" for a match in the name,
+  aliases, or lead, with its snippet and the matched words marked.
+- Type, scope (a series or a book), status, and "Canon text only" are
+  kept in the URL (`type`, `series` or `book`, `status`, `canon=true`)
+  and sent to `/api/search`. A blank or unknown value, such as
+  `canon=false` or `type=`, is no filter, and a book wins over a series.
+  When the API says there are more hits, "Show more matches" asks again
+  for more, up to the API's 200; when it can show no more, focus moves
+  to the line that says so.
+
+Spec: design.md §9 (#25). Covered by: `Search.test.tsx` (web).
+
+### SC-WEB-20. I search as of a story position
+
+The writer searches "Renfield" at Dracula chapter 3, then follows
+"Search everything".
+
+- The search is sent with `asOf=dracula:3`, so it finds only what the
+  reader has met by then, and the page says "Searching as of Dracula
+  chapter 3". With no hits it says "No matches as of Dracula chapter
+  3." There's no peek at hits met later. "Search everything" drops the
+  position and searches again. The Type filter lists only the types
+  of notes the reader has met, and keeps one already chosen. Results
+  from an earlier search at another position never show while the new
+  ones load.
+- A blank `at=` (or one of spaces) is sent as it is and fails closed:
+  the page shows the API's error and "Show everything", never the full
+  view. An error the API answers with, such as an unknown type, is
+  shown in its words.
+
+Spec: design.md §9 (#25, #26). Covered by: `Search.test.tsx` (web).
+
+### SC-WEB-21. A snippet holds HTML or brackets of its own
+
+- A snippet is rendered as text: `<script>` or `<img onerror>` in a note
+  shows as written and never runs. The API marks matches in square
+  brackets, so a bracketed run is marked only when its words are the
+  query's words (ignoring case and accents, `word*` as a prefix); a
+  `[[...]]` link or other brackets stay as written.
+
+Spec: design.md §9 (#25). Covered by: `Search.test.tsx` (web).
+
 ### SC-WEB-22. I read what changed in a note
 
 The history page shows a change to Mina Harker's note: her status
@@ -2831,9 +2895,8 @@ Mina Harker, and an edit since. They open her page and pick History.
 - The History tab goes to the same page with `?view=history`, keeping
   the position, and works for a note named by a path. The tabs and the
   breadcrumb are in the same place on both tabs. The list shows the
-  checkpoints newest first, twenty at a time, each with its date, which
-  is git's author date (as "yesterday", with the full date and time in
-  its tooltip), its
+  checkpoints newest first, twenty at a time, each with when it was
+  written ("yesterday", with the exact time in its tooltip), its
   author, its message, and how it changed the note (added, modified,
   renamed, or deleted). "Show older checkpoints" loads the next page.
 - "Uncommitted changes" is on top, and its diff is shown first. With no
@@ -2841,8 +2904,8 @@ Mina Harker, and an edit since. They open her page and pick History.
   shown instead. Picking a checkpoint shows what it changed. Ticking two
   compares them, the older as `from` and the newer as `to`, whichever
   is ticked first; ticking a checkpoint and the uncommitted changes
-  compares it with the note as it is now. The choice is kept in the URL,
-  and a short id in it still marks its row after a reload. A tick
+  compares it with the note as it is now. The choice is kept in the
+  URL, and a short id in it still marks its row after a reload. A tick
   doesn't carry over to another note.
 - The page says history ignores the story position, and never asks the
   history endpoints as of one. At a position before the note enters,

@@ -1162,35 +1162,58 @@ docs/
     react-markdown, which builds React elements and never HTML strings.
     Raw HTML in a note is dropped, and unsafe URLs such as `javascript:`
     are removed.
+- **The search page** (#25; v0 behaviour, not a recorded decision). A
+  search box sits in the top bar; `/` focuses it from anywhere but a
+  text box. Typing searches once it pauses (300 ms), on
+  `/u/<universe>/search?q=<words>`, which also keeps the filters
+  (`type`, `series` or `book`, `status`, `canon=true`) and `at`. The
+  page sends them to `/api/search` and lists the hits by note, with
+  the note's type and scope, the section (linked to its anchor on the
+  note's page), and the snippet with the matched words marked. The
+  snippet is rendered as text; a bracketed run is marked only when its
+  words are the query's, since a note's own text can hold brackets.
+  "Show more matches" asks again with a bigger `limit` (20, 50, 100,
+  200), as the API has no offset. As of a position the search sends
+  `asOf`, says so ("Searching as of Dracula chapter 9"), and offers to
+  search everything; hits the reader hasn't met aren't shown or
+  peeked at. The Type filter lists only the types the reader has met,
+  which applies the maintainer's hidden-by-default decision (#26) as
+  the tree does. A blank `at` fails closed, as on every page. Search is
+  full-text only: the API has no search of one field's value (such as
+  every character whose `occupation:` holds physician), and field
+  values aren't in the full-text index.
 - **The history page** (#27; v0 behaviour, not a recorded decision,
   except the reveal, which applies the #26 decision). An entity page
   has Note and History tabs, below the breadcrumb on both. History is
   the same route with `?view=history`, since the entity's name, slashes
   and all, ends the path; the diff shown is in the URL too
-  (`checkpoint`, or `from` and `to`). The page lists the entity's
-  checkpoints from `/api/history`, newest first, twenty at a time, each
-  with its date (git's author date, as the list says), author, message,
-  and how it changed the file, under "Uncommitted changes" when the
-  file differs from the latest
-  checkpoint. It shows that diff first, or else the latest
-  checkpoint's. Picking a checkpoint shows its own change; ticking two
-  compares them (ticking the uncommitted changes as one compares with
-  the file now). A short id, tag, or `HEAD~1` in the URL is matched to
-  its row through the commit the API resolved it to. The UI parses the
-  patch itself, with no diff library: line numbers, added and removed
-  lines (named for screen readers too), hunk headers, "No newline at
-  end of file", a visible mark for each `\r`, U+0085, U+2028, and
-  U+2029, git's mode and empty-file headers in words, and the changed
-  words within a line that replaced one. It renders text only. A
-  checkpoint's diff, or one between two, can't change, so it's fetched
-  once; the uncommitted one is fetched again after a few seconds at
-  most.
+  (`checkpoint`, or `from` and `to`).
+  - **The list.** The page lists the entity's checkpoints from
+    `/api/history`, newest first, twenty at a time, each with when it
+    was written, its author, its message, and how it changed the file,
+    under "Uncommitted changes" when the file differs from the latest
+    checkpoint. The date is git's author date, which is what the API
+    gives; the page says "written", without the jargon, and gives the
+    exact time in a tooltip.
+  - **The diff.** The page shows the uncommitted changes first, or else
+    the latest checkpoint's. Picking a checkpoint shows its own change;
+    ticking two compares them (ticking the uncommitted changes as one
+    compares with the file now). A short id, tag, or `HEAD~1` in the
+    URL is matched to its row through the commit the API resolved it
+    to. The UI parses the patch itself, with no diff library: line
+    numbers, added and removed lines (named for screen readers too),
+    hunk headers, "No newline at end of file", a visible mark for each
+    `\r`, U+0085, U+2028, and U+2029, git's mode and empty-file headers
+    in words, and the changed words within a line that replaced one. It
+    renders text only. A checkpoint's diff, or one between two, can't
+    change, so it's fetched once; the uncommitted one is fetched again
+    after a few seconds at most.
   - **Position.** History isn't a story view, so it ignores the
-    position, and says so. At a position where the reader hasn't met the
-    entity, both tabs show the #26 banner and fetch nothing of it until
-    "Show it anyway". The reveal is one per note, at that position,
-    shared by both tabs, and greyed alike; leaving the note, changing the
-    position, or a reload hides it again.
+    position, and says so. At a position where the reader hasn't met
+    the entity, both tabs show the #26 banner and fetch nothing of it
+    until "Show it anyway". The reveal is one per note, at that
+    position, shared by both tabs, and greyed alike; leaving the note,
+    changing the position, or a reload hides it again.
   - **Limits.** Since the log follows the file's current path (§6), a
     checkpoint that renamed it is listed as adding it, and its own diff
     shows the rename. Without history, the page gives the API's reason

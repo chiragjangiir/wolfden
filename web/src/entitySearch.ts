@@ -18,17 +18,21 @@ function text(value: unknown): string | undefined {
   return t || undefined
 }
 
+/**
+ * The router lays a route's validated search over the raw query string, so
+ * every key is returned, undefined when it's dropped; a key left out would
+ * keep its raw value (as for the search page, #177).
+ */
 export function validateEntitySearch(search: Record<string, unknown>): EntitySearch {
+  const none: EntitySearch = { view: undefined, checkpoint: undefined, from: undefined, to: undefined }
   if (search.view !== 'history') {
-    return {}
+    return none
   }
 
-  const checkpoint = text(search.checkpoint)
   const from = text(search.from)
-  const to = from ? text(search.to) : undefined
   if (from) {
-    return to ? { view: 'history', from, to } : { view: 'history', from }
+    return { ...none, view: 'history', from, to: text(search.to) }
   }
 
-  return checkpoint ? { view: 'history', checkpoint } : { view: 'history' }
+  return { ...none, view: 'history', checkpoint: text(search.checkpoint) }
 }

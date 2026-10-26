@@ -66,9 +66,11 @@ export function HistoryPage() {
 /**
  * The history itself. `scope` is the note's breadcrumb from its page at the
  * position; for a note shown anyway it's undefined, and the full view gives
- * it.
+ * it. Shown anyway, it sits inside the banner's page, so it isn't wrapped in
+ * a page of its own.
  */
 function History({ universe, entityKey, scope }: { universe: string; entityKey: string; scope: ContainerRef[] | undefined }) {
+  const outer = scope === undefined ? 'history' : 'page-body history'
   const search = route.useSearch()
   const history = useInfiniteQuery(historyQuery(universe, entityKey))
   const uncommitted = useQuery(historyDiffQuery(universe, entityKey, {}))
@@ -103,7 +105,7 @@ function History({ universe, entityKey, scope }: { universe: string; entityKey: 
 
   if (!first.available) {
     return (
-      <div className="page-body history">
+      <div className={outer}>
         {header}
         <NoHistory result={first} />
       </div>
@@ -112,7 +114,7 @@ function History({ universe, entityKey, scope }: { universe: string; entityKey: 
 
   const resolved = resolveSelection(selection, diff.data)
   return (
-    <div className="page-body history">
+    <div className={outer}>
       {header}
       <p className="muted history-note">History shows every saved version of this note, whatever the story position.</p>
       <div className="history-columns">
@@ -308,7 +310,7 @@ function CheckpointList({ universe, entityKey, path, entries, hasUncommitted, se
   return (
     <div className="checkpoints">
       <h2>Checkpoints</h2>
-      <p className="muted compare-hint">Tick two to compare them. Dates are when each change was written (git's author date).</p>
+      <p className="muted compare-hint">Tick two to compare them. Dates are when each change was written.</p>
       <ol>
         {nowRow && (
           <li className={`checkpoint uncommitted${isUncommittedShown ? ' selected' : ''}`} aria-current={isUncommittedShown ? 'true' : undefined}>

@@ -13,6 +13,7 @@ import { SeriesPage } from './pages/SeriesPage'
 import { BookPage } from './pages/BookPage'
 import { ChapterPage } from './pages/ChapterPage'
 import { EntityRoute } from './pages/EntityRoute'
+import { SearchPage } from './pages/SearchPage'
 import { validateEntitySearch } from './entitySearch'
 import { NotFound } from './components/States'
 
@@ -82,10 +83,63 @@ const entityRoute = createRoute({
   component: EntityRoute,
 })
 
-const routeTree = rootRoute.addChildren([homeRoute, universeRoute, seriesRoute, bookRoute, chapterRoute, entityRoute])
+/**
+ * The search page's params (#25): the words (`q`), and the filters, each
+ * undefined when unset. A series and a book don't go together, so a book
+ * wins.
+ */
+export interface SearchPageSearch extends StorySearch {
+  q?: string
+  type?: string
+  status?: string
+  series?: string
+  book?: string
+  canon?: boolean
+}
+
+/**
+ * Validates the search page's params. The router lays a route's validated
+ * search over the raw query string, so a key left out here would keep its
+ * raw value (`canon=false` would stay the string 'false'): every key is
+ * returned, undefined when it's dropped. `at` is validated again as the root
+ * does, so a blank one stays '' and fails closed.
+ */
+export function validateSearchPageSearch(search: Record<string, unknown>): SearchPageSearch {
+  const text = (name: string) => (typeof search[name] === 'string' ? (search[name] as string).trim() : '') || undefined
+  const book = text('book')
+  return {
+    at: validateStorySearch(search).at,
+    q: text('q'),
+    type: text('type'),
+    status: text('status'),
+    series: book ? undefined : text('series'),
+    book,
+    canon: search.canon === true || search.canon === 'true' ? true : undefined,
+  }
+}
+
+const searchRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/u/$universe/search',
+  validateSearch: validateSearchPageSearch,
+  component: SearchPage,
+})
+
+const routeTree = rootRoute.addChildren([homeRoute, universeRoute, seriesRoute, bookRoute, chapterRoute, entityRoute, searchRoute])
+
+const lastActions = new WeakMap<RouterHistory, string>()
+
+/**
+ * True if the last navigation stepped through history (Back, Forward, or a
+ * jump), where the router restores the scroll position, rather than going
+ * to a new page.
+ */
+export function wasHistoryStep(history: RouterHistory): boolean {
+  return ['BACK', 'FORWARD', 'GO'].includes(lastActions.get(history) ?? '')
+}
 
 export function createAppRouter(queryClient: QueryClient, history?: RouterHistory) {
-  return createRouter({
+  const router = createRouter({
     routeTree,
     history,
     context: { queryClient },
@@ -94,6 +148,8 @@ export function createAppRouter(queryClient: QueryClient, history?: RouterHistor
     defaultPreload: false,
     scrollRestoration: true,
   })
+  router.history.subscribe(({ action }) => lastActions.set(router.history, action.type))
+  return router
 }
 
 declare module '@tanstack/react-router' {

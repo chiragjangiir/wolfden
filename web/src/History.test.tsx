@@ -302,7 +302,9 @@ describe('SC-WEB-23: I look at a note’s history in the browser', () => {
     expect(first.textContent).toContain('c5aaaaa')
     expect(first.textContent).toContain('Co-Authored-By: Claude')
     expect(first.querySelector('time')!.textContent).toBe('yesterday')
-    expect(first.querySelector('time')!.getAttribute('title')).toBeTruthy()
+    expect(first.querySelector('time')!.getAttribute('title')).toMatch(/^Written /)
+    expect(list.textContent).toContain('Dates are when each change was written.')
+    expect(list.textContent).not.toMatch(/author date|git's/)
     expect(within(list).getByRole('button', { name: 'Rename Mina' }).closest('li')!.querySelector('.badge')!.textContent).toBe('renamed')
     expect(within(list).queryByRole('button', { name: 'Mina marries' })).toBeNull()
 
@@ -403,6 +405,7 @@ describe('SC-WEB-23: I look at a note’s history in the browser', () => {
     // Greyed as a note shown anyway is, with the breadcrumb and tabs from the full view.
     const revealed = heading.closest('.revealed')!
     expect(revealed).toBeTruthy()
+    expect(revealed.querySelector('.page-body')).toBeNull()
     await within(revealed as HTMLElement).findByRole('navigation', { name: 'Where this is filed' })
   })
 
