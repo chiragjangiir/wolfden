@@ -191,7 +191,13 @@ public sealed class SearchWords
         return found;
     }
 
-    /// <summary>The words of <paramref name="text"/>: runs of letters, digits, and marks, each with its folded form.</summary>
+    /// <summary>
+    /// The words of <paramref name="text"/>, each with its folded form, as
+    /// SQLite's <c>unicode61</c> tokenizer finds them: runs of letters,
+    /// digits, private-use characters, and combining diacritical marks
+    /// (U+0300 to U+036F, which folding drops). Any other combining mark,
+    /// such as a Devanagari vowel sign or a Hebrew point, ends a word.
+    /// </summary>
     private static List<(int Start, int Length, string Folded)> Tokens(string text)
     {
         var tokens = new List<(int Start, int Length, string Folded)>();
@@ -205,10 +211,10 @@ public sealed class SearchWords
             {
                 var category = CharUnicodeInfo.GetUnicodeCategory(text, i);
                 width = char.IsSurrogatePair(text, i) ? 2 : 1;
-                isWord = category is UnicodeCategory.UppercaseLetter or UnicodeCategory.LowercaseLetter or UnicodeCategory.TitlecaseLetter
-                    or UnicodeCategory.ModifierLetter or UnicodeCategory.OtherLetter or UnicodeCategory.DecimalDigitNumber
-                    or UnicodeCategory.LetterNumber or UnicodeCategory.OtherNumber or UnicodeCategory.NonSpacingMark
-                    or UnicodeCategory.SpacingCombiningMark or UnicodeCategory.EnclosingMark or UnicodeCategory.PrivateUse;
+                isWord = IsDiacritic(text[i]) || category is UnicodeCategory.UppercaseLetter or UnicodeCategory.LowercaseLetter
+                    or UnicodeCategory.TitlecaseLetter or UnicodeCategory.ModifierLetter or UnicodeCategory.OtherLetter
+                    or UnicodeCategory.DecimalDigitNumber or UnicodeCategory.LetterNumber or UnicodeCategory.OtherNumber
+                    or UnicodeCategory.PrivateUse;
             }
 
             if (isWord && start < 0)
@@ -232,18 +238,44 @@ public sealed class SearchWords
         return tokens;
     }
 
-    /// <summary>Lower case, without accents.</summary>
+    /// <summary>
+    /// Lower case, without the diacritics <c>remove_diacritics 2</c> removes:
+    /// combining marks U+0300 to U+036F, and those of precomposed Latin
+    /// letters (é, ñ, ǘ). Other scripts' letters are kept as they are, so ё
+    /// isn't е, and ά isn't α, as in the search table.
+    /// </summary>
     private static string Fold(string word)
     {
         var builder = new StringBuilder(word.Length);
-        foreach (var c in word.Normalize(NormalizationForm.FormD))
+        foreach (var c in word)
         {
-            if (CharUnicodeInfo.GetUnicodeCategory(c) is not (UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark or UnicodeCategory.EnclosingMark))
+            if (IsDiacritic(c))
+            {
+                continue;
+            }
+
+            if (IsLatinWithMarks(c))
+            {
+                foreach (var d in c.ToString().Normalize(NormalizationForm.FormD))
+                {
+                    if (!IsDiacritic(d))
+                    {
+                        builder.Append(d);
+                    }
+                }
+            }
+            else
             {
                 builder.Append(c);
             }
         }
 
-        return builder.ToString().Normalize(NormalizationForm.FormC).ToLowerInvariant();
+        return builder.ToString().ToLowerInvariant();
     }
+
+    /// <summary>A combining diacritical mark (U+0300 to U+036F).</summary>
+    private static bool IsDiacritic(char c) => c is >= '̀' and <= 'ͯ';
+
+    /// <summary>A Latin letter that may be precomposed with diacritics: Latin-1 Supplement, Latin Extended-A and -B, and Latin Extended Additional.</summary>
+    private static bool IsLatinWithMarks(char c) => c is (>= 'À' and <= 'ɏ') or (>= 'Ḁ' and <= 'ỿ');
 }

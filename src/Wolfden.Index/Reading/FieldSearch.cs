@@ -190,7 +190,7 @@ internal sealed class FieldSearch
         _db.FieldValues.Where(v => (_universeId == null || v.UniverseId == _universeId) && (_field == null || v.Field == _field)).ToList();
 
     /// <summary>A long value cut down to about <see cref="Window"/> characters around its first match, with ellipses where it's cut.</summary>
-    private static MarkedText Cut(string text, IReadOnlyList<TextMatch> matches)
+    internal static MarkedText Cut(string text, IReadOnlyList<TextMatch> matches)
     {
         var merged = MarkedText.Merge(matches);
         if (text.Length <= Window)
@@ -214,6 +214,17 @@ internal sealed class FieldSearch
         if (end <= first)
         {
             end = Math.Min(text.Length, start + Window);
+        }
+
+        // Never cut a surrogate pair in two: step back to its first half.
+        if (start > 0 && char.IsLowSurrogate(text[start]))
+        {
+            start--;
+        }
+
+        if (end < text.Length && char.IsLowSurrogate(text[end]))
+        {
+            end--;
         }
 
         var head = start > 0 ? "…" : "";

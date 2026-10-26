@@ -175,11 +175,65 @@ public sealed class SearchTests : IClassFixture<SearchTests.Built>
     [InlineData("marsh-salt", "the Salt Marsh docks", false)]
     [InlineData("docks salt", "the Salt Marsh docks", true)]
     [InlineData("[[x]]", "[[x]]", true)]
+    [InlineData("cafe", "Café", true)]
+    [InlineData("resume", "résumé", true)]
+    [InlineData("senor", "SEÑOR", true)]
+    [InlineData("nguyen", "Nguyễn", true)]
+    [InlineData("елка", "ёлка", false)]
+    [InlineData("ЁЛКА", "ёлка", true)]
+    [InlineData("иод", "йод", false)]
+    [InlineData("αλφα", "άλφα", false)]
+    [InlineData("か", "が", false)]
+    [InlineData("שלום", "שָׁלוֹם", false)]
+    [InlineData("ह", "हिन्दी", true)]
+    [InlineData("हिन्दी", "हिन्दी", true)]
     public void SearchWordsMatchFieldTextAsTheSearchTableDoes(string query, string text, bool matches)
     {
         var words = SearchWords.Parse(query);
 
         Assert.Equal(matches, words.Find(text).All(found => found.Count > 0));
+        Assert.Equal(matches, Fts5Matches(query, text));
+    }
+
+    [Theory]
+    [InlineData("lighthouses", "")]
+    [InlineData("lighthouse", "")]
+    [InlineData("lighthouses", "x")]
+    public void ALongFieldValueIsCutWithoutSplittingASurrogatePair(string word, string before)
+    {
+        // No spaces to cut at, so the cut falls where it may: after a word of odd or even length.
+        var emoji = string.Concat(Enumerable.Repeat("\U0001F56F", 120));
+        var text = before + emoji + "-" + word + emoji;
+        var at = text.IndexOf(word, StringComparison.Ordinal);
+
+        var cut = Wolfden.Index.Reading.FieldSearch.Cut(text, [new TextMatch(at, word.Length)]);
+
+        for (var i = 0; i < cut.Text.Length; i++)
+        {
+            Assert.False(char.IsLowSurrogate(cut.Text[i]) && (i == 0 || !char.IsHighSurrogate(cut.Text[i - 1])), $"A lone low surrogate at {i}.");
+            Assert.False(char.IsHighSurrogate(cut.Text[i]) && (i == cut.Text.Length - 1 || !char.IsLowSurrogate(cut.Text[i + 1])), $"A lone high surrogate at {i}.");
+        }
+
+        var match = Assert.Single(cut.Matches);
+        Assert.Equal(word, cut.Text.Substring(match.Start, match.Length));
+    }
+
+    /// <summary>Whether SQLite's own FTS5 table, with the index's tokenizer, finds <paramref name="query"/> in <paramref name="text"/>, read as DenIndex.Search reads it.</summary>
+    private static bool Fts5Matches(string query, string text)
+    {
+        using var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "CREATE VIRTUAL TABLE t USING fts5(x, tokenize = 'unicode61 remove_diacritics 2'); INSERT INTO t VALUES ($text);";
+        command.Parameters.AddWithValue("$text", text);
+        command.ExecuteNonQuery();
+        command.CommandText = "SELECT count(*) FROM t WHERE t MATCH $query";
+        command.Parameters.Clear();
+        command.Parameters.AddWithValue(
+            "$query",
+            string.Join(' ', query.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Select(w => $"\"{w.TrimEnd('*').Replace("\"", "\"\"", StringComparison.Ordinal)}\"{(w.EndsWith('*') ? "*" : "")}")));
+        return (long)command.ExecuteScalar()! > 0;
     }
 
     [Fact]
