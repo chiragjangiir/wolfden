@@ -275,10 +275,19 @@ public sealed class DenReader
     }
 
     /// <summary><see cref="GetEntity(string, string?, string?)"/> over an index already brought up to date and opened.</summary>
-    public GetEntityResult GetEntity(DenIndex index, string entity, string? universe, string? asOf)
+    public GetEntityResult GetEntity(DenIndex index, string entity, string? universe, string? asOf) =>
+        GetEntity(index, entity, universe, asOf, out _);
+
+    /// <summary>
+    /// <see cref="GetEntity(DenIndex, string, string?, string?)"/>, also giving
+    /// the canon-as-of view of the whole universe it read at <paramref name="asOf"/>
+    /// (null without a position), so a caller that needs it too doesn't build it again.
+    /// </summary>
+    public GetEntityResult GetEntity(DenIndex index, string entity, string? universe, string? asOf, out CanonView? view)
     {
         ArgumentNullException.ThrowIfNull(index);
         CheckEntityName(entity);
+        view = null;
         var db = index.Context;
         var universes = db.Containers.Where(c => c.Kind == "universe").ToDictionary(c => c.Id, c => c.Key);
         var scopes = Scopes(db);
@@ -305,6 +314,7 @@ public sealed class DenReader
         // entities the reader has met by then: an entity met later can't
         // shadow one met already, tie with it, or show in an error.
         var found = CanonView(index, u.Key, asOf, null);
+        view = found;
         var met = Match(index, u.Id, name, found.Entities.Select(x => x.Path).ToHashSet(StringComparer.Ordinal));
         if (met.Count > 1)
         {

@@ -262,13 +262,22 @@ public sealed partial class GitHistory : IHistoryProvider
     public HistoryResult<HistoryDiff> DiffCheckpoint(string revision, string? path = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(revision);
-        var specs = Pathspecs(path is null ? null : [path]);
         var to = Resolve(revision, cancellationToken);
 
         // The first parent; a commit without one is compared with the empty tree.
         var parent = Run(["rev-parse", "--verify", "--quiet", to + "^1^{commit}"], cancellationToken);
         var from = parent.Succeeded ? CommitId(parent) : null;
-        var files = CompareFiles([from ?? (to.Length == 64 ? EmptyTreeSha256 : EmptyTreeSha1), to], specs, null, cancellationToken);
+
+        // The whole den is compared and then narrowed to the path, so rename
+        // detection (-M) sees a file's old path too: a pathspec of the new
+        // path alone would hide it, and a renamed file would show as added.
+        var files = CompareFiles([from ?? (to.Length == 64 ? EmptyTreeSha256 : EmptyTreeSha1), to], Pathspecs(null), null, cancellationToken);
+        if (path?.Replace('\\', '/').Trim('/') is { Length: > 0 } limit)
+        {
+            files = files.Where(f => Under(f.Change.Path) || (f.Change.OldPath is { } old && Under(old))).ToList();
+            bool Under(string p) => p == limit || p.StartsWith(limit + "/", StringComparison.Ordinal);
+        }
+
         return HistoryResult<HistoryDiff>.Done(new HistoryDiff(from ?? "", to, files));
     }
 

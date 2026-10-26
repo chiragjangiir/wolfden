@@ -23,7 +23,7 @@ internal static class EntityPages
         DenReader.CheckEntityName(entity);
         return reader.WithIndex(index =>
         {
-            var found = reader.GetEntity(index, entity, universe, asOf);
+            var found = reader.GetEntity(index, entity, universe, asOf, out var canonView);
             if (found.Entity is not { } view)
             {
                 return new EntityPageResult(ReadEndpoints.ResultVersion, found.View, found.Position, found.InView, found.Note, null);
@@ -32,7 +32,7 @@ internal static class EntityPages
             var db = index.Context;
             var record = db.Entities.Single(e => e.Path == view.Path);
             var containers = db.Containers.Where(c => c.UniverseId == record.UniverseId).ToList().ToDictionary(c => c.Id);
-            var canon = asOf is null ? null : reader.CanonView(index, view.Universe, asOf, null).Entities.ToDictionary(e => e.Path, StringComparer.Ordinal);
+            var canon = canonView?.Entities.ToDictionary(e => e.Path, StringComparer.Ordinal);
 
             // The entity's own links, and every entity they reach or match.
             var links = db.Links.Where(l => l.SourceEntityId == record.Id).ToList().OrderBy(l => l.Line).ThenBy(l => l.Column).ToList();
@@ -48,13 +48,14 @@ internal static class EntityPages
                 var target = l.TargetKey is { } key ? targets.GetValueOrDefault(key) : null;
                 bool? inView = target is not null && canon is not null ? canon.ContainsKey(target.Path) : null;
                 var reached = inView == false ? null : target;
+                var all = Matches(l.MatchesJson).ToList();
                 var matches = l.MatchesJson is null
                     ? null
-                    : Matches(l.MatchesJson).Select(k => targets.GetValueOrDefault(k)).OfType<EntityRecord>()
+                    : all.Select(k => targets.GetValueOrDefault(k)).OfType<EntityRecord>()
                         .Where(e => canon is null || canon.ContainsKey(e.Path)).Select(Ref).ToList();
                 return new LinkView(
                     l.Text, l.Target, l.Heading, l.Label, l.Line, l.Column, l.Outcome, reached is null ? null : Ref(reached),
-                    reached is null ? null : l.TargetSection, matches, l.Problem, inView);
+                    reached is null ? null : l.TargetSection, matches, Problem(l, canon is not null, reader.PinnedUniverse is not null, matches, all.Count), inView);
             }
 
             var bySection = links.Where(l => l.SourceSectionId is not null).ToLookup(l => sectionLines.GetValueOrDefault(l.SourceSectionId!.Value));
@@ -76,6 +77,44 @@ internal static class EntityPages
                 Backlinks(index, record, containers, canon, asOf is null ? null : index.PointOf(view.Universe, asOf)));
             return new EntityPageResult(ReadEndpoints.ResultVersion, found.View, found.Position, found.InView, found.Note, page);
         });
+    }
+
+    /// <summary>
+    /// Why a link doesn't resolve, as the page may say it. The index stores
+    /// the message <c>wolfden check</c> gives, which names every match, and
+    /// for a broken link may name an entity in another universe (F-LINK-8)
+    /// or a file. As of a position (<paramref name="asOf"/>), the message is
+    /// made again from what the reader has met: an ambiguous link names only
+    /// the matches met by then, and says "and others not met yet" without
+    /// naming them, and a broken one says only that it doesn't resolve. In a
+    /// server pinned to one universe (<paramref name="pinned"/>), a broken
+    /// link's message doesn't name another universe's entity.
+    /// </summary>
+    private static string? Problem(LinkRecord l, bool asOf, bool pinned, IReadOnlyList<EntityRef>? met, int matches)
+    {
+        if (l.Problem is not { } problem)
+        {
+            return null;
+        }
+
+        if (asOf)
+        {
+            return l.Outcome switch
+            {
+                "resolved" => null,
+                "ambiguous" when met is { Count: > 0 } =>
+                    $"'{l.Target}' is ambiguous: it matches {met.Count} {(met.Count == 1 ? "entity" : "entities")} the reader has met by now " +
+                    $"({string.Join("; ", met.Select(m => $"'{m.Name}'"))}){(matches > met.Count ? ", and others not met yet" : "")}. Link by slug or id to pick one.",
+                "ambiguous" => $"'{l.Target}' is ambiguous: it matches entities the reader hasn't met yet. Link by slug or id to pick one.",
+                _ => $"'{l.Target}' doesn't reach an entity. Run 'wolfden check' to see why.",
+            };
+        }
+
+        // LinkResolver's F-LINK-8 hint: "It matches only 'X' in universe 'Y'; links don't cross universes."
+        var hint = problem.IndexOf(" It matches only '", StringComparison.Ordinal);
+        return pinned && l.Outcome == "broken" && hint > 0 && problem.EndsWith("links don't cross universes.", StringComparison.Ordinal)
+            ? problem[..hint]
+            : problem;
     }
 
     /// <summary>

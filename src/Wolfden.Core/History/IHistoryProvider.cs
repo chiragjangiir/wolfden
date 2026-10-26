@@ -76,9 +76,11 @@ public interface IHistoryProvider
     /// What one checkpoint changed, in the den or in the file or folder
     /// <paramref name="path"/>: the checkpoint compared with the one before
     /// it (for git, the commit's first parent). The result's
-    /// <see cref="HistoryDiff.From"/> is that checkpoint's id, or empty for
-    /// the first checkpoint, which is compared with nothing, so every file
-    /// in it is added; <see cref="HistoryDiff.To"/> is the checkpoint's id.
+    /// <see cref="HistoryDiff.From"/> is the first parent's id, or empty for
+    /// the first checkpoint, which has no parent and is compared with
+    /// nothing, so every file in it is added; <see cref="HistoryDiff.To"/>
+    /// is the checkpoint's id. A file the checkpoint renamed into or out of
+    /// <paramref name="path"/> shows as a rename.
     /// A <paramref name="revision"/> the history doesn't have throws a
     /// <see cref="HistoryRevisionException"/>. A backend without it says it
     /// isn't available.

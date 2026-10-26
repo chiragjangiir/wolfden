@@ -1055,8 +1055,12 @@ docs/
   session. `asOf` is the tools' `as_of`: a position, with the same
   syntax, checks, and canon-as-of meaning; without it, the author's
   full view. An endpoint refuses a parameter it doesn't take (so
-  `as_of` isn't quietly ignored) or one given twice, and an empty value
-  counts as left out. Errors use the tools' codes, with 400 for
+  `as_of` isn't quietly ignored) or one given twice. An empty value
+  counts as left out, except an empty `asOf`, which is `bad_argument`:
+  left out it would give the full view, spoilers and all, so a page that
+  meant to send a position fails closed. A revision that can't be a
+  checkpoint (it starts with `-` or holds a space) is `bad_argument`,
+  and a message repeats at most 80 characters of one. Errors use the tools' codes, with 400 for
   `bad_argument`, `bad_position`, `universe_required`, and
   `unknown_type`; 404 for `unknown_universe`, `unknown_scope`,
   `unknown_entity`, `unknown_checkpoint`, and `no_universe`; 409 for
@@ -1072,11 +1076,30 @@ docs/
   | `/api/canon` | `universe`, `asOf`, `series`, `book`, `type`, `brief` | `canon_as_of`. |
   | `/api/search` | `query`, `universe`, `type`, `canonOnly`, `limit`, `status`, `series`, `book`, `asOf` | `search`, with snippets; it can also keep entities of one status, those a series or book filter covers (as in a canon view), or, as of a position, hits in the entities and sections in the canon view there. |
   | `/api/history` | `entity`, `universe`, `limit`, `before` | `get_history`'s checkpoints, a page at a time. |
-  | `/api/history/diff` | `entity`, `universe`, and `checkpoint`, or `from` and `to` | The entity file's unified diff: what one checkpoint changed (against the one before it, or for the first, against nothing, through the history provider's `DiffCheckpoint`), the change between two, or since one (by default the latest) up to the file as it is now. |
+  | `/api/history/diff` | `entity`, `universe`, and `checkpoint`, or `from` and `to` | The entity file's unified diff: what one checkpoint changed (against the one before it, or for the first, against nothing, through the history provider's `DiffCheckpoint`), the change between two (`from` and `to`), or since one (`from`, or by default the latest) up to the file as it is now. |
 
   History endpoints, like `get_history`, treat a den without history as
   an answer, not an error: `available` is false, `backend` is `none`,
-  and `reason` says why.
+  and `reason` says why. `/api/history/diff` takes `to` only with
+  `from`. A checkpoint's own diff compares the whole den and keeps the
+  entity's file, so a checkpoint that renamed it shows a rename.
+
+  **As of a position, nothing names what the reader hasn't met.** A
+  link's `problem` is made again from what the reader has met: an
+  ambiguous link names only the matches met by then, adding "and others
+  not met yet" without naming them, and a broken one says only that it
+  doesn't resolve, never the file or entity the check's message names.
+  A link to an entity met later has no `entity`, and `inView` is false.
+  So `outcome: "ambiguous"` and `inView: false` reveal that some entity
+  the reader hasn't met exists, never which one; that's intended, since
+  the page must still show the link as the writer wrote it. In a server
+  pinned to one universe, a broken link's `problem` doesn't name an
+  entity in another universe (the F-LINK-8 hint).
+
+  **Decided (maintainer, 2026-10-26): chapter titles stay.**
+  `/api/hierarchy` and `/api/positions` list every chapter, with its
+  title, whatever the `asOf`: the author is the one viewing, and the
+  as-of view hides notes, not the table of contents.
 - **The browsing UI** (#24, #26). Three choices are maintainer
   decisions (2026-10-26):
   - **Layout: a sidebar tree.** On the left is a tree: universe → series

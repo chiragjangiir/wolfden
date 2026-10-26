@@ -285,6 +285,67 @@ public class ReadEndpointTests
         Assert.Equal("Halden Pike", full.GetProperty("entity").GetProperty("name").GetString());
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-WEB-6")]
+    public async Task BacklinksAsOfAPositionFromChaptersAndOutlineRowsCountUpToThatChapter()
+    {
+        using var den = TempDen.Dracula();
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root));
+
+        async Task<List<string?>> From(string entity, string asOf, string site, string member) =>
+            (await server.GetJsonAsync($"/api/entity?entity={entity}&asOf={asOf}", HttpStatusCode.OK)).GetProperty("entity").GetProperty("backlinks")
+                .EnumerateArray().Where(b => b.GetProperty("site").GetString() == site).Select(b => b.GetProperty(member).GetString()).ToList();
+
+        // Mina is the POV of chapter 5 on: book.md's chapter fields link her.
+        var pov = await From("Mina%20Harker", "dracula:5", "chapter_field", "chapter");
+        Assert.Contains("dracula:5", pov);
+        Assert.DoesNotContain("dracula:6", pov);
+        Assert.Contains("dracula:6", await From("Mina%20Harker", "dracula:6", "chapter_field", "chapter"));
+
+        // The outline's rows for chapter 1 name Jonathan; those for chapter 2 come later.
+        var rows = await From("Jonathan%20Harker", "dracula:1", "outline_row", "outlineRow");
+        Assert.Equal(["1", "2"], rows);
+        Assert.Contains("3", await From("Jonathan%20Harker", "dracula:2", "outline_row", "outlineRow"));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-4")]
+    public async Task APinnedServerDoesntNameAnotherUniversesEntityInABrokenLink()
+    {
+        using var den = TempDen.Starfall();
+        den.Write("universes/drift/entities/characters/harbour-ghost.md", "---\ntype: character\nname: Harbour Ghost\nstatus: canon\n---\n");
+        den.Write(MaraFile, den.Read(MaraFile).Replace(
+            "Executive officer of the *Tessaly*.", "Executive officer of the *Tessaly*. Fears the [[Harbour Ghost]].", StringComparison.Ordinal));
+
+        static JsonElement Link(JsonElement page) => Assert.Single(page.GetProperty("entity").GetProperty("sections").EnumerateArray()
+            .Single(s => s.GetProperty("name").GetString() == "Overview").GetProperty("links").EnumerateArray());
+
+        await using var all = await Server.StartAsync(new WolfdenApiOptions(den.Root));
+        var open = Link(await all.GetJsonAsync("/api/entity?universe=starfall&entity=Mara%20Voss", HttpStatusCode.OK));
+        Assert.Equal("broken", open.GetProperty("outcome").GetString());
+        Assert.Contains("universe 'drift'", open.GetProperty("problem").GetString(), StringComparison.Ordinal);
+
+        await using var pinned = await Server.StartAsync(new WolfdenApiOptions(den.Root) { PinnedUniverse = "starfall" });
+        var problem = Link(await pinned.GetJsonAsync("/api/entity?entity=Mara%20Voss", HttpStatusCode.OK)).GetProperty("problem").GetString();
+        Assert.Equal("'Harbour Ghost' matches no entity in universe 'starfall'.", problem);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-10")]
+    public async Task AnEmptyAsOfIsRefusedRatherThanShowingEverything()
+    {
+        using var den = TempDen.Dracula();
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root));
+
+        foreach (var path in new[] { "/api/entity?entity=Mina&asOf=", "/api/canon?asOf=%20", "/api/hierarchy?asOf=", "/api/entities?asOf=", "/api/search?query=Mina&asOf=" })
+        {
+            Assert.Equal("bad_argument", (await server.GetJsonAsync(path, HttpStatusCode.BadRequest)).GetProperty("code").GetString());
+        }
+
+        // Other empty filters are left out.
+        await server.GetJsonAsync("/api/entities?type=&status=", HttpStatusCode.OK);
+    }
+
     [Theory]
     [Trait("Scenario", "SC-WEB-7")]
     [InlineData(null, null, null)]
@@ -406,6 +467,7 @@ public class ReadEndpointTests
         var ambiguous = await server.GetJsonAsync("/api/entity?universe=starfall&entity=Lantern", HttpStatusCode.Conflict);
         Assert.Equal("ambiguous_entity", ambiguous.GetProperty("code").GetString());
         Assert.Equal(2, ambiguous.GetProperty("candidates").GetArrayLength());
+        Assert.DoesNotContain("name its universe", ambiguous.GetProperty("message").GetString(), StringComparison.Ordinal);
 
         // The reader hasn't met Halden Pike at ember:1: not an error, but not in the view.
         var unmet = await server.GetJsonAsync("/api/entity?universe=starfall&entity=Halden%20Pike&asOf=ember:1", HttpStatusCode.OK);
