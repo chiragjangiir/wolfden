@@ -663,6 +663,7 @@ it to Claude Code, Claude Desktop, and other clients is in
 | `add_idea` | shipped (#21) | Record undecided material with `status: idea` |
 | `rename_section` | shipped (#21) | Rename a section and rewrite the links to it, den-wide (format.md F-RT-5) |
 | `rename_entity` / `change_alias` | shipped (#150) | Change an entity's name, or change or remove an alias, rewriting the links that used the old text den-wide, or keep the old text as an alias (F-RT-5) |
+| `move_entity` | shipped (#89) | Move an entity to another scope of its universe, keeping where it enters canon and rewriting links that would stop reaching it to its id (F-RT-5) |
 | `copy_entity` | shipped (#129) | Copy an entity under a new name, with a new id and file, beside it or into another scope or universe |
 | `update_chapter_fields` | shipped (#21) | Set, add to, remove from, or clear a chapter's own fields |
 | `get_chapter_defaults` | shipped (#151) | A universe's, series', or book's `chapter_defaults`, what its books would inherit from above, the books it reaches, and its file's hash |
@@ -903,6 +904,53 @@ store, so an edit changes only what it means to (format.md §12):
   reached no entity before, so it's only reported, never refused. A change that only alters case or spacing changes no link
   (F-LINK-4). Renaming an entity to one of its own aliases takes that
   alias out.
+- **Moves** (maintainer decision, 2026-10-24, #89). `move_entity`
+  moves an entity's file into a series, a book, or the universe itself,
+  within its universe, keeping its path below `entities/`. It takes the
+  file's hash, refuses a move out of or into a final book, and
+  refuses a file already at the new path (in any case). Canon views stay
+  as they were (format.md F-RT-5): an entity without `from` gets the
+  entry point it had written as `from`, unless the new scope starts at
+  that very point. If the reader meets the entity outside the new scope,
+  the move is refused (`entry_outside_scope`), since MCP can't ask; the
+  error names both ways forward, and `keep_entry` (keep it as `from`,
+  with the F-ENT-6 warning) or `enter_at_new_scope` (take `from` out, so
+  it enters at the new scope's start, which `pinned_canon` flags if it
+  holds pinned facts) makes the move. For an entity met before the new
+  scope, that leaves it out of the views in between; for one met only
+  after it (`from: ash:2` moved into Ember), it enters earlier than the
+  reader met it before, and the error and `effects` say which. Neither
+  changes anything when the entry point is inside the new scope. Every
+  link in the den is resolved
+  again as it would be after the move. A link to the entity that would
+  stop reaching it (F-LINK-7 tie-breaks change with scope) is rewritten
+  to its id, showing the same text (`[[id|Tessaly]]`; `\|` in a table
+  row, with or without its outer pipes, in a blockquote too), and the
+  entity gets an id if it has none; if such a link is in a
+  final book, nothing moves. The moved file's own links to other
+  entities that would reach another one, or become ambiguous, from the
+  new scope are rewritten the same way, each to the id of the entity it
+  reaches now, keeping its text, `#section`, and label
+  (`[[id|Lantern]]`), and each is listed in `effects` (maintainer
+  decision on #164); with `allow_relinks` they're left as written, to
+  follow the new scope, and listed as links that resolve differently.
+  Broken and ambiguous links in it stay as written, and so does one
+  whose target has no id, which then counts as below. Any other link
+  that would change which
+  entity it reaches refuses the
+  move unless `allow_relinks`, as for renames, and links that resolve
+  differently, such as an ambiguous one that now resolves, are listed
+  in `effects` rather than prevented (format.md F-RT-5). The steps keep
+  one copy of the entity, with the same views, at every point: the file
+  is rewritten in place (its id, a kept `from`, its own links), then the
+  links to it in other files, then it's moved whole with one atomic
+  rename (which also refuses a name taken in any case), and last, for
+  `enter_at_new_scope`, its `from` is taken out at the new path. A
+  failure puts back every step made, newest first. The session counts
+  the old path as its own deletion, so a checkpoint lists it under
+  `written_by_session` even when git sees a delete and an add rather
+  than a rename; a checkpoint with `paths` needs both the old and the
+  new path to record the move.
 - **Copies** (maintainer decisions, 2026-10-23, #129). `copy_entity`
   (and `wolfden copy`) starts a new entity from an existing one, where
   `create_entity` starts from the type's template. The copy gets a new id
@@ -932,7 +980,6 @@ store, so an edit changes only what it means to (format.md §12):
   start (F-ENT-6), and `effects` say so; a `from` outside the book it's
   filed in is said instead. `effects` also count the links in the copy that
   still reach the original, such as its own `[[Name#Section]]` links.
-  Moving entities comes later (#89).
 
 ## 9. Architecture
 

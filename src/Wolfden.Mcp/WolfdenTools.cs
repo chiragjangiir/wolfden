@@ -284,6 +284,34 @@ public sealed class WolfdenTools
         [Description(RelinksHelp)] bool allow_relinks = false) =>
         Respond(() => _tools.ChangeAlias(entity, alias, expected_hash, new_alias, keep_old_alias, universe, allow_relinks));
 
+    /// <summary>The <c>move_entity</c> tool.</summary>
+    [McpServerTool(Name = "move_entity", Title = "Move an entity to another scope", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]
+    [Description(
+        "Moves an entity's file to another scope of its universe: into a series (to_series), into a book (to_book), or, with neither, " +
+        "into the universe itself. The file keeps its name and its folders under entities/. Canon views stay as they were: an entity " +
+        "with no 'from' gets the point where it entered canon written as 'from', and a link to it that would stop reaching it (scope " +
+        "breaks ties between entities with the same name) is rewritten to its id, showing the same text. The moved entity's own links " +
+        "that would reach a different entity, or become ambiguous, from the new scope are rewritten to the id of what they reach now, " +
+        "keeping their text, #section, and label, and listed in effects. If the reader meets the " +
+        "entity outside the new scope (a series character first met in Book 1, moved into Book 2), the move is refused " +
+        "(entry_outside_scope): ask the writer, then call again with keep_entry true (keep where it enters; check then warns about a " +
+        "book entity's 'from' outside its book) or enter_at_new_scope true (it enters at the start of the new scope instead; for one " +
+        "the reader meets only after the new scope, that's earlier than readers meet it now). Nothing " +
+        "moves into or out of a final (frozen) book. If a link in another file that reaches another entity would change target, nothing " +
+        "changes unless allow_relinks is true; allow_relinks also leaves the moved entity's own links as written, to follow the new " +
+        "scope. The result's path and hash are the file's new ones, and 'files' marks the moved file with its " +
+        "old path. A checkpoint with 'paths' needs both the old and the new path." + WriteHelp)]
+    public CallToolResult MoveEntity(
+        [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
+        [Description(HashHelp)] string expected_hash,
+        [Description("Move it into this series (its key).")] string? to_series = null,
+        [Description("Move it into this book (its key).")] string? to_book = null,
+        [Description("If it enters canon outside the new scope: true to keep where it enters, as its 'from'.")] bool keep_entry = false,
+        [Description("If it enters canon outside the new scope: true to have it enter at the start of the new scope instead.")] bool enter_at_new_scope = false,
+        [Description(UniverseHelp)] string? universe = null,
+        [Description(RelinksHelp)] bool allow_relinks = false) =>
+        Respond(() => _tools.MoveEntity(entity, expected_hash, to_series, to_book, keep_entry, enter_at_new_scope, universe, allow_relinks));
+
     /// <summary>The <c>copy_entity</c> tool.</summary>
     [McpServerTool(Name = "copy_entity", Title = "Copy an entity", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
     [Description(
@@ -383,7 +411,8 @@ public sealed class WolfdenTools
         "checkpoint can include edits the writer made elsewhere. The result lists the recorded files your writes in this session " +
         "saved since they were last recorded ('written_by_session') apart from those that changed some other way " +
         "('changed_outside_session'); a file you wrote that was changed after, say in the writer's editor, is in both. Tell the writer " +
-        "about the second list. If nothing changed since the last checkpoint, nothing is recorded. If the den has no history, the result says so ('available' false) and the edits are still saved in the files.")]
+        "about the second list. If nothing changed since the last checkpoint, nothing is recorded. After move_entity, 'paths' must name " +
+        "both the old and the new path to record the move. If the den has no history, the result says so ('available' false) and the edits are still saved in the files.")]
     public CallToolResult Checkpoint(
         [Description("What the checkpoint is, such as 'End of chapter 14 session: Lucy's timeline'.")] string message,
         [Description("You, as 'Name <email>' on one line, such as 'Claude <noreply@anthropic.com>'.")] string co_author,

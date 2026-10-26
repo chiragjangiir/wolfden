@@ -54,9 +54,10 @@ public sealed partial class DenTools
     /// made some other way. A file a failed write put back as it was isn't
     /// here. Paths compare as the file system does (ignoring case on
     /// Windows and macOS, as git's paths may differ in case there).
-    /// Guarded by <see cref="_writeLock"/>.
+    /// A null value marks a file this session deleted: the old path of a
+    /// file <c>move_entity</c> moved. Guarded by <see cref="_writeLock"/>.
     /// </summary>
-    private readonly Dictionary<string, byte[]> _sessionWritten =
+    private readonly Dictionary<string, byte[]?> _sessionWritten =
         new(OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private IDenStore? _store;
 
@@ -470,7 +471,17 @@ public sealed partial class DenTools
                 var onDisk = new Dictionary<string, byte[]?>(_sessionWritten.Comparer);
                 foreach (var (path, bytes) in _sessionWritten.ToList())
                 {
-                    if (history.HoldsAtLatest(path, bytes) is { IsAvailable: true, Value: true })
+                    if (bytes is null)
+                    {
+                        // Deleted by this session. A file there again was put there some other way,
+                        // so the deletion isn't the session's to claim any more.
+                        onDisk[path] = Store.TryReadFile(path);
+                        if (onDisk[path] is not null)
+                        {
+                            _sessionWritten.Remove(path);
+                        }
+                    }
+                    else if (history.HoldsAtLatest(path, bytes) is { IsAvailable: true, Value: true })
                     {
                         _sessionWritten.Remove(path);
                     }
@@ -488,6 +499,7 @@ public sealed partial class DenTools
 
                 if (result.Value is not { } e)
                 {
+                    ForgetRecordedDeletions(given);
                     return new CheckpointResult(ToolJson.Version, history.Name, true, null, false, null);
                 }
 
@@ -509,7 +521,8 @@ public sealed partial class DenTools
 
                     ours.Add(change.Path);
                     var now = change.Path == tracked ? onDisk.GetValueOrDefault(tracked) : Store.TryReadFile(change.Path);
-                    if (now is null || !now.AsSpan().SequenceEqual(_sessionWritten[tracked]))
+                    var wrote = _sessionWritten[tracked];
+                    if (wrote is null ? now is not null : now is null || !now.AsSpan().SequenceEqual(wrote))
                     {
                         theirs.Add(change.Path);
                     }
@@ -524,6 +537,8 @@ public sealed partial class DenTools
                     }
                 }
 
+                ForgetRecordedDeletions(given);
+
                 return new CheckpointResult(
                     ToolJson.Version, history.Name, true, null, true,
                     new HistoryEntryView(e.Id, e.When, e.Author, e.Message, e.Changes.Select(c => new HistoryChangeView(c.Kind.ToString().ToLowerInvariant(), c.Path, c.OldPath)).ToList()),
@@ -537,6 +552,39 @@ public sealed partial class DenTools
             catch (HistoryException e)
             {
                 throw new DenToolException(ToolErrorCodes.HistoryFailed, e.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// After a checkpoint: forgets the session's deletions that the latest
+    /// recorded state no longer holds. A checkpoint records every den file
+    /// it covers (the whole den, or <paramref name="given"/>), so a path it
+    /// covered that's absent now is absent at the latest checkpoint too,
+    /// whether this one recorded the deletion or an earlier commit made
+    /// elsewhere did.
+    /// </summary>
+    /// <summary>The paths the session tracks as its own deletions, for tests.</summary>
+    internal IReadOnlyList<string> SessionDeletions
+    {
+        get
+        {
+            lock (_writeLock)
+            {
+                return _sessionWritten.Where(p => p.Value is null).Select(p => p.Key).Order(StringComparer.Ordinal).ToList();
+            }
+        }
+    }
+
+    private void ForgetRecordedDeletions(IReadOnlyList<string>? given)
+    {
+        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (var (path, bytes) in _sessionWritten.ToList())
+        {
+            var covered = given is null || given.Any(p => string.Equals(path, p, comparison) || path.StartsWith(p + "/", comparison));
+            if (bytes is null && covered && !Store.FileExists(path))
+            {
+                _sessionWritten.Remove(path);
             }
         }
     }
