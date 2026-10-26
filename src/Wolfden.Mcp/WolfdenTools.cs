@@ -135,7 +135,9 @@ public sealed class WolfdenTools
         "moved or renamed. If the den has no history (it isn't in a git repository, or git isn't installed), the result isn't an " +
         "error: 'available' is false and 'reason' says why. History isn't a story view, so it can show material the reader meets later.")]
     public CallToolResult GetHistory(
-        [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,
+        [Description(
+            "The entity: its name, an alias, its file name, its id, its key, or its path. A note with errors, which the den leaves out " +
+            "until they're fixed, is named by its path.")] string entity,
         [Description(UniverseHelp)] string? universe = null,
         [Description("The most checkpoints to return, 1 to 100.")] int limit = 20,
         [Description("Only checkpoints older than this one (an id from an earlier result's 'next_before'), for the next page.")] string? before = null,

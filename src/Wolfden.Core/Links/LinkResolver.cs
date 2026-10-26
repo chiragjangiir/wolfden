@@ -215,10 +215,32 @@ public sealed class LinkResolver
 
     private static string Describe(Container c) => $"{c.Kind.ToString().ToLowerInvariant()} '{c.Key}'";
 
+    /// <summary>
+    /// How a broken link's message ends when its hint names an entity in
+    /// another universe (F-LINK-8): <c>It matches only '&lt;name&gt;' in universe
+    /// '&lt;key&gt;'; links don't cross universes.</c> No other message ends so,
+    /// so a reader that mustn't name another universe, such as a server
+    /// pinned to one (#175), can tell the hint by it, and give
+    /// <see cref="BrokenMessageStart"/> alone instead.
+    /// </summary>
+    public const string CrossUniverseHintEnd = "; links don't cross universes.";
+
+    /// <summary>
+    /// The start of a broken link's message (F-LINK-8), before any hint:
+    /// that <paramref name="target"/> (as written; it's trimmed) matches no
+    /// entity in universe <paramref name="universeKey"/>.
+    /// </summary>
+    public static string BrokenMessageStart(string universeKey, string target)
+    {
+        ArgumentNullException.ThrowIfNull(universeKey);
+        ArgumentNullException.ThrowIfNull(target);
+        return $"'{target.Trim()}' matches no entity in universe '{universeKey}'.";
+    }
+
     /// <summary>The F-LINK-8 message, with a hint when the target matches something links can't reach.</summary>
     private string BrokenMessage(Universe universe, string target)
     {
-        var message = $"'{target}' matches no entity in universe '{universe.Key}'.";
+        var message = BrokenMessageStart(universe.Key, target);
         var normalized = LinkText.Normalize(target);
         if (_excluded.TryGetValue(universe, out var excluded)
             && (excluded.TryGetValue(normalized, out var errorPath) || excluded.TryGetValue(target, out errorPath)))
@@ -230,7 +252,7 @@ public sealed class LinkResolver
         {
             if (_targets[other].Match(target) is (not null, var elsewhere))
             {
-                return $"{message} It matches only '{elsewhere[0].Name}' in universe '{other.Key}'; links don't cross universes.";
+                return $"{message} It matches only '{elsewhere[0].Name}' in universe '{other.Key}'{CrossUniverseHintEnd}";
             }
         }
 

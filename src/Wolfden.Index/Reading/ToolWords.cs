@@ -22,9 +22,16 @@ namespace Wolfden.Index.Reading;
 /// What pins every read to one universe, with <c>{0}</c> for its key, to
 /// start a sentence: <c>This session is pinned to universe '{0}' (wolfden mcp --universe)</c>.
 /// </param>
+/// <param name="AllUniverseReads">What alone takes every universe at once, after "is only for": <c>search and list_entities</c>.</param>
+/// <param name="AskAgain">
+/// How to ask again for one of an ambiguous name's matches, as a sentence:
+/// <c>Ask again with one's key or path, or name its universe.</c>
+/// </param>
 public sealed record ToolWords(
     string AllowRelinks, string NewName, string Slug, string Universe, string FindEntity, string CheckDen, string CheckTool, string CheckPath,
-    string PinnedTo = "This session is pinned to universe '{0}' (wolfden mcp --universe)")
+    string PinnedTo = "This session is pinned to universe '{0}' (wolfden mcp --universe)",
+    string AllUniverseReads = "search and list_entities",
+    string AskAgain = "Ask again with one's key or path, or name its universe.")
 {
     /// <summary>The MCP tools' own words, the default.</summary>
     public static ToolWords Mcp { get; } = new(

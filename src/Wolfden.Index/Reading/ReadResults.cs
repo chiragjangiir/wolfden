@@ -139,11 +139,18 @@ public sealed class DenToolException : Exception
 }
 
 /// <summary>One line about an entity: enough to tell it apart and to ask for it.</summary>
-/// <param name="Key">What links store and <c>get_entity</c> takes: its id, or its path while it has none.</param>
+/// <remarks>
+/// A note with errors, which the index leaves out (F-GEN-2), is known only
+/// by its path, so its summary, which only a history gives (#181), has the
+/// path as <c>Key</c> and <c>Path</c>, the file name (without <c>.md</c>)
+/// as <c>Name</c>, a null <c>Id</c> and <c>From</c>, and an empty
+/// <c>Type</c> and <c>Status</c>.
+/// </remarks>
+/// <param name="Key">What links store and <c>get_entity</c> takes: its id, or its path while it has none; for a note with errors, its path.</param>
 /// <param name="Id">The <c>id</c> from frontmatter, or null.</param>
-/// <param name="Name">The name.</param>
-/// <param name="Type">The type key, such as <c>character</c>.</param>
-/// <param name="Status">One of idea, undecided, candidate, draft, canon, retconned.</param>
+/// <param name="Name">The name; for a note with errors, its file name.</param>
+/// <param name="Type">The type key, such as <c>character</c>; empty for a note with errors.</param>
+/// <param name="Status">One of idea, undecided, candidate, draft, canon, retconned; empty for a note with errors.</param>
 /// <param name="Universe">The universe's key.</param>
 /// <param name="ScopeKind">Where it's filed: universe, series, or book.</param>
 /// <param name="ScopeKey">The key of that universe, series, or book.</param>

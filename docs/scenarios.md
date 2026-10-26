@@ -2458,7 +2458,8 @@ hasn't checkpointed yet.
   checkpoints shows a moved note as a rename. One checkpoint's own diff
   compares it with the checkpoint before it, or, for the first, with
   nothing, so its notes show as added; narrowed to a moved note's new
-  path, it still shows the rename. A checkpoint that isn't
+  path, it still shows the rename. Narrowed to a path that can't be a
+  den file, such as a hidden one, it shows nothing. A checkpoint that isn't
   in the repository is an error that says so, and a revision is never
   read as a git option.
 - A patch shows the note's text as it is. A form feed, a lone carriage
@@ -2473,6 +2474,7 @@ Spec: design.md §6 (#19). Covered by:
 `GitHistoryTests.ADiffBetweenTwoCheckpointsShowsARename`,
 `GitHistoryTests.ACheckpointsOwnDiffComparesItWithTheOneBeforeOrWithNothingForTheFirst`,
 `GitHistoryTests.ARevisionThatIsntOneIsAHistoryException`,
+`GitHistoryTests.ACheckpointsOwnDiffOfAPathThatCantBeADenFileIsEmpty`,
 `GitHistoryTests.APatchKeepsCharactersThatArentLineFeedsAsTheyAre`,
 `GitHistoryTests.ALineInAPatchCantStartAnotherFilesPart`,
 `GitHistoryTests.ANoteNamedWithALineSeparatorGetsItsOwnPatch`.
@@ -2514,6 +2516,69 @@ PATH.
 
 Spec: design.md §6 (maintainer decision, 2026-10-22). Covered by:
 `GitHistoryTests.WithoutGitEveryOperationSaysSoWithoutThrowing`.
+
+### SC-HIST-9. A merged checkpoint's clock was wrong
+
+The writer checkpointed Mara's note at 9:10, then, on a laptop whose
+clock was behind, made a branch from it with a checkpoint dated 9:01,
+checkpointed again on the main line at 9:20, and merged the branch.
+
+- The den's history lists the merge, the 9:20 checkpoint, the 9:01
+  one, and then the 9:10 one it came from: never a checkpoint before
+  one that came from it, though git's own order, by date alone, puts
+  9:10 first. Asking a page at a time gives the same order, and a
+  diff since the latest checkpoint starts at the merge. A history
+  without merges, or with honest clocks, is in date order as before.
+
+Spec: design.md §6 (#181). Covered by:
+`GitHistoryTests.TheLogNeverListsACheckpointBeforeOneThatCameFromIt`.
+
+### SC-HIST-10. I compare a note across a rename
+
+The writer renamed `mara.md` to `mara-voss.md` and edited it, and
+compares it with a checkpoint from before the rename.
+
+- The compare shows a rename from `mara.md`, with the edit, not a new
+  note: between two checkpoints, by the new path or the old one, and
+  from a checkpoint up to the note as it is now, before and after the
+  rename is checkpointed. The note's history lists the checkpoint that
+  renamed it as a rename; it ends there, since it follows the current
+  path. A folder's view shows a note moved into or out of it as a
+  rename too, even when a whole folder of notes was moved into it at
+  once.
+- A note moved into a hidden folder (`.trash/`) shows as deleted, in a
+  compare, a checkpoint's own diff, and the log, even when a copy of it
+  appears in the den under another name: the copy is added, not a
+  rename of the note. A note brought out of `.wolfden/` into the den is
+  added. Their patches are a plain delete's or add's, whole den or one
+  path, before or after the checkpoint: none names `.trash` or
+  `.wolfden`, or shows what was written in the hidden copy.
+
+Spec: design.md §6, §9 (#175, #181). Covered by:
+`GitHistoryTests.ACompareOfOneNoteAcrossARenameShowsTheRename`,
+`GitHistoryTests.ACheckpointThatRenamedAWholeFolderShowsEveryRename`,
+`GitHistoryTests.ANoteMovedIntoAHiddenFolderIsDeletedNotRenamedToALookAlike`;
+through the API, SC-WEB-9.
+
+### SC-HIST-11. A note with errors still has its history
+
+Mina Harker's note has an error now (an unclosed `[` in her `name:`),
+so the den leaves it out (F-GEN-2), and the writer wants to see what
+changed since it last worked.
+
+- Named by her name, she isn't found, and she has no page. Named by
+  her note's path, `get_history` and `/api/history` give the
+  checkpoints that changed it, and the diff since the latest one shows
+  the line that broke it. The summary knows only the path: its key and
+  path are the path, its name is the file name, its scope is the book
+  whose `entities/` folder holds it, and its type and status are empty.
+  A path that isn't an entity file, such as `book.md`, or a note that
+  isn't there, is still `unknown_entity`.
+- The browser's History tab needs the note's page, so it can't show a
+  note with errors yet (design.md §9).
+
+Spec: F-GEN-2, design.md §8, §9 (#181). Covered by:
+`HistoryEndpointTests.ANoteWithErrorsHasAHistoryByItsPath`.
 
 ## WEB: the den in a browser
 
@@ -2701,10 +2766,11 @@ Mina Harker, and an edit since.
   shows the note added), the change between two checkpoints, or the
   change since a checkpoint (by default the latest) up to the note as
   it is now, as a unified diff for the UI to show. A checkpoint that
-  renamed the note shows the rename. A checkpoint that isn't one is
-  `unknown_checkpoint`; `to` without `from`, or a revision that can't be
-  one (it starts with `-` or holds a space), is `bad_argument`, and a
-  very long one is cut short in the message.
+  renamed the note shows the rename, and is listed as one, and a
+  compare across it shows the rename too (#181). A checkpoint that
+  isn't one is `unknown_checkpoint`; `to` without `from`, or a revision
+  that can't be one (it starts with `-` or holds a space), is
+  `bad_argument`, and a very long one is cut short in the message.
 - A den without history isn't an error: `available` is false, the
   backend is `none`, and `reason` says why. So it is for a diff in a
   repository with nothing checkpointed yet.

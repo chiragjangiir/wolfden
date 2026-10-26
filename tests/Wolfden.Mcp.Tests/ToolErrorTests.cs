@@ -121,6 +121,7 @@ public sealed class OtherDenErrorTests
         var e = Assert.Throws<DenToolException>(() => tools.GetEntity("Lucy Westenra"));
         Assert.Equal(ToolErrorCodes.AmbiguousEntity, e.Code);
         Assert.Equal(2, e.Candidates!.Count);
+        Assert.EndsWith("Ask again with one's key or path, or name its universe.", e.Message, StringComparison.Ordinal);
 
         // At chapter 5 the reader has met only one of them, so that's the one.
         var early = tools.GetEntity("Lucy Westenra", asOf: "dracula:5");

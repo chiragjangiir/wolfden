@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Wolfden.Core.Links;
 using Wolfden.Index;
 
 namespace Wolfden.Api;
@@ -55,7 +56,7 @@ internal static class EntityPages
                         .Where(e => canon is null || canon.ContainsKey(e.Path)).Select(Ref).ToList();
                 return new LinkView(
                     l.Text, l.Target, l.Heading, l.Label, l.Line, l.Column, l.Outcome, reached is null ? null : Ref(reached),
-                    reached is null ? null : l.TargetSection, matches, Problem(l, canon is not null, reader.PinnedUniverse is not null, matches, all.Count), inView);
+                    reached is null ? null : l.TargetSection, matches, Problem(l, view.Universe, canon is not null, reader.PinnedUniverse is not null, matches, all.Count), inView);
             }
 
             var bySection = links.Where(l => l.SourceSectionId is not null).ToLookup(l => sectionLines.GetValueOrDefault(l.SourceSectionId!.Value));
@@ -90,7 +91,7 @@ internal static class EntityPages
     /// server pinned to one universe (<paramref name="pinned"/>), a broken
     /// link's message doesn't name another universe's entity.
     /// </summary>
-    private static string? Problem(LinkRecord l, bool asOf, bool pinned, IReadOnlyList<EntityRef>? met, int matches)
+    private static string? Problem(LinkRecord l, string universe, bool asOf, bool pinned, IReadOnlyList<EntityRef>? met, int matches)
     {
         if (l.Problem is not { } problem)
         {
@@ -110,10 +111,12 @@ internal static class EntityPages
             };
         }
 
-        // LinkResolver's F-LINK-8 hint: "It matches only 'X' in universe 'Y'; links don't cross universes."
-        var hint = problem.IndexOf(" It matches only '", StringComparison.Ordinal);
-        return pinned && l.Outcome == "broken" && hint > 0 && problem.EndsWith("links don't cross universes.", StringComparison.Ordinal)
-            ? problem[..hint]
+        // LinkResolver's F-LINK-8 hint that names another universe's entity
+        // is the only message that ends so. The message is made again without
+        // it, rather than cut, so a name that holds the hint's own words
+        // can't keep any of it.
+        return pinned && l.Outcome == "broken" && problem.EndsWith(LinkResolver.CrossUniverseHintEnd, StringComparison.Ordinal)
+            ? LinkResolver.BrokenMessageStart(universe, l.Target)
             : problem;
     }
 
