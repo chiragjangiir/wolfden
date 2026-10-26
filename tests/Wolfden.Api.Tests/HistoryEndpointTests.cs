@@ -108,6 +108,47 @@ public sealed class HistoryEndpointTests : IDisposable
         Assert.Equal(
             "bad_argument",
             (await server.GetJsonAsync($"/api/history/diff?entity=Mina&checkpoint={first}&to={second}", HttpStatusCode.BadRequest)).GetProperty("code").GetString());
+
+        // 'to' alone would compare backwards from the latest checkpoint.
+        Assert.Equal("bad_argument", (await server.GetJsonAsync($"/api/history/diff?entity=Mina&to={first}", HttpStatusCode.BadRequest)).GetProperty("code").GetString());
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-10")]
+    public async Task ARevisionThatCantBeOneIsABadArgumentAndALongOneIsCutShort()
+    {
+        TwoCheckpoints();
+        await using var server = await StartAsync();
+
+        foreach (var path in new[] { "/api/history?entity=Mina&before=-n1", "/api/history/diff?entity=Mina&checkpoint=a%20b", "/api/history/diff?entity=Mina&from=--all" })
+        {
+            Assert.Equal("bad_argument", (await server.GetJsonAsync(path, HttpStatusCode.BadRequest)).GetProperty("code").GetString());
+        }
+
+        var long_ = new string('a', 300);
+        foreach (var path in new[] { $"/api/history?entity=Mina&before={long_}", $"/api/history/diff?entity=Mina&checkpoint={long_}" })
+        {
+            var json = await server.GetJsonAsync(path, HttpStatusCode.NotFound);
+            Assert.Equal("unknown_checkpoint", json.GetProperty("code").GetString());
+            Assert.DoesNotContain(new string('a', 81), json.GetProperty("message").GetString(), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-9")]
+    public async Task ACheckpointThatRenamedTheNoteShowsTheRename()
+    {
+        TwoCheckpoints();
+        var moved = "universes/dracula/books/dracula/entities/characters/mina-murray-harker.md";
+        RunGit("mv", MinaFile, moved);
+        var rename = Commit("Rename Mina's note");
+        await using var server = await StartAsync();
+
+        var file = Assert.Single((await server.GetJsonAsync($"/api/history/diff?entity=Mina&checkpoint={rename}", HttpStatusCode.OK))
+            .GetProperty("diff").GetProperty("files").EnumerateArray());
+        Assert.Equal("renamed", file.GetProperty("change").GetProperty("kind").GetString());
+        Assert.Equal(moved, file.GetProperty("change").GetProperty("path").GetString());
+        Assert.Equal(MinaFile, file.GetProperty("change").GetProperty("oldPath").GetString());
     }
 
     [Fact]

@@ -55,31 +55,66 @@ public static class ReadEndpoints
             Words = Words,
         };
 
-        api.MapGet("/hierarchy", (HttpContext c) => Answer(c, ["universe", "asOf"], q => Hierarchy(reader, q.Text("universe"), q.Text("asOf"))));
+        api.MapGet("/hierarchy", (HttpContext c) => Answer(c, ["universe", "asOf"], q => Hierarchy(reader, q.Text("universe"), q.Position("asOf"))));
         api.MapGet("/positions", (HttpContext c) => Answer(c, ["universe"], q => Positions(reader, q.Text("universe"))));
         api.MapGet("/entities", (HttpContext c) => Answer(
             c,
             ["universe", "type", "status", "series", "book", "asOf", "limit"],
             q => reader.ListEntities(
-                q.Text("universe"), q.Text("type"), q.Text("status"), q.Text("series"), q.Text("book"), q.Int("limit", 200), q.Text("asOf"))));
+                q.Text("universe"), q.Text("type"), q.Text("status"), q.Text("series"), q.Text("book"), q.Int("limit", 200), q.Position("asOf"))));
         api.MapGet("/entity", (HttpContext c) => Answer(
-            c, ["entity", "universe", "asOf"], q => EntityPages.Get(reader, q.Text("entity"), q.Text("universe"), q.Text("asOf"))));
+            c, ["entity", "universe", "asOf"], q => EntityPages.Get(reader, q.Text("entity"), q.Text("universe"), q.Position("asOf"))));
         api.MapGet("/canon", (HttpContext c) => Answer(
             c,
             ["universe", "asOf", "series", "book", "type", "brief"],
-            q => reader.CanonAsOf(q.Text("universe"), q.Text("asOf"), q.Text("series"), q.Text("book"), q.Text("type"), q.Bool("brief"))));
+            q => reader.CanonAsOf(q.Text("universe"), q.Position("asOf"), q.Text("series"), q.Text("book"), q.Text("type"), q.Bool("brief"))));
         api.MapGet("/search", (HttpContext c) => Answer(
             c,
             ["query", "universe", "type", "status", "series", "book", "canonOnly", "asOf", "limit"],
             q => reader.Search(
                 q.Text("query") ?? "", q.Text("universe"), q.Text("type"), q.Bool("canonOnly"), q.Int("limit", 20),
-                q.Text("status"), q.Text("series"), q.Text("book"), q.Text("asOf"))));
+                q.Text("status"), q.Text("series"), q.Text("book"), q.Position("asOf"))));
         api.MapGet("/history", (HttpContext c) => Answer(
-            c, ["entity", "universe", "limit", "before"], q => reader.GetHistory(q.Text("entity") ?? "", q.Text("universe"), q.Int("limit", 20), q.Text("before"))));
+            c, ["entity", "universe", "limit", "before"], q => History(reader, q.Text("entity"), q.Text("universe"), q.Int("limit", 20), q.Text("before"))));
         api.MapGet("/history/diff", (HttpContext c) => Answer(
             c, ["entity", "universe", "checkpoint", "from", "to"],
             q => HistoryDiff(reader, q.Text("entity"), q.Text("universe"), q.Text("checkpoint"), q.Text("from"), q.Text("to"))));
     }
+
+    /// <summary>The longest part of a revision a message repeats.</summary>
+    private const int RevisionShown = 80;
+
+    /// <summary>An entity's checkpoints, a page at a time, as <c>get_history</c> gives them.</summary>
+    internal static GetHistoryResult History(DenReader reader, string? entity, string? universe, int limit, string? before)
+    {
+        CheckRevision("before", before);
+        try
+        {
+            return reader.GetHistory(entity ?? "", universe, limit, before);
+        }
+        catch (DenToolException e) when (e.Code == ToolErrorCodes.UnknownCheckpoint && before is { Length: > RevisionShown })
+        {
+            throw new DenToolException(e.Code, e.Message.Replace(before, Clip(before), StringComparison.Ordinal));
+        }
+    }
+
+    /// <summary>
+    /// Refuses a revision that can't be a checkpoint id or tag name (one
+    /// that starts with <c>-</c>, or holds a space or a control character)
+    /// as <c>bad_argument</c>, rather than as a checkpoint that isn't there.
+    /// </summary>
+    private static void CheckRevision(string name, string? revision)
+    {
+        if (revision is not null && (revision.StartsWith('-') || revision.Any(c => char.IsWhiteSpace(c) || char.IsControl(c))))
+        {
+            throw new DenToolException(
+                ToolErrorCodes.BadArgument,
+                $"'{name}' must be a checkpoint's id or a tag's name, which can't start with '-' or hold spaces: not '{Clip(revision)}'.");
+        }
+    }
+
+    /// <summary>A revision cut to <see cref="RevisionShown"/> characters for a message.</summary>
+    private static string Clip(string revision) => revision.Length <= RevisionShown ? revision : revision[..RevisionShown] + "…";
 
     /// <summary>The HTTP status for an error code.</summary>
     internal static int StatusOf(string code) => code switch
@@ -101,7 +136,11 @@ public static class ReadEndpoints
         }
         catch (DenToolException e)
         {
-            return Results.Json(new ApiError(e.Code, e.Message, e.Candidates), statusCode: StatusOf(e.Code));
+            // The tools' advice names their parameters; the API's candidates carry the keys to ask with.
+            var message = e.Code == ToolErrorCodes.AmbiguousEntity
+                ? e.Message.Replace("Ask again with one's key or path, or name its universe.", "Ask again with one of the candidates' keys.", StringComparison.Ordinal)
+                : e.Message.Replace("is only for search and list_entities", "is only for /api/search and /api/entities", StringComparison.Ordinal);
+            return Results.Json(new ApiError(e.Code, message, e.Candidates), statusCode: StatusOf(e.Code));
         }
     }
 
@@ -173,6 +212,16 @@ public static class ReadEndpoints
                 "Give 'checkpoint' for what one checkpoint changed, or 'from' and 'to' to compare two, not both.");
         }
 
+        if (to is not null && from is null)
+        {
+            throw new DenToolException(
+                ToolErrorCodes.BadArgument,
+                "Give 'from' with 'to': the older checkpoint to compare from. Leave both out for what changed since the latest checkpoint.");
+        }
+
+        CheckRevision("checkpoint", checkpoint);
+        CheckRevision("from", from);
+        CheckRevision("to", to);
         var summary = reader.HistoryEntity(entity, universe);
         try
         {
@@ -191,7 +240,9 @@ public static class ReadEndpoints
         }
         catch (HistoryRevisionException e)
         {
-            throw new DenToolException(ToolErrorCodes.UnknownCheckpoint, e.Message);
+            throw new DenToolException(
+                ToolErrorCodes.UnknownCheckpoint,
+                e.Revision.Length > RevisionShown ? e.Message.Replace(e.Revision, Clip(e.Revision), StringComparison.Ordinal) : e.Message);
         }
         catch (HistoryException e)
         {
@@ -236,6 +287,24 @@ public static class ReadEndpoints
         {
             var value = _query[name].ToString().Trim();
             return value.Length == 0 ? null : value;
+        }
+
+        /// <summary>
+        /// A story position parameter, or null if it's missing. Unlike other
+        /// parameters, an empty one is refused rather than left out: left
+        /// out, it gives the author's full view, spoilers and all, so a page
+        /// that meant to send a position and sent nothing fails closed.
+        /// </summary>
+        public string? Position(string name)
+        {
+            if (!_query.ContainsKey(name))
+            {
+                return null;
+            }
+
+            return Text(name) ?? throw new DenToolException(
+                ToolErrorCodes.BadArgument,
+                $"'{name}' is empty. Give a story position, such as 'book:chapter' or a bare book key, or leave '{name}' out for the full view.");
         }
 
         /// <summary>A whole-number parameter, or <paramref name="otherwise"/> if it's missing.</summary>
