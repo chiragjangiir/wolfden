@@ -25,4 +25,9 @@
     <None Include="..\..\web\dist\**\*" LinkBase="wwwroot" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- The den's shared read queries and their results (DenReader). -->
+  <ItemGroup>
+    <Using Include="Wolfden.Index.Reading" />
+  </ItemGroup>
+
 </Project>
