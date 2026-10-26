@@ -1209,6 +1209,40 @@ Spec: F-LAY-1, design.md §6, §7 (maintainer decision, #57, #122). Covered by:
 `InitGitTests.WithoutGitInstalledTheDenIsStillMadeAndItExplains`,
 `InitGitTests.WithoutTheFlagTheDenIsAPlainFolder`.
 
+### SC-CLI-13. I copy a character to start another like her
+
+The writer runs `wolfden copy "Count Dracula" "Count Varga"`, then
+`wolfden copy "Mr. Swales" "Young Swales" --to dracula/aftermath` for a
+sequel book.
+
+- The copy is `count-varga.md` beside the original, with a new id, the
+  new name, and no aliases, and a whole-den `check` finds no duplicate
+  id. The output names the new file and says what the copy means, as
+  `copy_entity` does (SC-MCP-28). `--to` takes a universe, or
+  `<universe>/<key>` for one of its series or books
+  (`<universe>/book:<key>` when a series shares the key). With one
+  universe, `--to aftermath` (or `--to book:aftermath`) is enough, but
+  `--to dracula` names both the universe and its book, so it's refused,
+  suggesting `dracula/` or `dracula/book:dracula`, and with a series
+  `dracula` too, `dracula/series:dracula` as well. With two universes, a bare book key isn't a
+  universe, and the error says how to name it. A `den.yaml` that
+  doesn't load is said as such. `--json` prints the write result.
+- A copy into a final book, or one that would take another note's
+  links without `--allow-relinks`, exits 2 and writes nothing. Errors
+  name the command's options and commands (`--allow-relinks`,
+  `--slug`, `wolfden query`), not the MCP tool's parameters, and a copy
+  named "Count allow_relinks" is reported by that name, in text and
+  JSON.
+
+Spec: format.md F-ID-3, F-ID-4, design.md §7, §8 (#129). Covered by:
+`CopyCommandTests.ACopyGoesBesideTheOriginalWithANewIdAndSaysWhatItMeans`,
+`CopyCommandTests.ToNamesTheUniverseOrOneOfItsSeriesOrBooks`,
+`CopyCommandTests.ARefusedCopyExitsTwoAndWritesNothing`,
+`CopyCommandTests.ADenWhoseDenYamlDoesntLoadSaysSo`,
+`CopyCommandTests.AKeyThatIsTheUniverseASeriesAndABookOffersEverySpelling`,
+`CopyCommandTests.ANameThatLooksLikeAParameterComesThroughAsWritten`,
+`CopyCommandTests.JsonPrintsTheWriteResult`.
+
 ## WATCH: keeping the index up to date while notes change
 
 Background: `wolfden index --watch` (design.md §7, #14) keeps the index up
@@ -2003,6 +2037,72 @@ decisions, 2026-10-25 and 2026-10-26). Covered by:
 `RenameEntityToolTests.RemovingAnAliasWhoseLinksWouldReachAnotherEntityIsRefusedWithItsOwnHint`,
 `RenameEntityToolTests.AnAliasThatTakesAnotherEntitysLinksIsRefusedUnlessAllowed`,
 `RenameEntityToolTests.AnAmbiguousLinkThatNowResolvesIsReportedNotRefused`.
+
+### SC-MCP-28. My assistant copies a character to start a new one
+
+The writer asks for another nobleman like the Count, Count Varga, and
+for Mr. Swales's son in a sequel book, Aftermath. Later they start a
+legend universe and want a Swales there too.
+
+- `copy_entity` writes `count-varga.md` beside the Count: a new id that
+  no note in the den uses (one that clashes is tried again), the name
+  Count Varga, his title heading, and no aliases, which stay the
+  Count's ("Dracula", "the Count", "Count de Ville"), and the result
+  says so. Everything else is the Count's, byte for byte, line endings
+  and byte order mark included, and the Count's own file is unchanged.
+  A second Count Varga gets `count-varga-2.md`, as does one whose file
+  name another file has in a different case; a slug asked for that's
+  taken is refused. "Ærin Søvik" gets `aerin-sovik.md`, and a name with
+  nothing to make a slug from uses the type key. A note without an id
+  gets one in its copy. Comment lines inside a block `aliases` list go
+  with it, and the result counts them. Only entities can be copied: `book.md`, an
+  outline, `universe.md`, or `den.yaml` is no entity. Links in the copy stay as they
+  are: one to Swales's own `#Arc` still reaches Swales, and the result
+  counts it.
+- Copied into Aftermath, Swales's son lands in
+  `aftermath/entities/characters/`, and copied into a series, Count
+  Varga lands in its `entities/characters/`. His `from`, `dracula:6`, is in
+  another book, which the result says and `check` reports (F-ENT-6). A
+  note without `from` copied there enters at the start of Aftermath,
+  not of the story, and the result says so. Nothing is copied into a
+  final book, but a note can be copied out of one.
+- Copied into the legend universe, the copy's `[[whitby]]` is broken
+  there (links don't cross universes), and its positions name books
+  the legend doesn't have: the result lists the broken link, with what
+  it reached in the original, and the positions, and the copy is made.
+  A session pinned to one universe can't copy into another.
+- Named "the Count", a copy of Swales would take a note's `[[the
+  Count]]` from Count Dracula, since a name matches before an alias:
+  refused, naming the link, unless `allow_relinks`, and then the result
+  lists it. Named "Mr. Swales" beside the original, the copy would
+  leave the note's `[[Mr. Swales]]` ambiguous (F-LINK-7), reaching
+  neither: refused the same way. So is a universe note's copy filed as
+  `notes/whitby.md`, which would tie with the location `whitby.md` for
+  every `[[whitby]]`, and a copy of Swales filed in the book as
+  `whitby.md`, whose nearer scope would take the book's `[[whitby]]`
+  from the location. A broken `[[Old Gale]]` that a copy named Old Gale
+  now mends is only reported. A stale `expected_hash` is refused.
+
+Spec: format.md F-ID-3, F-ID-4, F-ID-6, F-LINK-5, F-LINK-6, F-LINK-7,
+F-LINK-8, F-ENT-6, F-POS-4, F-BOOK-1, types.md F-TPL-6 (maintainer
+decisions, 2026-10-23 and 2026-10-26, #129). Covered by:
+`CopyEntityToolTests.ACopyGetsANewIdNameAndFileAndKeepsTheRest`,
+`CopyEntityToolTests.LinksInTheCopyAreLeftAsTheyAreAndThoseToTheOriginalAreSaid`,
+`CopyEntityToolTests.ACopyIntoAnotherScopeKeepsItsTypeFolderAndSaysWhereItEntersCanon`,
+`CopyEntityToolTests.NothingIsCopiedIntoAFinalBookButACopyOutOfOneIsFine`,
+`CopyEntityToolTests.ACopyIntoAnotherUniverseListsTheLinksThatBreak`,
+`CopyEntityToolTests.ACopyThatWouldTakeAnotherEntitysLinksIsRefusedUnlessAllowed`,
+`CopyEntityToolTests.ANameThatMakesALinkAmbiguousIsRefusedUnlessAllowedButMendingABrokenOneIsReported`,
+`CopyEntityToolTests.AFileNameThatTiesInTheSameScopeIsRefusedUnlessAllowed`,
+`CopyEntityToolTests.AFileNameInANearerScopeThatShadowsAnotherIsRefusedUnlessAllowed`,
+`CopyEntityToolTests.ACopyKeepsLineEndingsAndAByteOrderMark`,
+`CopyEntityToolTests.OnlyEntitiesCanBeCopied`,
+`CopyEntityToolTests.CommentLinesThatGoWithTheAliasesAreSaid`,
+`CopyEntityToolTests.ACopyIntoASeriesGoesInItsTypeFolder`,
+`CopyEntityToolTests.SlugsAreMadeAsTheTemplateRuleSaysAndCompareIgnoringCase`,
+`CopyEntityToolTests.ANoteWithoutAnIdGetsOneAndAStaleOrBadCopyIsRefused`,
+`CopyEntityToolTests.APinnedSessionCantCopyIntoAnotherUniverse`,
+`CopyEntityToolTests.ANewIdThatClashesIsTriedAgain`.
 
 ## STORE: Wolfden saves, moves, and deletes notes
 

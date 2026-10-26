@@ -65,6 +65,13 @@ public sealed partial class DenTools
     public Func<IHistoryProvider> History { get; init; } = () => NoHistory.Instance;
 
     /// <summary>
+    /// The words errors and effects use to advise what to do next: by
+    /// default the MCP tools' parameters and tools, or a command line's
+    /// options and commands (<see cref="ToolWords"/>).
+    /// </summary>
+    public ToolWords Words { get; init; } = ToolWords.Mcp;
+
+    /// <summary>
     /// The checkpoints that changed one entity's file, newest first, a page
     /// at a time, and optionally what changed in it since a checkpoint (or
     /// since the latest one). The entity is named as in <see cref="GetEntity"/>,
@@ -454,7 +461,7 @@ public sealed partial class DenTools
             {
                 throw new DenToolException(
                     ToolErrorCodes.DenNotLoaded,
-                    "den.yaml doesn't load, so nothing in the den can be read. Call the check tool to see why.");
+                    $"den.yaml doesn't load, so nothing in the den can be read. {ToolWords.Cap(Words.CheckTool)} to see why.");
             }
 
             return query(index);
@@ -527,7 +534,7 @@ public sealed partial class DenTools
                     _ => ToolErrorCodes.UniverseRequired,
                 },
                 e.Problem == UniverseChoiceProblem.UniverseRequired
-                    ? $"{e.Message} Give its key in 'universe'{(allowAll ? $", or '{AllUniverses}' for every universe" : "")}."
+                    ? $"{e.Message} Give its key {Words.Universe}{(allowAll ? $", or '{AllUniverses}' for every universe" : "")}."
                     : e.Message);
         }
 
@@ -543,7 +550,7 @@ public sealed partial class DenTools
     };
 
     /// <summary>Checks that the filter names one series or book of the universe, so any other view failure is the position's.</summary>
-    private static void CheckFilter(IndexDbContext db, ContainerRecord universe, CanonFilter? filter)
+    private static void CheckFilter(IndexDbContext db, ContainerRecord universe, CanonFilter? filter, ToolWords? words = null)
     {
         if (filter is null)
         {
@@ -563,7 +570,7 @@ public sealed partial class DenTools
             count == 0
                 ? $"Universe '{universe.Key}' has no {kind} '{filter.Key}'." +
                   (found.Count == 0 ? "" : $" Its {(kind == "series" ? "series" : "books")}: {string.Join(", ", found.Order(StringComparer.Ordinal))}.")
-                : $"More than one {kind} of universe '{universe.Key}' has the key '{filter.Key}' (F-KEY-5); run the check tool.");
+                : $"More than one {kind} of universe '{universe.Key}' has the key '{filter.Key}' (F-KEY-5); {(words ?? ToolWords.Mcp).CheckTool}.");
     }
 
     /// <summary>The canon view, with a bad filter or position as a tool error.</summary>
@@ -645,10 +652,10 @@ public sealed partial class DenTools
         return index.MatchEntities(universeId, name, amongPaths).ToList();
     }
 
-    private static DenToolException UnknownEntity(string name, string universe) => new(
+    private DenToolException UnknownEntity(string name, string universe) => new(
         ToolErrorCodes.UnknownEntity,
         $"No entity in universe '{universe}' matches '{name}' by id, path, file name, name, or alias. " +
-        "Use search or list_entities to find it.");
+        $"{ToolWords.Cap(Words.FindEntity)} to find it.");
 
     private static DenToolException Ambiguous(
         string name, IReadOnlyList<EntityRecord> matches, Dictionary<int, string> universes, Dictionary<int, ContainerRecord> scopes) =>

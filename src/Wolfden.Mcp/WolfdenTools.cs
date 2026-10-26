@@ -284,6 +284,29 @@ public sealed class WolfdenTools
         [Description(RelinksHelp)] bool allow_relinks = false) =>
         Respond(() => _tools.ChangeAlias(entity, alias, expected_hash, new_alias, keep_old_alias, universe, allow_relinks));
 
+    /// <summary>The <c>copy_entity</c> tool.</summary>
+    [McpServerTool(Name = "copy_entity", Title = "Copy an entity", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
+    [Description(
+        "Copies an entity to start a new one from it, such as another character like this one. The copy gets a new id that no file in " +
+        "the den uses, new_name as its name, and a file name made from it (-2, -3 if taken), and no aliases (they stay the original's); a " +
+        "title heading that reads the old name takes the new one. Its type, fields, sections, status, and from and until are kept, and " +
+        "links in it are left as they are. It's filed beside the original, or in to_universe, to_series, or to_book, in the original's " +
+        "folder path under entities/; never into a final (frozen) book. Copied into another universe, links that break there are listed in effects, not " +
+        "refused. A copy without 'from' enters canon at the start of where it's filed: effects say so. If the copy's name or file name " +
+        "would change which entity an existing link reaches (another one, or none because it becomes ambiguous), nothing is copied unless " +
+        "allow_relinks is true; a broken link the copy now mends is listed in effects. Use create_entity to start from the type's template instead." + WriteHelp)]
+    public CallToolResult CopyEntity(
+        [Description("The entity to copy: its name, an alias, its file name, its id, its key, or its path.")] string entity,
+        [Description("The copy's name.")] string new_name,
+        [Description(UniverseHelp + " This is the original's universe.")] string? universe = null,
+        [Description("Copy into this universe (its key), at universe scope unless to_series or to_book is given. By default, the original's.")] string? to_universe = null,
+        [Description("Copy into this series (its key).")] string? to_series = null,
+        [Description("Copy into this book (its key).")] string? to_book = null,
+        [Description("The copy's file name without .md: lowercase letters and digits with single hyphens. Leave it out to make one from new_name.")] string? slug = null,
+        [Description(RelinksHelp)] bool allow_relinks = false,
+        [Description("Optional: the original's hash from get_entity, to refuse the copy (stale_file) if it has changed since you read it.")] string? expected_hash = null) =>
+        Respond(() => _tools.CopyEntity(entity, new_name, universe, to_universe, to_series, to_book, slug, allow_relinks, expected_hash));
+
     private const string RelinksHelp =
         "If true, make the change even though links that reach another entity would change target; they're listed in the result's effects. " +
         "Check them with the writer first.";
