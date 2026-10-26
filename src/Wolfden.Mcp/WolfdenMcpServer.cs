@@ -42,9 +42,9 @@ public static class WolfdenMcpServer
         reader meets later. Use check for continuity problems, and get_history for the checkpoints that changed an entity and
         what changed since.
 
-        The write tools (create_entity, update_fields, append_section, add_idea, rename_section, rename_entity, change_alias,
+        The write tools (create_entity, update_fields, append_section, add_idea, rename_section, rename_entity, change_alias, copy_entity,
         move_entity, update_chapter_fields, update_chapter_defaults) change the den's files, keeping everything they don't change as the
-        writer wrote it. A rename or a move rewrites the links that depend on it, in the same change. Each edit
+        writer wrote it. A rename or a move rewrites the links that depend on it, in the same change, and a copy gets a new id. Each edit
         of an existing file takes the hash the file had when you read it (from get_entity, get_chapter, get_chapter_defaults, or
         your last write), and is refused if the file has changed since. An edit that would leave an error is refused, and
         nothing in a final (frozen) book can be changed. Edits to hard canon are allowed, but the result lists them: check them

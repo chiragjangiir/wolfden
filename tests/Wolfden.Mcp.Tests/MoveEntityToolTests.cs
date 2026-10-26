@@ -30,7 +30,7 @@ public sealed class MoveEntityToolTests : IDisposable
     public void Dispose() => _den.Dispose();
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void ABookEntityWithNoFromMovedUpGetsTheEntryPointItHadAsItsFrom()
     {
         const string Old = Ash + "/entities/characters/ilse-brandt.md";
@@ -62,7 +62,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void AMoveThatStartsAtTheSamePointWritesNoFrom()
     {
         const string Old = Series + "/entities/characters/oren-tal.md";
@@ -79,7 +79,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void ANarrowingMoveOutsideTheEntryPointIsRefusedNamingBothWaysForward()
     {
         var before = _den.Read(Mara);
@@ -99,7 +99,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void KeepEntryKeepsTheFromAndItsWarning()
     {
         var hash = Tools.GetEntity("Mara Voss", Universe).Entity!.Hash!;
@@ -116,7 +116,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void EnterAtNewScopeTakesTheFromOutAndFlagsPinnedCanon()
     {
         var hash = Tools.GetEntity("Mara Voss", Universe).Entity!.Hash!;
@@ -131,7 +131,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void ASeriesEntityWithNoFromMovedIntoItsSecondBookWritesTheSeriesStartWithKeepEntry()
     {
         _den.Write(Series + "/entities/characters/oren-tal.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z2\ntype: character\nname: Oren Tal\nstatus: canon\n---\n");
@@ -147,7 +147,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void AnEntryPointNoPositionCanNameNeedsEnterAtNewScope()
     {
         // The Drift War has no books, and none comes after it.
@@ -165,7 +165,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void LinksThatWouldStopReachingItAreRewrittenToItsId()
     {
         // A namesake in A Quiet Moon: links from the Long Dark reach the series' Tessaly only because it's nearer.
@@ -187,7 +187,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void ALinkToRewriteInAFinalBookStopsTheMove()
     {
         _den.Write(Moon + "/entities/ships/tessaly.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z4\ntype: ship\nname: Tessaly\nstatus: canon\nfrom: a-quiet-moon\n---\n");
@@ -211,7 +211,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void ALinkThatWouldReachAnotherEntityIsRefusedUnlessAllowed()
     {
         var before = _den.Read(LanternShip);
@@ -230,7 +230,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void TheMovedFilesOwnLinksCountToo()
     {
         // Moved to the universe, Pike's [[Lantern]] no longer has the Ash item in its scope chain.
@@ -244,7 +244,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void AnAmbiguousLinkThatNowResolvesIsReported()
     {
         // The Reach's [[Lantern]] is ambiguous between the ship and the item; with the ship in the universe, it reaches the ship.
@@ -260,7 +260,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void AFileAlreadyThereStopsTheMove()
     {
         const string Taken = Root + "/entities/characters/mara-voss.md";
@@ -275,7 +275,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void AMoveThatFailsPartWayPutsBackWhatItWrote()
     {
         _den.Write(Moon + "/entities/ships/tessaly.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z4\ntype: ship\nname: Tessaly\nstatus: canon\nfrom: a-quiet-moon\n---\n");
@@ -311,7 +311,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void TheDenNeverHoldsTwoCopiesOrNoneWhileItMoves()
     {
         var hash = Tools.GetEntity(Mara, Universe).Entity!.Hash!;
@@ -327,7 +327,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void EnterAtNewScopeForAnEntryAfterItSaysItEntersEarlier()
     {
         _den.Write(Ash + "/entities/characters/sash-orel.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z8\ntype: character\nname: Sash Orel\nstatus: canon\nfrom: \"ash:2\"\n---\n");
@@ -345,7 +345,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void AnEntityWithoutAnIdGetsOneAndOtherArgumentsAreChecked()
     {
         _den.Write(Ash + "/entities/notes/cargo-list.md", "---\ntype: note\nname: Cargo list\nstatus: draft\nfrom: \"ash:2\"\n---\n");
@@ -364,7 +364,7 @@ public sealed class MoveEntityToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void RowIdsThatNowResolveElsewhereAreSaid()
     {
         _den.Write(Ash + "/entities/events/the-ambush.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z7\ntype: event\nname: The ambush\nstatus: canon\nfrom: \"ash:1\"\nfields:\n  row: \"3\"\n---\n");

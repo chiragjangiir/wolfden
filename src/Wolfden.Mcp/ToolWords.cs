@@ -1,0 +1,33 @@
+using System.Globalization;
+
+namespace Wolfden.Mcp;
+
+/// <summary>
+/// The words <see cref="DenTools"/> uses when its errors and effects advise
+/// what to do next: the names of parameters and of the tools to call. An
+/// MCP client gets the tools' own (<see cref="Mcp"/>); a command line that
+/// runs the same tools, such as <c>wolfden copy</c>, gives its options and
+/// commands instead, so its messages never name a parameter it doesn't have.
+/// </summary>
+/// <param name="AllowRelinks">How to make a change that relinks anyway, after "or": <c>pass allow_relinks: true</c>.</param>
+/// <param name="NewName">Where a new name goes, after "Give the copy's name": <c>in 'new_name'</c>.</param>
+/// <param name="Slug">What sets a file name: <c>slug</c>.</param>
+/// <param name="Universe">Where a universe key goes, after "Give its key": <c>in 'universe'</c>.</param>
+/// <param name="FindEntity">How to find an entity, lowercase: <c>use search or list_entities</c>.</param>
+/// <param name="CheckDen">How to see more of what check reports, lowercase: <c>call check</c>.</param>
+/// <param name="CheckTool">How to see why the den doesn't load, lowercase: <c>call the check tool</c>.</param>
+/// <param name="CheckPath">How to see one file's errors, lowercase, with <c>{0}</c> for its path: <c>call check with path '{0}'</c>.</param>
+public sealed record ToolWords(
+    string AllowRelinks, string NewName, string Slug, string Universe, string FindEntity, string CheckDen, string CheckTool, string CheckPath)
+{
+    /// <summary>The MCP tools' own words, the default.</summary>
+    public static ToolWords Mcp { get; } = new(
+        "pass allow_relinks: true", "in 'new_name'", "slug", "in 'universe'", "use search or list_entities", "call check", "call the check tool",
+        "call check with path '{0}'");
+
+    /// <summary><see cref="CheckPath"/> for <paramref name="path"/>.</summary>
+    public string CheckFile(string path) => string.Format(CultureInfo.InvariantCulture, CheckPath, path);
+
+    /// <summary><paramref name="words"/> with its first letter capitalized, to start a sentence.</summary>
+    public static string Cap(string words) => words.Length == 0 ? words : char.ToUpperInvariant(words[0]) + words[1..];
+}

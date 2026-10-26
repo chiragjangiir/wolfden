@@ -15,7 +15,7 @@ public sealed class McpServerTests : IAsyncLifetime
     private static readonly string[] ReadToolNames = ["canon_as_of", "check", "get_chapter", "get_chapter_defaults", "get_entity", "get_history", "list_entities", "search"];
 
     private static readonly string[] WriteToolNames =
-        ["add_idea", "append_section", "change_alias", "checkpoint", "create_entity", "move_entity", "rename_entity", "rename_section", "update_chapter_defaults", "update_chapter_fields", "update_fields"];
+        ["add_idea", "append_section", "change_alias", "checkpoint", "copy_entity", "create_entity", "move_entity", "rename_entity", "rename_section", "update_chapter_defaults", "update_chapter_fields", "update_fields"];
 
     private readonly TempDen _den = TempDen.Dracula();
     private readonly StringWriter _log = new();

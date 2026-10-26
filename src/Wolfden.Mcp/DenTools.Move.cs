@@ -63,7 +63,7 @@ public sealed partial class DenTools
             var catalog = EntityCatalog.Load(structure, den);
             var target = catalog.FindByPath(path) ?? throw (den.FileExists(path)
                 ? new DenToolException(
-                    ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be moved here. Call check with path '{path}' to see them.")
+                    ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be moved here. {ToolWords.Cap(Words.CheckFile(path))} to see them.")
                 : Gone(path));
             var original = target.File.ToBytes();
             CheckHash(path, original, hash);
@@ -141,7 +141,7 @@ public sealed partial class DenTools
                 throw new DenToolException(
                     ToolErrorCodes.BadArgument,
                     $"{lost.Count} link(s) to '{target.Name}' wouldn't reach it after the move, even by its id: " +
-                    $"{string.Join("; ", lost.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} would {Outcome(l.After)}"))}. Nothing was changed. Call check to see why.");
+                    $"{string.Join("; ", lost.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} would {Outcome(l.After)}"))}. Nothing was changed. {ToolWords.Cap(Words.CheckDen)} to see why.");
             }
 
             // Links that reached another entity and wouldn't any more, or would reach another
@@ -162,7 +162,7 @@ public sealed partial class DenTools
                     $"{relinked.Count} link(s) would change which entity they reach once '{target.Name}' is in {EntityMove.Describe(scope)}: " +
                     $"{string.Join("; ", relinked.Take(ListedLinkChanges).Select(l => $"{Where(l.After)}{(InFinalBook(l.Before) ? " (in a final book)" : "")} reaches {Reached(l.Before)} and would {Outcome(l.After)}"))}" +
                     $"{(relinked.Count > ListedLinkChanges ? $"; and {relinked.Count - ListedLinkChanges} more" : "")}. Nothing was changed. " +
-                    "Link those by id or file name first, or pass allow_relinks: true to move it anyway.");
+                    $"Link those by id or file name first, or {Words.AllowRelinks} to move it anyway.");
             }
 
             var frozenRelinks = relinked.Where(l => InFinalBook(l.Before)).ToList();
@@ -193,7 +193,7 @@ public sealed partial class DenTools
             effects.AddRange(plan.Changes.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} {Now(l.After)}; before, it {Was(l.Before)}."));
             if (plan.Changes.Count > ListedLinkChanges)
             {
-                effects.Add($"And {plan.Changes.Count - ListedLinkChanges} more link(s) resolve differently now. Call check to see them.");
+                effects.Add($"And {plan.Changes.Count - ListedLinkChanges} more link(s) resolve differently now. {ToolWords.Cap(Words.CheckDen)} to see them.");
             }
 
             // Row ids resolve among the outlines of the entity's series or standalone book, or the whole universe (F-FLD-7).

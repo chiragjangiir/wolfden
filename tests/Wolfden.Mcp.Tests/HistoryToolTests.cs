@@ -243,7 +243,7 @@ public sealed class HistoryToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     [Trait("Scenario", "SC-MCP-22")]
     public void AMovedFilesOldPathIsTheSessionsWhenGitSeesADeleteAndAnAdd()
     {
@@ -265,7 +265,7 @@ public sealed class HistoryToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     [Trait("Scenario", "SC-MCP-22")]
     public void AMoveTheWriterCommittedElsewhereIsForgottenAtTheNextCheckpoint()
     {
@@ -294,7 +294,7 @@ public sealed class HistoryToolTests : IDisposable
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     [Trait("Scenario", "SC-MCP-22")]
     public void AFileTheSessionEditedThenMovedIsntChangedOutsideIt()
     {

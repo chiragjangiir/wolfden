@@ -44,7 +44,7 @@ internal static class CliApp
     internal static Wolfden.Git.GitOptions Git { get; set; } = Wolfden.Git.GitOptions.Default;
 
     /// <summary>Commands that work, in the order the usage lists them.</summary>
-    internal static readonly string[] Commands = ["init", "check", "index", "query", "new-id", "mcp"];
+    internal static readonly string[] Commands = ["init", "check", "index", "query", "copy", "new-id", "mcp"];
 
     /// <summary>Commands planned for v0 that aren't implemented yet.</summary>
     internal static readonly string[] PlannedCommands = ["serve"];
@@ -66,6 +66,8 @@ internal static class CliApp
           index [<den>]            rebuild the den's index from its files
                                    (--watch keeps it up to date as files change)
           query [<universe>]       show canon as of a story position (--at book:chapter)
+          copy <entity> <name>     copy an entity under a new name, with a new id
+                                   (--to <scope> puts it elsewhere)
           new-id [<count>]         print new ids for files made by hand
           mcp [<den>]              run the MCP server over stdio for an AI client
 
@@ -115,6 +117,8 @@ internal static class CliApp
                 return IndexCommand.Run(rest, output, error, stop);
             case ["query", .. var rest]:
                 return QueryCommand.Run(rest, output, error);
+            case ["copy", .. var rest]:
+                return CopyCommand.Run(rest, output, error);
             case ["new-id", .. var rest]:
                 return NewIdCommand.Run(rest, output, error);
             case ["mcp", .. var rest]:

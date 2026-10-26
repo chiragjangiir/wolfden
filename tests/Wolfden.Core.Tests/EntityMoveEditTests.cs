@@ -13,7 +13,7 @@ public class EntityMoveEditTests
     private const string Id = "01JA7Q8M4XK3V9R2D5W8HN6TQE";
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void ALinkRewrittenToAnIdShowsTheSameText()
     {
         Assert.Equal($"[[{Id}|Tessaly]]", LinkSyntax.WithIdTarget("[[Tessaly]]", Id, inTableRow: false));
@@ -26,7 +26,7 @@ public class EntityMoveEditTests
     }
 
     [Theory]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     [InlineData("| a | [[X]] |\n", true)]
     [InlineData("  | a | [[X]] |\n", true)]
     [InlineData("a | b\n--- | ---\nc | [[X]]\n", true)]
@@ -51,7 +51,7 @@ public class EntityMoveEditTests
     }
 
     [Fact]
-    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-29")]
     public void AnOverlayCanLeaveAFileOut()
     {
         var den = new MemoryDenSource().With("a/old.md", "old").With("a/kept.md", "kept");
