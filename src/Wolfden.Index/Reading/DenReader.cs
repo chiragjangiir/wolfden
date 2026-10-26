@@ -166,21 +166,28 @@ public sealed class DenReader
     }
 
     /// <summary>
-    /// Full-text search over names, aliases, leads, and section text, every
-    /// status included. Words match whole, in any order, ignoring case and
-    /// accents; a word ending in <c>*</c> matches as a prefix.
+    /// Full-text search over names, aliases, leads, section text, and field
+    /// values, every status included. Words match whole, in any order,
+    /// ignoring case and accents; a word ending in <c>*</c> matches as a
+    /// prefix. A field value's words are its own, as written, and for a link
+    /// the linked note's name and aliases too (maintainer decision on #179).
+    /// With <paramref name="field"/>, only that field's values are searched.
     /// </summary>
     /// <remarks>
-    /// The MCP <c>search</c> tool gives the first five parameters. The web
-    /// API also narrows the hits to entities of one <paramref name="status"/>,
-    /// to the entities a <paramref name="series"/> or <paramref name="book"/>
-    /// filter covers (as in a canon view, F-VIEW-1), or to what the reader
-    /// has met by <paramref name="asOf"/>: hits in the entities and sections
-    /// of the canon-as-of view there.
+    /// The MCP <c>search</c> tool gives the first five parameters and
+    /// <paramref name="field"/>. The web API also narrows the hits to
+    /// entities of one <paramref name="status"/>, to the entities a
+    /// <paramref name="series"/> or <paramref name="book"/> filter covers (as
+    /// in a canon view, F-VIEW-1), or to what the reader has met by
+    /// <paramref name="asOf"/>: hits in the entities, sections, and field
+    /// values of the canon-as-of view there. As of a position, a link
+    /// matches by its note's name or alias only when the reader has met
+    /// that note, so a search never confirms the name of one they haven't.
+    /// Hits in field values come after the others.
     /// </remarks>
     public SearchResult Search(
         string query, string? universe = null, string? type = null, bool canonOnly = false, int limit = 20,
-        string? status = null, string? series = null, string? book = null, string? asOf = null)
+        string? status = null, string? series = null, string? book = null, string? asOf = null, string? field = null)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -190,6 +197,7 @@ public sealed class DenReader
         CheckLimit(limit, 200);
         CheckStatus(status);
         var filter = Filter(series, book);
+        var fieldName = string.IsNullOrWhiteSpace(field) ? null : field.Trim();
         return WithIndex(index =>
         {
             var db = index.Context;
@@ -207,13 +215,19 @@ public sealed class DenReader
                 CheckTypes(db, universeId, [type], listUsed: asOf is null);
             }
 
+            if (fieldName is not null)
+            {
+                CheckField(db, universeId, fieldName);
+            }
+
             // The entities (by path) a filter or position keeps, and for a
             // position the lines of the sections in effect there.
             HashSet<string>? kept = null;
             Dictionary<string, HashSet<int>>? sectionsInView = null;
+            CanonView? view = null;
             if (asOf is not null)
             {
-                var view = CanonView(index, one!.Key, asOf, filter);
+                view = CanonView(index, one!.Key, asOf, filter);
                 kept = view.Entities.Select(e => e.Path).ToHashSet(StringComparer.Ordinal);
                 sectionsInView = view.Entities.ToDictionary(e => e.Path, e => e.Sections.Select(s => s.Line).ToHashSet(), StringComparer.Ordinal);
             }
@@ -223,33 +237,98 @@ public sealed class DenReader
                 kept = index.Entities(one!.Key, filter).Select(e => e.Path).ToHashSet(StringComparer.Ordinal);
             }
 
+            var scopes = Scopes(db);
+            var views = new List<SearchHitView>();
+
             // Filters apply after the search, so ask for more when there are
             // any; one more than the cap says whether the raw hits were cut off,
             // and one more than the limit whether the filtered ones were.
             var filtered = (universeId is not null && universes.Count > 1) || type is not null || canonOnly || status is not null || kept is not null;
             var cap = filtered ? Math.Max(limit * 20, 1000) : limit;
-            var hits = index.Search(query, cap + 1);
-            var paths = hits.Select(h => h.EntityPath).Distinct().ToList();
-            var entities = db.Entities.Where(e => paths.Contains(e.Path)).ToList().ToDictionary(e => e.Path, StringComparer.Ordinal);
-            var scopes = Scopes(db);
-            var views = hits
-                .Where(h => entities.ContainsKey(h.EntityPath))
-                .Select(h => (Hit: h, Entity: entities[h.EntityPath]))
-                .Where(x => universeId is null || x.Entity.UniverseId == universeId)
-                .Where(x => type is null || x.Entity.Type == type)
-                .Where(x => !canonOnly || x.Hit.IsInCanon)
-                .Where(x => status is null || x.Entity.Status == status)
-                .Where(x => kept is null || kept.Contains(x.Entity.Path))
-                .Where(x => sectionsInView is null || x.Hit.SectionLine is not { } line || sectionsInView[x.Entity.Path].Contains(line))
-                .Take(limit + 1)
-                .Select(x => new SearchHitView(
-                    Summary(x.Entity, universes, scopes), x.Hit.SectionName, x.Hit.SectionLine, x.Hit.Snippet, x.Hit.Status, x.Hit.IsInCanon, x.Hit.InComment))
-                .ToList();
+            var cutOff = false;
+            if (fieldName is null)
+            {
+                var hits = index.Search(query, cap + 1);
+                cutOff = hits.Count > cap;
+                var paths = hits.Select(h => h.EntityPath).Distinct().ToList();
+                var entities = db.Entities.Where(e => paths.Contains(e.Path)).ToList().ToDictionary(e => e.Path, StringComparer.Ordinal);
+                views.AddRange(hits
+                    .Where(h => entities.ContainsKey(h.EntityPath))
+                    .Select(h => (Hit: h, Entity: entities[h.EntityPath]))
+                    .Where(x => universeId is null || x.Entity.UniverseId == universeId)
+                    .Where(x => type is null || x.Entity.Type == type)
+                    .Where(x => !canonOnly || x.Hit.IsInCanon)
+                    .Where(x => status is null || x.Entity.Status == status)
+                    .Where(x => kept is null || kept.Contains(x.Entity.Path))
+                    .Where(x => sectionsInView is null || x.Hit.SectionLine is not { } line || sectionsInView[x.Entity.Path].Contains(line))
+                    .Take(limit + 1)
+                    .Select(x => new SearchHitView(
+                        Summary(x.Entity, universes, scopes), x.Hit.SectionName, x.Hit.SectionLine, x.Hit.Snippet, x.Hit.Status, x.Hit.IsInCanon,
+                        x.Hit.InComment)
+                    {
+                        Text = x.Hit.Text,
+                        Matches = x.Hit.Matches,
+                    }));
+            }
+
+            // Field values come after the text hits, so they're only worth
+            // matching while there's room, and while no text hit past the
+            // cap could still come before them.
+            if (views.Count <= limit && !cutOff)
+            {
+                var met = view is null ? null : filter is null ? kept : CanonView(index, one!.Key, asOf, null).Entities.Select(e => e.Path).ToHashSet(StringComparer.Ordinal);
+                var search = new FieldSearch(index, SearchWords.Parse(query), universeId, fieldName, met);
+                var candidates = view is null
+                    ? search.AllValues(e => (type is null || e.Type == type) && (status is null || e.Status == status) && (kept is null || kept.Contains(e.Path)))
+                    : search.ValuesIn(view, e => (type is null || e.Type == type) && (status is null || e.Status == status));
+                views.AddRange(candidates
+                    .Where(c => !canonOnly || c.Status is "draft" or "canon")
+                    .Select(search.Match)
+                    .OfType<FieldHit>()
+                    .Take(limit + 1 - views.Count)
+                    .Select(h => new SearchHitView(
+                        Summary(h.Entity, universes, scopes), null, h.Line, h.Snippet.Bracketed(), h.Status, h.Status is "draft" or "canon", false, h.Field)
+                    {
+                        Text = h.Snippet.Text,
+                        Matches = h.Snippet.Matches,
+                    }));
+            }
+
             // Raw hits past the cap may hold more that pass the filters.
-            var truncated = views.Count > limit || hits.Count > cap;
+            var truncated = views.Count > limit || cutOff;
             views = views.Take(limit).ToList();
             return new SearchResult(ResultVersion, query, views.Count, truncated, views);
         });
+    }
+
+    /// <summary>
+    /// The names of the fields notes give values for (#179), for a search's
+    /// field filter: every field of the universe's notes, or as of
+    /// <paramref name="asOf"/> only the fields of values in the canon view
+    /// there, so a field only later notes use isn't named.
+    /// </summary>
+    public FieldNamesResult FieldNames(string? universe = null, string? asOf = null) => WithIndex(index =>
+    {
+        var db = index.Context;
+        var u = ChooseUniverse(db, universe, asOf, allowAll: false)!;
+        var names = asOf is null
+            ? db.FieldValues.Where(v => v.UniverseId == u.Id).Select(v => v.Field).Distinct().ToList()
+            : CanonView(index, u.Key, asOf, null).Entities.SelectMany(e => e.Fields).Where(f => !f.IsDefault).Select(f => f.Name).Distinct().ToList();
+        names.Sort(StringComparer.Ordinal);
+        return new FieldNamesResult(ResultVersion, asOf, names.Count, names);
+    });
+
+    /// <summary>
+    /// Refuses a field no note of the universe (or of the den, for every
+    /// universe) gives a value for. It doesn't list the fields that are, as
+    /// some may be only later notes'.
+    /// </summary>
+    private static void CheckField(IndexDbContext db, int? universeId, string field)
+    {
+        if (!db.FieldValues.Any(v => v.Field == field && (universeId == null || v.UniverseId == universeId)))
+        {
+            throw new DenToolException(ToolErrorCodes.BadArgument, $"No note gives a value for a field '{field}', so there's nothing to search in it.");
+        }
     }
 
     /// <summary>

@@ -139,6 +139,50 @@ public sealed class SearchTests : IClassFixture<SearchTests.Built>
     }
 
     [Fact]
+    [Trait("Scenario", "SC-WEB-24")]
+    public void MatchesAreRangesInTheTextSoTheNotesOwnBracketsAndControlCharactersCantPassForThem()
+    {
+        var hit = Assert.Single(_index.Search("watch"));
+
+        Assert.Equal("Rung on the [[the Gull|keeper]]'s  watch  [twice].\n", hit.Text);
+        var match = Assert.Single(hit.Matches);
+        Assert.Equal("watch", hit.Text.Substring(match.Start, match.Length));
+        Assert.Equal("Rung on the [[the Gull|keeper]]'s  [watch]  [twice].\n", hit.Snippet);
+
+        // A word in the note's own brackets is a match like any other.
+        var twice = Assert.Single(_index.Search("twice"));
+        Assert.Equal("twice", twice.Text.Substring(twice.Matches[0].Start, twice.Matches[0].Length));
+        Assert.Contains("[[twice]]", twice.Snippet, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MarkedTextReadsMarksAndJoinsMatchesThatTouch()
+    {
+        var marked = MarkedText.FromMarks("a \u0001b\u0002\u0001c\u0002 [d]", MarkedText.Open, MarkedText.Close);
+
+        Assert.Equal("a bc [d]", marked.Text);
+        Assert.Equal([new TextMatch(2, 2)], marked.Matches);
+        Assert.Equal("a [bc] [d]", marked.Bracketed());
+        Assert.Equal("x\ty \nz", MarkedText.WithoutMarks("x\ty\u0001\nz"));
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-MCP-30")]
+    [InlineData("zoe", "Zoë Arkwright", true)]
+    [InlineData("ARKW*", "Zoë Arkwright", true)]
+    [InlineData("arkw", "Zoë Arkwright", false)]
+    [InlineData("salt-marsh", "the Salt Marsh docks", true)]
+    [InlineData("marsh-salt", "the Salt Marsh docks", false)]
+    [InlineData("docks salt", "the Salt Marsh docks", true)]
+    [InlineData("[[x]]", "[[x]]", true)]
+    public void SearchWordsMatchFieldTextAsTheSearchTableDoes(string query, string text, bool matches)
+    {
+        var words = SearchWords.Parse(query);
+
+        Assert.Equal(matches, words.Find(text).All(found => found.Count > 0));
+    }
+
+    [Fact]
     public void PrefixesMatchWithAStar()
     {
         Assert.Single(_index.Search("tidew*"));
@@ -178,6 +222,9 @@ public sealed class SearchTests : IClassFixture<SearchTests.Built>
                     Maybe she was a smuggler.
 
                     """,
+                // Brackets of its own, and the control characters a snippet marks matches with (#179).
+                ["universes/coast/entities/items/brass-bell.md"] =
+                    "---\ntype: item\nname: Brass Bell\n---\n\nRung on the [[the Gull|keeper]]'s \u0001watch\u0002 [twice].\n",
             });
             Index = DenIndex.Open(Den.Root);
         }

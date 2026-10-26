@@ -519,12 +519,17 @@ internal sealed class IndexWriter
 
     /// <summary>
     /// A search row. HTML comments (F-SEC-11) are searchable, in a column of
-    /// their own, so a hit can say it came from one.
+    /// their own, so a hit can say it came from one. Control characters other
+    /// than line breaks and tabs become spaces (the tokenizer reads them as
+    /// spaces anyway), so the marks a snippet puts around its matches
+    /// (<see cref="DenIndex.SearchMatch"/>) can't also be a note's text.
     /// </summary>
     private SearchRow Search(string path, int key, string title, string body, string kind, int entityId, int? sectionId)
     {
         var (text, notes) = MarkdownComments.Split(body);
-        return new SearchRow(_ids.Search.Take(path, key), title, text.TrimStart('\r', '\n'), notes, kind, entityId, sectionId);
+        return new SearchRow(
+            _ids.Search.Take(path, key), MarkedText.WithoutMarks(title), MarkedText.WithoutMarks(text.TrimStart('\r', '\n')),
+            MarkedText.WithoutMarks(notes), kind, entityId, sectionId);
     }
 
     private void WriteLinks(LinkIndex links)

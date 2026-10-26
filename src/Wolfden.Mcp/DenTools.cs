@@ -86,8 +86,9 @@ public sealed partial class DenTools
         Reader.GetHistory(entity, universe, limit, before, diff, diffFrom);
 
     /// <summary>Full-text search. See <see cref="DenReader.Search"/>.</summary>
-    public SearchResult Search(string query, string? universe = null, string? type = null, bool canonOnly = false, int limit = 20) =>
-        Reader.Search(query, universe, type, canonOnly, limit);
+    public SearchResult Search(
+        string query, string? universe = null, string? type = null, bool canonOnly = false, int limit = 20, string? field = null) =>
+        Reader.Search(query, universe, type, canonOnly, limit, field: field);
 
     /// <summary>One entity, in the full view or as of a position. See <see cref="DenReader.GetEntity(string, string?, string?)"/>.</summary>
     public GetEntityResult GetEntity(string entity, string? universe = null, string? asOf = null) => Reader.GetEntity(entity, universe, asOf);
