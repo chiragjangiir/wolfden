@@ -1841,11 +1841,15 @@ decisions, 2026-10-23, 2026-10-25). Covered by:
   its folder.
 - A universe-scope Mara Voss means `[[mara-voss]]` in the universe's
   defaults isn't the series' Mara Voss, so setting the same text in the
-  series' defaults changes `ash`'s POV, and is refused.
+  series' defaults changes `ash`'s POV, and is refused. Links are
+  compared by their text and by the entity they reach, so a different
+  spelling of the same link counts as a change too.
 - If `ash` is frozen while the edit is being made, the write is refused
-  as `stale_file`. If `ash`'s `book.md` has errors, so the den leaves it
-  out, but it says `status: final`, the edit is refused too; a draft
-  book with errors doesn't stop it.
+  as `stale_file`, saying to call `get_chapter_defaults` again. If
+  `ash`'s `book.md` has errors, so the den leaves it out, but it says
+  `status: final`, the edit is refused too; a draft book with errors
+  doesn't stop it, and the result says its chapters will inherit the
+  edit once it's fixed.
 
 Spec: format.md F-BOOK-1, F-KEY-5, types.md F-CHAP-4, F-CHAP-5 (#151).
 Covered by:

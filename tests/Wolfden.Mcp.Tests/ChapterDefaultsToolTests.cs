@@ -190,6 +190,9 @@ public sealed class ChapterDefaultsToolTests : IDisposable
         _den.Write(Ash, "---\nid: 01JAQKFBF5KZNWJ47TAN9ZT24N\nname: Ash\nchapters: [1, 2, 3, 4, epilogue]\n---\n");
         var made = Tools.UpdateChapterDefaults(series.Hash, change, "starfall", series: "long-dark");
         Assert.Contains("Book 'ash': chapters 1–epilogue now have pov [[mara-voss]].", made.Effects);
+
+        // The same text names another Mara Voss, so it isn't "as the universe's does".
+        Assert.Equal("Series 'long-dark' chapter_defaults now sets pov: [[mara-voss]], in place of [[mara-voss]] from universe 'starfall' chapter_defaults.", made.Effects[0]);
     }
 
     [Fact]
@@ -207,7 +210,8 @@ public sealed class ChapterDefaultsToolTests : IDisposable
             tools.UpdateChapterDefaults(series.Hash, Json("""[{"op": "set", "field": "tense", "value": "past"}]"""), "starfall", series: "long-dark"));
 
         Assert.Equal(ToolErrorCodes.StaleFile, stale.Code);
-        Assert.Contains(Ash, stale.Message, StringComparison.Ordinal);
+        Assert.Contains("A file below series 'long-dark' changed", stale.Message, StringComparison.Ordinal);
+        Assert.Contains("Call get_chapter_defaults again and retry.", stale.Message, StringComparison.Ordinal);
         Assert.Equal(before, _den.Read(LongDark + "/series.md"));
     }
 
@@ -227,7 +231,11 @@ public sealed class ChapterDefaultsToolTests : IDisposable
 
         // A draft book with errors isn't frozen.
         _den.Write(Ash, "---\nid: 01JAQKFBF5KZNWJ47TAN9ZT24N\nname: Ash\nchapters: { one: 1 }\n---\n");
-        Assert.True(Tools.UpdateChapterDefaults(series.Hash, change, "starfall", series: "long-dark").Changed);
+        var made = Tools.UpdateChapterDefaults(series.Hash, change, "starfall", series: "long-dark");
+        Assert.True(made.Changed);
+        Assert.Equal(
+            "Book 'ash' (universes/starfall/series/long-dark/books/ash) has errors, so the den leaves it out; its chapters will inherit this once it's fixed.",
+            made.Effects[^1]);
     }
 
     private void WriteUniverse(string extra) =>

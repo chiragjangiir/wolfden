@@ -35,9 +35,11 @@ namespace Wolfden.Mcp;
 /// can share a key, F-KEY-5); a final book whose chapters can't be paired
 /// before and after, and a <c>book.md</c> below that the den leaves out for
 /// errors but that says <c>status: final</c> (or whose frontmatter can't be
-/// read), stop the edit. A link in a value is compared by what it reaches
-/// from the container that holds it (types.md F-CHAP-4), so the same text
-/// naming another entity counts as a change. The <c>book.md</c> and
+/// read), stop the edit; a draft one that's left out is named in the
+/// effects. A link in a value is compared by its text and by the entity it
+/// reaches from the container that holds the value (types.md F-CHAP-4), so
+/// the same text naming another entity counts as a change, and so does a
+/// different spelling of the same link. The <c>book.md</c> and
 /// <c>series.md</c> files below are compared again just before the write,
 /// so a book frozen meanwhile isn't missed.
 /// </para>
@@ -127,18 +129,26 @@ public sealed partial class DenTools
                 new Lazy<LinkResolver>(() => new LinkResolver(EntityCatalog.Load(check.Structure, overlay))));
 
             // What the check below depends on, compared again just before the write.
-            var originals = new Dictionary<string, byte[]>(StringComparer.Ordinal) { [path] = original };
-            foreach (var (other, otherBytes) in FilesBelow(den, target))
+            var below = FilesBelow(den, target).Where(f => f.Path != path).ToList();
+            CheckFinalBooksBelow(edit, touched);
+            var unloaded = CheckUnloadedBooksBelow(den, structure, target);
+            BeforeDefaultsSave?.Invoke();
+            if (below.FirstOrDefault(f => Store.TryReadFile(f.Path) is not { } now || !now.AsSpan().SequenceEqual(f.Bytes)) is { Path: not null })
             {
-                originals.TryAdd(other, otherBytes);
+                throw new DenToolException(
+                    ToolErrorCodes.StaleFile,
+                    $"A file below {target.Kind.ToString().ToLowerInvariant()} '{target.Key}' changed while the edit was being made, " +
+                    "so nothing was written: which chapters are final, or what they inherit, may have changed. Call get_chapter_defaults again and retry.");
             }
 
-            CheckFinalBooksBelow(edit, touched);
-            CheckUnloadedBooksBelow(den, structure, target);
-            BeforeDefaultsSave?.Invoke();
-            Save(files, originals, created: null);
+            Save(files, new Dictionary<string, byte[]>(StringComparer.Ordinal) { [path] = original }, created: null);
 
             var effects = DefaultEffects(edit, touched);
+            effects.AddRange(unloaded.Select(p =>
+            {
+                var folder = p[..p.LastIndexOf('/')];
+                return $"Book '{folder[(folder.LastIndexOf('/') + 1)..]}' ({folder}) has errors, so the den leaves it out; its chapters will inherit this once it's fixed.";
+            }));
             if (idAdded is not null)
             {
                 effects.Add($"The file had no id, so it was given {idAdded} (F-ID-6).");
@@ -282,20 +292,18 @@ public sealed partial class DenTools
     /// Refuses the edit if a <c>book.md</c> below that the den leaves out for
     /// errors (it, or its series, doesn't load) says <c>status: final</c>, or
     /// its frontmatter can't be read, so it may be: its chapters would inherit
-    /// the edit once it's fixed.
+    /// the edit once it's fixed. Returns the draft ones, which don't stop it.
     /// </summary>
-    private static void CheckUnloadedBooksBelow(IDenSource den, DenStructure structure, Container container)
+    private static List<string> CheckUnloadedBooksBelow(IDenSource den, DenStructure structure, Container container)
     {
         var loaded = structure.Universes.SelectMany(u => u.Books).Select(b => b.FilePath).ToHashSet(StringComparer.Ordinal);
         var suspect = new List<string>();
+        var drafts = new List<string>();
         foreach (var (path, bytes) in FilesBelow(den, container).Where(f => f.Path.EndsWith("/book.md", StringComparison.Ordinal) && !loaded.Contains(f.Path)))
         {
             // Parsing never throws; frontmatter that doesn't parse is null.
             var frontmatter = MarkdownFile.Parse(bytes, requireFrontmatter: true).Frontmatter;
-            if (frontmatter is null || frontmatter["status"] is not (null or YamlScalar { IsNull: true } or YamlScalar { Text: "draft" }))
-            {
-                suspect.Add(path);
-            }
+            (frontmatter is null || frontmatter["status"] is not (null or YamlScalar { IsNull: true } or YamlScalar { Text: "draft" }) ? suspect : drafts).Add(path);
         }
 
         if (suspect.Count > 0)
@@ -306,6 +314,8 @@ public sealed partial class DenTools
                 $"would inherit this edit once they're fixed: {string.Join(", ", suspect)}. Nothing was changed. Call check to see the errors, " +
                 "and fix them first (F-BOOK-1).");
         }
+
+        return drafts;
     }
 
     /// <summary>What the edit means for the container and for each chapter below it, field by field.</summary>
@@ -324,7 +334,7 @@ public sealed partial class DenTools
             {
                 { IsNone: true } => $"{where} now sets {name}: [] (\"none here\"), so chapters below that don't set their own have no {name}" +
                     (aboveText is null ? "." : $", rather than inheriting {aboveText}. To inherit that again, clear the field."),
-                not null when above is not null && Describe(own) == Describe(above) => $"{where} now sets {name}: {Describe(own)}, as {Where(above.DefaultFrom!)} does.",
+                not null when above is not null && ValueKey(own, after, edit.AfterLinks) == ValueKey(above, above.DefaultFrom!, edit.AfterLinks) => $"{where} now sets {name}: {Describe(own)}, as {Where(above.DefaultFrom!)} does.",
                 not null => $"{where} now sets {name}: {Describe(own)}" + (aboveText is null ? "." : $", in place of {aboveText}."),
                 null when written => $"{where} writes {name}, but the value doesn't fit the field, so it's ignored and chapters inherit as if it weren't there (see the warnings).",
                 null => $"{where} no longer sets {name}" + (aboveText is null ? ", and no chapter_defaults above it does." : $", so its books inherit {aboveText}."),
@@ -433,23 +443,25 @@ public sealed partial class DenTools
 
     /// <summary>
     /// A chapter's effective value for a field, as text to compare, or null
-    /// if nothing sets it. A link in it is compared by the entity it reaches
-    /// from the container that holds the value (types.md F-CHAP-4), since the
-    /// same text in another container's defaults can name another entity.
+    /// if nothing sets it (see <see cref="ValueKey"/>).
     /// </summary>
-    private static string? EffectiveKey(Chapter chapter, string name, Lazy<LinkResolver> links)
-    {
-        if (chapter.Fields.GetValueOrDefault(name) is not { } value)
-        {
-            return null;
-        }
+    private static string? EffectiveKey(Chapter chapter, string name, Lazy<LinkResolver> links) =>
+        chapter.Fields.GetValueOrDefault(name) is { } value ? ValueKey(value, value.DefaultFrom ?? chapter.Book, links) : null;
 
+    /// <summary>
+    /// A value as text to compare. A link in it is compared by its text and
+    /// by the entity it reaches from <paramref name="scope"/>, the container
+    /// that holds the value (types.md F-CHAP-4), since the same text in
+    /// another container's defaults can name another entity, and a different
+    /// spelling of the same link counts as a change too.
+    /// </summary>
+    private static string ValueKey(ChapterFieldValue value, Container scope, Lazy<LinkResolver> links)
+    {
         if (value.IsNone)
         {
             return "[]";
         }
 
-        var scope = value.DefaultFrom ?? chapter.Book;
         return string.Join("\n", value.Items.Select(item =>
         {
             var text = JsonOf(item).GetRawText();
