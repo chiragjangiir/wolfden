@@ -31,6 +31,7 @@ namespace Wolfden.Api;
 /// machine (DNS rebinding), and the API refuses requests a browser marks as
 /// coming from another site (<see cref="CrossSiteGuard"/>). It sends no
 /// CORS headers, so a browser never lets another site read an answer.
+/// Every response has a Content-Security-Policy (<see cref="PagePolicy"/>, #180).
 /// Hosting for several users is a later phase (design.md §10), with its own
 /// authentication.
 /// </para>

@@ -1,12 +1,16 @@
-import { useMemo } from 'react'
+import { createContext, useContext, useMemo, type ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
-import type { LinkView } from '../api'
+import { denQuery, type LinkView } from '../api'
 import { WIKI_LINK, WikiLink, createLinkMatcher } from './Links'
 
 // Notes' markdown, rendered safely. react-markdown builds React elements
 // (never HTML strings), `skipHtml` drops any raw HTML in a note, and its URL
 // check drops `javascript:` and other unsafe links. `[[...]]` links become
-// in-app links through the API's resolved `links`.
+// in-app links through the API's resolved `links`. An image from a website
+// doesn't load unless den.yaml has `remote_images: true` (#180), so opening
+// a note doesn't tell that website the den was opened; the page's
+// Content-Security-Policy blocks it too, as a second line of defence.
 
 // The scheme of the links the plugin makes. It's random for each page load,
 // so a link written in a note can't pass for one.
@@ -66,8 +70,79 @@ function urlTransform(url: string, key: string): string {
   return key === 'href' && url.startsWith(WIKI_PROTOCOL) ? url : defaultUrlTransform(url)
 }
 
+/**
+ * Where an image's address leads: `local` if it resolves to this page's own
+ * server (a relative address, or one on this origin), or `remote`, with the
+ * full address, if it's on another site (`https:`, `http:`, `//host/...`,
+ * or a trick such as `\\host/...` that a browser reads as one). An address
+ * that doesn't parse is `remote` without one, so it never loads.
+ */
+export function imageSource(src: string, base: string = window.location.href): { kind: 'local' } | { kind: 'remote'; url: URL | null } {
+  let url: URL
+  try {
+    url = new URL(src, base)
+  } catch {
+    return { kind: 'remote', url: null }
+  }
+
+  return url.origin === new URL(base).origin ? { kind: 'local' } : { kind: 'remote', url }
+}
+
+/** True inside a note's link, where a placeholder mustn't hold a link of its own. */
+const InLink = createContext(false)
+
+/** What shows in place of an image from a website that doesn't load. */
+function BlockedImage({ src, alt, url }: { src: string; alt: string | undefined; url: URL | null }) {
+  const inLink = useContext(InLink)
+  const label = alt?.trim() ? `Image not loaded: ${alt.trim()}` : 'Image not loaded'
+  const web = url !== null && (url.protocol === 'https:' || url.protocol === 'http:')
+  return (
+    <span className="blocked-image" title="Images from websites don't load unless den.yaml has remote_images: true.">
+      <span className="blocked-image-label">{label}</span>{' '}
+      {web && !inLink ? (
+        <a href={url.href} target="_blank" rel="noopener noreferrer">
+          {src}
+        </a>
+      ) : (
+        <span className="blocked-image-address">{src}</span>
+      )}
+    </span>
+  )
+}
+
+/** A note's image: as written if it's local, and from a website only if the den allows it. */
+function Image({ src, alt, title, remoteImages }: { src: unknown; alt?: string; title?: string; remoteImages: boolean }) {
+  if (typeof src !== 'string') {
+    return null
+  }
+
+  const source = imageSource(src)
+  if (source.kind === 'local') {
+    return <img src={src} alt={alt} title={title} />
+  }
+
+  if (!remoteImages || !source.url) {
+    return <BlockedImage src={src} alt={alt} url={source.url} />
+  }
+
+  return <img src={src} alt={alt} title={title} referrerPolicy="no-referrer" />
+}
+
+/** A link in a note, to a website; it opens in a new tab. */
+function NoteLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <InLink.Provider value>
+      <a href={href} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    </InLink.Provider>
+  )
+}
+
 /** A note's markdown, with its `[[...]]` links resolved as the API resolved them. */
 export function Markdown({ text, links, universe }: { text: string; links: readonly LinkView[]; universe: string }) {
+  // Until the den's setting is known, images from websites stay blocked.
+  const remoteImages = useQuery(denQuery).data?.remoteImages === true
   const { plugin, resolved } = useMemo(() => {
     const resolved: LinkView[] = []
     return { plugin: wikiLinks(links, resolved), resolved }
@@ -81,19 +156,14 @@ export function Markdown({ text, links, universe }: { text: string; links: reado
           return link ? <WikiLink link={link} universe={universe} /> : <>{children}</>
         }
 
-        return href ? (
-          <a href={href} target="_blank" rel="noopener noreferrer">
-            {children}
-          </a>
-        ) : (
-          <>{children}</>
-        )
+        return href ? <NoteLink href={href}>{children}</NoteLink> : <>{children}</>
       },
+      img: ({ src, alt, title }) => <Image src={src} alt={alt} title={title} remoteImages={remoteImages} />,
       // A note's own headings sit under the section's heading.
       h1: ({ children }) => <h3>{children}</h3>,
       h2: ({ children }) => <h3>{children}</h3>,
     }),
-    [resolved, universe],
+    [resolved, universe, remoteImages],
   )
 
   return (

@@ -18,6 +18,8 @@ export interface DenSummary {
   name: string
   pinnedUniverse: string | null
   universes: UniverseSummary[]
+  /** True if den.yaml has `remote_images: true`, so notes' images from websites load (#180). */
+  remoteImages: boolean
 }
 
 export interface EntityCounts {
