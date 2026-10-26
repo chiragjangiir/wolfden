@@ -2831,8 +2831,9 @@ Mina Harker, and an edit since. They open her page and pick History.
 - The History tab goes to the same page with `?view=history`, keeping
   the position, and works for a note named by a path. The tabs and the
   breadcrumb are in the same place on both tabs. The list shows the
-  checkpoints newest first, twenty at a time, each with its commit date
-  (as "yesterday", with the full date and time in its tooltip), its
+  checkpoints newest first, twenty at a time, each with its date, which
+  is git's author date (as "yesterday", with the full date and time in
+  its tooltip), its
   author, its message, and how it changed the note (added, modified,
   renamed, or deleted). "Show older checkpoints" loads the next page.
 - "Uncommitted changes" is on top, and its diff is shown first. With no

@@ -1169,8 +1169,9 @@ docs/
   and all, ends the path; the diff shown is in the URL too
   (`checkpoint`, or `from` and `to`). The page lists the entity's
   checkpoints from `/api/history`, newest first, twenty at a time, each
-  with its commit date, author, message, and how it changed the file,
-  under "Uncommitted changes" when the file differs from the latest
+  with its date (git's author date, as the list says), author, message,
+  and how it changed the file, under "Uncommitted changes" when the
+  file differs from the latest
   checkpoint. It shows that diff first, or else the latest
   checkpoint's. Picking a checkpoint shows its own change; ticking two
   compares them (ticking the uncommitted changes as one compares with
