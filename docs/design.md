@@ -1077,6 +1077,50 @@ docs/
   History endpoints, like `get_history`, treat a den without history as
   an answer, not an error: `available` is false, `backend` is `none`,
   and `reason` says why.
+- **The browsing UI** (#24, #26). Three choices are maintainer
+  decisions (2026-10-26):
+  - **Layout: a sidebar tree.** On the left is a tree: universe → series
+    in story order → books → "Chapters" and entity-type groups →
+    entities. Notes filed in a universe or a series sit under that scope.
+    The page is on the right. On a narrow screen, the tree folds behind a
+    Contents button. A den with several universes has a universe
+    switcher. A server pinned with `serve --universe` shows only that
+    universe, and `/` goes straight to it, as it does for a den with one.
+  - **Story position: an always-on bar.** A bar runs across the top of
+    every page. It has a slider along every position (`/api/positions`),
+    book and chapter menus to jump, step buttons, and a "Show
+    everything" reset. The arrow keys step one chapter, and Home and End
+    go to the first chapter and to everything. It starts at "Everything",
+    meaning no `asOf`, the end of the story. The position is kept in the
+    URL as `?at=<position>` (for example `?at=dracula:9`), carried from
+    page to page, and kept by bookmarks and reloads. A change replaces
+    the history entry, so Back leaves the page rather than stepping back
+    through chapters.
+  - **Notes the reader hasn't met: hidden, with a peek.** At a position,
+    the tree and lists show only the entities in the view there (the
+    list `asOf` it, compared with the unfiltered list). Each group has a
+    "N more appear later" control that shows the rest greyed, each with
+    where it enters. A note out of view because of its status, not its
+    entry point, says so instead. Opening a note the reader hasn't met
+    shows a banner, such as "Readers first meet Quincey P. Morris in
+    Dracula chapter 5", with a button to go there, and nothing else of
+    the note.
+
+  The UI routes with TanStack Router. Its URLs (v0 behaviour, not a
+  recorded decision) are `/u/<universe>` for the overview,
+  `/u/<universe>/s/<series>`, `/u/<universe>/b/<book>` (the chapters,
+  with their titles), `/u/<universe>/b/<book>/c/<chapter>` (the chapter
+  and the notes that enter there), and `/u/<universe>/e/<entity>`, where
+  the entity is named by its id, or by its path while it has none. Each
+  page takes `?at=`. An entity page shows the name, type, status, scope
+  breadcrumb, and entry point; the fields; the sections, as markdown;
+  and "Linked from", grouped by source. `[[...]]` links become in-app
+  links through the API's resolved `links`, matched by exact text. A
+  broken link is marked as broken. An ambiguous link lists its matches
+  in a tooltip. As of a position, a link to a note the reader hasn't met
+  is plain text. Markdown is rendered with react-markdown, which builds
+  React elements and never HTML strings. Raw HTML in a note is dropped,
+  and unsafe URLs such as `javascript:` are removed.
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and
   unknown content. This gets heavy test coverage, since it decides whether
   people trust the tool with their notes.
