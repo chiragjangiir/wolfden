@@ -2520,7 +2520,10 @@ compares it with a checkpoint from before the rename.
 - A note moved into a hidden folder (`.trash/`) shows as deleted, in a
   compare, a checkpoint's own diff, and the log, even when a copy of it
   appears in the den under another name: the copy is added, not a
-  rename of the note.
+  rename of the note. A note brought out of `.wolfden/` into the den is
+  added. Their patches are a plain delete's or add's, whole den or one
+  path, before or after the checkpoint: none names `.trash` or
+  `.wolfden`, or shows what was written in the hidden copy.
 
 Spec: design.md §6, §9 (#175, #181). Covered by:
 `GitHistoryTests.ACompareOfOneNoteAcrossARenameShowsTheRename`,

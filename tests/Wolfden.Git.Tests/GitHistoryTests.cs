@@ -574,38 +574,93 @@ public sealed class GitHistoryTests
     public void ANoteMovedIntoAHiddenFolderIsDeletedNotRenamedToALookAlike()
     {
         // Mara's note goes to .trash/ and a copy of it, under another name,
-        // appears in the den. Without the hidden side, git would pair Mara
-        // with the copy (#184 review).
+        // appears in the den: without the hidden side, git would pair Mara
+        // with the copy. Fen's goes to .trash/ and is edited there, and a
+        // note kept in .wolfden/ comes out into the den, edited. Each is a
+        // plain delete or add, and no patch names a hidden path or shows a
+        // hidden file's text (#184 review).
         const string copy = "universes/vael/entities/characters/mara.md";
+        const string secret = "universes/vael/entities/characters/secret.md";
+        const string folder = "universes/vael/entities/characters";
         const string text = "# Mara Voss\n\nA pilot who flies the night run to the outer moons.\n";
+        const string fen = "# Fen Harbour\n\nA harbour on the night run.\nIts lamps burn blue.\nIts piers are old.\n";
+        const string hidden = "# Secret\n\nA secret line kept out of the den.\nAnother line of it.\nAnd one more.\n";
         using var repo = TestRepo.Create();
         repo.WriteDen(Mara, text);
-        repo.WriteDen(Fen, "# Fen Harbour\n");
+        repo.WriteDen(Fen, fen);
+        repo.WriteDen(".wolfden/secret.md", hidden);
         var before = repo.CommitAll("start");
         Directory.CreateDirectory(Path.Combine(repo.DenRoot, ".trash"));
         File.Move(Path.Combine(repo.DenRoot, Mara), Path.Combine(repo.DenRoot, ".trash", "mara-voss.md"));
         repo.WriteDen(copy, text);
+        repo.DeleteDen(Fen);
+        repo.WriteDen(".trash/fen-harbour.md", fen + "Edited in trash.\n");
+        repo.DeleteDen(".wolfden/secret.md");
+        repo.WriteDen(secret, hidden + "Edited in the den.\n");
 
         var deleted = new HistoryFileChange(HistoryChangeKind.Deleted, Mara);
         var added = new HistoryFileChange(HistoryChangeKind.Added, copy);
+        var fenDeleted = new HistoryFileChange(HistoryChangeKind.Deleted, Fen);
+        var secretAdded = new HistoryFileChange(HistoryChangeKind.Added, secret);
+        var history = repo.History;
 
-        // Up to the files now, then between checkpoints and in the checkpoint's own diff and log.
-        Assert.Equal(deleted, Assert.Single(repo.History.Diff(new HistoryDiffQuery(before, null, Mara), Token).Value.Files).Change);
-        Assert.Equal(added, Assert.Single(repo.History.Diff(new HistoryDiffQuery(before, null, copy), Token).Value.Files).Change);
-        Assert.Equal([added, deleted], repo.History.Diff(new HistoryDiffQuery(before), Token).Value.Files.Select(f => f.Change).OrderBy(c => c.Kind));
-        var after = repo.CommitAll("trash Mara");
-        Assert.Equal([added, deleted], repo.History.DiffCheckpoint(after, null, Token).Value.Files.Select(f => f.Change).OrderBy(c => c.Kind));
-        Assert.Equal([added, deleted], Assert.Single(repo.History.Log(new HistoryLogQuery(Limit: 1), Token).Value).Changes.OrderBy(c => c.Kind));
+        void Expect(HistoryResult<HistoryDiff> diff, params HistoryFileChange[] changes)
+        {
+            var files = diff.Value.Files;
+            Assert.Equal(changes.OrderBy(c => c.Path, StringComparer.Ordinal), files.Select(f => f.Change).OrderBy(c => c.Path, StringComparer.Ordinal));
+            foreach (var file in files)
+            {
+                Assert.DoesNotContain(".trash", file.Patch, StringComparison.Ordinal);
+                Assert.DoesNotContain(".wolfden", file.Patch, StringComparison.Ordinal);
+                Assert.DoesNotContain("Edited in trash", file.Patch, StringComparison.Ordinal);
+                Assert.DoesNotContain("rename ", file.Patch, StringComparison.Ordinal);
+                if (file.Change.Kind == HistoryChangeKind.Deleted)
+                {
+                    Assert.Contains("\ndeleted file mode ", file.Patch, StringComparison.Ordinal);
+                    Assert.Contains("\n+++ /dev/null\n", file.Patch, StringComparison.Ordinal);
+                }
+                else
+                {
+                    Assert.Contains("\nnew file mode ", file.Patch, StringComparison.Ordinal);
+                    Assert.Contains("\n--- /dev/null\n", file.Patch, StringComparison.Ordinal);
+                }
+            }
+        }
+
+        // Up to the files now, before the checkpoint.
+        Expect(history.Diff(new HistoryDiffQuery(before), Token), added, deleted, fenDeleted, secretAdded);
+        Expect(history.Diff(new HistoryDiffQuery(before, null, Mara), Token), deleted);
+        Expect(history.Diff(new HistoryDiffQuery(before, null, copy), Token), added);
+        Expect(history.Diff(new HistoryDiffQuery(before, null, Fen), Token), fenDeleted);
+        Expect(history.Diff(new HistoryDiffQuery(before, null, secret), Token), secretAdded);
+        Expect(history.Diff(new HistoryDiffQuery(before, null, folder), Token), added, deleted, secretAdded);
+        Assert.Contains("+Edited in the den.", history.Diff(new HistoryDiffQuery(before, null, secret), Token).Value.Files[0].Patch, StringComparison.Ordinal);
+
+        // Between checkpoints, and the checkpoint's own diff.
+        var after = repo.CommitAll("trash Mara and Fen, bring the secret out");
+        foreach (var diff in new Func<string?, HistoryResult<HistoryDiff>>[]
+        {
+            path => history.Diff(new HistoryDiffQuery(before, after, path), Token),
+            path => history.DiffCheckpoint(after, path, Token),
+        })
+        {
+            Expect(diff(null), added, deleted, fenDeleted, secretAdded);
+            Expect(diff(Mara), deleted);
+            Expect(diff(copy), added);
+            Expect(diff(Fen), fenDeleted);
+            Expect(diff(secret), secretAdded);
+            Expect(diff(folder), added, deleted, secretAdded);
+        }
+
+        // The log says the same.
         Assert.Equal(
-            [added, deleted],
-            repo.History.Log(new HistoryLogQuery("universes/vael/entities/characters", Limit: 1), Token).Value[0].Changes.OrderBy(c => c.Kind));
-        Assert.Equal(deleted, Assert.Single(repo.History.Diff(new HistoryDiffQuery(before, after, Mara), Token).Value.Files).Change);
-        Assert.Equal(deleted, Assert.Single(repo.History.DiffCheckpoint(after, Mara, Token).Value.Files).Change);
-        Assert.Equal(added, Assert.Single(repo.History.DiffCheckpoint(after, copy, Token).Value.Files).Change);
-        Assert.Equal([added], Assert.Single(repo.History.Log(new HistoryLogQuery(copy), Token).Value).Changes);
+            [added, secretAdded, deleted, fenDeleted],
+            Assert.Single(history.Log(new HistoryLogQuery(Limit: 1), Token).Value).Changes.OrderBy(c => c.Kind).ThenBy(c => c.Path, StringComparer.Ordinal));
         Assert.Equal(
-            [added, deleted],
-            repo.History.DiffCheckpoint(after, "universes/vael/entities/characters", Token).Value.Files.Select(f => f.Change).OrderBy(c => c.Kind));
+            [added, secretAdded, deleted],
+            history.Log(new HistoryLogQuery(folder, Limit: 1), Token).Value[0].Changes.OrderBy(c => c.Kind).ThenBy(c => c.Path, StringComparer.Ordinal));
+        Assert.Equal([added], Assert.Single(history.Log(new HistoryLogQuery(copy), Token).Value).Changes);
+        Assert.Equal([secretAdded], Assert.Single(history.Log(new HistoryLogQuery(secret), Token).Value).Changes);
     }
 
     [Fact]

@@ -439,15 +439,19 @@ The den store and the history provider are interfaces in `Wolfden.Core`
   files now) shows a file renamed into or out of it as a rename: the
   path's own diff comes first, and only when it adds, deletes, or
   renames a file does a raw diff of the whole den (no patches) find
-  the rename's other side, and one diff of the pair, with literal
-  pathspecs, gives its patch; past 100 other sides, or if git pairs
-  them otherwise, the whole den's patch is narrowed to the path
-  (#175). Rename detection sees hidden paths too, though they're never
-  reported, so a note moved into a hidden folder (`.trash/`) shows as
-  deleted, never as renamed to a den file that looks like it; a log
-  entry that may hide such a pairing is read again the same way (#184
-  review). A checkpoint's own diff of a path that can't be a den file
-  has no files. The log pages by position: each page
+  the rename's other side; then each change the path's own diff got
+  wrong is patched on its own: a rename from a diff of its two paths,
+  with literal pathspecs, an add or a delete from a `--no-renames`
+  diff of its path, a hundred paths to a run (#175). The raw diff sees
+  hidden paths too, so a note moved into a hidden folder (`.trash/`)
+  shows as deleted, never as renamed to a den file that looks like it,
+  and one moved out of one shows as added; a log entry that may hide
+  such a pairing is read again the same way. No patch comes from a run
+  that sees a hidden path, so a patch never names one or shows its
+  text, and such a delete or add has a true delete's or add's patch
+  (#184 review). The same goes for a diff of the whole den. A
+  checkpoint's own diff of a path that can't be a den file has no
+  files. The log pages by position: each page
   walks the same log from HEAD with the same path filter and starts
   after the `before` entry, since a history with merges isn't a line
   and the cursor's ancestors alone would miss main-line commits. A

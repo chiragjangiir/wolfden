@@ -307,8 +307,7 @@ public sealed partial class GitHistory : IHistoryProvider
     /// <summary>What changed between <paramref name="from"/> and the den's files as they are now, in <paramref name="limit"/> or the whole den.</summary>
     private HistoryResult<HistoryDiff> DiffWithFiles(string from, string? limit, CancellationToken cancellationToken)
     {
-        // The whole den keeps hidden paths in, for rename detection only (CompareFiles).
-        var specs = Pathspecs(limit is null ? null : [limit], withHidden: limit is null);
+        var specs = Pathspecs(limit is null ? null : [limit]);
 
         // The files as they are now, new ones included (#142): a temporary
         // index lists HEAD's files and the new ones, and git compares the
@@ -330,9 +329,9 @@ public sealed partial class GitHistory : IHistoryProvider
             _ = Run([.. TempIndexSettings, "add", "--refresh", "--", .. specs], cancellationToken, environment: environment);
             ListNewFiles(specs, emptyBlob, environment, cancellationToken);
 
-            // Finding a rename's other side takes the whole den, which means
-            // reading every den file once; that's done only when the path's
-            // own diff has a file added, deleted, or renamed.
+            // Finding a rename's other side takes the whole den, hidden paths
+            // included (CompareFiles), which means reading every file once;
+            // that's done only when the own diff adds, deletes, or renames one.
             void WholeDen()
             {
                 var den = Pathspecs(null, withHidden: true);
@@ -920,61 +919,71 @@ public sealed partial class GitHistory : IHistoryProvider
         return entries;
     }
 
-    /// <summary>The den files that differ between <paramref name="revisions"/>, each with its patch.</summary>
+    /// <summary>The den files that differ between <paramref name="revisions"/> at <paramref name="specs"/>, each with its patch.</summary>
     /// <remarks>
     /// One git run gives the list and the patches (#142 review, H2):
     /// comparing with the files on disk, two runs could each see a file
     /// saved in between differently. Each patch is matched to its file by
-    /// its <c>diff --git</c> line, never by position alone.
+    /// its <c>diff --git</c> line, never by position alone. The specs must
+    /// leave hidden paths out: a rename to or from one would carry its path
+    /// and its text into the patch (#184 review).
     /// </remarks>
     private List<HistoryFileDiff> CompareSpecs(
-        IReadOnlyList<string> revisions, IReadOnlyList<string> specs, IReadOnlyDictionary<string, string?>? environment, CancellationToken cancellationToken)
+        IReadOnlyList<string> revisions,
+        IReadOnlyList<string> specs,
+        IReadOnlyDictionary<string, string?>? environment,
+        CancellationToken cancellationToken,
+        bool noRenames = false)
     {
+        string[] renames = noRenames ? ["--no-renames"] : [];
         var output = Git(
-            [.. TempIndexSettings, "diff", .. DiffOptions, "--raw", "--patch", "-z", .. revisions, "--", .. specs], cancellationToken, environment: environment);
+            [.. TempIndexSettings, "diff", .. DiffOptions, .. renames, "--raw", "--patch", "-z", .. revisions, "--", .. specs],
+            cancellationToken,
+            environment: environment);
         return ReadDiff(output);
     }
 
-    /// <summary>The most paths a rename pairs with <c>limit</c> before a diff takes the whole den instead: the command line stays well inside Windows' limit.</summary>
-    private const int MostPairedPaths = 100;
+    /// <summary>The most paths one diff names, so the command line stays well inside Windows' limit.</summary>
+    private const int MostNamedPaths = 100;
 
     /// <summary>
     /// The den files in <paramref name="limit"/> (a file or folder), or in
     /// the whole den, that differ between <paramref name="revisions"/>, each
     /// with its patch. A file renamed into or out of <paramref name="limit"/>
-    /// shows as a rename, as in a diff of the whole den (#175, #181).
+    /// shows as a rename, and one renamed to or from a hidden path as
+    /// deleted or added, as the whole den's changes have them (#175, #181,
+    /// #184 review).
     /// </summary>
     /// <param name="revisions">One revision, compared with the files on disk through <paramref name="environment"/>'s index, or two.</param>
     /// <param name="limit">A den-relative file or folder, or null for the whole den.</param>
     /// <param name="environment">The temporary index for a diff with the files on disk, or null.</param>
-    /// <param name="wholeDen">Readies <paramref name="environment"/>'s index for a diff of the whole den, or null if it's ready.</param>
+    /// <param name="wholeDen">Readies <paramref name="environment"/>'s index for a diff of the whole den, hidden paths included, or null if it's ready.</param>
     /// <param name="cancellationToken">Stops git.</param>
     /// <remarks>
-    /// A pathspec of <paramref name="limit"/> alone hides a rename's other
-    /// side, so git would show the file added or deleted. Patching the whole
-    /// den and keeping the path's files is right, but slow on a big
-    /// checkpoint, such as a den's first, which holds every file. So:
+    /// <para>
+    /// Which files changed, and how, comes from a raw diff of the whole den
+    /// with hidden paths in: a pathspec of <paramref name="limit"/> alone
+    /// hides a rename's other side, so git would show the file added or
+    /// deleted, and leaving hidden paths out would let a note moved into
+    /// <c>.trash/</c> pair with a den file that looks like it.
+    /// <see cref="ParseChanges"/> makes a rename with a hidden side an add
+    /// or a delete. But every patch comes from a run in which git never sees
+    /// a hidden path, so no patch names one or shows its text, and an add
+    /// or a delete has a true add's or delete's patch.
+    /// </para>
     /// <list type="number">
-    /// <item>The path's own diff. If it adds, deletes, or renames nothing,
-    /// no rename can involve it (without <c>-B</c>, a file that's on both
-    /// sides is never a rename's side), and that's the answer.</item>
-    /// <item>Otherwise <c>git diff -M --raw</c> of the whole den, which
-    /// writes no patches, gives each change that touches the path, with
-    /// both sides of each rename. If they're the changes the path's own diff
-    /// gave, that's the answer.</item>
-    /// <item>Otherwise one diff of the path and the other sides of its
-    /// renames, each a literal pathspec, which <c>-M</c> pairs again. If it
-    /// gives the same changes as the whole den, that's the answer; if not
-    /// (rename detection among fewer files paired them otherwise), or there
-    /// are too many other sides for one command line, the whole den's
-    /// patch, narrowed to the path.</item>
+    /// <item>The path's (or the den's) own diff, hidden paths left out. If
+    /// it adds, deletes, or renames nothing, no rename can involve it
+    /// (without <c>-B</c>, a file that's on both sides is never a rename's
+    /// side), and that's the answer.</item>
+    /// <item>Otherwise the raw diff of the whole den, hidden paths in, which
+    /// writes no patches, gives each change that touches the path. If
+    /// they're the changes step 1 gave, step 1 is the answer.</item>
+    /// <item>Otherwise each change step 1 got wrong is patched on its own
+    /// terms: a rename from a diff of its two paths, as literal pathspecs,
+    /// which <c>-M</c> pairs as the whole den did; an add or a delete from a
+    /// <c>--no-renames</c> diff of its path. Paths go a hundred to a run.</item>
     /// </list>
-    /// Every answer comes from one git run that gives the changes and their
-    /// patches together (#142 review, H2). Steps 2 and 3 and the whole den's
-    /// patch keep hidden paths in, so a note moved into a hidden folder
-    /// pairs with its hidden new path and shows as deleted, never as renamed
-    /// to a den file that looks like it; hidden paths themselves are never
-    /// reported (<see cref="ParseChanges"/>).
     /// </remarks>
     private List<HistoryFileDiff> CompareFiles(
         IReadOnlyList<string> revisions,
@@ -983,12 +992,7 @@ public sealed partial class GitHistory : IHistoryProvider
         Action? wholeDen,
         CancellationToken cancellationToken)
     {
-        if (limit is null)
-        {
-            return CompareSpecs(revisions, Pathspecs(null, withHidden: true), environment, cancellationToken);
-        }
-
-        var own = CompareSpecs(revisions, Pathspecs([limit]), environment, cancellationToken);
+        var own = CompareSpecs(revisions, Pathspecs(limit is null ? null : [limit]), environment, cancellationToken);
         if (own.All(f => f.Change.Kind == HistoryChangeKind.Modified))
         {
             return own;
@@ -996,30 +1000,50 @@ public sealed partial class GitHistory : IHistoryProvider
 
         wholeDen?.Invoke();
         var raw = Git([.. TempIndexSettings, "diff", .. DiffOptions, "--raw", "-z", .. revisions, "--", .. Pathspecs(null, withHidden: true)], cancellationToken, environment: environment);
-        var touching = ParseChanges(SplitRawAndPatch(raw).Tokens)
+        var changes = ParseChanges(SplitRawAndPatch(raw).Tokens)
             .Select(c => c.Change)
             .OfType<HistoryFileChange>()
-            .Where(c => Touches(c, limit))
+            .Where(c => limit is null || Touches(c, limit))
             .ToList();
-        if (SameChanges(own.Select(f => f.Change), touching))
+        if (SameChanges(own.Select(f => f.Change), changes))
         {
             return own;
         }
 
-        var others = touching.SelectMany(c => new[] { c.Path, c.OldPath }).OfType<string>()
-            .Where(p => !Under(p, limit)).Distinct(StringComparer.Ordinal).ToList();
-        if (others.Count <= MostPairedPaths && others.All(IsDenPath))
+        var patches = new Dictionary<HistoryFileChange, string>();
+        Take(own);
+        var renames = changes.Where(c => c.Kind == HistoryChangeKind.Renamed && !patches.ContainsKey(c)).ToList();
+        foreach (var chunk in renames.Chunk(MostNamedPaths / 2))
         {
-            var paired = CompareSpecs(revisions, Pathspecs([limit, .. others], withHidden: true), environment, cancellationToken)
-                .Where(f => Touches(f.Change, limit))
-                .ToList();
-            if (SameChanges(paired.Select(f => f.Change), touching))
+            Take(CompareSpecs(revisions, Literal(chunk.SelectMany(c => new[] { c.OldPath!, c.Path })), environment, cancellationToken));
+        }
+
+        // Among others, git may pair a rename's sides otherwise; alone, it pairs them as the whole den did.
+        foreach (var rename in renames.Where(c => !patches.ContainsKey(c)))
+        {
+            Take(CompareSpecs(revisions, Literal([rename.OldPath!, rename.Path]), environment, cancellationToken));
+        }
+
+        foreach (var chunk in changes.Where(c => c.Kind != HistoryChangeKind.Renamed && !patches.ContainsKey(c)).Chunk(MostNamedPaths))
+        {
+            Take(CompareSpecs(revisions, Literal(chunk.Select(c => c.Path)), environment, cancellationToken, noRenames: true));
+        }
+
+        return changes.Select(c => patches.TryGetValue(c, out var patch)
+                ? new HistoryFileDiff(c, patch)
+                : throw new HistoryException($"Git's diff didn't show '{c.Path}' as its list of changed files did, so Wolfden can't give its patch. Try again."))
+            .ToList();
+
+        void Take(IEnumerable<HistoryFileDiff> files)
+        {
+            foreach (var file in files)
             {
-                return paired;
+                patches.TryAdd(file.Change, file.Patch);
             }
         }
 
-        return CompareSpecs(revisions, Pathspecs(null, withHidden: true), environment, cancellationToken).Where(f => Touches(f.Change, limit)).ToList();
+        // Paths git listed as den files, so none is hidden: each taken literally.
+        static List<string> Literal(IEnumerable<string> paths) => paths.Distinct(StringComparer.Ordinal).Select(p => ":(literal)" + p).ToList();
     }
 
     /// <summary>
