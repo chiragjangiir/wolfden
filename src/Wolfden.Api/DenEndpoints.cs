@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
 using Wolfden.Index;
 
@@ -32,7 +33,11 @@ public sealed record UniverseResult(string Key, string Name, string? Id, int Ser
 /// the MCP tools use where they mean the same thing (design.md §8), and a
 /// message that says what to do next.
 /// </summary>
-public sealed record ApiError(string Code, string Message);
+/// <param name="Code">The code.</param>
+/// <param name="Message">What went wrong, and what to do next.</param>
+/// <param name="Candidates">For <c>ambiguous_entity</c>, the entities the name matches; left out otherwise.</param>
+public sealed record ApiError(
+    string Code, string Message, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<EntitySummary>? Candidates = null);
 
 /// <summary>
 /// The API's endpoints, under <c>/api</c> (#23). They read the index the
@@ -45,7 +50,10 @@ public static class DenEndpoints
     /// <summary>The shape of <see cref="DenResult"/>.</summary>
     public const int DenResultVersion = 1;
 
-    /// <summary>Maps <c>GET /api/health</c>, <c>GET /api/den</c>, and a JSON 404 for anything else under <c>/api</c>.</summary>
+    /// <summary>
+    /// Maps <c>GET /api/health</c>, <c>GET /api/den</c>, the read endpoints
+    /// (<see cref="ReadEndpoints"/>), and a JSON 404 for anything else under <c>/api</c>.
+    /// </summary>
     public static IEndpointRouteBuilder MapWolfdenApi(this IEndpointRouteBuilder endpoints, WolfdenApiOptions options)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -53,6 +61,7 @@ public static class DenEndpoints
         var api = endpoints.MapGroup("/api");
         api.MapGet("/health", () => new HealthResult("ok", options.Version));
         api.MapGet("/den", () => Den(options));
+        ReadEndpoints.Map(api, options);
 
         // Anything else under /api: a known path with the wrong method, or no endpoint at all.
         api.Map("/{**rest}", (HttpContext context, string? rest) =>
@@ -72,7 +81,7 @@ public static class DenEndpoints
     }
 
     /// <summary>The paths under <c>/api</c> that answer GET.</summary>
-    private static readonly string[] GetPaths = ["health", "den"];
+    private static readonly string[] GetPaths = ["health", "den", .. ReadEndpoints.Paths];
 
     /// <summary>The den's name and its universes, or the pinned one.</summary>
     internal static IResult Den(WolfdenApiOptions options)

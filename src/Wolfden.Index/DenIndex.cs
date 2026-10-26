@@ -159,6 +159,19 @@ public sealed class DenIndex : IDisposable
         return CanonQuery.Run(Context, universeKey, position, filter);
     }
 
+    /// <summary>
+    /// The place of <paramref name="position"/> in the story order of the
+    /// universe with key <paramref name="universeKey"/> (F-ORD-2, F-ORD-3),
+    /// as the index's ordinals give it, or the end of the story for null:
+    /// the point a canon view at that position is taken at.
+    /// </summary>
+    /// <exception cref="CanonViewException">The universe doesn't exist, or the position doesn't parse or resolve.</exception>
+    public long PointOf(string universeKey, string? position)
+    {
+        ArgumentNullException.ThrowIfNull(universeKey);
+        return CanonQuery.PointOf(Context, universeKey, position);
+    }
+
     /// <summary>The links that resolve to the entity with this key: its backlinks, by path and place in the file.</summary>
     public IReadOnlyList<LinkRecord> Backlinks(string entityKey)
     {

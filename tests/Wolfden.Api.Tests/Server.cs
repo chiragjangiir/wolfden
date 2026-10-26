@@ -29,6 +29,7 @@ internal sealed class Server : IAsyncDisposable
             WebRoot = options.WebRoot,
             Version = options.Version,
             Log = options.Log,
+            History = options.History,
         });
         configure?.Invoke(app);
         await app.StartAsync(TestContext.Current.CancellationToken);

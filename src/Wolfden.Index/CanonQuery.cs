@@ -95,6 +95,13 @@ internal static class CanonQuery
             .ToList();
     }
 
+    /// <summary>The ordinal of <paramref name="position"/> in universe <paramref name="universeKey"/>, or the end of the story for null.</summary>
+    public static long PointOf(IndexDbContext db, string universeKey, string? position)
+    {
+        var universe = Universe(db, universeKey);
+        return Point(db, db.Containers.Where(c => c.UniverseId == universe.Id).ToList(), universe, position);
+    }
+
     private static ContainerRecord Universe(IndexDbContext db, string universeKey) =>
         db.Containers.Where(c => c.Kind == "universe" && c.Key == universeKey).ToList() switch
         {
