@@ -480,6 +480,10 @@ public sealed class GitHistoryTests
         var file = Assert.Single(diff.Files);
         Assert.Equal(new HistoryFileChange(HistoryChangeKind.Renamed, Mara, "universes/vael/entities/characters/mara.md"), file.Change);
         Assert.Contains("rename to ", file.Patch, StringComparison.Ordinal);
+
+        // The checkpoint's own diff, narrowed to the new path, still sees the old one.
+        var own = Assert.Single(repo.History.DiffCheckpoint(after, Mara, Token).Value.Files);
+        Assert.Equal(file.Change, own.Change);
     }
 
     [Fact]
