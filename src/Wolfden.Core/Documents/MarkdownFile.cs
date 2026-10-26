@@ -278,7 +278,9 @@ public sealed partial class MarkdownFile : DenFile
     /// such as <c>["x-color"]</c>, <c>["fields", "died", "from"]</c>, or
     /// <c>["aliases", "0"]</c>. Its lines go, with a comment on its last
     /// line and comment lines right after it indented under it; comment
-    /// lines above it stay. If it sat between two blank lines, one goes.
+    /// lines above it stay, unless it was the last key or item of a nested
+    /// block mapping or list, whose inside comment lines then go too
+    /// (format.md F-RT-6). If it sat between two blank lines, one goes.
     /// Nothing changes if it isn't there: a missing key, an item number past
     /// the end of a list, or a null value on the way. A block list or
     /// mapping that loses its last item is left as <c>key:</c> with no

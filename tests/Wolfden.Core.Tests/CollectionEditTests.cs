@@ -919,4 +919,117 @@ public class CollectionEditTests
         Assert.Equal([0xEF, 0xBB, 0xBF], edited.ToBytes()[..3]);
         Assert.False(edited.EndsWithNewline);
     }
+
+    // ---- #157: a block mapping or list emptied of its last key or item takes the comments inside it (F-RT-6) ----
+
+    private const string FoundDocuments = """
+        name: Ember
+        chapter_defaults:  # every chapter of Ember
+          # pov for the found-document chapters
+          pov: ["[[ship-log]]"]
+          narration: first   # until the Reach
+        chapters:
+          - key: "1"
+
+        """;
+
+    [Theory]
+    [Trait("Scenario", "SC-RT-16")]
+    [InlineData("pov", "narration")]
+    [InlineData("narration", "pov")]
+    public void ClearingChapterDefaultsKeyByKeyTakesTheCommentsInsideAndASetStartsClean(string firstKey, string secondKey)
+    {
+        var cleared = Md(FoundDocuments)
+            .WithoutFrontmatterValue(["chapter_defaults", firstKey])
+            .WithoutFrontmatterValue(["chapter_defaults", secondKey]);
+
+        Assert.Equal("name: Ember\nchapter_defaults:  # every chapter of Ember\nchapters:\n  - key: \"1\"\n", Fm(cleared));
+        Assert.True(cleared.GetFrontmatterValue("chapter_defaults") is YamlScalar { IsNull: true });
+
+        var set = cleared.WithFrontmatterValue(["chapter_defaults", "narration"], S("second"));
+
+        Assert.Equal("name: Ember\nchapter_defaults:  # every chapter of Ember\n  narration: second\nchapters:\n  - key: \"1\"\n", Fm(set));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-16")]
+    public void ClearingTheFirstOfTwoKeysKeepsTheCommentAboveIt()
+    {
+        // Not the last key: the comment above it stays (SC-RT-10) until the mapping is emptied.
+        var edited = Md(FoundDocuments).WithoutFrontmatterValue(["chapter_defaults", "pov"]);
+
+        Assert.Equal(FoundDocuments.Replace("  pov: [\"[[ship-log]]\"]\n", "", StringComparison.Ordinal), Fm(edited));
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-RT-16")]
+    [InlineData("chapters:\n  - key: \"1\"\n    fields:\n      # the log narrates\n      pov: [x]\n", "chapters.0.fields.pov", "chapters:\n  - key: \"1\"\n    fields:\n")]
+    [InlineData("x-meta:\n  palette:\n    # warm, for the Reach\n    accent: amber\n  mood: grim\n", "x-meta.palette.accent", "x-meta:\n  palette:\n  mood: grim\n")]
+    [InlineData("x-meta:\n  palette:\n    accent: amber\n      # checked against the cover\n# about mood\nmood: grim\n", "x-meta.palette.accent", "x-meta:\n  palette:\n# about mood\nmood: grim\n")]
+    [InlineData("x-list:\n  -\n    # the only key\n    a: 1\n  - b\n", "x-list.0.a", "x-list:\n  -\n  - b\n")]
+    [InlineData("chapter_defaults:\n\n  # pov\n\n  pov: x\n\nchapters: []\n", "chapter_defaults.pov", "chapter_defaults:\n\nchapters: []\n")]
+    [InlineData("chapter_defaults:\n  pov: x\n# the chapters, in reading order\nchapters: []\n", "chapter_defaults.pov", "chapter_defaults:\n# the chapters, in reading order\nchapters: []\n")]
+    [InlineData("rank:\n  - value: x\n    fields:\n      # the only one\n      a: 1\n", "rank.0.fields.a", "rank:\n  - value: x\n    fields:\n")]
+    public void EmptyingANestedMappingAtAnyDepthTakesTheCommentsInsideIt(string text, string path, string after)
+    {
+        Assert.Equal(after, Fm(Md(text).WithoutFrontmatterValue(path.Split('.'))));
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-RT-16")]
+    [InlineData("aliases:\n  # the rank she earns\n  - the Commander  # since ember:22\nname: x\n", EmptiedList.Null, "aliases:\nname: x\n")]
+    [InlineData("aliases:\n# the rank she earns\n- the Commander\nname: x\n", EmptiedList.Null, "aliases:\nname: x\n")]
+    [InlineData("aliases:  # kept\n  # the rank she earns\n  - the Commander\nname: x\n", EmptiedList.EmptyList, "aliases: []  # kept\nname: x\n")]
+    public void EmptyingANestedBlockListTakesTheCommentsInsideIt(string text, EmptiedList emptied, string after)
+    {
+        Assert.Equal(after, Fm(Md(text).WithoutFrontmatterValue(["aliases", "0"], emptied)));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-RT-16")]
+    public void EmptyingAChapterDefaultListTakesTheCommentsInsideIt()
+    {
+        var text = "chapter_defaults:\n  pov:  # the usual narrator\n    # until the Reach\n    - \"[[mara-voss]]\"\n";
+
+        Assert.Equal("chapter_defaults:\n  pov: []  # the usual narrator\n", Fm(Md(text).WithoutChapterDefaultItem("pov", 0)));
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-RT-14")]
+    [Trait("Scenario", "SC-RT-16")]
+    [InlineData("chapter_defaults:\n# pov: \"[[wren-calder]]\"\n  pov: x\nchapters: []\n", "chapter_defaults.pov")]
+    [InlineData("chapter_defaults:\n  pov: x\n  # narration: first\nchapters: []\n", "chapter_defaults.pov")]
+    [InlineData("chapter_defaults:\n  pov: x\n\n    # about the chapters\nchapters: []\n", "chapter_defaults.pov")]
+    [InlineData("x-meta:\n  palette:\n  # the palette\n    accent: amber\n", "x-meta.palette.accent")]
+    [InlineData("aliases:\n  - Voss\n  # the Commander, once she earns it\nname: x\n", "aliases.0")]
+    public void EmptyingACollectionIsRefusedWhenACommentInsideItMayBeAboutSomethingElse(string text, string path)
+    {
+        var file = Md(text);
+
+        Assert.Throws<NotSupportedException>(() => file.WithoutFrontmatterValue(path.Split('.')));
+        Assert.Equal(text, Fm(file));
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-RT-16")]
+    [InlineData("chapter_defaults:\n  # pov for the found documents\nchapters: []\n", "chapter_defaults:\n  # pov for the found documents\n  pov: x\nchapters: []\n")]
+    [InlineData("chapter_defaults: ~  # every chapter\n  # pov first\nchapters: []\n", "chapter_defaults:  # every chapter\n  # pov first\n  pov: x\nchapters: []\n")]
+    [InlineData("chapter_defaults:\n# the chapters\nchapters: []\n", "chapter_defaults:\n  pov: x\n# the chapters\nchapters: []\n")]
+    public void ANewKeyUnderAnEmptyKeyGoesAfterTheCommentsIndentedUnderIt(string text, string after)
+    {
+        Assert.Equal(after, Fm(Md(text).WithFrontmatterValue(["chapter_defaults", "pov"], S("x"))));
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-RT-16")]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void EmptyingANestedMappingInAYamlFileKeepsItsLineEndings(string nl)
+    {
+        var text = string.Join(nl, "format: 1", "spoiler_checks:", "  # only the final chapters", "  x-final: true", "name: Starfall", "");
+        var file = YamlFile.Parse(TestFiles.Utf8(text));
+
+        Assert.Equal(string.Join(nl, "format: 1", "spoiler_checks:", "name: Starfall", ""), file.WithoutValue(["spoiler_checks", "x-final"]).Text);
+        Assert.Equal("a:", YamlFile.Parse(TestFiles.Utf8("a:" + nl + "  # c" + nl + "  b: 1")).WithoutValue(["a", "b"]).Text);
+    }
 }

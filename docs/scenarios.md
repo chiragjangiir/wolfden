@@ -920,6 +920,7 @@ Spec: F-RT-1, F-RT-2. Covered by:
 `CollectionEditTests.RemovingAnExplicitFlowKeyIsRefused`,
 `CollectionEditTests.RemovingTheFlowKeyBeforeAnExplicitKeyIsRefused`,
 `CollectionEditTests.AddingToOrRemovingFromALeadingCommaFlowListIsRefused`,
+`CollectionEditTests.EmptyingACollectionIsRefusedWhenACommentInsideItMayBeAboutSomethingElse`,
 `SectionEditTests.RemovingASectionThatWouldMergeTheTextAroundItIsRefused`,
 `SectionEditTests.MovingASectionThatWouldMergeWithTheTextBeforeItIsRefused`,
 `SectionEditTests.RemovingASectionThatWouldMakeAStrayHeadingPartOfTheLeadIsRefused`,
@@ -949,6 +950,34 @@ Spec: F-RT-6, F-CHAP-5. Covered by:
 `CollectionEditTests.AnEmptiedChapterListKeepsCrlf`,
 `CollectionEditTests.RemovingTheLastChapterDefaultLeavesAnEmptyList`,
 `CollectionEditTests.AnEmptiedChapterDefaultKeepsCrlf`.
+
+### SC-RT-16. I clear the last of a container's chapter defaults
+
+A book's `chapter_defaults` is a block mapping with a comment line,
+`# pov for the found-document chapters`, indented above its `pov`. The
+writer clears its keys one by one. Later, the writer sets a new default.
+
+- While another key is left, a comment line above the cleared key stays.
+  When the last key goes, the comment lines inside the mapping go with
+  it, and `chapter_defaults:` is left with no value. A comment on the
+  `chapter_defaults:` line stays. The same holds for a mapping or list
+  at any depth: a chapter's `fields`, an `x-` key's nested mapping, or a
+  block list emptied of its last item.
+- If a comment inside the emptied mapping might be about something else
+  (it's outdented to the parent key, or it follows the removed key at
+  the mapping's indent), the edit is refused and the file is unchanged.
+- The new default goes on the line after `chapter_defaults:`, after any
+  comment lines indented under it.
+
+Spec: F-RT-6, F-RT-2. Covered by:
+`CollectionEditTests.ClearingChapterDefaultsKeyByKeyTakesTheCommentsInsideAndASetStartsClean`,
+`CollectionEditTests.ClearingTheFirstOfTwoKeysKeepsTheCommentAboveIt`,
+`CollectionEditTests.EmptyingANestedMappingAtAnyDepthTakesTheCommentsInsideIt`,
+`CollectionEditTests.EmptyingANestedBlockListTakesTheCommentsInsideIt`,
+`CollectionEditTests.EmptyingAChapterDefaultListTakesTheCommentsInsideIt`,
+`CollectionEditTests.EmptyingACollectionIsRefusedWhenACommentInsideItMayBeAboutSomethingElse`,
+`CollectionEditTests.ANewKeyUnderAnEmptyKeyGoesAfterTheCommentsIndentedUnderIt`,
+`CollectionEditTests.EmptyingANestedMappingInAYamlFileKeepsItsLineEndings`.
 
 ## CLI: working with a den from the command line
 
