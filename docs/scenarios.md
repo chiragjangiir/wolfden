@@ -1333,8 +1333,9 @@ Spec: design.md §7 (#116). Covered by:
 
 Background: `wolfden mcp` (design.md §8, #20) runs an MCP server over
 stdio, so an AI assistant can read the den with `search`, `get_entity`,
-`list_entities`, `canon_as_of`, `get_chapter`, `check`, and
-`get_history`, and write to it with the write tools (#21, SC-MCP-15 on).
+`list_entities`, `canon_as_of`, `get_chapter`, `get_chapter_defaults`,
+`check`, and `get_history`, and write to it with the write tools (#21,
+SC-MCP-15 on).
 Without a story position, a reading tool gives the author's full view;
 with one, it gives canon as the reader knows it there. Pinned canon comes
 first. The examples use the Dracula sample, whose book is `dracula`.
@@ -1787,6 +1788,55 @@ happens to be one a note in `starfall` uses.
 
 Spec: F-ID-3 (maintainer decision, 2026-10-23). Covered by:
 `WriteToolTests.APinnedSessionChecksNewIdsAcrossTheWholeDen`.
+
+### SC-MCP-24. My assistant makes Mara the default POV for a book
+
+In the Starfall den, `ember`'s prologue says `pov: []` and its chapter 3
+has Tomas Reyes's POV; its other chapters set none. The writer asks the
+assistant to make Mara Voss the book's default POV.
+
+- `get_chapter_defaults` for the book gives `book.md`'s hash (the same
+  as `get_chapter`'s), its defaults, and the books they reach. After
+  `update_chapter_defaults` adds `[[mara-voss]]` to `pov`, the result
+  says "Book 'ember': chapters 1–2b now have pov [[mara-voss]];
+  chapters prologue, 3 keep their own". Removing the item leaves
+  `pov: []` and says those chapters now have no POV; clearing the field
+  goes back to inheriting, here from nothing. Clearing a field that
+  isn't set, and an old hash, are refused, and asking for what the file
+  already says writes nothing.
+- A series' defaults reach both its books: the result names each book's
+  chapters, and a book whose own defaults set the field keeps that
+  value, named with where it comes from. A universe's defaults reach the
+  standalone book too, and chapters of the series' books keep the
+  series' value. Clearing the series' value hands its books the
+  universe's.
+- A series with no books yet can have defaults ("no chapter's tense
+  changes now"), and a series file without an id gets one (F-ID-6).
+- A value that doesn't fit the field (`tense: sideways`) is saved, as
+  in `update_chapter_fields`, with the F-CHAP-3 warning, and the result
+  says it's ignored, so chapters inherit as if it weren't there.
+
+Spec: types.md F-CHAP-5, format.md F-CTR-5, F-RT-6 (maintainer
+decisions, 2026-10-23, 2026-10-25). Covered by:
+`ChapterDefaultsToolTests.ABooksDefaultPovReachesTheChaptersThatDontSetTheirOwn`,
+`ChapterDefaultsToolTests.ASeriesDefaultSaysWhichBooksAndChaptersItReaches`,
+`ChapterDefaultsToolTests.ASeriesWithNoBooksYetCanHaveDefaultsAndGetsAnId`,
+`ChapterDefaultsToolTests.AValueThatDoesntFitTheFieldIsSavedWithAWarningAndSaysItsIgnored`.
+
+### SC-MCP-25. My assistant changes a default a finished book inherits
+
+`ash` is final, and its own `chapter_defaults` set `tense: past`.
+
+- Adding a default POV to the series `long-dark` would change what
+  `ash`'s chapters have, so it's refused as `frozen`, naming the book
+  and chapters, and nothing changes. So is any edit of `ash`'s own
+  defaults, and setting the universe's `narration`, which `ash` would
+  inherit.
+- Setting the universe's `tense` is made: `ash`'s own default shadows
+  it, and the result says `ash`'s chapters keep `past`.
+
+Spec: format.md F-BOOK-1, types.md F-CHAP-5 (#151). Covered by:
+`ChapterDefaultsToolTests.ADefaultThatWouldChangeAFinalBooksChaptersIsRefused`.
 
 ## STORE: Wolfden saves, moves, and deletes notes
 

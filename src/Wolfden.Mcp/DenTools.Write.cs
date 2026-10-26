@@ -1357,22 +1357,22 @@ public sealed partial class DenTools
 
     // ------------------------------------------------------------- chapters
 
-    private static int ItemToRemove(MarkdownFile file, string[] fieldPath, Change op)
+    private static int ItemToRemove(MarkdownFile file, string[] fieldPath, Change op, string owner = "The chapter's")
     {
         if (file.GetFrontmatterValue(fieldPath) is not YamlSequence list)
         {
-            throw new DenToolException(ToolErrorCodes.BadArgument, $"The chapter's '{op.Field}' isn't a list, so it has no item to remove. To unset it, use 'clear'.");
+            throw new DenToolException(ToolErrorCodes.BadArgument, $"{owner} '{op.Field}' isn't a list, so it has no item to remove. To unset it, use 'clear'.");
         }
 
         if (op.Item is { } item)
         {
-            return item < list.Items.Count ? item : throw new DenToolException(ToolErrorCodes.BadArgument, $"The chapter's '{op.Field}' has {list.Items.Count} item(s), so there's no item {item}.");
+            return item < list.Items.Count ? item : throw new DenToolException(ToolErrorCodes.BadArgument, $"{owner} '{op.Field}' has {list.Items.Count} item(s), so there's no item {item}.");
         }
 
         if (op.Value is YamlScalarValue value)
         {
             var i = list.Items.ToList().FindIndex(n => value.Matches(n) || (n is YamlScalar s && LinkText.Matches(s.Text, value.ToString())));
-            return i >= 0 ? i : throw new DenToolException(ToolErrorCodes.BadArgument, $"The chapter's '{op.Field}' has no item '{value}'.");
+            return i >= 0 ? i : throw new DenToolException(ToolErrorCodes.BadArgument, $"{owner} '{op.Field}' has no item '{value}'.");
         }
 
         throw new DenToolException(ToolErrorCodes.BadArgument, "A 'remove' change names the item to remove: 'item' (its number from 0) or 'value'.");
@@ -1421,9 +1421,6 @@ public sealed partial class DenTools
         }
 
         return effects;
-
-        static string Describe(ChapterFieldValue value) =>
-            value.IsNone ? "none ([])" : string.Join(", ", value.Items.Select(i => i is YamlScalar s ? s.Text : JsonOf(i).GetRawText()));
     }
 
     /// <summary>What a chapter would inherit for a field without its own value: the nearest <c>chapter_defaults</c> that sets it.</summary>
