@@ -2812,8 +2812,9 @@ The writer, at Dracula chapter 3, presses `/` and types "blood".
   replaces the history entry. Opening that URL shows "blood" in the box,
   and leaving the search page empties it.
 - A search still waiting on a pause is dropped by Enter or by going to
-  another page, so it never pulls the writer back to search; one that
-  runs reads the filters as they are then.
+  another page, such as opening a hit, so it never pulls the writer back
+  to search. Moving the position or changing a filter on the same page
+  keeps it, and when it runs it reads them as they are then.
 
 Spec: design.md §9 (#25). Covered by: `Search.test.tsx` (web).
 

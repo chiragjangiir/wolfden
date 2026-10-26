@@ -18,9 +18,11 @@
   --banner-bg: #fff5d6;
   --banner-border: #e5c76b;
   --focus: #2563eb;
-  /* A search match: at least 3:1 against the page, 4.5:1 for its text. */
-  --mark-bg: #cf7a12;
+  /* A search match: a fill its text reads on (4.5:1 or more), and an
+     underline at least 3:1 against the page. */
+  --mark-bg: #f5c242;
   --mark-text: #22201c;
+  --mark-line: #a8620c;
   --font-body: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif;
   --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --measure: 42rem;
@@ -49,6 +51,7 @@
     --focus: #8ab4f8;
     --mark-bg: #e3b341;
     --mark-text: #171614;
+    --mark-line: #e3b341;
   }
 }
 
@@ -700,6 +703,7 @@ button.peek {
 .snippet mark {
   background: var(--mark-bg);
   color: var(--mark-text);
+  border-bottom: 2px solid var(--mark-line);
   border-radius: 2px;
   padding: 0 0.1em;
 }

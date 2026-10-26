@@ -1176,11 +1176,12 @@ docs/
   200), as the API has no offset. As of a position the search sends
   `asOf`, says so ("Searching as of Dracula chapter 9"), and offers to
   search everything; hits the reader hasn't met aren't shown or
-  peeked at, and the Type filter lists only the types the reader has
-  met (maintainer decision, hidden by default, as for the tree). A
-  blank `at` fails closed, as on every page. Search is full-text only: the API has no search of one
-  field's value (such as every character whose `occupation:` holds
-  physician), and field values aren't in the full-text index.
+  peeked at. The Type filter lists only the types the reader has met,
+  which applies the maintainer's hidden-by-default decision (#26) as
+  the tree does. A blank `at` fails closed, as on every page. Search is
+  full-text only: the API has no search of one field's value (such as
+  every character whose `occupation:` holds physician), and field
+  values aren't in the full-text index.
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and
   unknown content. This gets heavy test coverage, since it decides whether
   people trust the tool with their notes.

@@ -144,6 +144,40 @@ describe('SC-WEB-18: a search waiting on a pause in typing', () => {
     expect(history.location.pathname).toBe('/u/dracula/e/E-MINA')
   })
 
+  it('is dropped by opening a hit from the search page', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    stubSearch()
+    const { history } = renderApp('/u/dracula/search?q=blood')
+    const main = await screen.findByRole('main')
+    await within(main).findByText('3 matches, in 2 notes.')
+    await waitFor(() => expect(searchBox().value).toBe('blood'))
+
+    fireEvent.change(searchBox(), { target: { value: 'blood x' } })
+    fireEvent.click(within(main).getByRole('link', { name: 'Illness' }))
+    await waitFor(() => expect(history.location.pathname).toBe('/u/dracula/e/E-LUCY'))
+
+    await act(() => vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS * 3))
+    expect(history.location.pathname).toBe('/u/dracula/e/E-LUCY')
+    expect(searchOf(history).has('q')).toBe(false)
+  })
+
+  it('runs at the new position when the position moves before typing pauses', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const { searches } = stubSearch()
+    const { history } = renderApp('/u/dracula')
+    await screen.findByRole('navigation', { name: 'Contents' })
+
+    fireEvent.change(searchBox(), { target: { value: 'blood' } })
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Book' }), { target: { value: 'dracula' } })
+    await waitFor(() => expect(searchOf(history).get('at')).toBe('dracula:1'))
+    expect(history.location.pathname).toBe('/u/dracula')
+
+    await act(() => vi.advanceTimersByTimeAsync(SEARCH_DEBOUNCE_MS * 3))
+    await waitFor(() => expect(history.location.pathname).toBe('/u/dracula/search'))
+    expect([searchOf(history).get('at'), searchOf(history).get('q')]).toEqual(['dracula:1', 'blood'])
+    await waitFor(() => expect(searches.at(-1)?.get('asOf')).toBe('dracula:1'))
+  })
+
   it('runs with the filters as they are when it fires, and the box empties on leaving the page', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     stubSearch()

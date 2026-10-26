@@ -5,6 +5,9 @@ import type { SearchPageSearch } from '../router'
 /** How long typing pauses before the search runs, in milliseconds. */
 export const SEARCH_DEBOUNCE_MS = 300
 
+/** The search page's path, `/u/<universe>/search`. */
+const SEARCH_PATH = /^\/u\/[^/]+\/search\/?$/
+
 /**
  * True if a key pressed in `target` types into it, so `/` there is a
  * character rather than the shortcut.
@@ -39,7 +42,7 @@ function UniverseSearchBox({ universe }: { universe: string }) {
   const match = useMatch({ from: '/u/$universe/search', shouldThrow: false })
   const onSearchPage = match !== undefined
   const q = onSearchPage ? (match.search as SearchPageSearch).q : undefined
-  const href = useRouterState({ select: (s) => s.location.href })
+  const location = useRouterState({ select: (s) => s.location })
   const [text, setText] = useState(q ?? '')
   const input = useRef<HTMLInputElement>(null)
   // The pending search while typing pauses, if any.
@@ -72,15 +75,24 @@ function UniverseSearchBox({ universe }: { universe: string }) {
     })
   }
 
-  // Going anywhere else (a link, Back) drops a search still waiting to run.
-  // Only this box's own search, or a filter changed beside it, keeps it:
-  // when it runs, it reads the URL as it is then.
+  // Going to another page (a link, Back) drops a search still waiting to
+  // run, and so does a change of the search page's words from elsewhere.
+  // Staying on the page keeps it: a filter or the position changed beside
+  // it, which it reads from the URL when it runs. So does this box's own
+  // search. It's decided from the location itself, since the route match
+  // can lag the address by a render.
+  const previousPath = useRef(location.pathname)
   useEffect(() => {
-    if (!(onSearchPage && q === sent.current)) {
+    const searchPath = SEARCH_PATH.test(location.pathname)
+    const rawQ = (location.search as Record<string, unknown>).q
+    const words = (typeof rawQ === 'string' ? rawQ.trim() : '') || undefined
+    const samePage = location.pathname === previousPath.current
+    previousPath.current = location.pathname
+    const keep = searchPath ? words === sent.current : samePage
+    if (!keep) {
       cancel()
     }
-    // Runs on each change of address; q and onSearchPage are read as they are then.
-  }, [href])
+  }, [location])
 
   // The URL's words changed from elsewhere (Back, a link): show them. Leaving
   // the search page clears the box.
