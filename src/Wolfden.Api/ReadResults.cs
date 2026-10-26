@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Wolfden.Index;
 
 namespace Wolfden.Api;
 
@@ -220,3 +221,30 @@ public sealed record DiffView(string? From, string? To, IReadOnlyList<HistoryFil
 /// <param name="Reason">Why the diff isn't available, in words for the writer, or null.</param>
 /// <param name="Diff">The diff, or null when it isn't available.</param>
 public sealed record HistoryDiffResult(int Version, EntitySummary Entity, string Backend, bool Available, string? Reason, DiffView? Diff);
+
+/// <summary>
+/// A search hit as the search page gets it: the MCP tool's hit, plus the
+/// excerpt without marks and where its matches are (#179). A match range
+/// can't be mistaken for a bracket in the note's own text.
+/// </summary>
+/// <param name="Entity">The entity.</param>
+/// <param name="Section">The section the match is in, or null for the name, aliases, lead, or a field.</param>
+/// <param name="Line">The section heading's line, or the field value's; null for the name, aliases, or lead.</param>
+/// <param name="Snippet">The excerpt with each match in square brackets, as the MCP tool gives it.</param>
+/// <param name="Status">The effective status of the matching section or field value, or of the entity.</param>
+/// <param name="InCanon">True if the match is canon text (draft or canon, not bookkeeping).</param>
+/// <param name="InComment">True if the match is in an HTML comment, such as a to-do note.</param>
+/// <param name="Field">The field the match is in, or null.</param>
+/// <param name="Text">The excerpt without marks.</param>
+/// <param name="Matches">Where the matches are in <paramref name="Text"/>, in order, as offsets and lengths in UTF-16 code units (JavaScript string indexes).</param>
+public sealed record SearchPageHit(
+    EntitySummary Entity, string? Section, int? Line, string Snippet, string Status, bool InCanon, bool InComment, string? Field, string Text,
+    IReadOnlyList<TextMatch> Matches);
+
+/// <summary>A search's result as the search page gets it: the MCP tool's, with <see cref="SearchPageHit"/>s.</summary>
+/// <param name="Version">The shape version.</param>
+/// <param name="Query">The query.</param>
+/// <param name="Count">How many hits this result holds.</param>
+/// <param name="Truncated">True if more hits matched than <c>limit</c>.</param>
+/// <param name="Hits">The hits, best first.</param>
+public sealed record SearchPageResult(int Version, string Query, int Count, bool Truncated, IReadOnlyList<SearchPageHit> Hits);

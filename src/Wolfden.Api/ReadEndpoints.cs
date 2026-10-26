@@ -35,7 +35,7 @@ public static class ReadEndpoints
     public const int ResultVersion = 1;
 
     /// <summary>The paths under <c>/api</c> this maps, all GET.</summary>
-    public static readonly IReadOnlyList<string> Paths = ["hierarchy", "positions", "entities", "entity", "canon", "search", "history", "history/diff"];
+    public static readonly IReadOnlyList<string> Paths = ["hierarchy", "positions", "entities", "entity", "canon", "search", "fields", "history", "history/diff"];
 
     /// <summary>The words the API's messages use for what to do next (<see cref="ToolWords"/>).</summary>
     public static readonly ToolWords Words = new(
@@ -70,16 +70,27 @@ public static class ReadEndpoints
             q => reader.CanonAsOf(q.Text("universe"), q.Position("asOf"), q.Text("series"), q.Text("book"), q.Text("type"), q.Bool("brief"))));
         api.MapGet("/search", (HttpContext c) => Answer(
             c,
-            ["query", "universe", "type", "status", "series", "book", "canonOnly", "asOf", "limit"],
-            q => reader.Search(
+            ["query", "universe", "type", "status", "series", "book", "canonOnly", "asOf", "limit", "field"],
+            q => SearchPage(reader.Search(
                 q.Text("query") ?? "", q.Text("universe"), q.Text("type"), q.Bool("canonOnly"), q.Int("limit", 20),
-                q.Text("status"), q.Text("series"), q.Text("book"), q.Position("asOf"))));
+                q.Text("status"), q.Text("series"), q.Text("book"), q.Position("asOf"), q.Text("field")))));
+        api.MapGet("/fields", (HttpContext c) => Answer(c, ["universe", "asOf"], q => reader.FieldNames(q.Text("universe"), q.Position("asOf"))));
         api.MapGet("/history", (HttpContext c) => Answer(
             c, ["entity", "universe", "limit", "before"], q => History(reader, q.Text("entity"), q.Text("universe"), q.Int("limit", 20), q.Text("before"))));
         api.MapGet("/history/diff", (HttpContext c) => Answer(
             c, ["entity", "universe", "checkpoint", "from", "to"],
             q => HistoryDiff(reader, q.Text("entity"), q.Text("universe"), q.Text("checkpoint"), q.Text("from"), q.Text("to"))));
     }
+
+    /// <summary>
+    /// A search's result as the API gives it: the tool's, with each hit's
+    /// text and match ranges added (#179), so the page can mark matches
+    /// without guessing which brackets are the search's.
+    /// </summary>
+    internal static SearchPageResult SearchPage(SearchResult result) => new(
+        result.Version, result.Query, result.Count, result.Truncated,
+        result.Hits.Select(h => new SearchPageHit(h.Entity, h.Section, h.Line, h.Snippet, h.Status, h.InCanon, h.InComment, h.Field, h.Text, h.Matches))
+            .ToList());
 
     /// <summary>The longest part of a revision a message repeats.</summary>
     private const int RevisionShown = 80;

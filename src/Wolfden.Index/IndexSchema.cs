@@ -16,8 +16,10 @@ public static class IndexSchema
     /// records a hash of the den's files (<see cref="FilesFingerprintKey"/>).
     /// Version 5 (#14) records a <see cref="WriteIdKey"/>, and gives search
     /// rows explicit rowids, so a file watcher can update the index in place.
+    /// Version 6 (#179) keeps control characters out of the search table, so
+    /// a snippet's match marks can't clash with a note's text.
     /// </summary>
-    public const int Version = 5;
+    public const int Version = 6;
 
     /// <summary>The <c>meta</c> key for <see cref="Version"/>.</summary>
     public const string SchemaVersionKey = "schema_version";

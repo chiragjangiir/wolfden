@@ -90,6 +90,8 @@ const entityRoute = createRoute({
  */
 export interface SearchPageSearch extends StorySearch {
   q?: string
+  /** Search only this field's values (#179). */
+  field?: string
   type?: string
   status?: string
   series?: string
@@ -110,6 +112,7 @@ export function validateSearchPageSearch(search: Record<string, unknown>): Searc
   return {
     at: validateStorySearch(search).at,
     q: text('q'),
+    field: text('field'),
     type: text('type'),
     status: text('status'),
     series: book ? undefined : text('series'),

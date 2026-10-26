@@ -139,6 +139,118 @@ public sealed class SearchTests : IClassFixture<SearchTests.Built>
     }
 
     [Fact]
+    [Trait("Scenario", "SC-WEB-24")]
+    public void MatchesAreRangesInTheTextSoTheNotesOwnBracketsAndControlCharactersCantPassForThem()
+    {
+        var hit = Assert.Single(_index.Search("watch"));
+
+        Assert.Equal("Rung on the [[the Gull|keeper]]'s  watch  [twice].\n", hit.Text);
+        var match = Assert.Single(hit.Matches);
+        Assert.Equal("watch", hit.Text.Substring(match.Start, match.Length));
+        Assert.Equal("Rung on the [[the Gull|keeper]]'s  [watch]  [twice].\n", hit.Snippet);
+
+        // A word in the note's own brackets is a match like any other.
+        var twice = Assert.Single(_index.Search("twice"));
+        Assert.Equal("twice", twice.Text.Substring(twice.Matches[0].Start, twice.Matches[0].Length));
+        Assert.Contains("[[twice]]", twice.Snippet, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MarkedTextReadsMarksAndJoinsMatchesThatTouch()
+    {
+        var marked = MarkedText.FromMarks("a \u0001b\u0002\u0001c\u0002 [d]", MarkedText.Open, MarkedText.Close);
+
+        Assert.Equal("a bc [d]", marked.Text);
+        Assert.Equal([new TextMatch(2, 2)], marked.Matches);
+        Assert.Equal("a [bc] [d]", marked.Bracketed());
+        Assert.Equal("x\ty \nz", MarkedText.WithoutMarks("x\ty\u0001\nz"));
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-MCP-30")]
+    [InlineData("zoe", "Zoë Arkwright", true)]
+    [InlineData("ARKW*", "Zoë Arkwright", true)]
+    [InlineData("arkw", "Zoë Arkwright", false)]
+    [InlineData("salt-marsh", "the Salt Marsh docks", true)]
+    [InlineData("marsh-salt", "the Salt Marsh docks", false)]
+    [InlineData("docks salt", "the Salt Marsh docks", true)]
+    [InlineData("[[x]]", "[[x]]", true)]
+    [InlineData("cafe", "Café", true)]
+    [InlineData("resume", "re\u0301sume\u0301", true)]
+    [InlineData("ab", "a\u0301b", true)]
+    [InlineData("ab", "a\u0305b", false)]
+    [InlineData("a b", "a\u0305b", true)]
+    [InlineData("ab", "a\u0336b", false)]
+    [InlineData("a", "a\u0336b", true)]
+    [InlineData("ab", "a\u0331b", true)]
+    [InlineData("ab", "a\u0332b", false)]
+    [InlineData("o", "\u01A1", true)]
+    [InlineData("senor", "SEÑOR", true)]
+    [InlineData("nguyen", "Nguyễn", true)]
+    [InlineData("елка", "ёлка", false)]
+    [InlineData("ЁЛКА", "ёлка", true)]
+    [InlineData("иод", "йод", false)]
+    [InlineData("αλφα", "άλφα", false)]
+    [InlineData("か", "が", false)]
+    [InlineData("שלום", "שָׁלוֹם", false)]
+    [InlineData("ह", "हिन्दी", true)]
+    [InlineData("हिन्दी", "हिन्दी", true)]
+    public void SearchWordsMatchFieldTextAsTheSearchTableDoes(string query, string text, bool matches)
+    {
+        var words = SearchWords.Parse(query);
+
+        Assert.Equal(matches, words.Find(text).All(found => found.Count > 0));
+        Assert.Equal(matches, Fts5Matches(query, text));
+    }
+
+    [Theory]
+    [InlineData("lighthouses", "")]
+    [InlineData("lighthouse", "")]
+    [InlineData("lighthouses", "x")]
+    public void ALongFieldValueIsCutWithoutSplittingASurrogatePair(string word, string before)
+    {
+        // No spaces to cut at, so the cut falls where it may: after a word of odd or even length.
+        var emoji = string.Concat(Enumerable.Repeat("\U0001F56F", 120));
+        var text = before + emoji + "-" + word + emoji;
+        var at = text.IndexOf(word, StringComparison.Ordinal);
+
+        var cut = Wolfden.Index.Reading.FieldSearch.Cut(text, [new TextMatch(at, word.Length)]);
+
+        for (var i = 0; i < cut.Text.Length; i++)
+        {
+            Assert.False(char.IsLowSurrogate(cut.Text[i]) && (i == 0 || !char.IsHighSurrogate(cut.Text[i - 1])), $"A lone low surrogate at {i}.");
+            Assert.False(char.IsHighSurrogate(cut.Text[i]) && (i == cut.Text.Length - 1 || !char.IsLowSurrogate(cut.Text[i + 1])), $"A lone high surrogate at {i}.");
+        }
+
+        var match = Assert.Single(cut.Matches);
+        Assert.Equal(word, cut.Text.Substring(match.Start, match.Length));
+    }
+
+    /// <summary>Whether SQLite's own FTS5 table, with the index's tokenizer, finds <paramref name="query"/> in <paramref name="text"/>, read as DenIndex.Search reads it.</summary>
+    /// <remarks>
+    /// The parity cases were written against the SQLite bundled with
+    /// Microsoft.EntityFrameworkCore.Sqlite 10.0.12 (SQLitePCLRaw's
+    /// e_sqlite3): SQLite 3.53.3. They run against whatever SQLite is
+    /// bundled, so an upgrade that changes the tokenizer fails here.
+    /// </remarks>
+    private static bool Fts5Matches(string query, string text)
+    {
+        using var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "CREATE VIRTUAL TABLE t USING fts5(x, tokenize = 'unicode61 remove_diacritics 2'); INSERT INTO t VALUES ($text);";
+        command.Parameters.AddWithValue("$text", text);
+        command.ExecuteNonQuery();
+        command.CommandText = "SELECT count(*) FROM t WHERE t MATCH $query";
+        command.Parameters.Clear();
+        command.Parameters.AddWithValue(
+            "$query",
+            string.Join(' ', query.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Select(w => $"\"{w.TrimEnd('*').Replace("\"", "\"\"", StringComparison.Ordinal)}\"{(w.EndsWith('*') ? "*" : "")}")));
+        return (long)command.ExecuteScalar()! > 0;
+    }
+
+    [Fact]
     public void PrefixesMatchWithAStar()
     {
         Assert.Single(_index.Search("tidew*"));
@@ -178,6 +290,9 @@ public sealed class SearchTests : IClassFixture<SearchTests.Built>
                     Maybe she was a smuggler.
 
                     """,
+                // Brackets of its own, and the control characters a snippet marks matches with (#179).
+                ["universes/coast/entities/items/brass-bell.md"] =
+                    "---\ntype: item\nname: Brass Bell\n---\n\nRung on the [[the Gull|keeper]]'s \u0001watch\u0002 [twice].\n",
             });
             Index = DenIndex.Open(Den.Root);
         }
