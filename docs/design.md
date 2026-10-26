@@ -923,8 +923,17 @@ store, so an edit changes only what it means to (format.md §12):
   to its id, showing the same text (`[[id|Tessaly]]`; `\|` in a table
   row, with or without its outer pipes, in a blockquote too), and the
   entity gets an id if it has none; if such a link is in a
-  final book, nothing moves. Any other link that would change which
-  entity it reaches, the moved file's own links included, refuses the
+  final book, nothing moves. The moved file's own links to other
+  entities that would reach another one, or become ambiguous, from the
+  new scope are rewritten the same way, each to the id of the entity it
+  reaches now, keeping its text, `#section`, and label
+  (`[[id|Lantern]]`), and each is listed in `effects` (maintainer
+  decision on #164); with `allow_relinks` they're left as written, to
+  follow the new scope, and listed as links that resolve differently.
+  Broken and ambiguous links in it stay as written, and so does one
+  whose target has no id, which then counts as below. Any other link
+  that would change which
+  entity it reaches refuses the
   move unless `allow_relinks`, as for renames, and links that resolve
   differently, such as an ambiguous one that now resolves, are listed
   in `effects` rather than prevented (format.md F-RT-5). The steps keep

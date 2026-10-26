@@ -1490,7 +1490,13 @@ rewrite, in the same change, every reference that depends on the old name:
   the same is every canon view, not every link: a link that was
   ambiguous and now resolves (the moved entity is nearer to it), and a
   `row` id that now resolves among other outlines (F-FLD-7), are
-  reported to the writer, not prevented.
+  reported to the writer, not prevented. The moved entity's own links
+  resolve from its new scope too, so one that would reach a different
+  entity, or become ambiguous, is rewritten in the same change to the id
+  of the entity it reaches now, keeping what it shows. A writer MAY
+  offer to leave them as written instead, so they follow the new
+  scope. Broken and ambiguous links in it stay as written. (Maintainer
+  decision on #164.)
 
 The core library's edits each change one file (`WithSectionName` renames
 a heading, for example). The den-wide rewrite belongs to the app's and

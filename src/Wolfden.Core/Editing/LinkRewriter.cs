@@ -85,7 +85,7 @@ internal static partial class LinkRewriter
 
             originals[path] = file.ToBytes();
             var places = found.Select(l => (l.Occurrence.Link.Line, l.Occurrence.Link.Column, l.Occurrence.Link.Target)).ToHashSet();
-            var (edited, count) = RewriteFile(file, places, matches, replace, newText);
+            var (edited, count) = RewriteFile(file, places, matches, (_, text, inTableRow) => replace(text, inTableRow), newText);
             rewritten += count;
             if (path == entity.Path)
             {
@@ -130,9 +130,21 @@ internal static partial class LinkRewriter
         return result;
     }
 
+    /// <summary>
+    /// Rewrites the links of one file at the given places (line, column,
+    /// target), each with its own replacement, which is told whether the
+    /// link is in a table row: links in a moved file to different entities,
+    /// say, each to its own target's id. Returns the file and how many were rewritten.
+    /// </summary>
+    internal static (MarkdownFile File, int Count) RewritePlaces(
+        MarkdownFile file, IReadOnlyDictionary<(int Line, int Column, string Target), Func<string, bool, string?>> replacements, string newText) =>
+        RewriteFile(
+            file, replacements.Keys.ToHashSet(), (_, _) => true,
+            (link, text, inTableRow) => replacements[(link.Line, link.Column, link.Link.Target)](text, inTableRow), newText);
+
     /// <summary>Rewrites each link at <paramref name="places"/> (line, column, target) that passes <paramref name="matches"/>.</summary>
     private static (MarkdownFile File, int Count) RewriteFile(
-        MarkdownFile file, HashSet<(int Line, int Column, string Target)> places, Func<string, string?, bool> matches, Func<string, bool, string?> replace, string newText)
+        MarkdownFile file, HashSet<(int Line, int Column, string Target)> places, Func<string, string?, bool> matches, Func<FoundLink, string, bool, string?> replace, string newText)
     {
         if (places.Count == 0)
         {
@@ -150,7 +162,7 @@ internal static partial class LinkRewriter
         Lines? lines = null;
         foreach (var link in found)
         {
-            if (Matches(link) && replace(text.Substring(link.Link.Offset, link.Link.Length), (lines ??= new Lines(text)).InTableRow(link.Link.Offset)) is { } replaced)
+            if (Matches(link) && replace(link, text.Substring(link.Link.Offset, link.Link.Length), (lines ??= new Lines(text)).InTableRow(link.Link.Offset)) is { } replaced)
             {
                 replacements.Add((link.Link.Offset, link.Link.Length, replaced));
             }
@@ -180,7 +192,7 @@ internal static partial class LinkRewriter
                         foreach (var link in changes.OrderByDescending(l => l.Link.Offset))
                         {
                             var linkText = value.Substring(link.Link.Offset, link.Link.Length);
-                            if (replace(linkText, false) is { } replaced)
+                            if (replace(link, linkText, false) is { } replaced)
                             {
                                 value = string.Concat(value.AsSpan(0, link.Link.Offset), replaced, value.AsSpan(link.Link.Offset + link.Link.Length));
                                 count++;

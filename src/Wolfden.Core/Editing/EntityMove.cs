@@ -26,10 +26,15 @@ namespace Wolfden.Core.Editing;
 /// rewritten, with the interim edit (its id, and a <c>from</c> that keeps
 /// views as they are) instead of the final one.
 /// </param>
+/// <param name="OwnRewritten">
+/// The moved file's own links that would have reached another entity, or
+/// none, from its new scope, and were rewritten to the id of the entity
+/// they reached, as the den resolved them before.
+/// </param>
 public sealed record EntityMovePlan(
     string From, string To, IReadOnlyDictionary<string, byte[]> Files, IReadOnlyDictionary<string, byte[]> Originals, LinkIndex After,
     IReadOnlyList<LinkChange> Changes, IReadOnlyList<ResolvedLink> Rewritten, IReadOnlyList<string> FrozenPaths, IReadOnlyList<string> SkippedPaths,
-    byte[] Interim);
+    byte[] Interim, IReadOnlyList<ResolvedLink> OwnRewritten);
 
 /// <summary>
 /// Moves an entity's file to another scope of its universe: the universe,
@@ -75,12 +80,18 @@ public static class EntityMove
     /// <param name="id">The entity's id once <paramref name="editOwn"/> is made (it may add one), or null if it has none.</param>
     /// <param name="editOwn">The edit of the entity's own file (its <c>from</c>, a missing id), made after its links are rewritten.</param>
     /// <param name="interimEdit">The edit for <see cref="EntityMovePlan.Interim"/>, the file in place before it moves, if it differs from <paramref name="editOwn"/>.</param>
+    /// <param name="rewriteOwnLinks">
+    /// True to rewrite the moved file's own links that would reach another
+    /// entity, or none, from its new scope to the id of what they reach now
+    /// (<see cref="EntityMovePlan.OwnRewritten"/>); false to leave them as
+    /// written, so they follow the new scope.
+    /// </param>
     /// <exception cref="ArgumentException">The scope is the entity's own, or in another universe.</exception>
     /// <exception cref="InvalidOperationException">Links to the entity would stop reaching it, and it has no id to rewrite them to.</exception>
     /// <exception cref="NotSupportedException">A file's links can't be rewritten in place.</exception>
     /// <exception cref="EditVerificationException">An edit didn't read back as intended (a bug).</exception>
     public static EntityMovePlan Plan(LinkIndex links, IDenSource den, CatalogEntity entity, Container scope, string? id, Func<MarkdownFile, MarkdownFile> editOwn,
-        Func<MarkdownFile, MarkdownFile>? interimEdit = null)
+        Func<MarkdownFile, MarkdownFile>? interimEdit = null, bool rewriteOwnLinks = true)
     {
         ArgumentNullException.ThrowIfNull(links);
         ArgumentNullException.ThrowIfNull(den);
@@ -110,9 +121,37 @@ public static class EntityMove
                 $"{lost.Count} link(s) to '{entity.Name}' would stop reaching it, and it has no id to link them by (F-ID-6), so they couldn't follow.");
         }
 
-        // Then those links rewritten to its id, in the same change (F-RT-5).
+        // The moved file's own links to other entities that would reach another one, or none
+        // because they'd be ambiguous, once its scope chain changes (F-LINK-7): unless the
+        // writer lets them follow the new scope, each is rewritten to the id of what it reaches
+        // now (maintainer decision on #164). A broken or ambiguous link reached nothing, so it
+        // stays as written, and so does one whose target has no id to link it by.
+        var own = rewriteOwnLinks
+            ? Between(links, first, from, to)
+                .Where(c => c.Before.Occurrence.Path == from && c.Before.Outcome == LinkOutcome.Resolved && c.Before.Target!.Path != from && c.Before.Target.Id is not null)
+                .Select(c => c.Before)
+                .ToList()
+            : [];
+
+        // Then those links, and the links to it, rewritten to ids, in the same change (F-RT-5).
+        // The moved file's are rewritten in one pass, each to its own target's id.
+        var ownPlaces = new Dictionary<(int Line, int Column, string Target), Func<string, bool, string?>>();
+        foreach (var link in lost.Where(l => l.Occurrence.Path == from))
+        {
+            ownPlaces[(link.Occurrence.Link.Line, link.Occurrence.Link.Column, link.Occurrence.Link.Target)] = (text, inTableRow) => LinkSyntax.WithIdTarget(text, id!, inTableRow);
+        }
+
+        foreach (var link in own)
+        {
+            var targetId = link.Target!.Id!;
+            ownPlaces[(link.Occurrence.Link.Line, link.Occurrence.Link.Column, link.Occurrence.Link.Target)] = (text, inTableRow) => LinkSyntax.WithIdTarget(text, targetId, inTableRow);
+        }
+
+        MarkdownFile OwnLinks(MarkdownFile file) => ownPlaces.Count == 0 ? file : LinkRewriter.RewritePlaces(file, ownPlaces, $"{id ?? entity.Id}|").File;
+
         var result = LinkRewriter.Rewrite(
-            links, den, entity, lost, (_, _) => true, (text, inTableRow) => LinkSyntax.WithIdTarget(text, id!, inTableRow), $"{id}|", editOwn);
+            links, den, entity, lost.Where(l => l.Occurrence.Path != from).ToList(), (_, _) => true,
+            (text, inTableRow) => LinkSyntax.WithIdTarget(text, id!, inTableRow), $"{id}|", f => editOwn(OwnLinks(f)));
         var files = new Dictionary<string, byte[]>(StringComparer.Ordinal) { [to] = result.Files[from] };
         foreach (var (path, bytes) in result.Files.Where(p => p.Key != from))
         {
@@ -123,13 +162,10 @@ public static class EntityMove
         var frozen = result.Frozen.ToHashSet(StringComparer.Ordinal);
         var keys = new[] { entity.Slug, entity.Name }.Concat(entity.Aliases).Where(k => k is not null).Select(k => LinkText.Normalize(k!)).ToHashSet(StringComparer.Ordinal);
         var skipped = LinkRewriter.Skipped(links, den, entity, (target, _) => target == entity.Id || keys.Contains(LinkText.Normalize(target)));
-        var interim = interimEdit is null ? result.Files[from]
-            : LinkRewriter.Rewrite(
-                links, den, entity, lost.Where(l => l.Occurrence.Path == from).ToList(), (_, _) => true,
-                (text, inTableRow) => LinkSyntax.WithIdTarget(text, id!, inTableRow), $"{id}|", interimEdit).Files[from];
+        var interim = interimEdit is null ? result.Files[from] : interimEdit(OwnLinks(entity.File)).ToBytes();
         return new EntityMovePlan(
             from, to, files, result.Originals, after, Between(links, after, from, to), lost.Where(l => !frozen.Contains(l.Occurrence.Path)).ToList(), result.Frozen, skipped,
-            interim);
+            interim, own);
     }
 
     /// <summary>

@@ -290,12 +290,16 @@ public sealed class WolfdenTools
         "Moves an entity's file to another scope of its universe: into a series (to_series), into a book (to_book), or, with neither, " +
         "into the universe itself. The file keeps its name and its folders under entities/. Canon views stay as they were: an entity " +
         "with no 'from' gets the point where it entered canon written as 'from', and a link to it that would stop reaching it (scope " +
-        "breaks ties between entities with the same name) is rewritten to its id, showing the same text. If the reader meets the " +
+        "breaks ties between entities with the same name) is rewritten to its id, showing the same text. The moved entity's own links " +
+        "that would reach a different entity, or become ambiguous, from the new scope are rewritten to the id of what they reach now, " +
+        "keeping their text, #section, and label, and listed in effects. If the reader meets the " +
         "entity outside the new scope (a series character first met in Book 1, moved into Book 2), the move is refused " +
         "(entry_outside_scope): ask the writer, then call again with keep_entry true (keep where it enters; check then warns about a " +
-        "book entity's 'from' outside its book) or enter_at_new_scope true (it enters at the start of the new scope instead). Nothing " +
-        "moves into or out of a final (frozen) book. If a link that reaches another entity would change target, nothing changes " +
-        "unless allow_relinks is true. The result's path and hash are the file's new ones, and 'files' marks the moved file with its " +
+        "book entity's 'from' outside its book) or enter_at_new_scope true (it enters at the start of the new scope instead; for one " +
+        "the reader meets only after the new scope, that's earlier than readers meet it now). Nothing " +
+        "moves into or out of a final (frozen) book. If a link in another file that reaches another entity would change target, nothing " +
+        "changes unless allow_relinks is true; allow_relinks also leaves the moved entity's own links as written, to follow the new " +
+        "scope. The result's path and hash are the file's new ones, and 'files' marks the moved file with its " +
         "old path. A checkpoint with 'paths' needs both the old and the new path." + WriteHelp)]
     public CallToolResult MoveEntity(
         [Description("The entity: its name, an alias, its file name, its id, its key, or its path.")] string entity,

@@ -231,16 +231,75 @@ public sealed class MoveEntityToolTests : IDisposable
 
     [Fact]
     [Trait("Scenario", "SC-MCP-29")]
-    public void TheMovedFilesOwnLinksCountToo()
+    public void TheMovedFilesOwnLinksThatWouldBeAmbiguousAreRewrittenToTheirTargetsIds()
     {
-        // Moved to the universe, Pike's [[Lantern]] no longer has the Ash item in its scope chain.
+        // Moved to the universe, Pike's [[Lantern]] links no longer have the Ash item in their scope chain,
+        // so they'd tie between the item and the ship: each is rewritten to the item's id, with its text,
+        // its section anchor, and its display text kept.
+        const string Item = "01JA7Q8M4XK3V9R2D5W8HN6TQG";
+        _den.Write(Pike, _den.Read(Pike).Replace(
+            "Owes money to the Compact.\n", "Owes money to the Compact. See [[Lantern#Overview]] and [[Lantern|the lamp]].\n", StringComparison.Ordinal));
+        var before = Tools.GetEntity("Halden Pike", Universe, "ash:2").Entity!;
         var hash = Tools.GetEntity("Halden Pike", Universe).Entity!.Hash!;
 
-        var refused = Assert.Throws<DenToolException>(() => Tools.MoveEntity("Halden Pike", hash, universe: Universe));
+        var result = Tools.MoveEntity("Halden Pike", hash, universe: Universe);
 
-        Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
-        Assert.Contains(Root + "/entities/characters/halden-pike.md", refused.Message, StringComparison.Ordinal);
-        Assert.True(File.Exists(Path.Combine(_den.Root, Pike)));
+        var moved = Root + "/entities/characters/halden-pike.md";
+        Assert.Equal(moved, result.Path);
+        var text = _den.Read(moved);
+        Assert.Contains($"[[{Item}|Lantern]] in the hold", text, StringComparison.Ordinal);
+        Assert.Contains($"See [[{Item}#Overview|Lantern#Overview]] and [[{Item}|the lamp]].", text, StringComparison.Ordinal);
+        Assert.Equal(3, result.Effects.Count(e => e.StartsWith("Its own link", StringComparison.Ordinal) && e.Contains(LanternItem, StringComparison.Ordinal)));
+        Assert.DoesNotContain(Tools.Check(path: moved, universe: Universe).Diagnostics, d => d.Rule is "F-LINK-7" or "F-LINK-8");
+
+        // The canon view is as it was, with the same links reaching the same entity.
+        var after = Tools.GetEntity("Halden Pike", Universe, "ash:2").Entity!;
+        Assert.Equal(before.Lead, after.Lead?.Replace($"{Item}|", "", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-29")]
+    public void TheMovedFilesOwnLinkThatWouldReachAnotherEntityKeepsItsTarget()
+    {
+        const string Old = Ash + "/entities/notes/signal-log.md";
+        const string Text = "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z9\ntype: note\nname: Signal log\nstatus: draft\nfrom: \"a-quiet-moon:1\"\n---\n\nThe [[Lantern]] signals. [[Nobody we know]] answers.\n";
+        _den.Write(Old, Text);
+        var hash = Tools.GetEntity("Signal log", Universe).Entity!.Hash!;
+
+        // In A Quiet Moon, [[Lantern]] would reach the ship there, not the Ash item it reaches now.
+        var result = Tools.MoveEntity("Signal log", hash, toBook: "a-quiet-moon", universe: Universe);
+
+        Assert.EndsWith("The [[01JA7Q8M4XK3V9R2D5W8HN6TQG|Lantern]] signals. [[Nobody we know]] answers.\n", _den.Read(result.Path), StringComparison.Ordinal);
+        Assert.Contains(result.Effects, e => e.StartsWith("Its own link [[Lantern]]", StringComparison.Ordinal) && e.Contains(LanternItem, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-29")]
+    public void WithAllowRelinksTheMovedFilesOwnLinksFollowTheNewScope()
+    {
+        const string Old = Ash + "/entities/notes/signal-log.md";
+        _den.Write(Old, "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z9\ntype: note\nname: Signal log\nstatus: draft\nfrom: \"a-quiet-moon:1\"\n---\n\nThe [[Lantern]] signals.\n");
+        var hash = Tools.GetEntity("Signal log", Universe).Entity!.Hash!;
+
+        var result = Tools.MoveEntity("Signal log", hash, toBook: "a-quiet-moon", universe: Universe, allowRelinks: true);
+
+        Assert.EndsWith("The [[Lantern]] signals.\n", _den.Read(result.Path), StringComparison.Ordinal);
+        Assert.DoesNotContain(result.Effects, e => e.StartsWith("Its own link", StringComparison.Ordinal));
+        Assert.Contains(result.Effects, e => e.Contains($"now reaches 'Lantern' ({LanternShip})", StringComparison.Ordinal) && e.Contains(LanternItem, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-29")]
+    public void AMoveWhoseOwnLinksWereRewrittenRollsBackWhole()
+    {
+        var before = _den.Read(Pike);
+        var hash = Tools.GetEntity("Halden Pike", Universe).Entity!.Hash!;
+
+        var tools = new DenTools(_den.Root) { Store = new StepStore(_den.Root, failMove: true) };
+        Assert.Equal(ToolErrorCodes.WriteFailed, Assert.Throws<DenToolException>(() => tools.MoveEntity("Halden Pike", hash, universe: Universe)).Code);
+
+        Assert.Equal(before, _den.Read(Pike));
+        Assert.False(File.Exists(Path.Combine(_den.Root, Root + "/entities/characters/halden-pike.md")));
     }
 
     [Fact]
@@ -336,7 +395,9 @@ public sealed class MoveEntityToolTests : IDisposable
         var refused = Assert.Throws<DenToolException>(() => Tools.MoveEntity("Sash Orel", hash, toBook: "ember", universe: Universe));
         Assert.Equal(ToolErrorCodes.EntryOutsideScope, refused.Code);
         Assert.Contains("after book 'ember'", refused.Message, StringComparison.Ordinal);
-        Assert.Contains("earlier than the reader meets it now", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("be warned: it would then appear in canon views from the start of book 'ember' on, earlier than readers now meet it", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("keep_entry", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("enter_at_new_scope", refused.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("before then leave it out", refused.Message, StringComparison.Ordinal);
 
         var result = Tools.MoveEntity("Sash Orel", hash, toBook: "ember", enterAtNewScope: true, universe: Universe);

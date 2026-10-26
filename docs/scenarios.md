@@ -2141,7 +2141,15 @@ War, a series with no books yet. The assistant moves notes between them.
   so Halden Pike's `[[Lantern]]`, which reaches the item, would become
   ambiguous: refused, naming the link, unless `allow_relinks`, and then
   the result lists it. Pike himself moved to the universe would lose his
-  own link to the item: refused the same way. The ship moved to the
+  own links to the item, since they'd tie there: each is rewritten to the
+  item's id, keeping its `#Overview` anchor or its "the lamp" label, and
+  listed in the result, so his canon views read as before. A note in Ash
+  whose `[[Lantern]]` would reach the ship once moved into A Quiet Moon
+  keeps the item the same way, and its broken `[[Nobody we know]]`
+  stays as written. With `allow_relinks` its links are left to follow
+  the new scope, and the result lists the one that now reaches the ship.
+  A move with such rewrites that fails puts the note back byte for byte.
+  The ship moved to the
   universe makes the Reach's ambiguous `[[Lantern]]` reach it, which is
   only reported.
 - A file already at the new path stops the move (`already_exists`). The
@@ -2167,7 +2175,10 @@ Spec: format.md F-RT-5, F-ENT-6, F-POS-7, F-ORD-3, F-LINK-7, F-BOOK-1
 `MoveEntityToolTests.LinksThatWouldStopReachingItAreRewrittenToItsId`,
 `MoveEntityToolTests.ALinkToRewriteInAFinalBookStopsTheMove`,
 `MoveEntityToolTests.ALinkThatWouldReachAnotherEntityIsRefusedUnlessAllowed`,
-`MoveEntityToolTests.TheMovedFilesOwnLinksCountToo`,
+`MoveEntityToolTests.TheMovedFilesOwnLinksThatWouldBeAmbiguousAreRewrittenToTheirTargetsIds`,
+`MoveEntityToolTests.TheMovedFilesOwnLinkThatWouldReachAnotherEntityKeepsItsTarget`,
+`MoveEntityToolTests.WithAllowRelinksTheMovedFilesOwnLinksFollowTheNewScope`,
+`MoveEntityToolTests.AMoveWhoseOwnLinksWereRewrittenRollsBackWhole`,
 `MoveEntityToolTests.AnAmbiguousLinkThatNowResolvesIsReported`,
 `MoveEntityToolTests.AFileAlreadyThereStopsTheMove`,
 `MoveEntityToolTests.AMoveThatFailsPartWayPutsBackWhatItWrote`,

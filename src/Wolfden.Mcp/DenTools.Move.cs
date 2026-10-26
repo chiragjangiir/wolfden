@@ -109,7 +109,8 @@ public sealed partial class DenTools
             try
             {
                 plan = EntityMove.Plan(
-                    links, den, target, scope, id, f => WithIdAdded(entry.Edit(f)), entry.InterimEdit is { } interim ? f => WithIdAdded(interim(f)) : null);
+                    links, den, target, scope, id, f => WithIdAdded(entry.Edit(f)), entry.InterimEdit is { } interim ? f => WithIdAdded(interim(f)) : null,
+                    rewriteOwnLinks: !allowRelinks);
             }
             catch (InvalidOperationException e)
             {
@@ -147,14 +148,11 @@ public sealed partial class DenTools
             // Links that reached another entity and wouldn't any more, or would reach another
             // (a nearer scope wins a tie, F-LINK-7), refuse the move unless allow_relinks says
             // to go ahead (maintainer decision, 2026-10-26). That includes the moved file's own
-            // links, whose scope chain changes. A link that was ambiguous or broken is only reported.
-            // The moved file's own links are kept apart: whether they're refused like the others, or
-            // rewritten to the id of what they reached before (as links to it are), is the
-            // maintainer's call (PR #164). To rewrite them, plan those in EntityMove.Plan and drop
-            // them from 'relinked' here.
+            // links whose target has no id to rewrite them to. The moved file's other own links
+            // were rewritten to their targets' ids by default (maintainer decision on #164), or,
+            // with allow_relinks, left to follow the new scope and listed below. A link that was
+            // ambiguous or broken is only reported.
             var relinked = plan.Changes.Where(l => l.Before.Outcome == Core.Links.LinkOutcome.Resolved).ToList();
-            var ownRelinked = relinked.Where(l => l.After.Occurrence.Path == plan.To).ToList();
-            relinked = [.. relinked.Except(ownRelinked), .. ownRelinked];
             if (relinked.Count > 0 && !allowRelinks)
             {
                 throw new DenToolException(
@@ -189,6 +187,11 @@ public sealed partial class DenTools
                     $"{plan.Rewritten.Count} link(s) to it would have stopped reaching it (another entity in a nearer scope, or a tie, F-LINK-7), so they were rewritten " +
                     $"to its id, showing the same text as before (F-RT-5), in: {string.Join(", ", rewrittenFiles)}.");
             }
+
+            // Its own links that would have reached another entity, or none, from the new scope.
+            effects.AddRange(plan.OwnRewritten.Select(l =>
+                $"Its own link {l.Occurrence.Link.Text} (line {l.Occurrence.Link.Line}) reached {Reached(l)}, and from {EntityMove.Describe(scope)} it wouldn't " +
+                $"(F-LINK-7), so it was rewritten to that entity's id, showing the same text as before. Pass allow_relinks to leave such links to follow the new scope instead."));
 
             effects.AddRange(plan.Changes.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} {Now(l.After)}; before, it {Was(l.Before)}."));
             if (plan.Changes.Count > ListedLinkChanges)
@@ -258,15 +261,6 @@ public sealed partial class DenTools
         return universe;
     }
 
-    /// <summary>
-    /// True to let <c>enter_at_new_scope</c> move an entity the reader meets
-    /// only after the new scope, so it enters canon earlier than before. The
-    /// maintainer hasn't decided yet whether that case keeps both ways
-    /// forward or only <c>keep_entry</c> (PR #164); false offers only
-    /// <c>keep_entry</c>.
-    /// </summary>
-    private const bool EnterAtNewScopeWhenEntryIsAfter = true;
-
     /// <summary>What a move does to where the entity enters canon.</summary>
     /// <param name="Edit">The edit of its <c>from</c>, if any.</param>
     /// <param name="Effects">What that means, for the result.</param>
@@ -335,8 +329,7 @@ public sealed partial class DenTools
         }
 
         var enters = entity.From is not null ? $"{entity.From} (its 'from')" : $"{entity.Scope.StartDescription} (it has no 'from')";
-        var enterOffered = place != Place.After || EnterAtNewScopeWhenEntryIsAfter;
-        if (enterAtNewScope && enterOffered)
+        if (enterAtNewScope)
         {
             effects.Add(
                 $"It now enters canon at {scope.StartDescription} (enter_at_new_scope); before the move it entered at {enters}, " +
@@ -373,13 +366,13 @@ public sealed partial class DenTools
             : $"so the reader meets it only after {EntityMove.Describe(scope)}";
         var instead = place == Place.Before
             ? $"so canon views before then leave it out"
-            : $"so canon views from then on include it, earlier than the reader meets it now";
+            : $"but be warned: it would then appear in canon views from {scope.StartDescription} on, earlier than readers now meet it ({enters})";
         throw new DenToolException(
             ToolErrorCodes.EntryOutsideScope,
             $"'{entity.Name}' enters canon at {enters}, in book '{book.Key}', which is {describe}, {already}. " +
             "Moving it there needs the writer's choice, so nothing was changed. Ask the writer, then call again with keep_entry: true to keep " +
             $"{written} (it still enters canon there{(scope is Book ? ", and check warns that its 'from' is outside its book, F-ENT-6" : "")})" +
-            (enterOffered ? $", or enter_at_new_scope: true to have it enter canon at {scope.StartDescription} instead, {instead}." : "."));
+            $", or enter_at_new_scope: true to have it enter canon at {scope.StartDescription} instead, {instead}.");
     }
 
     /// <summary>Where the book an entity enters canon in lies, against a scope it moves to.</summary>
