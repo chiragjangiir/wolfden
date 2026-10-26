@@ -413,7 +413,13 @@ The den store and the history provider are interfaces in `Wolfden.Core`
   checkpoint works up to its commit. Wolfden never deletes git's lock
   files. A diff against the files as they
   are now includes new files git doesn't track yet (not ignored ones),
-  through a temporary index, so it never changes the user's index. The
+  through a temporary index, so it never changes the user's index, and
+  it writes nothing into the repository's objects (#142). Clean filters
+  still run on the files compared, and Git LFS's stores what it cleans in
+  `.git/lfs/objects`. In a sparse checkout, files marked skip-worktree
+  (the ones it keeps off the disk, or any marked by hand) count as
+  unchanged; without one, a file marked by hand is compared as it is on
+  disk. Edits inside a submodule aren't the den's. The
   log of a file follows its current path, not back through renames
   (`--follow` can't be paged). The log pages by position: each page
   walks the same log from HEAD with the same path filter and starts
