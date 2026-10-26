@@ -72,6 +72,7 @@ public sealed partial class DenTools
             var ownAlias = sameForLinks ? -1 : aliasItems.ToList().FindIndex(i => i is YamlScalar { IsNull: false } s && LinkText.Matches(s.Text, newName));
             var dropped = ownAlias >= 0 ? ((YamlScalar)aliasItems[ownAlias]).Text : null;
             const string Hint = "pass keep_old_name: true to keep the old name as an alias instead, which leaves those links as they are";
+            var notes = new List<string>();
             return new TextChange(
                 LinkMatchKind.Name, oldName, newName, keep || sameForLinks ? null : newName,
                 file =>
@@ -79,7 +80,8 @@ public sealed partial class DenTools
                     file = Apply(() => file.WithFrontmatterValue(["name"], YamlScalarValue.String(newName)));
                     if (ownAlias >= 0)
                     {
-                        file = Apply(() => file.WithoutFrontmatterValue(["aliases", ownAlias.ToString(System.Globalization.CultureInfo.InvariantCulture)]));
+                        file = Apply(() => NoteEmptied(
+                            notes, file.WithoutFrontmatterValue(["aliases", ownAlias.ToString(System.Globalization.CultureInfo.InvariantCulture)], EmptiedList.Null, out var comments), comments, "aliases"));
                     }
 
                     if (keep && !alreadyAlias)
@@ -94,7 +96,8 @@ public sealed partial class DenTools
                 SameForLinks: sameForLinks,
                 KeepHint: Hint,
                 LostHint: "choose another name, or " + Hint,
-                DroppedAlias: dropped);
+                DroppedAlias: dropped,
+                Notes: notes);
         });
     }
 
@@ -157,10 +160,11 @@ public sealed partial class DenTools
 
             var itemPath = new[] { "aliases", index.ToString(System.Globalization.CultureInfo.InvariantCulture) };
             var keep = keepOldAlias && !sameForLinks;
+            var notes = new List<string>();
             return new TextChange(
                 LinkMatchKind.Alias, oldAlias, newAlias, keep || sameForLinks ? null : newAlias ?? target.Name,
                 f => keep ? Apply(() => f.WithNewListItem(["aliases"], YamlScalarValue.String(newAlias!), null, inTemplateOrder: true))
-                    : newAlias is null ? Apply(() => f.WithoutFrontmatterValue(itemPath))
+                    : newAlias is null ? Apply(() => NoteEmptied(notes, f.WithoutFrontmatterValue(itemPath, EmptiedList.Null, out var comments), comments, "aliases"))
                     : Apply(() => f.WithFrontmatterValue(itemPath, YamlScalarValue.String(newAlias))),
                 Kept: keep ? oldAlias : null,
                 NewAlias: newAlias,
@@ -170,7 +174,8 @@ public sealed partial class DenTools
                     : "pass keep_old_alias: true to add the new alias beside the old one instead, which leaves those links as they are",
                 LostHint: newAlias is null
                     ? "keep the alias, or change those links to the entity's id or file name first"
-                    : "choose another alias, or pass keep_old_alias: true to add the new alias beside the old one instead, which leaves those links as they are");
+                    : "choose another alias, or pass keep_old_alias: true to add the new alias beside the old one instead, which leaves those links as they are",
+                Notes: notes);
         });
     }
 
@@ -188,9 +193,10 @@ public sealed partial class DenTools
     /// <param name="KeepHint">What to do instead when a link to rewrite is in a final book.</param>
     /// <param name="LostHint">What to do instead when a rewritten link wouldn't reach the entity.</param>
     /// <param name="DroppedAlias">For a rename to one of the entity's own aliases: that alias, taken out of <c>aliases</c>.</param>
+    /// <param name="Notes">Effects the edit of the entity's own file adds as it's made, such as comment lines that went with an emptied list.</param>
     private sealed record TextChange(
         LinkMatchKind Kind, string OldText, string? NewText, string? LinkText, Func<MarkdownFile, MarkdownFile> Edit, string? Kept, string? NewAlias, bool SameForLinks,
-        string KeepHint, string LostHint, string? DroppedAlias = null);
+        string KeepHint, string LostHint, string? DroppedAlias = null, List<string>? Notes = null);
 
     private WriteResult ChangeText(string entity, string? universe, string hash, bool allowRelinks, Func<CatalogEntity, TextChange?> change)
     {
@@ -296,6 +302,7 @@ public sealed partial class DenTools
             var after = EntityCatalog.ReadEntityFile(check.Structure, path, files[path]).Entity!;
             var ownMoved = moved.Any(l => l.Before.Target?.Path == path);
             var effects = new List<string> { Said(c, plan, target, files.Count, ownMoved) };
+            effects.AddRange(c.Notes ?? []);
             if (c.Kind == LinkMatchKind.Name)
             {
                 effects.Add($"The file keeps its name, {path[(path.LastIndexOf('/') + 1)..]}, so links by its file name still reach it; renaming the file is a separate change.");
