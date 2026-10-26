@@ -100,8 +100,8 @@ Two fixes:
   the ambiguous links `wolfden check` lists: once the clash is gone, every
   one of them leads to the ship, so change the ones that meant the tavern
   to `[[The Lantern Inn]]`.
-- **Link by id,** with a label for readers. Every note's id is on the
-  `id:` line at the top of its file. If the ship's is
+- **Link by id,** with a label for readers. A note's id is on the
+  `id:` line at the top of its file (`wolfden check --fix` adds one if it's missing). If the ship's is
   `01JB2K8D4F6GH7J9KMNPQRSTVW`, then
   `[[01JB2K8D4F6GH7J9KMNPQRSTVW|the Lantern]]` always means the ship. An id
   never clashes.
