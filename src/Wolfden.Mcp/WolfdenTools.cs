@@ -39,7 +39,8 @@ public sealed class WolfdenTools
     [McpServerTool(Name = "search", Title = "Search the den", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]
     [Description(
         "Full-text search over the den's notes: entity names, aliases, leads, section text, and field values. Words match whole, " +
-        "in any order, ignoring case and accents; end a word with * to match it as a prefix. A field value's words are the value " +
+        "in any order, ignoring case and accents; end a word with * to match it as a prefix. There's no phrase search: quotes " +
+        "don't keep words together, though a hyphenated word such as mara-voss matches its parts side by side. A field value's words are the value " +
         "as written and, for a link, the linked entity's name and aliases. Give field to search only that field's values (field " +
         "'home' with query 'saltmarsh' finds home: Saltmarsh Docks); each hit in a field names it in 'field', and its snippet " +
         "shows the value, then '→' and a linked entity's name if that's what matched. Matches are in [square brackets]. Results " +

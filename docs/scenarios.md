@@ -2998,10 +2998,15 @@ his id; the reader meets Pike in *Ash*.
   position, "pike" finds the watch mate, and the snippet reads
   `[[<id>]] → Halden Pike`.
 - Only the values in the canon view count: Mara's posting to Kessan
-  Reach, from `ash:4`, isn't found at `ash:3`.
+  Reach, from `ash:4`, isn't found at `ash:1`.
 - The Field filter lists only the fields of values the reader has met
   (`/api/fields` with `asOf`), as the Type filter lists only met types,
-  and keeps one already chosen.
+  and keeps one already chosen. Searching a field only notes the reader
+  hasn't met have, such as Pike's `debts` before *Ash*, is refused just
+  as a made-up field is ("No note the reader has met by ember:3 gives a
+  value for a field 'debts'"), so the answer doesn't tell them apart.
+- For every position, a field search for a name only an unmet note has
+  finds nothing, not just nothing that names it.
 
 Spec: design.md §9 (#179, #26). Covered by:
 `FieldSearchEndpointTests.AsOfAPositionALinkMatchesByNameOnlyWhenTheReaderHasMetItsNote`,

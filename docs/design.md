@@ -1201,14 +1201,24 @@ docs/
   where that's what matched. The Field filter lists the fields notes
   give values for (`/api/fields`); as of a position, only those of
   values in view, as the Type filter lists only met types. A field no
-  note gives a value for is `bad_argument`. Types' defaults aren't
+  note gives a value for is `bad_argument`; as of a position, so is one
+  only notes the reader hasn't met give values for, judged from the
+  same list, so the answer can't tell a later note's field from a
+  made-up one. Types' defaults aren't
   searched: they aren't the note's writing. Field values aren't in the
   FTS5 table: a link's name changes when its note is renamed, without
   the linking file changing, and what counts depends on the position,
   so values are matched when a search asks (they're few next to
-  sections), and field hits come after the full-text hits. Phrase
-  search (`"a note"`) isn't supported yet: each word is matched on its
-  own.
+  sections), with the search table's tokenizer rules (`unicode61`,
+  `remove_diacritics 2`: Latin accents are folded, other scripts' marks
+  aren't), and field hits come after the full-text hits. When the
+  full-text hits run past the raw cap a filtered search fetches (1,000,
+  or 20 times the limit), field hits aren't added at all, since more
+  full-text hits would come before them; the result says `truncated`,
+  and a narrower query or the Field filter reaches them. Phrase search
+  (`"a note"`) isn't supported yet: the words of a query match anywhere
+  in the text, in any order. Only a word joined by punctuation, such as
+  `mara-voss`, matches its parts side by side.
 - **The history page** (#27; v0 behaviour, not a recorded decision,
   except the reveal, which applies the #26 decision). An entity page
   has Note and History tabs, below the breadcrumb on both. History is

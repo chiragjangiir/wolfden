@@ -342,10 +342,10 @@ export interface SearchHit {
   field?: string | null
   /** An excerpt with each match in square brackets, as the MCP tool gives it. The page marks matches from `text` and `matches`. */
   snippet: string
-  /** The excerpt without marks. */
-  text: string
-  /** Where the matches are in `text`. */
-  matches: TextMatch[]
+  /** The excerpt without marks. The API always gives it (#179); the page falls back to `snippet` unmarked. */
+  text?: string
+  /** Where the matches are in `text`; none marked if it's missing. */
+  matches?: TextMatch[]
   status: string
   inCanon: boolean
   inComment: boolean

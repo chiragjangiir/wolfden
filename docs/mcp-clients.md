@@ -195,7 +195,7 @@ prompts. This list is for knowing what the assistant can do.
 
 | Tool | What it does |
 |---|---|
-| `search` | Full-text search over names, aliases, leads, section text, and field values (a link in a field matches its note's name and aliases too); `field` searches one field's values. |
+| `search` | Full-text search over names, aliases, leads, section text, and field values (a link in a field matches its note's name and aliases too); `field` searches one field's values. A hit in a field has `field` (its name) and `line` (the entry's line), with no `section`, such as `{"field": "occupation", "line": 10, "snippet": "[physician], professor", …}`. A query's words match anywhere in any order; there's no phrase search yet. |
 | `get_entity` | One entity, by name, alias, file name, id, key, or path; with `as_of`, only what the reader knows at that position. |
 | `list_entities` | Entities by type, status, series, or book. |
 | `canon_as_of` | Canon at a story position (or the end of the story), pinned canon first. |

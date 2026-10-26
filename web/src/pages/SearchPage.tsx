@@ -326,7 +326,7 @@ function Hit({ universe, hit }: { universe: string; hit: SearchHit }) {
         {hit.inComment && <span className="badge">in a comment</span>}
       </p>
       <p className="snippet">
-        <Snippet text={hit.text} matches={hit.matches} />
+        <Snippet text={hit.text ?? hit.snippet} matches={hit.matches ?? []} />
       </p>
     </li>
   )
