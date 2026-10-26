@@ -196,11 +196,27 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
     /// <summary>F-DEN-1: <c>format</c> is a required integer, from 1 up to the highest this reader supports.</summary>
     private int? ReadFormat(YamlFile file)
     {
+        var format = ReadFormat(file, out var error);
+        if (error is not null)
+        {
+            den.Add(DenFile, error);
+        }
+
+        return format;
+    }
+
+    /// <summary>
+    /// F-DEN-1 without a den to report to: the format, or null with the
+    /// <paramref name="error"/> that says why there's none.
+    /// </summary>
+    internal static int? ReadFormat(YamlFile file, out Diagnostic? error)
+    {
+        error = null;
         var node = file.GetValue("format");
         if (node is not YamlScalar { IsNull: false, Style: YamlScalarStyle.Plain } scalar || !IsDecimalInteger(scalar.Text))
         {
-            den.Add(DenFile, new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node?.Line ?? 1,
-                node is null ? "den.yaml has no format. Add 'format: 1'." : "format must be an integer, such as 'format: 1'."));
+            error = new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node?.Line ?? 1,
+                node is null ? "den.yaml has no format. Add 'format: 1'." : "format must be an integer, such as 'format: 1'.");
             return null;
         }
 
@@ -208,40 +224,65 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         var tooBig = !int.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var format);
         if (tooBig ? !text.StartsWith('-') : format > DenStructure.SupportedFormat)
         {
-            den.Add(DenFile, new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node.Line,
-                $"den format {text} is newer than this version of Wolfden, which reads format {DenStructure.SupportedFormat}."));
+            error = new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node.Line,
+                $"den format {text} is newer than this version of Wolfden, which reads format {DenStructure.SupportedFormat}.");
             return null;
         }
 
         if (tooBig || format < 1)
         {
-            den.Add(DenFile, new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node.Line,
-                $"den format {text} doesn't exist: formats start at 1."));
+            error = new Diagnostic("F-DEN-1", DiagnosticSeverity.Error, node.Line,
+                $"den format {text} doesn't exist: formats start at 1.");
             return null;
         }
 
         return format;
     }
 
+    /// <summary>The <c>den.yaml</c> key that lets the web UI load images from websites (F-DEN-8).</summary>
+    internal const string RemoteImagesKey = "remote_images";
+
     /// <summary>
-    /// F-DEN-6 and F-DEN-7: <c>bookkeeping_sections</c> and
-    /// <c>spoiler_checks</c>. Returns false if <c>bookkeeping_sections</c>
-    /// has the wrong shape, an error that keeps the den from loading.
+    /// A boolean setting in <c>den.yaml</c>: its value, or null when it's
+    /// left out or null (the same as leaving it out, as for order and
+    /// books) or isn't a YAML boolean; then <paramref name="invalid"/> is
+    /// the node that isn't one.
+    /// </summary>
+    internal static bool? ReadBoolean(YamlFile file, string key, out YamlNode? invalid)
+    {
+        invalid = null;
+        switch (file.GetValue(key))
+        {
+            case null or YamlScalar { IsNull: true }:
+                return null;
+            case YamlScalar scalar when scalar.AsBoolean() is bool on:
+                return on;
+            case var node:
+                invalid = node;
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// F-DEN-6, F-DEN-7, and F-DEN-8: <c>bookkeeping_sections</c>,
+    /// <c>spoiler_checks</c>, and <c>remote_images</c>. Returns false if
+    /// <c>bookkeeping_sections</c> has the wrong shape, an error that keeps
+    /// the den from loading.
     /// </summary>
     private bool ReadSettings(YamlFile file)
     {
-        switch (file.GetValue("spoiler_checks"))
+        den.SpoilerChecks = ReadBoolean(file, "spoiler_checks", out var badSpoilers) ?? false;
+        if (badSpoilers is not null)
         {
-            // A null is the same as leaving it out, as for order and books.
-            case null or YamlScalar { IsNull: true }:
-                break;
-            case YamlScalar scalar when scalar.AsBoolean() is bool on:
-                den.SpoilerChecks = on;
-                break;
-            case var node:
-                den.Add(DenFile, new Diagnostic("F-DEN-7", DiagnosticSeverity.Warning, node.Line,
-                    $"spoiler_checks must be true or false, not '{Describe(node)}', so the spoiler checks stay off."));
-                break;
+            den.Add(DenFile, new Diagnostic("F-DEN-7", DiagnosticSeverity.Warning, badSpoilers.Line,
+                $"spoiler_checks must be true or false, not '{Describe(badSpoilers)}', so the spoiler checks stay off."));
+        }
+
+        den.RemoteImages = ReadBoolean(file, RemoteImagesKey, out var badImages) ?? false;
+        if (badImages is not null)
+        {
+            den.Add(DenFile, new Diagnostic("F-DEN-8", DiagnosticSeverity.Warning, badImages.Line,
+                $"remote_images must be true or false, not '{Describe(badImages)}', so images from websites stay blocked."));
         }
 
         var patterns = file.GetValue("bookkeeping_sections");

@@ -355,6 +355,7 @@ authors:
 packs: [space-opera]
 bookkeeping_sections: ["Scratch", "* working notes"]
 spoiler_checks: true
+remote_images: false
 ```
 
 **F-DEN-1.** `format` is REQUIRED and is an integer. This spec is format
@@ -399,6 +400,18 @@ writer can pace the reveals. The check helps writers who track that, by
 flagging a link to something the reader hasn't met yet. A null value is
 the same as leaving the key out. Any other value that isn't a YAML boolean
 is a [warning], and the checks stay off.
+
+**F-DEN-8.** `remote_images` is an optional boolean that lets the web UI
+(`wolfden serve`) load images in notes whose address is on a website:
+`![Harbour](https://example.com/harbour.jpg)`, an `http:` address, or one
+that starts with `//`. It defaults to `false`: such an image doesn't
+load, so opening a note doesn't tell the website that the den was opened,
+and the page shows a placeholder with the image's alt text and its address
+as a link to open in the browser. An image with a relative address isn't
+affected by this setting. A null value is the same as leaving the key
+out. Any other value that isn't a YAML boolean is a [warning], and remote
+images stay blocked. Apart from that warning, the setting changes only
+what the web UI shows.
 
 ## 6. Containers: universe, series, book
 

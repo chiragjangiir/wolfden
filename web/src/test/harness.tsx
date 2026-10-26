@@ -23,6 +23,7 @@ export const den: DenSummary = {
   name: 'Dracula',
   pinnedUniverse: null,
   universes: [{ key: 'dracula', name: 'Dracula', id: 'U1', series: 0, books: 1, entities: 7 }],
+  remoteImages: false,
 }
 
 const titles = ["Jonathan Harker's Journal", "Jonathan Harker's Journal", "Jonathan Harker's Journal", "Jonathan Harker's Journal", 'Letters—Lucy and Mina']

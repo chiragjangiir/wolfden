@@ -224,6 +224,7 @@ internal static class InitCommand
             ? start + "# name: My Notes           # display name; defaults to the folder's name\n"
             : YamlFile.Parse(Utf8.GetBytes(start)).WithValue("name", YamlScalarValue.String(name)).Text;
         text += "# spoiler_checks: true     # flag links to things the reader hasn't met yet (F-DEN-7)\n";
+        text += "# remote_images: true      # let the web UI load images from websites in notes (F-DEN-8)\n";
         return Utf8.GetBytes(text);
     }
 

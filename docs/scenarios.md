@@ -2524,7 +2524,8 @@ search, and history pages come in M3 (#24 to #27); their read API comes
 first, and SC-WEB-4 to SC-WEB-10 describe what it answers. SC-WEB-11
 to SC-WEB-17 describe the browsing pages, SC-WEB-18 to SC-WEB-21 the
 search page, and SC-WEB-22 and SC-WEB-23 the history page. SC-WEB-24
-and SC-WEB-25 describe field search (#179).
+and SC-WEB-25 describe field search (#179). SC-WEB-35 to SC-WEB-38
+cover images in notes and what a page may load (#180).
 
 ### SC-WEB-1. I open my den in the browser
 
@@ -3013,3 +3014,75 @@ Spec: design.md §9 (#179, #26). Covered by:
 `FieldSearchEndpointTests.TheFieldsAreThoseNotesGiveValuesForAndAsOfAPositionOnlyThoseInView`,
 `SpoilerTests.NothingAsOfAPositionNamesAnEntityTheReaderHasntMet`,
 `Search.test.tsx` (web).
+
+### SC-WEB-35. A note shows an image from a website
+
+Bistritz's note has `![Castle at dusk](https://example.com/castle.jpg)`
+in a section, and the den's `den.yaml` doesn't mention `remote_images`.
+
+- The image doesn't load, so opening the note sends nothing to
+  example.com. In its place is a small placeholder, "Image not loaded:
+  Castle at dusk", with the address as a link that opens in a new tab
+  (`rel="noopener noreferrer"`); its tooltip says how to turn images on.
+  The same goes for an `http:` address, a `//host/...` one, one written
+  as `https:host/...`, and an image given by reference. Without alt
+  text it says "Image not loaded". Inside a note's link the address is
+  shown as text, so there's no link inside a link. A raw `<img>` or a
+  `data:` image never shows.
+
+Spec: design.md §9 (#180, the maintainer's decision), format.md F-DEN-8.
+Covered by: `ContentSecurityPolicyTests.ByDefaultTheDenDoesntAllowRemoteImages`,
+`Images.test.tsx` (web).
+
+### SC-WEB-36. The browser is told what a page may load
+
+- Every page `wolfden serve` sends has a Content-Security-Policy that
+  lets it load script, style, images, and API answers only from the
+  server itself (and a `data:` image, for its empty icon), with no
+  inline script or style, no plugins, no `<base>`, and no framing by
+  another page. The API's answers, the UI's files, and errors (a
+  refused host name, a `cross_site` 403, an `internal_error`) get a
+  policy that loads nothing, and `nosniff`. The built page has no inline
+  script or style for the policy to block. `npm run dev` doesn't get the
+  policy, so hot reload still works.
+
+Spec: design.md §9 (#180). Covered by:
+`ContentSecurityPolicyTests.PagesGetAPolicyThatLoadsOnlyFromThisServer`,
+`ContentSecurityPolicyTests.EverythingElseGetsAPolicyThatLoadsNothing`,
+`ContentSecurityPolicyTests.ErrorsGetThePolicyThatLoadsNothing`,
+`ContentSecurityPolicyTests.ThePageThatSaysHowToBuildTheUiHasItsOwnPolicy`,
+`ServeCommandTests.TheBuiltUiIsServedFromWwwroot`.
+
+### SC-WEB-37. I let my den show images from websites
+
+The writer adds `remote_images: true` to `den.yaml` and reloads the
+page.
+
+- Images from websites load, without sending the page's address as the
+  referrer, and the page's policy allows `https:` and `http:` images.
+  `/api/den` says `remoteImages: true`. Until the UI knows the setting,
+  images stay blocked. Setting it back to `false`, or to something that
+  isn't true or false (a warning in `wolfden check`), blocks them again
+  on the next load, without a restart. A `den.yaml` that doesn't parse,
+  or whose `format` this Wolfden can't read, keeps them blocked.
+- While a page is open, it keeps the setting it first got, since its
+  policy was fixed when it loaded. Turned off, images are blocked at
+  once. Turned on, the placeholder stays and says to reload the page,
+  rather than showing a broken image.
+
+Spec: format.md F-DEN-8, design.md §9 (#180). Covered by:
+`EntityCatalogTests.RemoteImagesAreABooleanThatDefaultsToOff`,
+`EntityCatalogTests.ADenYamlWithoutAFormatItCanReadLeavesRemoteImagesOff`,
+`ContentSecurityPolicyTests.RemoteImagesTrueAllowsThemInThePolicyAndTellsTheUi`,
+`ContentSecurityPolicyTests.ADenYamlThatDoesntLoadKeepsRemoteImagesBlocked`,
+`Images.test.tsx` (web).
+
+### SC-WEB-38. A note shows an image kept in the den
+
+A note has `![Map of the castle](images/castle-map.png)`.
+
+- The image is rendered with its address as written, whatever
+  `remote_images` says, as before #180. (`serve` doesn't serve the
+  den's own files yet, so it doesn't show.)
+
+Spec: design.md §9 (#180). Covered by: `Images.test.tsx` (web).
