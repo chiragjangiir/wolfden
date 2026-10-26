@@ -147,9 +147,10 @@ internal static partial class LinkRewriter
         // The body first, by offset, then the frontmatter, whose offsets the body's edits don't move.
         var replacements = new List<(int Start, int Length, string Text)>();
         var found = file.IsOutline ? BodyLinkScanner.ScanOutline(file) : BodyLinkScanner.ScanBody(file);
+        Lines? lines = null;
         foreach (var link in found)
         {
-            if (Matches(link) && replace(text.Substring(link.Link.Offset, link.Link.Length), InTableRow(text, link.Link.Offset)) is { } replaced)
+            if (Matches(link) && replace(text.Substring(link.Link.Offset, link.Link.Length), (lines ??= new Lines(text)).InTableRow(link.Link.Offset)) is { } replaced)
             {
                 replacements.Add((link.Link.Offset, link.Link.Length, replaced));
             }
@@ -224,38 +225,79 @@ internal static partial class LinkRewriter
 
     /// <summary>
     /// True if the line that holds <paramref name="offset"/> is a table row
-    /// (GFM tables), where a <c>|</c> splits the cell: one that starts with
-    /// <c>|</c>, or one with a <c>|</c> in a run of lines that has a delimiter
-    /// row (<c>---|---</c>), for a table written without the outer pipes. A
-    /// blockquote's <c>&gt;</c> markers are skipped first, for a table in a quote.
+    /// (GFM tables), where a <c>|</c> splits the cell. See <see cref="Lines"/>.
     /// </summary>
-    internal static bool InTableRow(string text, int offset)
+    internal static bool InTableRow(string text, int offset) => new Lines(text).InTableRow(offset);
+
+    /// <summary>A text's lines, split once, to ask of several offsets whether each is in a table row.</summary>
+    internal sealed class Lines
     {
-        var lines = text.Split('\n');
-        var at = text.AsSpan(0, Math.Min(offset, text.Length)).Count('\n');
-        var line = Unquoted(lines[at]);
-        if (line.StartsWith('|'))
-        {
-            return true;
-        }
+        private readonly string[] _lines;
+        private readonly int[] _starts;
 
-        if (!line.Contains('|', StringComparison.Ordinal))
+        public Lines(string text)
         {
-            return false;
-        }
-
-        for (var step = -1; step <= 1; step += 2)
-        {
-            for (var i = at; i >= 0 && i < lines.Length && Unquoted(lines[i]).Length > 0; i += step)
+            _lines = text.Split('\n');
+            _starts = new int[_lines.Length];
+            for (int i = 1, at = 0; i < _lines.Length; i++)
             {
-                if (DelimiterRow().IsMatch(Unquoted(lines[i])))
+                at += _lines[i - 1].Length + 1;
+                _starts[i] = at;
+            }
+        }
+
+        /// <summary>
+        /// True if the line that holds <paramref name="offset"/> is a table
+        /// row: one that starts with <c>|</c>; one with a <c>|</c> whose next
+        /// line is a delimiter row (<c>---|---</c>), so it's the header; or
+        /// one with a <c>|</c> below a delimiter row in the same run of
+        /// non-blank lines, for a table written without the outer pipes.
+        /// Only lines above are looked at, as GFM makes only a paragraph's
+        /// last line a header, and the walk stops at a code fence or an HTML
+        /// comment's marker. A blockquote's <c>&gt;</c> markers are skipped
+        /// first, for a table in a quote.
+        /// </summary>
+        public bool InTableRow(int offset)
+        {
+            var at = Array.BinarySearch(_starts, offset);
+            at = at >= 0 ? at : ~at - 1;
+            var line = Unquoted(_lines[at]);
+            if (line.StartsWith('|'))
+            {
+                return true;
+            }
+
+            if (!line.Contains('|', StringComparison.Ordinal) || IsMarker(line))
+            {
+                return false;
+            }
+
+            if (at + 1 < _lines.Length && Unquoted(_lines[at + 1]) is var next && !IsMarker(next) && DelimiterRow().IsMatch(next))
+            {
+                return true;
+            }
+
+            for (var i = at - 1; i >= 0; i--)
+            {
+                var above = Unquoted(_lines[i]);
+                if (above.Length == 0 || IsMarker(above))
+                {
+                    return false;
+                }
+
+                if (DelimiterRow().IsMatch(above))
                 {
                     return true;
                 }
             }
+
+            return false;
         }
 
-        return false;
+        /// <summary>True for a line that opens or closes a code fence or an HTML comment, where a table can't continue.</summary>
+        private static bool IsMarker(string line) =>
+            line.StartsWith("```", StringComparison.Ordinal) || line.StartsWith("~~~", StringComparison.Ordinal)
+            || line.Contains("<!--", StringComparison.Ordinal) || line.Contains("-->", StringComparison.Ordinal);
     }
 
     /// <summary>The line without its indent, any blockquote markers, or a carriage return.</summary>

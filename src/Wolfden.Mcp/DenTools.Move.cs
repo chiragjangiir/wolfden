@@ -465,7 +465,7 @@ public sealed partial class DenTools
         }
         catch (Exception e)
         {
-            var stuck = new List<string>();
+            var stuck = new List<(string Path, byte[] Holds)>();
             foreach (var (path, holds, undo) in Enumerable.Reverse(made))
             {
                 try
@@ -476,25 +476,26 @@ public sealed partial class DenTools
                     }
                     else
                     {
-                        stuck.Add(path);
+                        stuck.Add((path, holds));
                     }
                 }
                 catch (Exception u) when (u is IOException or UnauthorizedAccessException)
                 {
-                    stuck.Add(path);
+                    stuck.Add((path, holds));
                 }
             }
 
-            // A file put back is as the session found it; one that still holds the edit is the session's.
-            foreach (var path in stuck.Distinct(StringComparer.Ordinal))
+            // A file put back is as the session found it; one that still holds what a step wrote
+            // (the in-place rewrite, a link rewrite, or the final text) is the session's.
+            foreach (var (path, holds) in stuck)
             {
-                if (Store.TryReadFile(path) is { } now && files.TryGetValue(path, out var wrote) && now.AsSpan().SequenceEqual(wrote))
+                if (Holds(path, holds))
                 {
-                    _sessionWritten[path] = wrote;
+                    _sessionWritten[path] = holds;
                 }
             }
 
-            var left = stuck.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+            var left = stuck.Select(s => s.Path).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
             if (e is not (IOException or UnauthorizedAccessException))
             {
                 if (left.Count > 0)

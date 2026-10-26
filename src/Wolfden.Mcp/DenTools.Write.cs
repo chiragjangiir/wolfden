@@ -499,6 +499,7 @@ public sealed partial class DenTools
 
                 if (result.Value is not { } e)
                 {
+                    ForgetRecordedDeletions(given);
                     return new CheckpointResult(ToolJson.Version, history.Name, true, null, false, null);
                 }
 
@@ -536,6 +537,8 @@ public sealed partial class DenTools
                     }
                 }
 
+                ForgetRecordedDeletions(given);
+
                 return new CheckpointResult(
                     ToolJson.Version, history.Name, true, null, true,
                     new HistoryEntryView(e.Id, e.When, e.Author, e.Message, e.Changes.Select(c => new HistoryChangeView(c.Kind.ToString().ToLowerInvariant(), c.Path, c.OldPath)).ToList()),
@@ -549,6 +552,39 @@ public sealed partial class DenTools
             catch (HistoryException e)
             {
                 throw new DenToolException(ToolErrorCodes.HistoryFailed, e.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// After a checkpoint: forgets the session's deletions that the latest
+    /// recorded state no longer holds. A checkpoint records every den file
+    /// it covers (the whole den, or <paramref name="given"/>), so a path it
+    /// covered that's absent now is absent at the latest checkpoint too,
+    /// whether this one recorded the deletion or an earlier commit made
+    /// elsewhere did.
+    /// </summary>
+    /// <summary>The paths the session tracks as its own deletions, for tests.</summary>
+    internal IReadOnlyList<string> SessionDeletions
+    {
+        get
+        {
+            lock (_writeLock)
+            {
+                return _sessionWritten.Where(p => p.Value is null).Select(p => p.Key).Order(StringComparer.Ordinal).ToList();
+            }
+        }
+    }
+
+    private void ForgetRecordedDeletions(IReadOnlyList<string>? given)
+    {
+        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        foreach (var (path, bytes) in _sessionWritten.ToList())
+        {
+            var covered = given is null || given.Any(p => string.Equals(path, p, comparison) || path.StartsWith(p + "/", comparison));
+            if (bytes is null && covered && !Store.FileExists(path))
+            {
+                _sessionWritten.Remove(path);
             }
         }
     }

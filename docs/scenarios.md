@@ -2077,6 +2077,7 @@ Spec: format.md F-RT-5, F-ENT-6, F-POS-7, F-ORD-3, F-LINK-7, F-BOOK-1
 `MoveEntityToolTests.EnterAtNewScopeForAnEntryAfterItSaysItEntersEarlier`,
 `HistoryToolTests.AMovedFilesOldPathIsTheSessionsWhenGitSeesADeleteAndAnAdd`,
 `HistoryToolTests.AFileTheSessionEditedThenMovedIsntChangedOutsideIt`,
+`HistoryToolTests.AMoveTheWriterCommittedElsewhereIsForgottenAtTheNextCheckpoint`,
 `EntityMoveEditTests.ALinkRewrittenToAnIdShowsTheSameText`,
 `EntityMoveEditTests.ATableRowIsFoundWithOrWithoutItsOuterPipes`,
 `EntityMoveEditTests.AnOverlayCanLeaveAFileOut`.

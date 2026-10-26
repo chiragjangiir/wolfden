@@ -37,6 +37,14 @@ public class EntityMoveEditTests
     [InlineData("See [[Y|y]] and [[X]].\n", false)]
     [InlineData("a | b\n\nc | [[X]]\n--- | ---\n", true)]
     [InlineData("a | b\n--- | ---\n\nc | [[X]]\n", false)]
+    [InlineData("See [[X]] | a\nh1 | h2\n--- | ---\nc | d\n", false)]
+    [InlineData("See [[X]] | a\n```\n-|-\n```\n", false)]
+    [InlineData("See [[X]] | a\n<!-- -|- -->\n", false)]
+    [InlineData("```\n-|-\n```\nSee [[X]] | a\n", false)]
+    [InlineData("<!--\n-|-\n-->\nSee [[X]] | a\n", false)]
+    [InlineData("- a | b\n  --- | ---\n  c | [[X]]\n", true)]
+    [InlineData("- [[X]] | b\n  --- | ---\n", true)]
+    [InlineData("a | b\r\n--- | ---\r\nc | [[X]]\r\n", true)]
     public void ATableRowIsFoundWithOrWithoutItsOuterPipes(string text, bool inTable)
     {
         Assert.Equal(inTable, LinkRewriter.InTableRow(text, text.IndexOf("[[X]]", StringComparison.Ordinal)));

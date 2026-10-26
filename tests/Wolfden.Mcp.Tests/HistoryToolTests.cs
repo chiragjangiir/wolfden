@@ -261,6 +261,36 @@ public sealed class HistoryToolTests : IDisposable
         Assert.Equal("deleted", result.Checkpoint!.Changes.Single(c => c.Path == Old).Kind);
         Assert.Equal([Old, New], result.WrittenBySession!.Order(StringComparer.Ordinal));
         Assert.Empty(result.ChangedOutsideSession!);
+        Assert.Empty(tools.SessionDeletions);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-28")]
+    [Trait("Scenario", "SC-MCP-22")]
+    public void AMoveTheWriterCommittedElsewhereIsForgottenAtTheNextCheckpoint()
+    {
+        const string Old = "universes/dracula/books/dracula/entities/notes/q.md";
+        const string New = "universes/dracula/entities/notes/q.md";
+        _den.Write(Old, "---\ntype: note\nname: Q\n---\n");
+        RunGit("init", "--quiet");
+        Commit("Start the Dracula notes");
+        var tools = new DenTools(_den.Root) { History = () => GitHistory.ForDen(_den.Root, Git) };
+        tools.MoveEntity("Q", tools.GetEntity("Q").Entity!.Hash!);
+        Assert.Equal([Old], tools.SessionDeletions);
+
+        // A checkpoint of other paths leaves the deletion to record.
+        _den.Write("universes/dracula/entities/notes/elsewhere.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z3\ntype: note\nname: Elsewhere\nstatus: draft\n---\n");
+        tools.Checkpoint("Elsewhere", "Claude <noreply@anthropic.com>", ["universes/dracula/entities/notes/elsewhere.md"]);
+        Assert.Equal([Old], tools.SessionDeletions);
+
+        // The writer commits the move by hand; the next checkpoint records nothing, and forgets it.
+        Commit("The writer commits the move");
+        var result = tools.Checkpoint("Nothing new", "Claude <noreply@anthropic.com>");
+
+        Assert.False(result.Recorded);
+        Assert.Empty(tools.SessionDeletions);
+        Assert.False(File.Exists(Path.Combine(_den.Root, Old)));
+        Assert.True(File.Exists(Path.Combine(_den.Root, New)));
     }
 
     [Fact]
