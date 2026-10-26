@@ -1,11 +1,15 @@
 using System.Net;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Net.Http.Headers;
 
 namespace Wolfden.Api;
 
@@ -18,11 +22,16 @@ namespace Wolfden.Api;
 /// <para>
 /// v0 is local-first and single-user, with no accounts and no
 /// authentication, so the server listens on 127.0.0.1 only, never on
-/// another network interface, and answers only requests addressed to
-/// <c>localhost</c> or <c>127.0.0.1</c>. The host check keeps a web page
-/// on another site from reaching the den through a DNS name that resolves
-/// to this machine (DNS rebinding). Hosting for several users is a later
-/// phase (design.md §10), with its own authentication.
+/// another network interface. Configuration can't add a listener: the
+/// server reads no environment variables, command line, or
+/// <c>appsettings.json</c>. It answers only requests addressed to
+/// <c>localhost</c> or <c>127.0.0.1</c>, which keeps a web page on another
+/// site from reaching the den through a DNS name that resolves to this
+/// machine (DNS rebinding), and the API refuses requests a browser marks as
+/// coming from another site (<see cref="CrossSiteGuard"/>). It sends no
+/// CORS headers, so a browser never lets another site read an answer.
+/// Hosting for several users is a later phase (design.md §10), with its own
+/// authentication.
 /// </para>
 /// </remarks>
 public static class WolfdenApi
@@ -36,8 +45,10 @@ public static class WolfdenApi
     /// <summary>
     /// Builds the server for <paramref name="options"/>, listening on
     /// 127.0.0.1 at <see cref="WolfdenApiOptions.Port"/>. Start it with
-    /// <c>StartAsync</c>; a port that's in use fails there, with an
-    /// <see cref="IOException"/>.
+    /// <c>StartAsync</c>; a port that's in use fails there with an
+    /// <see cref="IOException"/>, and one the system won't let it use
+    /// (reserved, or below 1024 on Linux) with a
+    /// <see cref="System.Net.Sockets.SocketException"/>.
     /// </summary>
     public static WebApplication Build(WolfdenApiOptions options)
     {
@@ -46,12 +57,18 @@ public static class WolfdenApi
         {
             Args = [],
             ApplicationName = typeof(WolfdenApi).Assembly.GetName().Name,
-            // Not the current folder, so an appsettings.json there changes nothing.
             ContentRootPath = AppContext.BaseDirectory,
             EnvironmentName = Environments.Production,
         });
 
-        builder.WebHost.ConfigureKestrel(kestrel => kestrel.Listen(IPAddress.Loopback, options.Port));
+        // No configuration from the environment (ASPNETCORE_URLS, Kestrel__Endpoints__…)
+        // or an appsettings.json next to wolfden: none of it may add a listener.
+        builder.Configuration.Sources.Clear();
+        builder.WebHost.ConfigureKestrel(kestrel =>
+        {
+            kestrel.Configure(new ConfigurationBuilder().Build(), reloadOnChange: false);
+            kestrel.Listen(IPAddress.Loopback, options.Port);
+        });
         builder.Services.AddHostFiltering(hosts =>
         {
             hosts.AllowedHosts = [.. AllowedHosts];
@@ -67,31 +84,104 @@ public static class WolfdenApi
         }
 
         var app = builder.Build();
+        app.UseExceptionHandler(errors => errors.Run(InternalError));
+        app.Use((context, next) =>
+        {
+            context.Response.Headers[HeaderNames.XContentTypeOptions] = "nosniff";
+            return next(context);
+        });
         app.UseHostFiltering();
+        app.UseWhen(context => context.Request.Path.StartsWithSegments("/api"), api => api.Use(CrossSiteGuard));
         MapWebUi(app, options.WebRoot);
         app.MapWolfdenApi(options);
         return app;
+    }
+
+    /// <summary>The addresses <paramref name="app"/> listens on that aren't on the loopback interface. After <c>StartAsync</c>, there should be none.</summary>
+    public static IReadOnlyList<string> NonLoopbackAddresses(WebApplication app)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+        return app.Urls
+            .Where(url => !Uri.TryCreate(url, UriKind.Absolute, out var uri) || !IPAddress.TryParse(uri.Host.Trim('[', ']'), out var ip) || !IPAddress.IsLoopback(ip))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Refuses an API request a browser says comes from another site:
+    /// <c>Sec-Fetch-Site: cross-site</c>, or an <c>Origin</c> that isn't
+    /// this server (<c>localhost</c> or <c>127.0.0.1</c> on the port the
+    /// request came in on). Requests without either header, such as
+    /// <c>curl</c>'s, and the browser's same-origin requests pass. The Vite
+    /// dev server's proxy drops <c>Origin</c> (web/vite.config.ts), since its
+    /// page has another port.
+    /// </summary>
+    internal static Task CrossSiteGuard(HttpContext context, RequestDelegate next)
+    {
+        var headers = context.Request.Headers;
+        var crossSite = string.Equals(headers["Sec-Fetch-Site"], "cross-site", StringComparison.OrdinalIgnoreCase);
+        var origin = headers.Origin.ToString();
+        if (!crossSite && (origin.Length == 0 || IsThisServer(origin, context.Connection.LocalPort)))
+        {
+            return next(context);
+        }
+
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return context.Response.WriteAsJsonAsync(new ApiError(
+            "cross_site", "Wolfden's API answers only its own pages, not requests from another site."));
+
+        static bool IsThisServer(string origin, int port) =>
+            Uri.TryCreate(origin, UriKind.Absolute, out var uri)
+            && uri.Scheme == Uri.UriSchemeHttp
+            && AllowedHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase)
+            && uri.Port == port;
+    }
+
+    /// <summary>An unexpected failure, as JSON in the API's error shape.</summary>
+    private static Task InternalError(HttpContext context)
+    {
+        var error = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        return context.Response.WriteAsJsonAsync(new ApiError(
+            "internal_error", $"Something went wrong in Wolfden: {error?.Message ?? "an unknown error"}"));
     }
 
     /// <summary>
     /// Serves the built UI from <paramref name="webRoot"/>, with
     /// <c>index.html</c> for any other path that isn't a file, so the UI's
     /// own routes work on reload. Without a built UI, <c>/</c> says how to
-    /// build one.
+    /// build one. Pages are sent with <c>Cache-Control: no-cache</c>, so a
+    /// new build shows on the next load.
     /// </summary>
     private static void MapWebUi(WebApplication app, string? webRoot)
     {
         if (webRoot is null || !File.Exists(Path.Combine(webRoot, "index.html")))
         {
-            app.MapGet("/", () => Results.Content(NotBuiltPage, "text/html; charset=utf-8"));
+            app.MapGet("/", (HttpContext context) =>
+            {
+                context.Response.Headers.CacheControl = "no-cache";
+                return Results.Content(NotBuiltPage, "text/html; charset=utf-8");
+            });
             return;
         }
 
         var files = new PhysicalFileProvider(Path.GetFullPath(webRoot));
         app.Lifetime.ApplicationStopped.Register(files.Dispose);
+        var staticFiles = new StaticFileOptions
+        {
+            FileProvider = files,
+            OnPrepareResponse = NoCacheForPages,
+        };
         app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = files });
-        app.UseStaticFiles(new StaticFileOptions { FileProvider = files });
-        app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = files });
+        app.UseStaticFiles(staticFiles);
+        app.MapFallbackToFile("index.html", staticFiles);
+    }
+
+    private static void NoCacheForPages(StaticFileResponseContext file)
+    {
+        if (file.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+        {
+            file.Context.Response.Headers.CacheControl = "no-cache";
+        }
     }
 
     /// <summary>What <c>/</c> shows when the web UI isn't built.</summary>

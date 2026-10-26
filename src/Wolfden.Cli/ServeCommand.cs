@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Net.Sockets;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Connections;
 using Wolfden.Api;
@@ -51,7 +52,7 @@ internal static class ServeCommand
         can open the page while it runs.
 
         Exits 0 on Ctrl+C, and 2 if the server couldn't start: no den, a
-        --universe the den doesn't have, or a port that's in use.
+        --universe the den doesn't have, or a port that's in use or reserved.
         """,
         ["--no-open", "--no-watch"],
         ["--den", "--universe", "--port"],
@@ -64,6 +65,9 @@ internal static class ServeCommand
 
     /// <summary>For tests: the built UI's folder in place of <see cref="DefaultWebRoot"/>.</summary>
     internal static string? WebRoot { get; set; }
+
+    /// <summary>For tests: starts the server in place of <c>StartAsync</c>, to make it fail as the system would.</summary>
+    internal static Func<WebApplication, CancellationToken, Task>? StartOverride { get; set; }
 
     /// <summary>For tests: called with the address once the server is listening.</summary>
     internal static Action<string>? Started { get; set; }
@@ -116,18 +120,23 @@ internal static class ServeCommand
         {
             try
             {
-                app.StartAsync(stop).GetAwaiter().GetResult();
+                (StartOverride ?? ((a, token) => a.StartAsync(token)))(app, stop).GetAwaiter().GetResult();
             }
-            catch (IOException e)
+            catch (Exception e) when (StartFailure(e, port) is { } message)
             {
-                error.WriteLine(e.InnerException is AddressInUseException
-                    ? $"wolfden serve: port {port} on 127.0.0.1 is in use, perhaps by another 'wolfden serve'. Stop that, or pick another port with '--port <n>'."
-                    : $"wolfden serve: couldn't listen on 127.0.0.1 port {port}: {e.Message}");
+                error.WriteLine(message);
                 return CliApp.ExitUsage;
             }
             catch (OperationCanceledException) when (stop.IsCancellationRequested)
             {
                 return CliApp.ExitOk;
+            }
+
+            // Build listens on 127.0.0.1 only, and reads no configuration that could add a listener; this makes sure.
+            if (WolfdenApi.NonLoopbackAddresses(app) is { Count: > 0 } exposed)
+            {
+                error.WriteLine($"wolfden serve: stopped, because the server also listened on {string.Join(", ", exposed)}, beyond this computer. It should listen on 127.0.0.1 only.");
+                return CliApp.ExitUsage;
             }
 
             var url = app.Urls.First().TrimEnd('/') + "/";
@@ -181,6 +190,23 @@ internal static class ServeCommand
             CliApp.RunsUntilStopped = false;
         }
     }
+
+    /// <summary>
+    /// What to say when the server couldn't start listening, or null for a
+    /// failure that isn't about the port. A port in use is an
+    /// <see cref="IOException"/> around an <see cref="AddressInUseException"/>;
+    /// one the system won't let a program use, such as a port in a range
+    /// Windows reserves, or one below 1024 on Linux, is a
+    /// <see cref="SocketException"/> (access denied).
+    /// </summary>
+    internal static string? StartFailure(Exception e, int port) => e switch
+    {
+        IOException { InnerException: AddressInUseException } or AddressInUseException =>
+            $"wolfden serve: port {port} on 127.0.0.1 is in use, perhaps by another 'wolfden serve'. Stop that, or pick another port with '--port <n>'.",
+        SocketException or IOException =>
+            $"wolfden serve: couldn't listen on 127.0.0.1 port {port}: {e.Message} (the port may be reserved; try another with '--port <n>', or '--port 0' for a free one)",
+        _ => null,
+    };
 
     /// <summary>Opens <paramref name="url"/> in the default browser, or says to open it by hand.</summary>
     private static void Open(string url, TextWriter error)

@@ -564,7 +564,7 @@ commands, and `wolfden <command> --help` describes each one:
 | `wolfden query [<universe>] [--universe <key>] [--at <position>]` | Canon as of a position (format.md F-VIEW-1), from the index, of one universe (see "Which universe" below; `*` is refused, since a view is of one universe). `--series` or `--book` narrows the view, `--type` (any type an enabled pack defines) and `--entity` (matched as a link is, F-LINK-6, among the entities in the view, so one the reader meets later can't shadow one they've met) pick entities out of it, `--pinned` gives pinned canon (F-VIEW-2), and `--brief` lists one line per entity. |
 | `wolfden copy <entity> <new name> [--to <scope>] [--universe <key>] [--slug <slug>] [--allow-relinks]` | Copies an entity under a new name, with a new id, as the MCP tool `copy_entity` does (§8, #129): beside the original, or `--to` a universe (`<universe>`, or `<universe>/`) or one of its series or books (`<universe>/<key>`, or `<universe>/series:<key>` or `<universe>/book:<key>` when a series and a book share the key). In a den with one universe, a bare series or book key (or `series:<key>`, `book:<key>`) will do (as for `check`, #127), unless it's also the universe's key, which is refused with every spelling suggested. It writes the den's files only. Its messages name its options (`--allow-relinks`, `--slug`) and commands (`wolfden check`), not the tool's parameters: the tools take the words their advice uses as a setting, and names the writer gave come through as written. It exits 2 when the copy is refused. |
 | `wolfden new-id [<count>]` | Prints new ids for files made by hand (format.md F-ID-5). |
-| `wolfden serve [<den>] [--universe <key>] [--port <n>] [--no-open] [--no-watch]` | Serves the web UI and the API on 127.0.0.1 (§9, #23), opens the default browser unless `--no-open`, and runs until Ctrl+C. The port is 9653 by default (WOLF on a phone keypad); `--port 0` picks a free one, and the address is printed either way. A port in use exits 2 and says so. `--universe` serves only that universe, as `mcp --universe` pins one; a key the den doesn't have exits 2. It hosts the same watcher as `mcp`, unless `--no-watch`. Without a built UI, the API still works and the page says how to build the UI. |
+| `wolfden serve [<den>] [--universe <key>] [--port <n>] [--no-open] [--no-watch]` | Serves the web UI and the API on 127.0.0.1 (§9, #23), opens the default browser unless `--no-open`, and runs until Ctrl+C. The port is 9653 by default (WOLF on a phone keypad); `--port 0` picks a free one, and the address is printed either way. A port in use, or one the system won't let it use (reserved, or below 1024 on Linux), exits 2 and says so. `--universe` serves only that universe, as `mcp --universe` pins one; a key the den doesn't have exits 2. It hosts the same watcher as `mcp`, unless `--no-watch`. Without a built UI, the API still works and the page says how to build the UI. |
 | `wolfden mcp [<den>] [--universe <key>] [--no-watch]` | Runs the MCP server over stdio for an AI client (§8, #20) until the client disconnects or Ctrl+C. `--universe` pins the session to one universe (§8); a key the den doesn't have exits 2. Standard output carries only the protocol; log messages go to standard error. It exits 2 if there's no den and 3 if it stops because of a failure after it started, but serves a den whose `den.yaml` doesn't load, so the client can call `check` to find out why. |
 
 They share one surface:
@@ -956,17 +956,29 @@ docs/
   server over stdio for AI clients.
 - **The web scaffold** (#23; v0 behaviour, not a recorded decision).
   `Wolfden.Api` is a library (an ASP.NET Core minimal API), not a program
-  of its own, so `wolfden serve` hosts it in the same process. It listens
-  on 127.0.0.1 only, never on another network interface, since v0 is
-  single-user with no accounts or authentication, and it answers only
-  requests addressed to `localhost` or `127.0.0.1`, so a web page on
-  another site can't reach the den through a DNS name that points at this
-  machine (DNS rebinding). Hosting for several users (§10) brings its own
-  authentication. The API is JSON under `/api`, in camelCase, as is usual
-  for a web client (the MCP tools keep snake_case, §8); errors are
-  `{code, message}` with the MCP tools' codes where they mean the same
-  thing (`den_not_loaded`, `den_unreadable`), and results carry a
-  `version` for their shape, as `--json` does. Each request brings the
+  of its own, so `wolfden serve` hosts it in the same process. v0 is
+  single-user with no accounts or authentication, so the server guards
+  the den from everything but its own pages on this computer. It listens
+  on 127.0.0.1 only, never on another network interface, and reads no
+  configuration (environment variables, `appsettings.json`) that could add
+  a listener; `serve` also checks the addresses after starting and stops
+  if one isn't loopback. It answers only requests addressed to
+  `localhost` or `127.0.0.1`, so a web page on another site can't reach
+  the den through a DNS name that points at this machine (DNS rebinding).
+  The API refuses, with 403 `cross_site`, a request whose
+  `Sec-Fetch-Site` is `cross-site` or whose `Origin` isn't the server
+  itself (`localhost` or `127.0.0.1` on its port), and sends no CORS
+  headers, so another site's script can't read an answer or send a
+  write. Requests without those headers, such as `curl`'s, are answered.
+  Every response has `X-Content-Type-Options: nosniff`, and pages are
+  sent with `Cache-Control: no-cache`, so a new build shows on the next
+  load. Hosting for several users (§10) brings its own authentication.
+  The API is JSON under `/api`, in camelCase, as is usual for a web
+  client (the MCP tools keep snake_case, §8); errors are `{code,
+  message}`, with the MCP tools' codes where they mean the same thing
+  (`den_not_loaded`, `den_unreadable`), and `not_found`,
+  `method_not_allowed`, `cross_site`, and `internal_error` otherwise.
+  Results carry a `version` for their shape, as `--json` does. Each request brings the
   index up to date first, as an MCP tool call does. So far it has
   `/api/health` and `/api/den` (the den's name and its universes); M3
   adds the rest (#24 to #27). The UI in `web/` is built with npm (`npm run
@@ -975,7 +987,8 @@ docs/
   never runs npm, so .NET work doesn't need Node. Paths that aren't files
   get `index.html`, so the UI's own routes survive a reload. For UI work,
   `npm run dev` serves the UI with hot reload and passes `/api` to a
-  running `wolfden serve --no-open`.
+  running `wolfden serve --no-open` (port 9653, or `WOLFDEN_PORT`),
+  dropping the page's `Origin`, since its port is Vite's.
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and
   unknown content. This gets heavy test coverage, since it decides whether
   people trust the tool with their notes.

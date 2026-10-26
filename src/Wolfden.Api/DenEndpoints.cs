@@ -53,10 +53,26 @@ public static class DenEndpoints
         var api = endpoints.MapGroup("/api");
         api.MapGet("/health", () => new HealthResult("ok", options.Version));
         api.MapGet("/den", () => Den(options));
-        api.Map("/{**rest}", (string? rest) => Results.Json(
-            new ApiError("not_found", $"There's no API endpoint '/api/{rest}'."), statusCode: StatusCodes.Status404NotFound));
+
+        // Anything else under /api: a known path with the wrong method, or no endpoint at all.
+        api.Map("/{**rest}", (HttpContext context, string? rest) =>
+        {
+            if (GetPaths.Contains(rest?.TrimEnd('/') ?? "", StringComparer.OrdinalIgnoreCase))
+            {
+                context.Response.Headers.Allow = "GET";
+                return Error(
+                    StatusCodes.Status405MethodNotAllowed,
+                    "method_not_allowed",
+                    $"'/api/{rest}' answers GET, not {context.Request.Method}.");
+            }
+
+            return Error(StatusCodes.Status404NotFound, "not_found", $"There's no API endpoint '/api/{rest}'.");
+        });
         return endpoints;
     }
+
+    /// <summary>The paths under <c>/api</c> that answer GET.</summary>
+    private static readonly string[] GetPaths = ["health", "den"];
 
     /// <summary>The den's name and its universes, or the pinned one.</summary>
     internal static IResult Den(WolfdenApiOptions options)

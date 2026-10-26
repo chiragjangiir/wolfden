@@ -71,6 +71,9 @@ dotnet run --project src/Wolfden.Cli -- serve samples/dracula --no-open
 npm run dev     # in web/; it passes /api on to the server on port 9653
 ```
 
+If the server runs on another port (`serve --port <n>`), set
+`WOLFDEN_PORT=<n>` for `npm run dev`.
+
 Pin each npm dependency to an exact version, commit `package-lock.json`,
 and check its license first, as for NuGet packages.
 

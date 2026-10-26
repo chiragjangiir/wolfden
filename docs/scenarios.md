@@ -2411,6 +2411,7 @@ Spec: design.md §7, §9. Covered by:
 `ApiTests.APinnedServerListsOnlyItsUniverse`,
 `ApiTests.WithoutABuiltUiTheRootSaysHowToBuildIt`,
 `ApiTests.ABuiltUiIsServedWithIndexHtmlForItsOwnRoutes`,
+`ServeCommandTests.TheBuiltUiIsServedFromWwwroot`,
 `App.test.tsx` (web).
 
 ### SC-WEB-2. Wolfden is already serving on that port
@@ -2419,19 +2420,33 @@ The writer runs `wolfden serve` while another `wolfden serve`, or some
 other program, already listens on port 9653.
 
 - It doesn't start: it says the port is in use and how to pick another
-  with `--port`, and exits 2. `--port 0` picks a free port.
+  with `--port`, and exits 2. `--port 0` picks a free port. A port the
+  system won't let it use (one Windows reserves, or one below 1024 on
+  Linux) is said as such, with the same advice, and exits 2 too.
 
 Spec: design.md §7. Covered by:
-`ServeCommandTests.APortInUseExitsTwoAndSaysSo`.
+`ServeCommandTests.APortInUseExitsTwoAndSaysSo`,
+`ServeCommandTests.APortTheSystemWontLetItUseExitsTwoAndSaysSo`.
 
 ### SC-WEB-3. A web page on another site tries to read my den
 
 While `wolfden serve` runs, the writer visits a site whose script sends
 requests to a DNS name that points at their own computer.
 
-- The server listens on 127.0.0.1 only, and answers only requests
-  addressed to `localhost` or `127.0.0.1`: any other host name gets 400
-  and nothing from the den.
+Another time, a page on another site sends requests straight to
+`http://127.0.0.1:9653/api/den`.
+
+- The server listens on 127.0.0.1 only, whatever the environment or an
+  `appsettings.json` says, and answers only requests addressed to
+  `localhost` or `127.0.0.1`: any other host name gets 400 and nothing
+  from the den. The API answers a request the browser marks as from
+  another site (`Sec-Fetch-Site: cross-site`, or an `Origin` other than
+  the server itself) with 403 `cross_site` and nothing from the den, and
+  never sends CORS headers. Its own pages, and requests from outside a
+  browser such as `curl`, are answered.
 
 Spec: design.md §9. Covered by:
-`ApiTests.ItListensOnLoopbackOnlyAndRefusesOtherHostNames`.
+`ApiTests.ItListensOnLoopbackOnlyAndRefusesOtherHostNames`,
+`ApiGuardTests.ACrossSiteRequestIsRefusedWithoutCorsHeaders`,
+`ApiGuardTests.ARequestFromItsOwnPageOrWithoutABrowserIsAnswered`,
+`ListenerConfigurationTests.EnvironmentVariablesAndAppSettingsAddNoListener`.

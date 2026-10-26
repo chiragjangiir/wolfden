@@ -41,7 +41,7 @@ jobs:
   web:
     name: Web UI (build and test)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
@@ -64,3 +64,17 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # Once, here: dotnet build copies web/dist next to wolfden as wwwroot,
+      # and wolfden serve serves it.
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Serve the built UI
+        working-directory: .
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+          DOTNET_NOLOGO: "1"
+          WOLFDEN_REQUIRE_BUILT_UI: "1"
+        run: dotnet test tests/Wolfden.Cli.Tests -c Release --filter "FullyQualifiedName~ServeCommandTests.TheBuiltUiIsServedFromWwwroot"
