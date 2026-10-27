@@ -17,7 +17,7 @@ internal static class PinnedUniverse
             return true;
         }
 
-        if (pinned == Mcp.DenTools.AllUniverses)
+        if (pinned == DenTools.AllUniverses)
         {
             error.WriteLine($"wolfden {command}: '*' (every universe) can't be pinned: --universe pins one universe. Leave it out to serve them all.");
             return false;

@@ -5,9 +5,9 @@ using Wolfden.Core.Links;
 using Wolfden.Core.Positions;
 using Wolfden.Core.Structure;
 using Wolfden.Core.Yaml;
-using Wolfden.Index;
+using Wolfden.Index.Reading;
 
-namespace Wolfden.Mcp;
+namespace Wolfden.Index.Writing;
 
 /// <summary>
 /// Copying an entity to start a new one from it (#129): the copy gets a new
@@ -152,7 +152,7 @@ public sealed partial class DenTools
             var after = afterLinks.Catalog.FindByPath(newPath) ?? EntityCatalog.ReadEntityFile(check.Structure, newPath, bytes).Entity!;
             var effects = CopyEffects(source, after, scope, id, retitled, droppedComments, check, links, afterLinks, changed);
             return new WriteResult(
-                ToolJson.Version, true, newPath, HashOf(bytes), Summary(after), effects, [], Warnings(check),
+                DenReader.ResultVersion, true, newPath, HashOf(bytes), Summary(after), effects, [], Warnings(check),
                 [new WrittenFileView(newPath, HashOf(bytes), Created: true)]);
         }
     }

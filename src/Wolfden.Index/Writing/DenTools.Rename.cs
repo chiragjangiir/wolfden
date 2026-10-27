@@ -4,8 +4,9 @@ using Wolfden.Core.Entities;
 using Wolfden.Core.Links;
 using Wolfden.Core.Structure;
 using Wolfden.Core.Yaml;
+using Wolfden.Index.Reading;
 
-namespace Wolfden.Mcp;
+namespace Wolfden.Index.Writing;
 
 /// <summary>
 /// Renaming an entity, and changing or removing one of its aliases, with
@@ -208,7 +209,7 @@ public sealed partial class DenTools
             var catalog = EntityCatalog.Load(structure, den);
             var target = catalog.FindByPath(path) ?? throw (den.FileExists(path)
                 ? new DenToolException(
-                    ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. Call check with path '{path}' to see them.")
+                    ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. {ToolWords.Cap(Words.CheckFile(path))} to see them.")
                 : Gone(path));
             var original = target.File.ToBytes();
             CheckHash(path, original, hash);
@@ -326,7 +327,7 @@ public sealed partial class DenTools
             effects.AddRange(moved.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} {Now(l.After)}; before, it {Was(l.Before)}."));
             if (moved.Count > ListedLinkChanges)
             {
-                effects.Add($"And {moved.Count - ListedLinkChanges} more link(s) resolve differently now. Call check to see them.");
+                effects.Add($"And {moved.Count - ListedLinkChanges} more link(s) resolve differently now. {ToolWords.Cap(Words.CheckDen)} to see them.");
             }
 
             if (plan.SkippedPaths.Count > 0)
@@ -342,7 +343,7 @@ public sealed partial class DenTools
             }
 
             return new WriteResult(
-                ToolJson.Version, true, path, HashOf(files[path]), Summary(after), effects, [], Warnings(check),
+                DenReader.ResultVersion, true, path, HashOf(files[path]), Summary(after), effects, [], Warnings(check),
                 files.OrderBy(p => p.Key == path ? 0 : 1).ThenBy(p => p.Key, StringComparer.Ordinal).Select(p => new WrittenFileView(p.Key, HashOf(p.Value))).ToList(),
                 IdAdded: idAdded);
         }

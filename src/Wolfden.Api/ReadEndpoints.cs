@@ -134,13 +134,16 @@ public static class ReadEndpoints
         ToolErrorCodes.DenNotLoaded or ToolErrorCodes.DenUnreadable => StatusCodes.Status503ServiceUnavailable,
         ToolErrorCodes.NoUniverse or ToolErrorCodes.UnknownUniverse or ToolErrorCodes.UnknownScope or ToolErrorCodes.UnknownEntity
             or ToolErrorCodes.UnknownCheckpoint => StatusCodes.Status404NotFound,
-        ToolErrorCodes.AmbiguousEntity => StatusCodes.Status409Conflict,
-        ToolErrorCodes.HistoryFailed or ToolErrorCodes.Internal => StatusCodes.Status500InternalServerError,
+        ToolErrorCodes.UnknownSection => StatusCodes.Status404NotFound,
+        ToolErrorCodes.AmbiguousEntity or ToolErrorCodes.AmbiguousSection or ToolErrorCodes.StaleFile or ToolErrorCodes.Frozen
+            or ToolErrorCodes.AlreadyExists => StatusCodes.Status409Conflict,
+        ToolErrorCodes.InvalidEdit or ToolErrorCodes.UnsupportedEdit => StatusCodes.Status422UnprocessableEntity,
+        ToolErrorCodes.HistoryFailed or ToolErrorCodes.Internal or ToolErrorCodes.WriteFailed => StatusCodes.Status500InternalServerError,
         _ => StatusCodes.Status400BadRequest,
     };
 
     /// <summary>Reads the query, runs <paramref name="read"/>, and answers with its result as JSON, or its error.</summary>
-    private static IResult Answer<T>(HttpContext context, string[] parameters, Func<ApiQuery, T> read)
+    internal static IResult Answer<T>(HttpContext context, string[] parameters, Func<ApiQuery, T> read)
     {
         try
         {

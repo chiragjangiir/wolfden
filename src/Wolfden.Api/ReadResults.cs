@@ -193,10 +193,12 @@ public sealed record BacklinkView(
 /// <param name="Entry">Where it enters canon.</param>
 /// <param name="LeadLinks">The links in its lead.</param>
 /// <param name="Backlinks">The links that reach it, by path and place in the file; as of a position, only those in what the reader has met.</param>
+/// <param name="Frozen">Why it can't be edited, since it's filed in a final book (format.md F-BOOK-1), or null if it can be (#28).</param>
 public sealed record EntityPage(
     string Key, string? Id, string Name, string Type, string Status, string Universe, string ScopeKind, string ScopeKey, string Path, string? From,
     IReadOnlyList<string>? Aliases, string? Lead, PinnedFacts? Pinned, IReadOnlyList<PageField> Fields, IReadOnlyList<PageSection> Sections,
-    string? Hash, IReadOnlyList<ContainerRef> Scope, EntryView Entry, IReadOnlyList<LinkView> LeadLinks, IReadOnlyList<BacklinkView> Backlinks);
+    string? Hash, IReadOnlyList<ContainerRef> Scope, EntryView Entry, IReadOnlyList<LinkView> LeadLinks, IReadOnlyList<BacklinkView> Backlinks,
+    string? Frozen = null);
 
 /// <summary>The result of <c>GET /api/entity</c>: <see cref="GetEntityResult"/>, with the page.</summary>
 /// <param name="Version">The shape version.</param>

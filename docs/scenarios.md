@@ -2596,7 +2596,9 @@ first, and SC-WEB-4 to SC-WEB-10 describe what it answers. SC-WEB-11
 to SC-WEB-17 describe the browsing pages, SC-WEB-18 to SC-WEB-21 the
 search page, and SC-WEB-22 and SC-WEB-23 the history page. SC-WEB-24
 and SC-WEB-25 describe field search (#179). SC-WEB-35 to SC-WEB-39
-cover images in notes and what a page may load (#180, #186).
+cover images in notes and what a page may load (#180, #186). SC-WEB-40
+to SC-WEB-46 cover editing a note's lead and sections in the browser
+(#28, part a).
 
 ### SC-WEB-1. I open my den in the browser
 
@@ -3210,3 +3212,174 @@ Spec: format.md F-LAY-9, design.md §9 (#186). Covered by:
 `DenFileTests.APinnedServerServesOnlyItsUniverseAndTheDenLevelImages`,
 `DenFileTests.APinnedServerDoesntFollowAFileLinkIntoAnotherUniverse`,
 `Images.test.tsx` (web).
+
+### SC-WEB-40. I edit a section, or the opening, in place
+
+Mina's note is open. I click Edit under "Overview".
+
+- The section's text opens in place, as Markdown, with highlighting; the
+  rest of the note stays readable. Focus moves into the editor. The text
+  is the section as written in the file, HTML comments included. Its
+  section comment (`<!-- wolfden: from=dracula:5 -->`) isn't in the
+  editor; it's shown above it, kept as it is, with "change it with Edit
+  file".
+- Typing `[[Whit` offers the notes whose names start so, from the search
+  API, and picking one writes `[[Whitby]]`.
+- Preview shows the text as the page renders it; links show as written
+  until the note is saved.
+- Save, or Ctrl+Enter (⌘+Enter), sends the text with the file's hash.
+  Only the section's own text changes in the file (format.md §12); a file
+  without an id gets one (F-ID-6). The editor closes, the page and the
+  lists, searches, and history it shows are fetched again, and a note
+  says what the save did: its effects, any pinned canon it touched, the
+  file's warnings, and that saving doesn't make a checkpoint.
+- Cancel, or Escape, closes the editor without saving, and focus goes
+  back to the Edit button. With unsaved changes it asks first, in the
+  page: "Keep editing" (focused, and back into the editor) or "Discard
+  changes".
+- The editor always opens on the file as it is now, fetched when it
+  opens, never on an answer cached from an earlier edit.
+- "Edit opening" does the same for the text before the first section,
+  title heading included.
+- Text that would add a heading to a section is refused, with a hint to
+  use Add section or Edit file; text that would leave the note with an
+  error is refused with the errors (`invalid_edit`), and the editor stays
+  open.
+- While anything is being edited, the page shows the full note, whatever
+  the story position, with an "Editing shows everything" badge. A note
+  the reader hasn't met can be edited once shown with "Show it anyway".
+  When the editor closes, the position view comes back.
+
+Spec: design.md §9 (maintainer decisions on #28, 2026-10-27). Covered
+by: `WriteEndpointTests.TheSourceGivesTheFilesHashAndEachSectionsTextAsWritten`,
+`WriteEndpointTests.ReplacingASectionChangesOnlyItsTextAndGivesTheFileAnId`,
+`WriteEndpointTests.EditingPinnedCanonSaysSo`,
+`WriteEndpointTests.ReplacingTheLeadKeepsTheFrontmatterAndSections`,
+`WriteEndpointTests.TextThatWouldAddAHeadingToASectionIsRefused`,
+`LeadEditTests`, `Editing.test.tsx` (web).
+
+### SC-WEB-41. I add, rename, and remove sections
+
+- Add section asks for a name (offering the type's standard sections the
+  note doesn't have), where it goes (at the end, or before a section, at
+  that section's level), and its text. A name typed with the heading's
+  marks (`## Arc`) is refused, with the name to give instead (`Arc`).
+- Renaming or adding a section to a name another section already has is
+  saved, and the result says that a link to that name reaches the first
+  one (F-LINK-9).
+- Rename turns the heading into a text box. Saving renames the section
+  and rewrites every link to it by heading, in any note, as the MCP
+  `rename_section` does (format.md F-RT-5); if one of those links is in a
+  final book, nothing is renamed.
+- Remove asks in the page, not in a browser dialog: "Remove the section
+  'Arc' and its 1 subsection?", with "Keep it" focused. Removing takes the
+  section's subsections too. Links to it by heading aren't rewritten; the
+  result lists them, and what they reach now.
+
+Spec: design.md §9 (#28). Covered by:
+`WriteEndpointTests.AddingASectionPutsItAtTheEndOrBeforeAnother`,
+`WriteEndpointTests.RenamingASectionRewritesTheLinksToIt`,
+`WriteEndpointTests.RemovingASectionTakesItsSubsectionsAndSaysWhichLinksLoseIt`,
+`WriteEndpointTests.ASectionNameWithHeadingMarksIsRefusedAndADuplicateNameIsReported`,
+`Editing.test.tsx` (web).
+
+### SC-WEB-42. I edit the whole file
+
+- Edit file opens the note's whole source, frontmatter included, for
+  anything the other controls can't do (a section comment, or a field
+  until part b of #28).
+- Saving writes it with the file's own line breaks and byte order mark.
+  The note's id can't be changed or removed there (F-ID-4). A note
+  without an id can be given one there, but not one another note or
+  container already has (`already_exists`, F-ID-3), and not one that
+  isn't an id (`invalid_edit`, F-ID-1). A new name or alias is saved, and
+  the result says, in a writer's words, that links written with the old
+  text weren't rewritten, and that an AI assistant working through
+  Wolfden can rename the note and rewrite them.
+- Text that would leave an error, such as frontmatter that doesn't parse,
+  is refused with the errors, and nothing is written.
+
+Spec: design.md §9 (#28). Covered by:
+`WriteEndpointTests.EditFileReplacesTheWholeFileButNeverItsId`,
+`WriteEndpointTests.EditFileRefusesAnIdAnotherFileHasOrOneThatIsntAnId`,
+`WriteEndpointTests.EditFileSaysInTheWritersWordsThatLinksToTheOldNameWerentRewritten`,
+`WriteEndpointTests.AnEditThatWouldLeaveAnErrorIsRefusedWithTheErrors`,
+`Editing.test.tsx` (web).
+
+### SC-WEB-43. An agent changed the note while I was editing it
+
+I opened "Overview" in the editor; meanwhile an AI agent, through MCP,
+saved Mina's note. I press Save.
+
+- Nothing is saved. The page shows my version and the file as it is now
+  side by side, with the lines that differ marked, and three choices:
+  - **Keep mine** saves my text over the new file, on its new hash.
+  - **Take theirs** drops my edit and shows the note as it is now.
+  - **Copy mine and reload** copies my text to the clipboard and opens the
+    editor again on the file as it is now, with my text shown below it.
+- A section is sent by its place and its name together, checked with the
+  hash, so an edit never lands in another section of the same name. Keep
+  mine finds the section in the new file by the place it had and its
+  name, so it stays in the same section even when the new file has two
+  of that name.
+
+Spec: design.md §8 "Stale files", §9 (#28). Covered by:
+`WriteEndpointTests.AStaleEditIsRefusedWithTheFileAsItIsNow`,
+`WriteEndpointTests.AStaleSectionIndexOrNameIsRefused`,
+`Editing.test.tsx` (web).
+
+### SC-WEB-44. Editing is guarded
+
+- With unsaved changes, following a link in the app, the browser's Back,
+  or moving the story position asks in the page whether to leave ("Keep
+  editing" or "Leave without saving"), and closing or reloading the tab
+  makes the browser ask. Leaving closes the editor; a new position shows
+  the note as of there.
+- On a note in a final book, every Edit control is off, and the page says
+  why ("... is in book 'dracula', which is final (frozen) ..."). The API
+  refuses such an edit anyway (`frozen`).
+- One piece is edited at a time: the other Edit controls are off until
+  the open one is saved or cancelled.
+
+Spec: design.md §8 "Frozen and pinned", §9 (#28). Covered by:
+`WriteEndpointTests.ANoteInAFinalBookIsFrozen`, `Editing.test.tsx` (web).
+
+### SC-WEB-45. Saving what I didn't change leaves the file as it was
+
+A note with CRLF line breaks, a byte order mark, extra blank lines, and
+no final newline.
+
+- Saving the opening, a section, or the whole file without changing it
+  writes nothing: the bytes are the same. The same holds in a file that
+  mixes CRLF and LF line breaks: text that differs only in its line
+  breaks is unchanged, so nothing is written.
+- In the page, Save is off until the text changes, and Ctrl+Enter on
+  unchanged text closes the editor without sending anything.
+- Changing one section changes only that section's text (and adds a
+  missing id); every other byte, line breaks included, stays as it was.
+
+Spec: format.md §12, F-RT-1, F-RT-2. Covered by:
+`WriteEndpointTests.EditingAndSavingTheSameTextKeepsEveryByte`,
+`WriteEndpointTests.SavingUnchangedTextInAFileThatMixesLineBreaksWritesNothing`,
+`Editing.test.tsx` (web).
+
+### SC-WEB-46. Only Wolfden's own page can edit the den
+
+- An edit is a `POST` with a JSON body. One sent as a form
+  (`application/x-www-form-urlencoded`, `multipart/form-data`) or as
+  `text/plain` is refused (415, `unsupported_media_type`), so a page on
+  another site can't post a form that edits the den.
+- One with another site's `Origin`, or `Sec-Fetch-Site: cross-site`, is
+  refused (403, `cross_site`), and no answer has CORS headers.
+- An edit endpoint answers only `POST` (405 otherwise), and refuses a
+  member it doesn't take, such as `expected_hash`, or a missing
+  `expectedHash`.
+- With `serve --universe drift`, a note in another universe can't be read
+  for editing or edited.
+
+Spec: design.md §9 (#23, #28). Covered by:
+`WriteEndpointTests.AnEditThatIsntJsonIsRefusedSoAFormCantPostOne`,
+`WriteEndpointTests.ACrossSiteEditIsRefused`,
+`WriteEndpointTests.AnEditFromItsOwnPageIsAnswered`,
+`WriteEndpointTests.AnEditEndpointAnswersOnlyPostAndItsOwnMembers`,
+`WriteEndpointTests.APinnedServerEditsOnlyItsUniverse`.

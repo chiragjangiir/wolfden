@@ -1,5 +1,5 @@
-import { Fragment, useEffect, useMemo, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Link, getRouteApi, useRouter, useRouterState } from '@tanstack/react-router'
 import { wasHistoryStep } from '../router'
 import {
@@ -16,6 +16,18 @@ import {
 import { EntityTabs } from '../components/EntityTabs'
 import { EntityLink, LinkedText, createLinkMatcher, sectionAnchor } from '../components/Links'
 import { Markdown } from '../components/Markdown'
+import {
+  AddSection,
+  EditButton,
+  EditingProvider,
+  EditingStatus,
+  FrozenNotice,
+  PieceEditor,
+  RemoveSection,
+  RenameSection,
+  useEditing,
+  type EditTarget,
+} from '../components/Editing'
 import { ErrorState, Loading, StatusBadge } from '../components/States'
 import { useDocumentTitle, useEntitiesInView, usePosition } from '../hooks'
 import { chapterWords, describePosition, entryOf, ordinalOf } from '../story'
@@ -33,7 +45,9 @@ const route = getRouteApi('/u/$universe/e/$')
 export function EntityPageView() {
   const { universe, _splat: key = '' } = route.useParams()
   const { at } = usePosition()
-  const page = useQuery(entityQuery(universe, key, at))
+  // Editing shows the full note, whatever the position (maintainer decision on #28).
+  const [target, setTarget] = useState<EditTarget | null>(null)
+  const page = useQuery({ ...entityQuery(universe, key, target ? undefined : at), placeholderData: target ? keepPreviousData : undefined })
   const view = useEntitiesInView(universe)
   // Only the API's page names the note, and it's null when the reader hasn't met it.
   useDocumentTitle(page.data ? (page.data.entity?.name ?? 'Not met yet') : undefined)
@@ -58,11 +72,16 @@ export function EntityPageView() {
         note={page.data.note}
         positions={view.positions ?? []}
         at={at}
+        edit={{ target, setTarget }}
       />
     )
   }
 
-  return <EntityArticle universe={universe} entity={entity} positions={view.positions ?? []} />
+  return (
+    <EditingProvider universe={universe} entityKey={key} frozen={entity.frozen ?? null} target={target} setTarget={setTarget}>
+      <EntityArticle universe={universe} entity={entity} positions={view.positions ?? []} />
+    </EditingProvider>
+  )
 }
 
 /**
@@ -81,6 +100,7 @@ export function NotInView({
   positions,
   at,
   className = 'page-body',
+  edit,
   children,
 }: {
   universe: string
@@ -90,6 +110,8 @@ export function NotInView({
   positions: PositionView[]
   at: string | undefined
   className?: string
+  /** The page's editing state: the note shown anyway can be edited, which shows it in full. */
+  edit?: { target: EditTarget | null; setTarget: (target: EditTarget | null) => void }
   children?: ReactNode
 }) {
   const { setAt } = usePosition()
@@ -132,7 +154,7 @@ export function NotInView({
       </div>
       {revealed && (
         <div className="revealed" aria-label="Shown anyway, from the full view">
-          {children ?? <FullEntity universe={universe} entityKey={entityKey} positions={positions} />}
+          {children ?? <FullEntity universe={universe} entityKey={entityKey} positions={positions} edit={edit} />}
         </div>
       )}
     </div>
@@ -140,7 +162,17 @@ export function NotInView({
 }
 
 /** A note's full view (no position), for "Show it anyway". */
-function FullEntity({ universe, entityKey, positions }: { universe: string; entityKey: string; positions: PositionView[] }) {
+function FullEntity({
+  universe,
+  entityKey,
+  positions,
+  edit,
+}: {
+  universe: string
+  entityKey: string
+  positions: PositionView[]
+  edit?: { target: EditTarget | null; setTarget: (target: EditTarget | null) => void }
+}) {
   const full = useQuery(entityQuery(universe, entityKey, undefined))
   if (full.isPending) {
     return <Loading what="the note" />
@@ -150,8 +182,13 @@ function FullEntity({ universe, entityKey, positions }: { universe: string; enti
     return <ErrorState error={full.error} />
   }
 
-  return full.data.entity ? (
-    <EntityArticle universe={universe} entity={full.data.entity} positions={positions} />
+  const entity = full.data.entity
+  return entity && edit ? (
+    <EditingProvider universe={universe} entityKey={entityKey} frozen={entity.frozen ?? null} target={edit.target} setTarget={edit.setTarget}>
+      <EntityArticle universe={universe} entity={entity} positions={positions} />
+    </EditingProvider>
+  ) : entity ? (
+    <EntityArticle universe={universe} entity={entity} positions={positions} />
   ) : (
     <p className="muted">{full.data.note}</p>
   )
@@ -159,6 +196,7 @@ function FullEntity({ universe, entityKey, positions }: { universe: string; enti
 
 function EntityArticle({ universe, entity, positions }: { universe: string; entity: EntityPage; positions: PositionView[] }) {
   const lead = stripTitle(entity.lead, entity.name)
+  const target = useEditing()?.target ?? null
   // A link to a section (#section-...) arrives before the page has loaded,
   // so the router can't scroll to it; scroll once the section is here.
   // Back and Forward keep the scroll position the router restores.
@@ -180,15 +218,66 @@ function EntityArticle({ universe, entity, positions }: { universe: string; enti
         <h1>{entity.name}</h1>
         <p className="entry">{entryWords(entity, positions)}</p>
         {entity.aliases && entity.aliases.length > 0 && <p className="aliases">Also: {entity.aliases.join(', ')}</p>}
+        <p className="edit-bar">
+          <EditButton target={{ kind: 'file' }} label="Edit file: the note's whole source, frontmatter included">
+            Edit file
+          </EditButton>
+        </p>
+        <FrozenNotice />
       </header>
-      {lead && <Markdown text={lead} links={entity.leadLinks} universe={universe} file={entity.path} />}
-      {entity.fields.length > 0 && <Fields universe={universe} fields={entity.fields} positions={positions} />}
-      {entity.sections.map((s) => (
-        <Section key={s.line} universe={universe} section={s} positions={positions} file={entity.path} />
-      ))}
+      <EditingStatus />
+      {target?.kind === 'file' ? (
+        <PieceEditor target={target} what="the whole file" file={entity.path} />
+      ) : (
+        <>
+          {target?.kind === 'lead' ? (
+            <PieceEditor target={target} what="the opening" file={entity.path} />
+          ) : (
+            <div className="lead">
+              {lead && <Markdown text={lead} links={entity.leadLinks} universe={universe} file={entity.path} />}
+              <p className="piece-tools">
+                <EditButton target={{ kind: 'lead' }} label="Edit the opening, the text before the sections">
+                  {lead ? 'Edit opening' : 'Write an opening'}
+                </EditButton>
+              </p>
+            </div>
+          )}
+          {entity.fields.length > 0 && <Fields universe={universe} fields={entity.fields} positions={positions} />}
+          {entity.sections.map((s, i) => (
+            <Section
+              key={s.line}
+              universe={universe}
+              section={s}
+              subsections={subsectionCount(entity.sections, i)}
+              positions={positions}
+              file={entity.path}
+              target={target}
+            />
+          ))}
+          {target?.kind === 'add' ? (
+            <AddSection file={entity.path} />
+          ) : (
+            <p className="piece-tools">
+              <EditButton target={{ kind: 'add' }} label="Add a section">
+                Add section
+              </EditButton>
+            </p>
+          )}
+        </>
+      )}
       <Backlinks universe={universe} backlinks={entity.backlinks} positions={positions} />
     </article>
   )
+}
+
+/** How many subsections the section at `index` holds: the sections after it, up to the next of its level or higher. */
+function subsectionCount(sections: PageSection[], index: number): number {
+  let n = 0
+  for (let i = index + 1; i < sections.length && sections[i].level > sections[index].level; i++) {
+    n++
+  }
+
+  return n
 }
 
 /** The lead without a first `# Name` heading, which the page shows already. */
@@ -350,17 +439,55 @@ export function FieldValue({ value, links, universe }: { value: unknown; links: 
   return <>{render(value)}</>
 }
 
-function Section({ universe, section, positions, file }: { universe: string; section: PageSection; positions: PositionView[]; file: string }) {
+function Section({
+  universe,
+  section,
+  subsections,
+  positions,
+  file,
+  target,
+}: {
+  universe: string
+  section: PageSection
+  subsections: number
+  positions: PositionView[]
+  file: string
+  target: EditTarget | null
+}) {
   const Heading = `h${Math.min(Math.max(section.level, 2), 6)}` as 'h2'
+  const here = target !== null && 'line' in target && target.line === section.line && target.name === section.name ? target : null
+  const { line, name } = section
   return (
     <section className={`section level-${section.level}${section.bookkeeping ? ' bookkeeping' : ''}`}>
-      <Heading id={sectionAnchor(section.name)}>
-        {section.name} <StatusBadge status={section.status} />
-        <Span from={section.from} until={section.until} positions={positions} />
-        {section.pinned && <span className="badge">pinned</span>}
-        {section.bookkeeping && <span className="badge">bookkeeping</span>}
-      </Heading>
-      {section.body.trim() && <Markdown text={section.body} links={section.links} universe={universe} file={file} />}
+      {here?.kind === 'rename' ? (
+        <RenameSection target={here} />
+      ) : (
+        <Heading id={sectionAnchor(section.name)}>
+          {section.name} <StatusBadge status={section.status} />
+          <Span from={section.from} until={section.until} positions={positions} />
+          {section.pinned && <span className="badge">pinned</span>}
+          {section.bookkeeping && <span className="badge">bookkeeping</span>}
+        </Heading>
+      )}
+      {here?.kind !== 'rename' && (
+        <p className="piece-tools section-tools">
+          <EditButton target={{ kind: 'section', line, name }} label={`Edit “${name}”`}>
+            Edit
+          </EditButton>
+          <EditButton target={{ kind: 'rename', line, name }} label={`Rename “${name}”`}>
+            Rename
+          </EditButton>
+          <EditButton target={{ kind: 'remove', line, name }} label={`Remove “${name}”`}>
+            Remove
+          </EditButton>
+        </p>
+      )}
+      {here?.kind === 'remove' && <RemoveSection target={here} subsections={subsections} />}
+      {here?.kind === 'section' ? (
+        <PieceEditor target={here} what={`the section “${name}”`} file={file} />
+      ) : (
+        section.body.trim() && <Markdown text={section.body} links={section.links} universe={universe} file={file} />
+      )}
     </section>
   )
 }

@@ -7,4 +7,9 @@
     <ProjectReference Include="..\..\src\Wolfden.Git\Wolfden.Git.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Using Include="Wolfden.Index.Reading" />
+    <Using Include="Wolfden.Index.Writing" />
+  </ItemGroup>
+
 </Project>
