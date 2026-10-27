@@ -39,6 +39,22 @@ public static class WriteEndpoints
     public static readonly IReadOnlyList<string> PostPaths =
         ["edit/lead", "edit/section", "edit/section/add", "edit/section/rename", "edit/section/remove", "edit/file"];
 
+    /// <summary>
+    /// The words the edits' messages use for what to do next. Their errors
+    /// and effects are shown to the writer on the page, so they name what a
+    /// writer can do (an editor, the search box, <c>wolfden check</c>), not
+    /// MCP tools or API parameters as <see cref="ReadEndpoints.Words"/> does.
+    /// </summary>
+    public static readonly ToolWords Words = ReadEndpoints.Words with
+    {
+        FindEntity = "use the search box",
+        CheckDen = "run 'wolfden check' in the den's folder",
+        CheckTool = "run 'wolfden check' in the den's folder",
+        CheckPath = "open '{0}' in your editor, or run 'wolfden check' in the den's folder,",
+        NameLinks = "An AI assistant working through Wolfden can rename the note and rewrite those links.",
+        AliasLinks = "An AI assistant working through Wolfden can change an alias and rewrite those links.",
+    };
+
     /// <summary>Maps the editing endpoints onto <paramref name="api"/>.</summary>
     public static void Map(RouteGroupBuilder api, WolfdenApiOptions options)
     {
@@ -50,7 +66,7 @@ public static class WriteEndpoints
         {
             WatcherWait = options.WatcherWait,
             PinnedUniverse = options.PinnedUniverse,
-            Words = ReadEndpoints.Words,
+            Words = WriteEndpoints.Words,
         };
 
         api.MapGet("/entity/source", (HttpContext c) => ReadEndpoints.Answer(

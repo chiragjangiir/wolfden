@@ -253,7 +253,7 @@ public sealed partial class DenTools
             var catalog = EntityCatalog.Load(structure, den);
             var target = catalog.FindByPath(path) ?? throw (den.FileExists(path)
                 ? new DenToolException(
-                    ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. Call check with path '{path}' to see them.")
+                    ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. {ToolWords.Cap(Words.CheckFile(path))} to see them.")
                 : Gone(path));
             CheckHash(path, target.File.ToBytes(), hash);
             CheckNotFrozen(target);
@@ -302,6 +302,10 @@ public sealed partial class DenTools
             if (target.File.Sections.FirstOrDefault(s => s.Index < found.Index && LinkText.Matches(s.Name, newName)) is { } earlier)
             {
                 effects.Add($"An earlier section, '{earlier.Name}' at line {earlier.Line}, already has that name, so a link to '{newName}' reaches that one first (F-LINK-9).");
+            }
+            else if (target.File.Sections.FirstOrDefault(s => s.Index > found.Index && LinkText.Matches(s.Name, newName)) is { } later)
+            {
+                effects.Add($"The note already has a section '{later.Name}' (line {later.Line}), and a link to '{newName}' reaches the first one (F-LINK-9).");
             }
 
             if (plan.SkippedPaths.Count > 0)
@@ -864,7 +868,7 @@ public sealed partial class DenTools
             CheckHash(path, original, hash);
             var read = EntityCatalog.ReadEntityFile(structure, path, original);
             var before = read.Entity ?? throw new DenToolException(
-                ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. Call check with path '{path}' to see them.");
+                ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. {ToolWords.Cap(Words.CheckFile(path))} to see them.");
             CheckNotFrozen(before);
             var pinned = new List<string>();
             var (file, effects) = edit(before.File, before, pinned);

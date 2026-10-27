@@ -48,6 +48,11 @@ interface Editing {
   /** Closes the editor; after a save, shows what the save did. */
   close: (saved?: Saved) => void
   setDirty: (dirty: boolean) => void
+  /** Cancel or Escape: closes the editor, or with unsaved changes, asks first (DiscardPrompt). */
+  cancel: () => void
+  /** True while the page asks whether to discard unsaved changes. */
+  discarding: boolean
+  keepEditing: () => void
   /** The badge, the last save's result, and the prompt before leaving, for EditingStatus. */
   status: ReactNode
 }
@@ -91,6 +96,8 @@ export function EditingProvider({
 }) {
   const [dirty, setDirty] = useState(false)
   const [saved, setSaved] = useState<Saved | null>(null)
+  const [discarding, setDiscarding] = useState(false)
+  const focusBack = useRef<HTMLElement | null>(null)
   const dirtyRef = useRef(false)
   dirtyRef.current = dirty
   const returnTo = useRef<string | null>(null)
@@ -114,6 +121,7 @@ export function EditingProvider({
     (next: EditTarget) => {
       setSaved(null)
       setDirty(false)
+      setDiscarding(false)
       setTarget(next)
     },
     [setTarget],
@@ -122,11 +130,30 @@ export function EditingProvider({
     (result?: Saved) => {
       returnTo.current = result ? 'edit-saved' : target ? editButtonId(target) : null
       setDirty(false)
+      setDiscarding(false)
       setSaved(result ?? null)
       setTarget(null)
     },
     [setTarget, target],
   )
+
+  const cancel = useCallback(() => {
+    if (!dirtyRef.current) {
+      close()
+      return
+    }
+
+    // Focus goes back where it was (inside the editor's shadow root, for CodeMirror) if the writer keeps editing.
+    const active = document.activeElement as HTMLElement | null
+    focusBack.current = (active?.shadowRoot?.activeElement as HTMLElement | null) ?? active
+    setDiscarding(true)
+  }, [close])
+  const keepEditing = useCallback(() => {
+    setDiscarding(false)
+    const back = focusBack.current
+    focusBack.current = null
+    setTimeout(() => back?.focus(), 0)
+  }, [])
 
   // Focus goes back where the edit started, or to what the save did.
   useEffect(() => {
@@ -145,20 +172,18 @@ export function EditingProvider({
       open,
       close,
       setDirty,
+      cancel,
+      discarding,
+      keepEditing,
       status: (
         <>
           {blocker.status === 'blocked' && (
-            <div className="banner leave-prompt" role="alertdialog" aria-labelledby="leave-prompt-text">
-              <p id="leave-prompt-text">You have changes that aren't saved. Leave without saving them?</p>
-              <p className="banner-actions">
-                <button type="button" onClick={() => blocker.reset()} autoFocus>
-                  Keep editing
-                </button>
-                <button type="button" onClick={() => blocker.proceed()}>
-                  Leave without saving
-                </button>
-              </p>
-            </div>
+            <UnsavedPrompt
+              question="You have changes that aren't saved. Leave without saving them?"
+              discard="Leave without saving"
+              onKeep={() => blocker.reset()}
+              onDiscard={() => blocker.proceed()}
+            />
           )}
           {target !== null && (
             <p className="editing-badge" role="status">
@@ -169,9 +194,43 @@ export function EditingProvider({
         </>
       ),
     }),
-    [universe, entityKey, frozen, target, open, close, blocker, saved],
+    [universe, entityKey, frozen, target, open, close, cancel, discarding, keepEditing, blocker, saved],
   )
   return <EditingContext.Provider value={value}>{children}</EditingContext.Provider>
+}
+
+/**
+ * The page's own question before unsaved changes are dropped, by leaving
+ * the page or by Cancel or Escape: "Keep editing" (focused) or discard.
+ */
+function UnsavedPrompt({ question, discard, onKeep, onDiscard }: { question: string; discard: string; onKeep: () => void; onDiscard: () => void }) {
+  const id = useId()
+  return (
+    <div className="banner leave-prompt" role="alertdialog" aria-labelledby={id}>
+      <p id={id}>{question}</p>
+      <p className="banner-actions">
+        <button type="button" onClick={onKeep} autoFocus>
+          Keep editing
+        </button>
+        <button type="button" onClick={onDiscard}>
+          {discard}
+        </button>
+      </p>
+    </div>
+  )
+}
+
+/** Asks before Cancel or Escape drops unsaved changes, in the editor that has them. */
+function DiscardPrompt() {
+  const editing = useEditing()!
+  return editing.discarding ? (
+    <UnsavedPrompt
+      question="Discard the changes you haven't saved?"
+      discard="Discard changes"
+      onKeep={editing.keepEditing}
+      onDiscard={() => editing.close()}
+    />
+  ) : null
 }
 
 /** The editing state the page shows under its heading: the badge, what the last save did, and the prompt before leaving. */
@@ -271,14 +330,17 @@ interface Piece {
 type TextTarget = Extract<EditTarget, { kind: 'lead' | 'section' | 'file' }>
 
 /** The piece `target` names in `source`, or null if it isn't there (any more). */
-function pieceOf(source: EntitySource, target: TextTarget | { kind: 'rename' | 'remove'; line: number; name: string }, byNameOnly = false): Piece | null {
+function pieceOf(source: EntitySource, target: TextTarget | { kind: 'rename' | 'remove'; line: number; name: string }, opened?: Piece | null): Piece | null {
   switch (target.kind) {
     case 'lead':
       return { hash: source.hash, text: source.lead.text }
     case 'file':
       return { hash: source.hash, text: source.text }
     default: {
-      const exact = byNameOnly ? undefined : source.sections.find((s) => s.line === target.line && s.name === target.name)
+      // In the file as it was opened, by its line; in a newer file, by the index it had, if that still has its name.
+      const exact = opened
+        ? source.sections.find((s) => s.index === opened.index && s.name === target.name)
+        : source.sections.find((s) => s.line === target.line && s.name === target.name)
       const named = source.sections.filter((s) => s.name === target.name)
       const section = exact ?? (named.length === 1 ? named[0] : undefined)
       return section ? { hash: source.hash, text: section.body, index: section.index, name: section.name } : null
@@ -289,11 +351,13 @@ function pieceOf(source: EntitySource, target: TextTarget | { kind: 'rename' | '
 /** Fetches the note's source when an editor opens, and gives the piece it edits, kept as it was when it opened. */
 function useOpenedPiece(target: TextTarget | { kind: 'rename' | 'remove'; line: number; name: string }) {
   const editing = useEditing()!
-  const source = useQuery(sourceQuery(editing.universe, editing.entityKey))
+  const source = useQuery({ ...sourceQuery(editing.universe, editing.entityKey), refetchOnMount: 'always' })
   const [piece, setPiece] = useState<Piece | null>(null)
   const [missing, setMissing] = useState(false)
+  // Only the file as fetched for this editor, never an answer cached from an earlier one.
+  const fresh = source.isFetchedAfterMount && !source.isFetching
   useEffect(() => {
-    if (source.data && piece === null && !missing) {
+    if (fresh && source.data && piece === null && !missing) {
       const found = pieceOf(source.data, target)
       if (found) {
         setPiece(found)
@@ -301,7 +365,7 @@ function useOpenedPiece(target: TextTarget | { kind: 'rename' | 'remove'; line: 
         setMissing(true)
       }
     }
-  }, [source.data, piece, missing, target])
+  }, [fresh, source.data, piece, missing, target])
   return { source, piece, setPiece, missing }
 }
 
@@ -344,6 +408,12 @@ export function PieceEditor({ target, what, file }: { target: TextTarget; what: 
       return
     }
 
+    if (base === piece && text === piece.text) {
+      // Nothing to save: no request, and the file is left as it is.
+      editing.close()
+      return
+    }
+
     setSaving(true)
     setError(null)
     try {
@@ -368,7 +438,8 @@ export function PieceEditor({ target, what, file }: { target: TextTarget; what: 
     }
   }
 
-  const cancel = () => editing.close()
+  const cancel = editing.cancel
+  const dirty = text !== piece?.text
 
   if (source.isError) {
     return <ErrorState error={source.error} />
@@ -390,7 +461,7 @@ export function PieceEditor({ target, what, file }: { target: TextTarget; what: 
   }
 
   if (conflict) {
-    const theirs = pieceOf(conflict, target, true)
+    const theirs = pieceOf(conflict, target, piece)
     return (
       <Conflict
         what={what}
@@ -408,7 +479,7 @@ export function PieceEditor({ target, what, file }: { target: TextTarget; what: 
         }
         onTakeTheirs={() => {
           void afterSave()
-          cancel()
+          editing.close()
         }}
         onCopyMine={async () => {
           let note = 'Your version is copied. The editor now holds the file as it is; paste your text where you want it.'
@@ -459,8 +530,9 @@ export function PieceEditor({ target, what, file }: { target: TextTarget; what: 
         </div>
       )}
       {error && <SaveError error={error} />}
+      <DiscardPrompt />
       <p className="editor-actions">
-        <button type="button" className="primary" onClick={() => void save()} disabled={saving}>
+        <button type="button" className="primary" onClick={() => void save()} disabled={saving || !dirty}>
           {saving ? 'Saving…' : 'Save'}
         </button>
         <button type="button" onClick={cancel} disabled={saving}>
@@ -645,7 +717,7 @@ export function RenameSection({ target }: { target: { kind: 'rename'; line: numb
       await afterSave()
       editing.close({ what: `the section “${target.name}”`, result })
     } catch (e) {
-      setError(staleAgain(e, target, setPiece))
+      setError(staleAgain(e, target, piece, setPiece))
     } finally {
       setSaving(false)
     }
@@ -661,7 +733,7 @@ export function RenameSection({ target }: { target: { kind: 'rename'; line: numb
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.preventDefault()
-          editing.close()
+          editing.cancel()
         }
       }}
     >
@@ -672,11 +744,12 @@ export function RenameSection({ target }: { target: { kind: 'rename'; line: numb
       <p className="muted">Links to this section by its heading are changed to the new name, in every note.</p>
       {missing && <p role="alert">This section isn't in the file now. Reload the page to see it as it is.</p>}
       {error && <SaveError error={error} />}
+      <DiscardPrompt />
       <p className="editor-actions">
         <button type="submit" className="primary" disabled={!piece || saving}>
           {saving ? 'Renaming…' : 'Rename'}
         </button>
-        <button type="button" onClick={() => editing.close()} disabled={saving}>
+        <button type="button" onClick={editing.cancel} disabled={saving}>
           Cancel
         </button>
       </p>
@@ -688,9 +761,14 @@ export function RenameSection({ target }: { target: { kind: 'rename'; line: numb
  * After a stale rename or removal, takes the section from the file as it is
  * now, so trying again sends the new hash, and says the note changed.
  */
-function staleAgain(e: unknown, target: { kind: 'rename' | 'remove'; line: number; name: string }, setPiece: (p: Piece | null) => void): Error {
+function staleAgain(
+  e: unknown,
+  target: { kind: 'rename' | 'remove'; line: number; name: string },
+  opened: Piece | null,
+  setPiece: (p: Piece | null) => void,
+): Error {
   if (e instanceof EditError && e.code === 'stale_file') {
-    const now = e.current ? pieceOf(e.current, target, true) : null
+    const now = e.current ? pieceOf(e.current, target, opened) : null
     if (now) {
       setPiece(now)
       return new Error('The note changed meanwhile, perhaps edited by an agent or in another editor. Check it, then try again.')
@@ -726,7 +804,7 @@ export function RemoveSection({ target, subsections }: { target: { kind: 'remove
       await afterSave()
       editing.close({ what: `the note (removed “${target.name}”)`, result })
     } catch (e) {
-      setError(staleAgain(e, target, setPiece))
+      setError(staleAgain(e, target, piece, setPiece))
     } finally {
       setSaving(false)
     }
@@ -766,7 +844,8 @@ export function RemoveSection({ target, subsections }: { target: { kind: 'remove
 export function AddSection({ file }: { file: string }) {
   const editing = useEditing()!
   const afterSave = useAfterSave()
-  const source = useQuery(sourceQuery(editing.universe, editing.entityKey))
+  const source = useQuery({ ...sourceQuery(editing.universe, editing.entityKey), refetchOnMount: 'always' })
+  const fresh = source.isFetchedAfterMount && !source.isFetching
   const [base, setBase] = useState<EntitySource | null>(null)
   const [name, setName] = useState('')
   const [before, setBefore] = useState('')
@@ -779,10 +858,10 @@ export function AddSection({ file }: { file: string }) {
   const { setDirty } = editing
 
   useEffect(() => {
-    if (source.data && base === null) {
+    if (fresh && source.data && base === null) {
       setBase(source.data)
     }
-  }, [source.data, base])
+  }, [fresh, source.data, base])
   useEffect(() => setDirty(name.trim() !== '' || text.trim() !== ''), [name, text, setDirty])
   useEffect(() => nameInput.current?.focus(), [base])
 
@@ -837,7 +916,7 @@ export function AddSection({ file }: { file: string }) {
       onKeyDown={(e) => {
         if (e.key === 'Escape' && !e.defaultPrevented) {
           e.preventDefault()
-          editing.close()
+          editing.cancel()
         }
       }}
     >
@@ -872,7 +951,7 @@ export function AddSection({ file }: { file: string }) {
           value={text}
           onChange={setText}
           onSave={() => void save()}
-          onCancel={() => editing.close()}
+          onCancel={editing.cancel}
           label="Markdown of the new section"
           universe={editing.universe}
         />
@@ -883,11 +962,12 @@ export function AddSection({ file }: { file: string }) {
         </div>
       )}
       {error && <SaveError error={error} />}
+      <DiscardPrompt />
       <p className="editor-actions">
         <button type="submit" className="primary" disabled={saving}>
           {saving ? 'Adding…' : 'Add section'}
         </button>
-        <button type="button" onClick={() => editing.close()} disabled={saving}>
+        <button type="button" onClick={editing.cancel} disabled={saving}>
           Cancel
         </button>
       </p>

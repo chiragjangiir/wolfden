@@ -1464,12 +1464,32 @@ docs/
     (`bad_argument`), as `WithSectionBody` refuses it. The lead's editor
     holds the lead as written, title heading included. Line breaks are
     LF in the editor and written as the file's own (the more common one
-    in a file that mixes them), and the byte order mark is kept, so
-    saving unchanged text writes nothing.
+    in a file that mixes them), and the byte order mark is kept. Text
+    that equals the piece's, line breaks aside, writes nothing, even in a
+    file that mixes them, and the page doesn't send it (Save is off until
+    the text changes).
+  - **Section names.** A name typed with a heading's `#` marks (`## Arc`)
+    is refused, with the name to give instead, rather than stripped: the
+    level comes from where the section goes, and a writer's text isn't
+    changed behind their back. Adding or renaming to a name another
+    section has is saved, and `effects` says a link to it reaches the
+    first one (F-LINK-9); `rename_section` says so too now.
   - **Edit file.** It refuses a change to, or removal of, an existing id
-    (F-ID-4, `unsupported_edit`). It doesn't rewrite links when the name
-    or an alias changes; the result says so, and `rename_entity` and
-    `change_alias` (or a later UI) do that.
+    (F-ID-4, `unsupported_edit`). A note without one may be given one,
+    but not an id another file of the den has (`already_exists`), checked
+    through the index across universes. `DenWriteCheck` reads only the
+    file written (F-GEN-4), so it doesn't see F-ID-3, which compares
+    files; the MCP tools never take an id by hand, so only Edit file
+    needs the check. An id that isn't one is F-ID-1, an error, so
+    `invalid_edit`. Edit file doesn't rewrite links when the name or an
+    alias changes; the result says so.
+  - **Words for writers.** The edits' errors and effects are shown on the
+    page, so the API's `DenTools` uses its own `ToolWords`
+    (`WriteEndpoints.Words`): they name the search box, an editor, and
+    `wolfden check`, and say that an AI assistant working through Wolfden
+    can rename a note or change an alias and rewrite the links, where the
+    MCP tools' words name `rename_entity` and `change_alias`. The MCP
+    tools' and the command line's words are unchanged.
   - **Removing a section** takes its subsections, and doesn't rewrite
     links to it by heading: `effects` lists them, and what they reach
     now (a later section of that name, or only the note).
@@ -1480,12 +1500,18 @@ docs/
     `style-src 'self'` refuses. `[[` autocomplete asks `/api/search` for
     the words typed so far, as a prefix. Preview uses the page's own
     renderer, with links shown as written until the note is saved. One
-    piece is edited at a time. Leaving through the app with unsaved
-    changes asks in the page (TanStack Router's blocker), and closing or
-    reloading the tab makes the browser ask (`beforeunload`). Remove asks
+    piece is edited at a time, and an editor opens only on the source
+    fetched when it opened, never a cached answer. Leaving through the
+    app with unsaved changes (a link, Back, or the position bar) asks in
+    the page (TanStack Router's blocker), and closing or reloading the
+    tab makes the browser ask (`beforeunload`); Cancel or Escape asks the
+    same way before dropping unsaved text. A change of position ends the
+    edit: the page is made again for the new position. Remove asks
     in the page, never in a browser dialog. A stale save shows the
     writer's version and the file's side by side, with the lines that
-    differ marked, and offers Keep mine (save it again on the new hash),
+    differ marked, and offers Keep mine (save it again on the new hash,
+    to the section at the same index with the same name, or the only one
+    of that name),
     Take theirs, and Copy mine and reload (copy it to the clipboard, and
     open the editor on the file as it is now). A save refreshes every
     cached answer, since a rename or a new name can change lists,

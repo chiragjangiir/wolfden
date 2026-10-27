@@ -42,7 +42,7 @@ public sealed partial class DenTools
         var bytes = den.TryReadFile(path) ?? throw Gone(path);
         var read = EntityCatalog.ReadEntityFile(structure, path, bytes);
         var e = read.Entity ?? throw new DenToolException(
-            ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. Run 'wolfden check' on it to see them.");
+            ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. {ToolWords.Cap(Words.CheckFile(path))} to see them.");
         return SourceOf(e, bytes);
     }
 
@@ -75,7 +75,12 @@ public sealed partial class DenTools
         ArgumentNullException.ThrowIfNull(text);
         return EditEntity(entity, universe, RequireHash(expectedHash), (file, _, pinned) =>
         {
-            file = Apply(() => file.WithLead(text));
+            // The same text, line breaks aside, writes nothing, even in a file that mixes them.
+            if (EditorText(file.Lead) != EditorText(text))
+            {
+                file = Apply(() => file.WithLead(text));
+            }
+
             return (file, (before, after) =>
             {
                 pinned.AddRange(PinnedChanges(before, after));
@@ -105,7 +110,11 @@ public sealed partial class DenTools
         return EditEntity(entity, universe, RequireHash(expectedHash), (file, _, pinned) =>
         {
             var target = SectionAt(file, index, name);
-            file = Apply(() => file.WithSectionBody(target, text));
+            if (EditorText(target.Body) != EditorText(text))
+            {
+                file = Apply(() => file.WithSectionBody(target, text));
+            }
+
             return (file, (before, after) =>
             {
                 pinned.AddRange(PinnedChanges(before, after));
@@ -250,8 +259,19 @@ public sealed partial class DenTools
     public WriteResult ReplaceFile(string entity, string text, string expectedHash, string? universe = null)
     {
         ArgumentNullException.ThrowIfNull(text);
+
+        // Every id in the den, across universes, from the index (F-ID-3): DenWriteCheck reads only the file
+        // being written (F-GEN-4), so it can't see an id another file has. The MCP tools never take an id by
+        // hand (update_fields refuses one; new ids are made unused), so only Edit file needs this.
+        var (_, ids) = Locate(entity, universe);
         return EditEntity(entity, universe, RequireHash(expectedHash), (file, catalog, pinned) =>
         {
+            if (Lf(file.Text) == Lf(text))
+            {
+                // The same text, line breaks aside, writes nothing, even in a file that mixes them.
+                return (file, (_, _) => []);
+            }
+
             var newline = file.LineEndings == LineEndingKind.CrLf || (file.LineEndings == LineEndingKind.Mixed && CrLfMostly(file.Text)) ? "\r\n" : "\n";
             var written = LineBreak().Replace(text, newline);
             var payload = Encoding.UTF8.GetBytes(written);
@@ -266,6 +286,14 @@ public sealed partial class DenTools
                     $"The note's id is {old}, and an id never changes (F-ID-4): links and history follow it. Put back 'id: {old}' and save again.");
             }
 
+            if (catalog.Id is null && id is not null && ids.Contains(id))
+            {
+                throw new DenToolException(
+                    ToolErrorCodes.AlreadyExists,
+                    $"Another note or container already has the id {id}, and two files can't share one (F-ID-3): links to either would break. " +
+                    "Take the id line out and save: the note gets a new id of its own (F-ID-6).");
+            }
+
             return (next, (before, after) =>
             {
                 pinned.AddRange(PinnedChanges(before, after));
@@ -278,7 +306,7 @@ public sealed partial class DenTools
                 {
                     effects.Add(
                         $"The name is now '{after.Name}'. Links written with the old name, '{before.Name}', weren't rewritten, so they no longer reach it " +
-                        "unless it's kept as an alias. Renaming the note (rename_entity) rewrites them.");
+                        $"unless it's kept as an alias. {Words.NameLinks}");
                 }
 
                 var gone = before.Aliases.Where(a => !after.Aliases.Any(b => LinkText.Matches(a, b)) && !LinkText.Matches(a, after.Name)).ToList();
@@ -286,7 +314,7 @@ public sealed partial class DenTools
                 {
                     effects.Add(
                         $"Links written with the alias{(gone.Count == 1 ? "" : "es")} {string.Join(", ", gone.Select(a => $"'{a}'"))} weren't rewritten, " +
-                        "so they no longer reach it. Changing an alias with change_alias rewrites them.");
+                        $"so they no longer reach it. {Words.AliasLinks}");
                 }
 
                 return effects;
@@ -328,6 +356,14 @@ public sealed partial class DenTools
         if (trimmed.Length == 0 || trimmed.Any(char.IsControl))
         {
             throw new DenToolException(ToolErrorCodes.BadArgument, "A section name is one line of text, not empty.");
+        }
+
+        if (trimmed.StartsWith('#'))
+        {
+            // Refused rather than stripped: the level comes from where the section goes, and a name the
+            // writer typed is never changed behind their back.
+            throw new DenToolException(
+                ToolErrorCodes.BadArgument, $"Give the section's name without the heading's '#' marks, such as '{trimmed.TrimStart('#').Trim()}'.");
         }
 
         return trimmed;

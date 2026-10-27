@@ -399,6 +399,112 @@ public class WriteEndpointTests
         Assert.Equal([0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes(expected[1..])], File.ReadAllBytes(Path.Combine(den.Root, NotePath)));
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-WEB-45")]
+    public async Task SavingUnchangedTextInAFileThatMixesLineBreaksWritesNothing()
+    {
+        using var den = NewDen();
+
+        // The lead and First use CRLF; the rest of the file uses LF.
+        var mixed = Note.Replace("# Edit Test\n\nThe opening line.\n", "# Edit Test\r\n\r\nThe opening line.\r\n", StringComparison.Ordinal)
+            .Replace("<!-- wolfden: pin=true -->\nFirst text.\n", "<!-- wolfden: pin=true -->\r\nFirst text.\r\n", StringComparison.Ordinal);
+        File.WriteAllText(Path.Combine(den.Root, NotePath), mixed, new UTF8Encoding(false));
+        var original = File.ReadAllBytes(Path.Combine(den.Root, NotePath));
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root));
+        var source = await SourceAsync(server, NotePath);
+        Assert.Equal("mixed", source.GetProperty("lineEndings").GetString());
+
+        foreach (var (path, body) in new (string, object)[]
+        {
+            ("/api/edit/lead", new { entity = NotePath, expectedHash = Hash(source), text = source.GetProperty("lead").GetProperty("text").GetString() }),
+            ("/api/edit/section", new
+            {
+                entity = NotePath, expectedHash = Hash(source), index = IndexOf(source, "First"), name = "First", text = Section(source, "First").GetProperty("body").GetString(),
+            }),
+            ("/api/edit/file", new { entity = NotePath, expectedHash = Hash(source), text = source.GetProperty("text").GetString() }),
+        })
+        {
+            var (status, json) = await PostAsync(server, path, body);
+            Assert.Equal(HttpStatusCode.OK, status);
+            Assert.False(json.GetProperty("changed").GetBoolean(), path);
+            Assert.Empty(json.GetProperty("pinnedCanon").EnumerateArray());
+            Assert.Equal(original, File.ReadAllBytes(Path.Combine(den.Root, NotePath)));
+        }
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-42")]
+    public async Task EditFileRefusesAnIdAnotherFileHasOrOneThatIsntAnId()
+    {
+        using var den = NewDen();
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root));
+        var source = await SourceAsync(server, NotePath);
+
+        // Mr. Swales's id, in another folder of the den.
+        var taken = Note.Replace("type: note\n", "id: 01M4TF5F0EKGGWD5FNVBAEY8X7\ntype: note\n", StringComparison.Ordinal);
+        var (status, json) = await PostAsync(server, "/api/edit/file", new { entity = NotePath, expectedHash = Hash(source), text = taken });
+        Assert.Equal(HttpStatusCode.Conflict, status);
+        Assert.Equal("already_exists", json.GetProperty("code").GetString());
+        Assert.Contains("F-ID-3", json.GetProperty("message").GetString(), StringComparison.Ordinal);
+
+        var invalid = Note.Replace("type: note\n", "id: not-an-id\ntype: note\n", StringComparison.Ordinal);
+        (status, json) = await PostAsync(server, "/api/edit/file", new { entity = NotePath, expectedHash = Hash(source), text = invalid });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, status);
+        Assert.Equal("invalid_edit", json.GetProperty("code").GetString());
+        Assert.Contains("F-ID-1", json.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Equal(Note, den.Read(NotePath));
+
+        // An unused id of the writer's own is fine.
+        var own = Note.Replace("type: note\n", "id: 01M4TF5F0EKGGWD5FNVBAEY8Z9\ntype: note\n", StringComparison.Ordinal);
+        (status, json) = await PostAsync(server, "/api/edit/file", new { entity = NotePath, expectedHash = Hash(source), text = own });
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("idAdded").ValueKind);
+        Assert.Equal(own, den.Read(NotePath));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-42")]
+    public async Task EditFileSaysInTheWritersWordsThatLinksToTheOldNameWerentRewritten()
+    {
+        using var den = NewDen();
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root));
+        var source = await SourceAsync(server, LinkerPath);
+
+        var renamed = Linker.Replace("name: Edit Linker\n", "name: Edit Joiner\n", StringComparison.Ordinal);
+        var (status, json) = await PostAsync(server, "/api/edit/file", new { entity = LinkerPath, expectedHash = Hash(source), text = renamed });
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        var effects = string.Join("\n", json.GetProperty("effects").EnumerateArray().Select(e => e.GetString()));
+        Assert.Contains("An AI assistant working through Wolfden can rename the note and rewrite those links.", effects, StringComparison.Ordinal);
+        Assert.DoesNotContain("rename_entity", effects, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-41")]
+    public async Task ASectionNameWithHeadingMarksIsRefusedAndADuplicateNameIsReported()
+    {
+        using var den = NewDen();
+
+        // Without links to 'Second', a rename may give 'First' its name.
+        File.Delete(Path.Combine(den.Root, LinkerPath));
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root));
+        var source = await SourceAsync(server, NotePath);
+
+        var (status, json) = await PostAsync(server, "/api/edit/section/add", new { entity = NotePath, expectedHash = Hash(source), name = "## Later", text = "" });
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.Contains("'Later'", json.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Equal(Note, den.Read(NotePath));
+
+        (status, json) = await PostAsync(server, "/api/edit/section/rename", new
+        {
+            entity = NotePath, expectedHash = Hash(source), index = IndexOf(source, "First"), name = "First", newName = "Second",
+        });
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Contains(
+            json.GetProperty("effects").EnumerateArray().Select(e => e.GetString()!),
+            e => e.Contains("already has a section 'Second'", StringComparison.Ordinal) && e.Contains("F-LINK-9", StringComparison.Ordinal));
+    }
+
     [Theory]
     [Trait("Scenario", "SC-WEB-46")]
     [InlineData("text/plain")]

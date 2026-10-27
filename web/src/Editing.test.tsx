@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { QueryClient } from '@tanstack/react-query'
+import { createBrowserHistory } from '@tanstack/react-router'
+import { App } from './App'
 import type { EntityPageResult, PageSection } from './api'
 import type { EntitySource, WriteResult } from './editApi'
 import { editorViewIn } from './components/MarkdownEditor'
@@ -81,13 +84,15 @@ function stubEditing(options: { onPost?: (post: Post, n: number) => Response | W
   }
 
   const stub = stubApi({ entityPage: pages })
+  // The file as the API reads it now; a test changes it to play an edit made elsewhere.
+  const file = { source: source() }
   const base = stub.fetchMock.getMockImplementation()!
   const posts: Post[] = []
   stub.fetchMock.mockImplementation((async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1')
     if (url.pathname === '/api/entity/source') {
       stub.calls.push(`${url.pathname}${url.search}`)
-      return Response.json(source())
+      return Response.json(file.source)
     }
 
     if (url.pathname.startsWith('/api/edit/')) {
@@ -102,7 +107,7 @@ function stubEditing(options: { onPost?: (post: Post, n: number) => Response | W
 
     return base(input)
   }) as typeof fetch)
-  return { ...stub, posts }
+  return { ...stub, posts, file }
 }
 
 async function editorFor(label: RegExp | string) {
@@ -154,18 +159,58 @@ describe('SC-WEB-40: editing a section or the opening in place', () => {
     expect(posts.map((p) => p.body.text)).toEqual(['Typed.'])
   })
 
-  it('cancels with Escape, sending nothing, and puts focus back on the Edit button', async () => {
+  it('asks before Escape drops unsaved text, and closes at once when nothing changed', async () => {
     const { posts } = stubEditing()
     renderApp('/u/dracula/e/E-MINA')
     const { view } = await openSectionEditor()
-    replaceText(view, 'Thrown away.')
+    replaceText(view, 'Not thrown away yet.')
 
     fireEvent.keyDown(view.contentDOM, { key: 'Escape' })
+    const ask = await screen.findByRole('alertdialog', { name: "Discard the changes you haven't saved?" })
+    expect(document.activeElement).toBe(within(ask).getByRole('button', { name: 'Keep editing' }))
+    fireEvent.click(within(ask).getByRole('button', { name: 'Keep editing' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(view.state.doc.toString()).toBe('Not thrown away yet.')
+    await waitFor(() => expect(view.hasFocus).toBe(true))
 
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Discard changes' }))
     await waitFor(() => expect(screen.queryByRole('group', { name: /Markdown of/ })).toBeNull())
     expect(posts).toEqual([])
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Edit “Overview”' }))
     expect(screen.getByText('Old text.')).toBeTruthy()
+
+    // Unchanged, Escape closes without asking.
+    const again = await openSectionEditor()
+    fireEvent.keyDown(again.view.contentDOM, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('group', { name: /Markdown of/ })).toBeNull())
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
+  it('sends nothing when the text is unchanged: Save is off, and Ctrl+Enter just closes', async () => {
+    const { posts } = stubEditing()
+    renderApp('/u/dracula/e/E-MINA')
+    const { view } = await openSectionEditor()
+
+    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.keyDown(view.contentDOM, { key: 'Enter', ctrlKey: true })
+
+    await waitFor(() => expect(screen.queryByRole('group', { name: /Markdown of/ })).toBeNull())
+    expect(posts).toEqual([])
+  })
+
+  it('opens on the file as it is now, not on an answer cached from an earlier edit', async () => {
+    const { file } = stubEditing()
+    renderApp('/u/dracula/e/E-MINA')
+    const first = await openSectionEditor()
+    expect(first.view.state.doc.toString()).toBe('Old text.')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('group', { name: /Markdown of/ })).toBeNull())
+
+    // Changed elsewhere meanwhile.
+    file.source = source('h5', 'Changed in another editor.')
+    const second = await openSectionEditor()
+    await waitFor(() => expect(second.view.state.doc.toString()).toBe('Changed in another editor.'))
   })
 
   it('edits the opening, title heading included, and shows a preview with the page’s renderer', async () => {
@@ -370,6 +415,24 @@ describe('SC-WEB-43: when the file changed meanwhile', () => {
     expect(screen.getByText(/Your version is copied/)).toBeTruthy()
   })
 
+  it('keeps mine in the same section when the new file has two of that name', async () => {
+    const current = source('h9', 'An agent wrote this.')
+    current.sections = [current.sections[0], { ...current.sections[0], index: 1, line: 11, body: 'A second Overview.' }, ...current.sections.slice(1).map((x) => ({ ...x, index: x.index + 1 }))]
+    const { posts } = stubEditing({
+      onPost: (_, n) => (n === 1 ? Response.json({ code: 'stale_file', message: 'It changed.', current }, { status: 409 }) : written()),
+    })
+    renderApp('/u/dracula/e/E-MINA')
+    const { view } = await openSectionEditor()
+    replaceText(view, 'My text.')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    const conflict = await screen.findByRole('region', { name: /The note changed/ })
+    expect(within(conflict).getByText('An agent wrote this.')).toBeTruthy()
+    fireEvent.click(within(conflict).getByRole('button', { name: 'Keep mine' }))
+    await screen.findByText('Saved the section “Overview”.')
+    expect(posts[1].body).toMatchObject({ expectedHash: 'h9', index: 0, name: 'Overview', text: 'My text.' })
+  })
+
   it('marks the lines only one version has', () => {
     expect(differingLines('a\nb\nc', 'a\nx\nc')).toEqual([
       [false, true, false],
@@ -407,6 +470,47 @@ describe('SC-WEB-44: guards around editing', () => {
     fireEvent.click(within(contents).getByRole('link', { name: 'Jonathan Harker' }))
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Leave without saving' }))
     await waitFor(() => expect(history.location.pathname).toBe('/u/dracula/e/E-JONATHAN'))
+  })
+
+  it('asks before Back leaves with unsaved changes', async () => {
+    stubEditing()
+    // The browser's own Back: a memory history doesn't block it, so this uses the browser history.
+    window.scrollTo = () => {}
+    window.history.replaceState(null, '', '/u/dracula')
+    const history = createBrowserHistory()
+    render(<App queryClient={new QueryClient({ defaultOptions: { queries: { retry: false } } })} history={history} />)
+    const contents = await screen.findByRole('navigation', { name: 'Contents' })
+    fireEvent.click(within(contents).getByRole('link', { name: 'Mina Harker' }))
+    await waitFor(() => expect(history.location.pathname).toBe('/u/dracula/e/E-MINA'))
+    const { view } = await openSectionEditor()
+    replaceText(view, 'Unsaved.')
+
+    act(() => window.history.back())
+    const prompt = await screen.findByRole('alertdialog')
+    expect(prompt.textContent).toContain("You have changes that aren't saved.")
+    fireEvent.click(within(prompt).getByRole('button', { name: 'Leave without saving' }))
+    await waitFor(() => expect(history.location.pathname).toBe('/u/dracula'))
+  })
+
+  it('asks before the position bar leaves the edit, and leaving closes the editor', async () => {
+    stubEditing()
+    const { history } = renderApp('/u/dracula/e/E-MINA?at=dracula:3')
+    const { view } = await openSectionEditor()
+    replaceText(view, 'Unsaved.')
+
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Story position' }), { key: 'ArrowLeft' })
+    const prompt = await screen.findByRole('alertdialog')
+    fireEvent.click(within(prompt).getByRole('button', { name: 'Keep editing' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    expect(new URLSearchParams(history.location.search).get('at')).toBe('dracula:3')
+    expect(screen.getByRole('group', { name: 'Markdown of the section “Overview”' })).toBeTruthy()
+
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Story position' }), { key: 'ArrowLeft' })
+    fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Leave without saving' }))
+    await waitFor(() => expect(new URLSearchParams(history.location.search).get('at')).toBe('dracula:2'))
+    await waitFor(() => expect(screen.queryByRole('group', { name: /Markdown of/ })).toBeNull())
+    expect(screen.queryByText('Editing shows everything')).toBeNull()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
   })
 
   it('turns the Edit controls off on a frozen note, and says why', async () => {

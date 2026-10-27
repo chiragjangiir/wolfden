@@ -209,7 +209,7 @@ public sealed partial class DenTools
             var catalog = EntityCatalog.Load(structure, den);
             var target = catalog.FindByPath(path) ?? throw (den.FileExists(path)
                 ? new DenToolException(
-                    ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. Call check with path '{path}' to see them.")
+                    ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. {ToolWords.Cap(Words.CheckFile(path))} to see them.")
                 : Gone(path));
             var original = target.File.ToBytes();
             CheckHash(path, original, hash);
@@ -327,7 +327,7 @@ public sealed partial class DenTools
             effects.AddRange(moved.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} {Now(l.After)}; before, it {Was(l.Before)}."));
             if (moved.Count > ListedLinkChanges)
             {
-                effects.Add($"And {moved.Count - ListedLinkChanges} more link(s) resolve differently now. Call check to see them.");
+                effects.Add($"And {moved.Count - ListedLinkChanges} more link(s) resolve differently now. {ToolWords.Cap(Words.CheckDen)} to see them.");
             }
 
             if (plan.SkippedPaths.Count > 0)

@@ -3234,7 +3234,11 @@ Mina's note is open. I click Edit under "Overview".
   says what the save did: its effects, any pinned canon it touched, the
   file's warnings, and that saving doesn't make a checkpoint.
 - Cancel, or Escape, closes the editor without saving, and focus goes
-  back to the Edit button.
+  back to the Edit button. With unsaved changes it asks first, in the
+  page: "Keep editing" (focused, and back into the editor) or "Discard
+  changes".
+- The editor always opens on the file as it is now, fetched when it
+  opens, never on an answer cached from an earlier edit.
 - "Edit opening" does the same for the text before the first section,
   title heading included.
 - Text that would add a heading to a section is refused, with a hint to
@@ -3258,7 +3262,11 @@ by: `WriteEndpointTests.TheSourceGivesTheFilesHashAndEachSectionsTextAsWritten`,
 
 - Add section asks for a name (offering the type's standard sections the
   note doesn't have), where it goes (at the end, or before a section, at
-  that section's level), and its text.
+  that section's level), and its text. A name typed with the heading's
+  marks (`## Arc`) is refused, with the name to give instead (`Arc`).
+- Renaming or adding a section to a name another section already has is
+  saved, and the result says that a link to that name reaches the first
+  one (F-LINK-9).
 - Rename turns the heading into a text box. Saving renames the section
   and rewrites every link to it by heading, in any note, as the MCP
   `rename_section` does (format.md F-RT-5); if one of those links is in a
@@ -3272,6 +3280,7 @@ Spec: design.md §9 (#28). Covered by:
 `WriteEndpointTests.AddingASectionPutsItAtTheEndOrBeforeAnother`,
 `WriteEndpointTests.RenamingASectionRewritesTheLinksToIt`,
 `WriteEndpointTests.RemovingASectionTakesItsSubsectionsAndSaysWhichLinksLoseIt`,
+`WriteEndpointTests.ASectionNameWithHeadingMarksIsRefusedAndADuplicateNameIsReported`,
 `Editing.test.tsx` (web).
 
 ### SC-WEB-42. I edit the whole file
@@ -3280,14 +3289,20 @@ Spec: design.md §9 (#28). Covered by:
   anything the other controls can't do (a section comment, or a field
   until part b of #28).
 - Saving writes it with the file's own line breaks and byte order mark.
-  The note's id can't be changed or removed there (F-ID-4). A new name or
-  alias is saved, and the result says that links written with the old
-  text weren't rewritten.
+  The note's id can't be changed or removed there (F-ID-4). A note
+  without an id can be given one there, but not one another note or
+  container already has (`already_exists`, F-ID-3), and not one that
+  isn't an id (`invalid_edit`, F-ID-1). A new name or alias is saved, and
+  the result says, in a writer's words, that links written with the old
+  text weren't rewritten, and that an AI assistant working through
+  Wolfden can rename the note and rewrite them.
 - Text that would leave an error, such as frontmatter that doesn't parse,
   is refused with the errors, and nothing is written.
 
 Spec: design.md §9 (#28). Covered by:
 `WriteEndpointTests.EditFileReplacesTheWholeFileButNeverItsId`,
+`WriteEndpointTests.EditFileRefusesAnIdAnotherFileHasOrOneThatIsntAnId`,
+`WriteEndpointTests.EditFileSaysInTheWritersWordsThatLinksToTheOldNameWerentRewritten`,
 `WriteEndpointTests.AnEditThatWouldLeaveAnErrorIsRefusedWithTheErrors`,
 `Editing.test.tsx` (web).
 
@@ -3303,7 +3318,10 @@ saved Mina's note. I press Save.
   - **Copy mine and reload** copies my text to the clipboard and opens the
     editor again on the file as it is now, with my text shown below it.
 - A section is sent by its place and its name together, checked with the
-  hash, so an edit never lands in another section of the same name.
+  hash, so an edit never lands in another section of the same name. Keep
+  mine finds the section in the new file by the place it had and its
+  name, so it stays in the same section even when the new file has two
+  of that name.
 
 Spec: design.md §8 "Stale files", §9 (#28). Covered by:
 `WriteEndpointTests.AStaleEditIsRefusedWithTheFileAsItIsNow`,
@@ -3312,9 +3330,11 @@ Spec: design.md §8 "Stale files", §9 (#28). Covered by:
 
 ### SC-WEB-44. Editing is guarded
 
-- With unsaved changes, following a link in the app asks in the page
-  whether to leave ("Keep editing" or "Leave without saving"), and closing
-  or reloading the tab makes the browser ask.
+- With unsaved changes, following a link in the app, the browser's Back,
+  or moving the story position asks in the page whether to leave ("Keep
+  editing" or "Leave without saving"), and closing or reloading the tab
+  makes the browser ask. Leaving closes the editor; a new position shows
+  the note as of there.
 - On a note in a final book, every Edit control is off, and the page says
   why ("... is in book 'dracula', which is final (frozen) ..."). The API
   refuses such an edit anyway (`frozen`).
@@ -3330,12 +3350,18 @@ A note with CRLF line breaks, a byte order mark, extra blank lines, and
 no final newline.
 
 - Saving the opening, a section, or the whole file without changing it
-  writes nothing: the bytes are the same.
+  writes nothing: the bytes are the same. The same holds in a file that
+  mixes CRLF and LF line breaks: text that differs only in its line
+  breaks is unchanged, so nothing is written.
+- In the page, Save is off until the text changes, and Ctrl+Enter on
+  unchanged text closes the editor without sending anything.
 - Changing one section changes only that section's text (and adds a
   missing id); every other byte, line breaks included, stays as it was.
 
 Spec: format.md §12, F-RT-1, F-RT-2. Covered by:
-`WriteEndpointTests.EditingAndSavingTheSameTextKeepsEveryByte`.
+`WriteEndpointTests.EditingAndSavingTheSameTextKeepsEveryByte`,
+`WriteEndpointTests.SavingUnchangedTextInAFileThatMixesLineBreaksWritesNothing`,
+`Editing.test.tsx` (web).
 
 ### SC-WEB-46. Only Wolfden's own page can edit the den
 
