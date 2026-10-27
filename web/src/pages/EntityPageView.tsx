@@ -28,6 +28,8 @@ import {
   useEditing,
   type EditTarget,
 } from '../components/Editing'
+import { AddField, FieldEditor, FieldTools } from '../components/FieldEditing'
+import { sourceQuery, type EntitySource } from '../editApi'
 import { ErrorState, Loading, StatusBadge } from '../components/States'
 import { useDocumentTitle, useEntitiesInView, usePosition } from '../hooks'
 import { chapterWords, describePosition, entryOf, ordinalOf } from '../story'
@@ -196,7 +198,10 @@ function FullEntity({
 
 function EntityArticle({ universe, entity, positions }: { universe: string; entity: EntityPage; positions: PositionView[] }) {
   const lead = stripTitle(entity.lead, entity.name)
-  const target = useEditing()?.target ?? null
+  const editing = useEditing()
+  const target = editing?.target ?? null
+  // The fields' editors need the file's values as written and the type's fields, which only the source has.
+  const source = useQuery({ ...sourceQuery(universe, editing?.entityKey ?? entity.key), enabled: editing !== null })
   // A link to a section (#section-...) arrives before the page has loaded,
   // so the router can't scroll to it; scroll once the section is here.
   // Back and Forward keep the scroll position the router restores.
@@ -242,7 +247,9 @@ function EntityArticle({ universe, entity, positions }: { universe: string; enti
               </p>
             </div>
           )}
-          {entity.fields.length > 0 && <Fields universe={universe} fields={entity.fields} positions={positions} />}
+          {(entity.fields.length > 0 || editing !== null) && (
+            <Fields universe={universe} fields={entity.fields} positions={positions} target={target} source={editing ? source.data : undefined} />
+          )}
           {entity.sections.map((s, i) => (
             <Section
               key={s.line}
@@ -361,7 +368,20 @@ function Span({ from, until, positions }: { from: string | null; until: string |
   return <span className="badge span">{text}</span>
 }
 
-function Fields({ universe, fields, positions }: { universe: string; fields: PageField[]; positions: PositionView[] }) {
+function Fields({
+  universe,
+  fields,
+  positions,
+  target,
+  source,
+}: {
+  universe: string
+  fields: PageField[]
+  positions: PositionView[]
+  target: EditTarget | null
+  /** The note's source, when it can be edited: which fields have their own editor, and which the type has. */
+  source: EntitySource | undefined
+}) {
   // A field's entries are listed one after another; show them under one name.
   const groups: PageField[][] = []
   for (const f of fields) {
@@ -373,23 +393,67 @@ function Fields({ universe, fields, positions }: { universe: string; fields: Pag
     }
   }
 
+  const editingField = target?.kind === 'field' ? target.name : null
+  const unset = source?.fieldTypes.some((t) => source.fields.find((f) => f.name === t.name)?.value == null) ?? false
   return (
-    <dl className="fields">
-      {groups.map((entries) => (
-        <div key={`${entries[0].name}:${entries[0].line}`} className="field">
-          <dt>{entries[0].name}</dt>
-          {entries.map((f) => (
-            <dd key={f.line} className={f.live === false ? 'not-live' : undefined} title={f.live === false ? 'No view of the story shows this entry.' : undefined}>
-              <FieldValue value={f.value} links={f.links} universe={universe} />{' '}
-              {f.kind === 'default' && <span className="badge">type default</span>}
-              <Span from={f.from} until={f.until} positions={positions} />
-              {f.pinned && <span className="badge">pinned</span>}
-              <StatusBadge status={f.status} />
-            </dd>
+    <>
+      {groups.length > 0 && (
+        <dl className="fields">
+          {groups.map((entries) => (
+            <div key={`${entries[0].name}:${entries[0].line}`} className="field">
+              <dt>{entries[0].name}</dt>
+              {editingField === entries[0].name ? (
+                <dd className="field-editing">
+                  <FieldEditor name={editingField} positions={positions} />
+                </dd>
+              ) : (
+                <>
+                  <FieldEntries universe={universe} entries={entries} positions={positions} />
+                  {source && (
+                    <dd className="field-tools">
+                      <FieldTools name={entries[0].name} source={source} />
+                    </dd>
+                  )}
+                </>
+              )}
+            </div>
           ))}
+        </dl>
+      )}
+      {editingField !== null && !groups.some((g) => g[0].name === editingField) && (
+        <div className="field-new">
+          <FieldEditor name={editingField} positions={positions} />
         </div>
+      )}
+      {target?.kind === 'add-field' ? (
+        <AddField source={source} />
+      ) : (
+        source &&
+        unset && (
+          <p className="piece-tools">
+            <EditButton target={{ kind: 'add-field' }} label="Add a field">
+              Add field
+            </EditButton>
+          </p>
+        )
+      )}
+    </>
+  )
+}
+
+function FieldEntries({ universe, entries, positions }: { universe: string; entries: PageField[]; positions: PositionView[] }) {
+  return (
+    <>
+      {entries.map((f) => (
+        <dd key={f.line} className={f.live === false ? 'not-live' : undefined} title={f.live === false ? 'No view of the story shows this entry.' : undefined}>
+          <FieldValue value={f.value} links={f.links} universe={universe} />{' '}
+          {f.kind === 'default' && <span className="badge">type default</span>}
+          <Span from={f.from} until={f.until} positions={positions} />
+          {f.pinned && <span className="badge">pinned</span>}
+          <StatusBadge status={f.status} />
+        </dd>
       ))}
-    </dl>
+    </>
   )
 }
 

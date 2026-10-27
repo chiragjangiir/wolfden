@@ -52,6 +52,8 @@ function source(hash = 'h1', overview = 'Old text.'): EntitySource {
       { index: 2, name: 'Late arc', level: 3, line: 16, comment: null, body: 'Much later.', pinned: false, parent: 1 },
     ],
     standardSections: ['Overview', 'Appearance', 'Arc'],
+    fields: [],
+    fieldTypes: [],
   }
 }
 

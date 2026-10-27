@@ -1,8 +1,9 @@
 import { queryOptions } from '@tanstack/react-query'
 import { ApiRequestError, apiPath, getJson, type EntitySummary } from './api'
+import type { Json } from './fieldModel'
 
 // The editing API (#28; src/Wolfden.Api/WriteEndpoints.cs): an entity's
-// source, and edits of its lead, sections, and whole file. Every edit carries
+// source, and edits of its lead, sections, fields, and whole file. Every edit carries
 // the hash of the file it was based on; if the file changed since, the API
 // refuses it with `stale_file` and sends the file as it is now.
 
@@ -41,6 +42,32 @@ export interface EntitySource {
   lead: SourceLead
   sections: SourceSection[]
   standardSections: string[]
+  /** Each field the file sets, in file order, with its value as written. */
+  fields: SourceField[]
+  /** The fields the type defines, in field order, then the universal `placeholder`. */
+  fieldTypes: SourceFieldType[]
+}
+
+/** A field the file sets: its value as written, a plain bool or number as one and every other scalar as text. */
+export interface SourceField {
+  name: string
+  line: number
+  value: Json
+}
+
+/** A field the entity's type defines (types.md §5). */
+export interface SourceFieldType {
+  name: string
+  type: 'string' | 'text' | 'number' | 'bool' | 'date' | 'enum' | 'ref' | 'position'
+  list: boolean
+  temporal: boolean
+  required: boolean
+  /** An enum's values. */
+  values: string[]
+  /** The types a ref links to, or null for any. */
+  to: string[] | null
+  description: string | null
+  default: Json | null
 }
 
 export interface DiagnosticView {
@@ -85,7 +112,7 @@ export function sourceQuery(universe: string, entity: string) {
 }
 
 /** The edits, by their path under /api/edit. */
-export type EditPath = 'lead' | 'section' | 'section/add' | 'section/rename' | 'section/remove' | 'file'
+export type EditPath = 'lead' | 'section' | 'section/add' | 'section/rename' | 'section/remove' | 'file' | 'field'
 
 /** Sends an edit as JSON (the API takes nothing else), and returns its result, or throws an EditError. */
 export async function postEdit(path: EditPath, body: Record<string, unknown>): Promise<WriteResult> {
