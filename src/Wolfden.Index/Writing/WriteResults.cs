@@ -164,9 +164,36 @@ public sealed record CheckpointResult(
 /// <param name="Lead">The lead.</param>
 /// <param name="Sections">Every section, in file order, subsections included.</param>
 /// <param name="StandardSections">The standard sections of the entity's type, in the type's order, or none for an untyped entity.</param>
+/// <param name="Fields">Each field under the file's <c>fields:</c>, in file order, with its value as written.</param>
+/// <param name="FieldTypes">The fields the entity's type defines, in field order (types.md F-FT-3), then the universal
+/// <c>placeholder</c> (F-FT-17), which every entity has, typed or not. <c>row</c> (F-FT-16) isn't here: it's edited in the file.</param>
 public sealed record EntitySourceResult(
     int Version, EntitySummary Entity, string Hash, string Text, string LineEndings, bool ByteOrderMark, string? Frozen, SourceLead Lead,
-    IReadOnlyList<SourceSection> Sections, IReadOnlyList<string> StandardSections);
+    IReadOnlyList<SourceSection> Sections, IReadOnlyList<string> StandardSections, IReadOnlyList<SourceField> Fields, IReadOnlyList<SourceFieldType> FieldTypes);
+
+/// <summary>One field the entity's file sets (format.md §7.2), as a field editor needs it.</summary>
+/// <param name="Name">The field's name.</param>
+/// <param name="Line">The line its key is on.</param>
+/// <param name="Value">
+/// Its value as written, whatever its shape (a plain value, an entry, or a temporal list, format.md §7.3), as JSON:
+/// a plain <c>true</c> or <c>false</c> as a boolean, a plain number as a number, a null as null, lists and mappings
+/// as arrays and objects, and every other scalar, quoted or not, as a string of its text.
+/// </param>
+public sealed record SourceField(string Name, int Line, JsonElement Value);
+
+/// <summary>A field an entity's type defines (types.md §5), as a field editor needs it.</summary>
+/// <param name="Name">The field's name.</param>
+/// <param name="Type">Its field type: <c>string</c>, <c>text</c>, <c>number</c>, <c>bool</c>, <c>date</c>, <c>enum</c>, <c>ref</c>, or <c>position</c>.</param>
+/// <param name="List">True for a list field (F-FT-12).</param>
+/// <param name="Temporal">True if its value can change over the story (F-FT-13).</param>
+/// <param name="Required">True if it should have a value (F-FT-14).</param>
+/// <param name="Values">For an enum, its values, in order; otherwise empty.</param>
+/// <param name="To">For a ref, the types it links to, or null for any type.</param>
+/// <param name="Description">Its description, or null.</param>
+/// <param name="Default">The value views show when it has none (F-FT-15), as JSON, or null.</param>
+public sealed record SourceFieldType(
+    string Name, string Type, bool List, bool Temporal, bool Required, IReadOnlyList<string> Values, IReadOnlyList<string>? To, string? Description,
+    JsonElement? Default);
 
 /// <summary>The lead of an entity's file (format.md F-SEC-2): the text before its first section, title heading included.</summary>
 /// <param name="Line">The line it starts at.</param>

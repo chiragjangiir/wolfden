@@ -17,6 +17,7 @@ public sealed partial class YamlScalarValue : YamlValue
     {
         String,
         Integer,
+        Float,
         Boolean,
         Null,
     }
@@ -47,6 +48,20 @@ public sealed partial class YamlScalarValue : YamlValue
 
     /// <summary>An integer, written plain (<c>format: 1</c>).</summary>
     public static YamlScalarValue Integer(long value) => new(Kind.Integer, value.ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// A number that isn't whole, such as <c>2.5</c> or <c>1e3</c>, written
+    /// plain as given. <paramref name="text"/> must be a float under YAML
+    /// 1.2's core schema (types.md F-FT-6), without <c>.inf</c> or <c>.nan</c>.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="text"/> isn't such a number.</exception>
+    public static YamlScalarValue Float(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return FloatPattern().IsMatch(text)
+            ? new(Kind.Float, text)
+            : throw new ArgumentException($"'{text}' isn't a number YAML reads as one, such as 2.5 or 1e3.", nameof(text));
+    }
 
     /// <summary>A boolean, written <c>true</c> or <c>false</c>.</summary>
     public static YamlScalarValue Boolean(bool value) => new(Kind.Boolean, value ? "true" : "false");
@@ -125,7 +140,7 @@ public sealed partial class YamlScalarValue : YamlValue
         {
             Kind.Null => scalar.IsNull,
             Kind.Boolean => scalar.AsBoolean() == (_text == "true"),
-            Kind.Integer => scalar.Style == YamlScalarStyle.Plain && scalar.Text == _text,
+            Kind.Integer or Kind.Float => scalar.Style == YamlScalarStyle.Plain && scalar.Text == _text,
             _ => !scalar.IsNull && scalar.Text == _text,
         };
     }
@@ -234,4 +249,8 @@ public sealed partial class YamlScalarValue : YamlValue
 
     [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_-]*$", RegexOptions.CultureInvariant)]
     private static partial Regex SafeKey();
+
+    /// <summary>A float under YAML 1.2's core schema, as types.md F-FT-6 reads one, without <c>.inf</c> and <c>.nan</c>.</summary>
+    [GeneratedRegex(@"^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?\z", RegexOptions.CultureInvariant)]
+    private static partial Regex FloatPattern();
 }

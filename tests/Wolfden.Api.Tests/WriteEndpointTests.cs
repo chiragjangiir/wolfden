@@ -492,8 +492,18 @@ public class WriteEndpointTests
 
         var (status, json) = await PostAsync(server, "/api/edit/section/add", new { entity = NotePath, expectedHash = Hash(source), name = "## Later", text = "" });
         Assert.Equal(HttpStatusCode.BadRequest, status);
-        Assert.Contains("'Later'", json.GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.Contains("such as 'Later'", json.GetProperty("message").GetString(), StringComparison.Ordinal);
+        (status, json) = await PostAsync(server, "/api/edit/section/add", new { entity = NotePath, expectedHash = Hash(source), name = "###", text = "" });
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        Assert.DoesNotContain("such as", json.GetProperty("message").GetString(), StringComparison.Ordinal);
         Assert.Equal(Note, den.Read(NotePath));
+
+        // A name that only starts with '#' is a name like any other.
+        (status, json) = await PostAsync(server, "/api/edit/section/add", new { entity = NotePath, expectedHash = Hash(source), name = "#1 Fan", text = "Quincey." });
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.EndsWith("Child text.\n\n## #1 Fan\nQuincey.\n", den.Read(NotePath), StringComparison.Ordinal);
+        source = await SourceAsync(server, NotePath);
+        Assert.Contains(source.GetProperty("sections").EnumerateArray(), s => s.GetProperty("name").GetString() == "#1 Fan");
 
         (status, json) = await PostAsync(server, "/api/edit/section/rename", new
         {

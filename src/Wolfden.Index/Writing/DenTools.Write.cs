@@ -1560,7 +1560,7 @@ public sealed partial class DenTools
         return fields.EnumerateObject().Select(p => new KeyValuePair<string, YamlValue>(p.Name, ToYaml(p.Value))).ToList();
     }
 
-    /// <summary>A JSON value as YAML to write: text as strings, whole numbers, true and false, null, lists, and mappings.</summary>
+    /// <summary>A JSON value as YAML to write: text as strings, numbers (whole or not) written plain, true and false, null, lists, and mappings.</summary>
     private static YamlValue ToYaml(JsonElement value)
     {
         try
@@ -1572,7 +1572,7 @@ public sealed partial class DenTools
                 case JsonValueKind.Number when value.TryGetInt64(out var n):
                     return YamlScalarValue.Integer(n);
                 case JsonValueKind.Number:
-                    throw new DenToolException(ToolErrorCodes.BadArgument, $"{value.GetRawText()} isn't a whole number; write it as text, \"{value.GetRawText()}\".");
+                    return YamlScalarValue.Float(value.GetRawText());
                 case JsonValueKind.True or JsonValueKind.False:
                     return YamlScalarValue.Boolean(value.GetBoolean());
                 case JsonValueKind.Null:

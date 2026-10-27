@@ -210,6 +210,24 @@ public sealed class WriteToolTests : IDisposable
 
     [Fact]
     [Trait("Scenario", "SC-MCP-19")]
+    public void RenamingASectionToANameTheNoteHasSaysWhichOneALinkReaches()
+    {
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        // No link names Voice or Arc, so the rename is made, and the effect says a link to 'Arc' reaches the first one (F-LINK-9).
+        var result = Tools.RenameSection("Mr. Swales", "Voice", "Arc", hash);
+
+        Assert.Contains("\n## Arc\nThick Yorkshire dialect", _den.Read(Swales), StringComparison.Ordinal);
+        Assert.Contains(result.Effects, e => e.Contains("already has a section 'Arc'", StringComparison.Ordinal) && e.Contains("F-LINK-9", StringComparison.Ordinal));
+
+        // Renamed back, then the later one renamed to the earlier name: a link reaches the earlier one.
+        var back = Tools.RenameSection("Mr. Swales", "Arc", "Voice", result.Hash, sectionLine: 20);
+        var earlier = Tools.RenameSection("Mr. Swales", "Arc", "Overview", back.Hash);
+        Assert.Contains(earlier.Effects, e => e.Contains("An earlier section, 'Overview'", StringComparison.Ordinal) && e.Contains("F-LINK-9", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-19")]
     public void ALinkInAFrozenBookStopsTheRename()
     {
         _den.Write("universes/dracula/books/aftermath/book.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY8Z2\nname: Aftermath\nstatus: final\n---\n");
