@@ -201,7 +201,9 @@ public sealed class DenReader
     /// Full-text search over names, aliases, leads, section text, and field
     /// values, every status included. Words match whole, in any order,
     /// ignoring case and accents; a word ending in <c>*</c> matches as a
-    /// prefix. A field value's words are its own, as written, and for a link
+    /// prefix. Words in double quotes (<c>"silver key"</c>) are a phrase,
+    /// matched side by side and in order, in text and field values alike
+    /// (#185; see <see cref="DenIndex.Search"/>). A field value's words are its own, as written, and for a link
     /// the linked note's name and aliases too (maintainer decision on #179).
     /// With <paramref name="field"/>, only that field's values are searched.
     /// </summary>

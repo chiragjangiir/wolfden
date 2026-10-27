@@ -2213,15 +2213,21 @@ field that links Kessan Reach by its id.
 - A field no note gives a value for is `bad_argument`. The tool's JSON
   gains `field` on a field hit; snippets keep their brackets, and the
   web API's match ranges aren't in it.
+- A quoted query is a phrase (#185): `habits: [chess, "night watches"]`
+  matches `"night watches"` as one match, `chess, [night watches]`, but
+  not `"watches night"`, and the berth matches `"kessan reach"` by the
+  linked note's name, not `"reach kessan"`.
 
 Spec: design.md §8, §9 (#179; the semantics are the maintainer's
 decision of 2026-10-26). Covered by:
 `FieldSearchToolTests.OrdinarySearchFindsWordsInFieldValuesAndSaysWhichField`,
 `FieldSearchToolTests.OneFieldSearchMatchesTheValuesWordsIgnoringCase`,
 `FieldSearchToolTests.ALinkMatchesItsNotesNameAndAliasesAndTheTextAsWritten`,
+`FieldSearchToolTests.AQuotedQueryMatchesAFieldValueOrALinkedNameAsAPhrase`,
 `FieldSearchToolTests.AFieldNoNoteHasIsABadArgument`,
 `FieldSearchToolTests.TheToolsJsonNamesTheFieldAndKeepsBracketedSnippets`,
-`SearchTests.SearchWordsMatchFieldTextAsTheSearchTableDoes`.
+`SearchTests.SearchWordsMatchFieldTextAsTheSearchTableDoes`,
+`SearchTests.PhrasesMatchFieldTextAsTheSearchTableDoes`.
 
 ## STORE: Wolfden saves, moves, and deletes notes
 
@@ -3044,10 +3050,15 @@ The writer's notes give characters an `occupation:`, and Lucy a
   other brackets in a note are never taken for one. The index keeps
   control characters out of the search table, so the marks it puts in
   snippets can't be the note's own text.
+- A quoted query is a phrase in text and in field values alike (#185):
+  `"mara voss"` marks "Mara Voss" as one match range, `"voss mara"`
+  finds nothing though `voss mara` does, and `"saltmarsh docks"` in
+  `home` is one range, `"docks saltmarsh"` none.
 
 Spec: design.md §9 (#179; the semantics are the maintainer's decision
-of 2026-10-26). Covered by:
+of 2026-10-26; phrases are #185). Covered by:
 `FieldSearchEndpointTests.AFieldSearchGivesWhatTheToolGivesWithTextAndMatchRanges`,
+`FieldSearchEndpointTests.AQuotedQueryIsAPhraseWhoseMatchIsOneRange`,
 `FieldSearchEndpointTests.MatchRangesTellTheSearchsMarksFromTheNotesOwnBrackets`,
 `SearchTests.MatchesAreRangesInTheTextSoTheNotesOwnBracketsAndControlCharactersCantPassForThem`,
 `Search.test.tsx` (web).

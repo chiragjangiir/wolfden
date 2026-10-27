@@ -120,7 +120,9 @@ public sealed record MarkedText(string Text, IReadOnlyList<TextMatch> Matches)
 /// text that isn't in it, such as field values: the text is split into words
 /// of letters and digits, compared ignoring case and accents. Each query word
 /// matches whole, or as a prefix if it ends in <c>*</c>, and a query word
-/// that holds several (<c>mara-voss</c>) matches them side by side, as a phrase.
+/// that holds several (<c>mara-voss</c>) matches them side by side, as a
+/// phrase, as do the words of a quoted phrase (<c>"silver key"</c>; see
+/// <see cref="SearchQuery"/>).
 /// </summary>
 public sealed class SearchWords
 {
@@ -134,31 +136,23 @@ public sealed class SearchWords
     /// <summary>True if the query has no words to search for.</summary>
     public bool IsEmpty => _terms.Count == 0;
 
-    /// <summary>How many query words (terms) there are.</summary>
+    /// <summary>How many query terms (words and phrases) there are.</summary>
     public int Count => _terms.Count;
 
     /// <summary>The words of <paramref name="query"/>, read as <see cref="DenIndex.Search"/> reads them.</summary>
     public static SearchWords Parse(string query)
     {
         ArgumentNullException.ThrowIfNull(query);
-        var terms = new List<(string[] Words, bool Prefix)>();
-        var clean = new string(query.Select(c => char.IsControl(c) ? ' ' : c).ToArray());
-        foreach (var part in clean.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
-        {
-            var prefix = part.EndsWith('*');
-            var words = Tokens(part.TrimEnd('*')).Select(t => t.Folded).ToArray();
-            if (words.Length > 0)
-            {
-                terms.Add((words, prefix));
-            }
-        }
-
+        var terms = SearchQuery.Parse(query)
+            .Select(t => (Words: Tokens(t.Text).Select(w => w.Folded).ToArray(), t.Prefix))
+            .Where(t => t.Words.Length > 0)
+            .ToList();
         return new SearchWords(terms);
     }
 
     /// <summary>
-    /// Where each query word occurs in <paramref name="text"/>: for each
-    /// term, in query order, the ranges of its occurrences (empty if none).
+    /// Where each query term occurs in <paramref name="text"/>: for each
+    /// word or phrase, in query order, the ranges of its occurrences (empty if none).
     /// </summary>
     public IReadOnlyList<IReadOnlyList<TextMatch>> Find(string text)
     {
@@ -199,7 +193,7 @@ public sealed class SearchWords
     /// other combining mark, such as U+0305 overline, a Devanagari vowel
     /// sign, or a Hebrew point, ends a word.
     /// </summary>
-    private static List<(int Start, int Length, string Folded)> Tokens(string text)
+    internal static List<(int Start, int Length, string Folded)> Tokens(string text)
     {
         var tokens = new List<(int Start, int Length, string Folded)>();
         var start = -1;

@@ -94,6 +94,28 @@ public sealed class FieldSearchToolTests : IDisposable
 
     [Fact]
     [Trait("Scenario", "SC-MCP-30")]
+    public void AQuotedQueryMatchesAFieldValueOrALinkedNameAsAPhrase()
+    {
+        // A list item: the phrase is one match, and the words the other way round aren't the phrase (#185).
+        Assert.Equal("chess, [night watches]", Assert.Single(Tools.Search("\"night watches\"", "starfall").Hits).Snippet);
+        Assert.Empty(Tools.Search("\"watches night\"", "starfall").Hits);
+        Assert.Equal("chess, [night] [watches]", Assert.Single(Tools.Search("watches night", "starfall").Hits).Snippet);
+
+        // A phrase and a word together, and a phrase as a prefix.
+        Assert.Single(Tools.Search("\"night watches\" chess", "starfall", field: "habits").Hits);
+        Assert.Single(Tools.Search("\"night wat\"*", "starfall", field: "habits").Hits);
+        Assert.Empty(Tools.Search("\"watches chess\"", "starfall", field: "habits").Hits);
+
+        // Punctuation between a phrase's words doesn't matter, as in text: list items are joined with commas.
+        Assert.Equal("[chess, night] watches", Assert.Single(Tools.Search("\"chess night\"", "starfall", field: "habits").Hits).Snippet);
+
+        // A linked note's name: the berth, written by id, matches Kessan Reach as a phrase.
+        Assert.Equal($"[[{ReachId}]] → [Kessan Reach]", Assert.Single(Tools.Search("\"kessan reach\"", "starfall", field: "berth").Hits).Snippet);
+        Assert.Empty(Tools.Search("\"reach kessan\"", "starfall", field: "berth").Hits);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-30")]
     public void AFieldNoNoteHasIsABadArgument()
     {
         var e = Assert.Throws<DenToolException>(() => Tools.Search("saltmarsh", "starfall", field: "hoem"));

@@ -243,10 +243,7 @@ public sealed class SearchTests : IClassFixture<SearchTests.Built>
         command.ExecuteNonQuery();
         command.CommandText = "SELECT count(*) FROM t WHERE t MATCH $query";
         command.Parameters.Clear();
-        command.Parameters.AddWithValue(
-            "$query",
-            string.Join(' ', query.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                .Select(w => $"\"{w.TrimEnd('*').Replace("\"", "\"\"", StringComparison.Ordinal)}\"{(w.EndsWith('*') ? "*" : "")}")));
+        command.Parameters.AddWithValue("$query", SearchQuery.ToFts5(query));
         return (long)command.ExecuteScalar()! > 0;
     }
 
@@ -255,6 +252,101 @@ public sealed class SearchTests : IClassFixture<SearchTests.Built>
     {
         Assert.Single(_index.Search("tidew*"));
         Assert.Empty(_index.Search("tidew"));
+    }
+
+    [Theory]
+    [InlineData("\"silver key\"", new[] { "Old Lantern" })]
+    [InlineData("silver key", new[] { "Old Lantern", "Rusted Chain" })]
+    [InlineData("\"key silver\"", new string[0])]
+    [InlineData("\"SÍLVER KEY\"", new[] { "Old Lantern" })]
+    [InlineData("\"silver key\" iron", new[] { "Old Lantern" })]
+    [InlineData("iron \"silver key\"", new[] { "Old Lantern" })]
+    [InlineData("\"silver key\" chain", new string[0])]
+    [InlineData("\"silver key\"\"iron gate\"", new[] { "Old Lantern" })]
+    [InlineData("\"silver ke\"", new string[0])]
+    [InlineData("\"silver ke*\"", new[] { "Old Lantern" })]
+    [InlineData("\"silver ke\"*", new[] { "Old Lantern" })]
+    [InlineData("\"silver ke* \"", new[] { "Old Lantern" })]
+    [InlineData("\"silver ke * \"", new string[0])]
+    [InlineData("\"silver ke \"*", new string[0])]
+    [InlineData("\"silver ke-*\"", new string[0])]
+    [InlineData("\"silver *\"", new[] { "Old Lantern", "Rusted Chain" })]
+    [InlineData("\"silver key\" *", new[] { "Old Lantern" })]
+    [InlineData("\"silver* key\"", new[] { "Old Lantern" })]
+    [InlineData("\"rusted key", new[] { "Rusted Chain" })]
+    [InlineData("\"rusted key\"", new string[0])]
+    [InlineData("\"\" chain", new[] { "Rusted Chain" })]
+    [InlineData("chain \"", new[] { "Rusted Chain" })]
+    [InlineData("\"key, rusted\"", new[] { "Rusted Chain" })]
+    [InlineData("“silver key”", new[] { "Old Lantern" })]
+    [InlineData("„silver key“", new[] { "Old Lantern" })]
+    [InlineData("„silver key”", new[] { "Old Lantern" })]
+    [InlineData("＂silver key＂", new[] { "Old Lantern" })]
+    [InlineData("\"silver key”", new[] { "Old Lantern" })]
+    [InlineData("“silver key\"", new[] { "Old Lantern" })]
+    [InlineData("“silver ke”*", new[] { "Old Lantern" })]
+    [InlineData("”rusted key”", new[] { "Rusted Chain" })]
+    [InlineData("“rusted key", new[] { "Rusted Chain" })]
+    [InlineData("„key silver”", new string[0])]
+    public void AQuotedQueryIsAPhrase(string query, string[] names)
+    {
+        // "Old Lantern" has "silver-key", side by side; "Rusted Chain" has both words, apart (#185).
+        Assert.Equal(names, _index.Search(query).Select(h => h.EntityName).Distinct().Order(StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("\"\"")]
+    [InlineData("\" \"")]
+    [InlineData("\"*\"")]
+    [InlineData("\"-\"")]
+    [InlineData("\"\"\"")]
+    public void EmptyQuotesFindNothing(string query)
+    {
+        Assert.Empty(_index.Search(query));
+    }
+
+    [Fact]
+    public void ASnippetMarksThePhrase()
+    {
+        var hit = Assert.Single(_index.Search("\"silver key\""));
+
+        Assert.Contains("[silver-key]", hit.Snippet, StringComparison.Ordinal);
+        Assert.DoesNotContain("[silver]", hit.Snippet, StringComparison.Ordinal);
+        Assert.DoesNotContain("[key]", hit.Snippet, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("\"silver key\"", "a silver-key", true)]
+    [InlineData("\"silver key\"", "a key of silver", false)]
+    [InlineData("\"silver ke*\"", "Silver Keys", true)]
+    [InlineData("\"silver ke\"*", "Silver Keys", true)]
+    [InlineData("\"silver ke\"", "Silver Keys", false)]
+    [InlineData("\"cafe noir\" x", "Café Noir, x", true)]
+    [InlineData("\"silver key", "key of silver", true)]
+    [InlineData("\"\" silver", "key of silver", true)]
+    [InlineData("\"silver *\"", "silver key", true)]
+    [InlineData("\"silver ke *\"", "Silver Keys", false)]
+    [InlineData("\"silver ke \"*", "Silver Keys", false)]
+    [InlineData("„silver ke*“", "Silver Keys", true)]
+    [InlineData("“silver key”", "a key of silver", false)]
+    [InlineData("＂silver key\"", "the silver key", true)]
+    public void PhrasesMatchFieldTextAsTheSearchTableDoes(string query, string text, bool matches)
+    {
+        var words = SearchWords.Parse(query);
+
+        Assert.Equal(matches, words.Find(text).All(found => found.Count > 0));
+        Assert.Equal(matches, Fts5Matches(query, text));
+    }
+
+    [Fact]
+    public void AFieldPhraseMatchIsOneRange()
+    {
+        var words = SearchWords.Parse("\"silver key\" gate");
+        var found = words.Find("the silver key, the gate, a key of silver");
+
+        Assert.Equal(2, words.Count);
+        Assert.Equal([new TextMatch(4, 10)], found[0]);
+        Assert.Equal([new TextMatch(20, 4)], found[1]);
     }
 
     /// <summary>A small invented den, indexed once.</summary>
@@ -293,6 +385,12 @@ public sealed class SearchTests : IClassFixture<SearchTests.Built>
                 // Brackets of its own, and the control characters a snippet marks matches with (#179).
                 ["universes/coast/entities/items/brass-bell.md"] =
                     "---\ntype: item\nname: Brass Bell\n---\n\nRung on the [[the Gull|keeper]]'s \u0001watch\u0002 [twice].\n",
+
+                // Phrase search (#185): the words side by side, and the same words apart.
+                ["universes/coast/entities/items/old-lantern.md"] =
+                    "---\ntype: item\nname: Old Lantern\n---\n\nIts silver-key opens the iron gate. A key of silver hangs by it.\n",
+                ["universes/coast/entities/items/rusted-chain.md"] =
+                    "---\ntype: item\nname: Rusted Chain\n---\n\nA key, rusted, on a silver chain.\n",
             });
             Index = DenIndex.Open(Den.Root);
         }
