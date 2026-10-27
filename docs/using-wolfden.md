@@ -52,7 +52,9 @@ readers say):
 A space in a file name is written `%20`
 (`![Map](images/castle%20map.png)`), or put the path in angle brackets:
 `![Map](<images/castle map.png>)`. Simplest of all is a name without
-spaces, such as `castle-map.png`.
+spaces, such as `castle-map.png`. Avoid `%` and `#` in image file names:
+`#` ends the path, and a `%` has to be written `%25` (`100%25.png` for
+`100%.png`).
 
 If the picture can't be found, the page shows "Image not found" with the
 text from the brackets, so you can see which path to fix. Check the
@@ -73,8 +75,9 @@ it. To allow them, add `remote_images: true` to `den.yaml`
 You can keep using [Obsidian](https://obsidian.md) to write in your den.
 
 1. **Open the den's top folder as the vault,** the one with `den.yaml`
-   in it. Then Obsidian and Wolfden agree on where everything is, and a
-   `/` path means the same thing in both.
+   in it. Then Obsidian and Wolfden agree on where everything is. Use
+   paths relative to the note (the next setting does this for you),
+   rather than ones starting with `/`.
 2. In **Settings → Files and links**:
    - Set **New link format** to **Relative path to note**. Obsidian then
      writes image paths from the note's folder, as Wolfden reads them.
@@ -82,6 +85,11 @@ You can keep using [Obsidian](https://obsidian.md) to write in your den.
      current file**, or to **In subfolder under current folder** (and name
      the subfolder, such as `images`). A picture you paste or drag in then
      lands next to its note.
+
+When a path doesn't lead to the file, Obsidian looks for an image with
+that file name anywhere in the vault, so an image can show in Obsidian
+and still be "not found" in Wolfden. Make sure the path points at the file
+itself.
 
 One thing to watch: Wolfden's links between notes use double brackets,
 `[[Mina Harker]]`, as Obsidian's do, but an Obsidian image embed,

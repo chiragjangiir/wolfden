@@ -3182,6 +3182,12 @@ Spec: format.md F-LAY-9, design.md §9 (#186). Covered by:
   a wildcard, a folder link (to inside the den or out of it), a file link
   to a file outside the den or to one that isn't an image, and a request
   a browser marks as cross-site.
+- Pinned with `serve --universe starfall`, `serve` answers 404 for an
+  image under `universes/drift/`, and still serves those under
+  `universes/starfall/` and outside `universes/` (`images/crest.png`).
+- A path the page can't turn into a file name (an encoded `/`, as in
+  `images/a%2Fb.png`) gets the placeholder too, with a tooltip that says
+  the path is the problem rather than the den's folder.
 
 Spec: format.md F-LAY-9, design.md §9 (#186). Covered by:
 `DenFileTests.AnythingButAnImageInTheDenIsA404`,
@@ -3189,4 +3195,7 @@ Spec: format.md F-LAY-9, design.md §9 (#186). Covered by:
 `DenFileTests.PathsThatLeaveTheDenOrArentWrittenAsDenPathsAreRefused`,
 `DenFileTests.AFolderLinkIsntFollowedEvenToImagesInTheDen`,
 `DenFileTests.AFileLinkIsServedOnlyIfItLeadsToAnImageInTheDen`,
-`DenFileTests.ARequestFromAnotherSiteIsA404`, `Images.test.tsx` (web).
+`DenFileTests.ARequestFromAnotherSiteIsA404`,
+`DenFileTests.APinnedServerServesOnlyItsUniverseAndTheDenLevelImages`,
+`DenFileTests.APinnedServerDoesntFollowAFileLinkIntoAnotherUniverse`,
+`Images.test.tsx` (web).

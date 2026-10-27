@@ -195,7 +195,63 @@ public class DenFileTests
         using var reader = new StreamReader(stream);
         var status = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
 
-        Assert.True(status?.StartsWith("HTTP/1.1 404", StringComparison.Ordinal) == true || status?.StartsWith("HTTP/1.1 400", StringComparison.Ordinal) == true, $"{path}: {status}");
+        Assert.Equal("HTTP/1.1 404 Not Found", status);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-39")]
+    public async Task APinnedServerServesOnlyItsUniverseAndTheDenLevelImages()
+    {
+        using var den = TempDen.Starfall();
+        WriteBytes(den, "universes/starfall/images/ship.png", Png);
+        WriteBytes(den, "universes/drift/images/station.png", Png);
+        WriteBytes(den, "images/crest.png", Png);
+        WriteBytes(den, "universes/banner.png", Png);
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root) { PinnedUniverse = "starfall" });
+        var token = TestContext.Current.CancellationToken;
+
+        foreach (var path in new[] { "universes/starfall/images/ship.png", "images/crest.png", "universes/banner.png" })
+        {
+            using var served = await server.Client.GetAsync("/den-files/" + path, token);
+            Assert.True(served.StatusCode == HttpStatusCode.OK, $"{path}: {served.StatusCode}");
+        }
+
+        await AssertNotFoundAsync(server, "/den-files/universes/drift/images/station.png");
+        if (OperatingSystem.IsWindows())
+        {
+            // Another case names the same folder on Windows; it's still another universe's.
+            await AssertNotFoundAsync(server, "/den-files/Universes/DRIFT/images/station.png");
+        }
+
+        Assert.Null(DenFiles.Find(den.Root, "universes/drift/images/station.png", "starfall"));
+        Assert.NotNull(DenFiles.Find(den.Root, "universes/drift/images/station.png", "drift"));
+    }
+
+    [Fact]
+    public async Task AnUnpinnedServerServesEveryUniversesImages()
+    {
+        using var den = TempDen.Starfall();
+        WriteBytes(den, "universes/starfall/images/ship.png", Png);
+        WriteBytes(den, "universes/drift/images/station.png", Png);
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root));
+        var token = TestContext.Current.CancellationToken;
+
+        foreach (var path in new[] { "universes/starfall/images/ship.png", "universes/drift/images/station.png" })
+        {
+            using var served = await server.Client.GetAsync("/den-files/" + path, token);
+            Assert.Equal(HttpStatusCode.OK, served.StatusCode);
+        }
+    }
+
+    [Fact]
+    public void APinnedServerDoesntFollowAFileLinkIntoAnotherUniverse()
+    {
+        using var den = TempDen.Starfall();
+        WriteBytes(den, "universes/drift/images/station.png", Png);
+        LinkFile(Path.Combine(den.Root, "universes", "starfall", "station.png"), Path.Combine(den.Root, "universes", "drift", "images", "station.png"));
+
+        Assert.Null(DenFiles.Find(den.Root, "universes/starfall/station.png", "starfall"));
+        Assert.NotNull(DenFiles.Find(den.Root, "universes/starfall/station.png"));
     }
 
     [Fact]

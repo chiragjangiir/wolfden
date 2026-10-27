@@ -1232,8 +1232,8 @@ docs/
     VS Code's preview, and in Obsidian's "Relative path to note" mode;
     from the den root if it starts with `/`; and never above the den
     root. The renderer resolves it against the note's `path` from
-    `/api/entity` (the entity's file), clamps `../` at the root (a path
-    that climbs out doesn't load), and rewrites it to
+    `/api/entity` (the entity's file), refuses a path whose `../` climbs
+    above the root (such an image never loads), and rewrites it to
     `/den-files/<path>`, each name percent-encoded. An address with a
     scheme or a host is left as it is. `serve` answers `GET` and `HEAD`
     on `/den-files/{**path}`, a prefix that can't be a UI route (`/u/...`)
@@ -1247,7 +1247,12 @@ docs/
     Windows), so a short name such as `WOLFDE~1` can't stand in for a
     hidden folder; no folder on the way is a folder link, which the den
     never follows; and a file that's a symbolic link leads to a file
-    that passes the same checks, so it can't reach outside the den.
+    that passes the same checks, so it can't reach outside the den. A
+    server pinned with `serve --universe` serves only that universe, as
+    for the API: a path under another universe's folder
+    (`universes/<other>/`; a universe's key is its folder name, F-KEY-3)
+    is refused, and den-level paths outside `universes/`, such as
+    `/images/`, are still served.
     Anything else, and a request a browser marks as cross-site, is a
     404, never a 403, so a request can't tell a refused file from a
     missing one. A file's response has `X-Content-Type-Options: nosniff`,

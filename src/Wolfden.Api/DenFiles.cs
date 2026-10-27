@@ -27,7 +27,9 @@ namespace Wolfden.Api;
 /// <item>no folder on the way is a folder link (a symbolic link or a
 /// junction), which the den never follows (F-LAY-2); a file that's a
 /// symbolic link is served only if the file it leads to passes these
-/// checks too, so it can't reach outside the den.</item>
+/// checks too, so it can't reach outside the den;</item>
+/// <item>when <c>serve --universe</c> pins the server, it isn't in another
+/// universe's folder (<c>universes/&lt;other&gt;/</c>).</item>
 /// </list>
 /// <para>
 /// A request a browser marks as coming from another site is a 404 as well,
@@ -66,13 +68,16 @@ internal static class DenFiles
     {
         ArgumentNullException.ThrowIfNull(endpoints);
         ArgumentNullException.ThrowIfNull(options);
-        endpoints.MapMethods(Prefix + "/{**path}", [HttpMethods.Get, HttpMethods.Head], (HttpContext context, string? path) => Serve(context, options.DenRoot, path));
+        endpoints.MapMethods(
+            Prefix + "/{**path}",
+            [HttpMethods.Get, HttpMethods.Head],
+            (HttpContext context, string? path) => Serve(context, options.DenRoot, options.PinnedUniverse, path));
         return endpoints;
     }
 
-    private static IResult Serve(HttpContext context, string denRoot, string? path)
+    private static IResult Serve(HttpContext context, string denRoot, string? pinnedUniverse, string? path)
     {
-        if (WolfdenApi.IsCrossSite(context) || Find(denRoot, path) is not { } file)
+        if (WolfdenApi.IsCrossSite(context) || Find(denRoot, path, pinnedUniverse) is not { } file)
         {
             return Results.NotFound();
         }
@@ -93,11 +98,23 @@ internal static class DenFiles
     /// <summary>
     /// The full path of the image at den-relative <paramref name="path"/>
     /// in the den at <paramref name="denRoot"/>, or null if it isn't one to
-    /// serve (see <see cref="DenFiles"/>).
+    /// serve (see <see cref="DenFiles"/>). With <paramref name="pinnedUniverse"/>
+    /// (<c>serve --universe</c>), a file in another universe's folder,
+    /// <c>universes/&lt;other&gt;/...</c>, isn't one: a universe's key is its
+    /// folder name (format.md F-KEY-3), as the API's pinning has it. Files
+    /// outside <c>universes/</c>, such as a den-level <c>images/</c>, are
+    /// still served.
     /// </summary>
-    internal static string? Find(string denRoot, string? path) => Find(denRoot, path, followFileLink: true);
+    /// <remarks>
+    /// The den root is taken as given, not resolved. If it's reached through
+    /// a folder link or junction itself, a file symlink's resolved target
+    /// isn't under the root as given, so every file symlink is refused: it
+    /// fails safe, and ordinary files are still served.
+    /// </remarks>
+    internal static string? Find(string denRoot, string? path, string? pinnedUniverse = null) =>
+        Find(denRoot, path, pinnedUniverse, followFileLink: true);
 
-    private static string? Find(string denRoot, string? path, bool followFileLink)
+    private static string? Find(string denRoot, string? path, string? pinnedUniverse, bool followFileLink)
     {
         if (path is null || DenPaths.Problem(path) is not null)
         {
@@ -116,6 +133,16 @@ internal static class DenFiles
             for (var i = 0; i < names.Length - 1; i++)
             {
                 if (Entry(folder, names[i], file: false) is not DirectoryInfo next || FileSystemDenSource.IsFolderLink(next))
+                {
+                    return null;
+                }
+
+                // Pinned: another universe's folder is out of bounds. The
+                // names on disk are compared, so a different case on
+                // Windows can't reach it either.
+                if (i == 1 && pinnedUniverse is not null
+                    && string.Equals(folder.Name, "universes", NameComparison)
+                    && !string.Equals(next.Name, pinnedUniverse, StringComparison.Ordinal))
                 {
                     return null;
                 }
@@ -146,7 +173,7 @@ internal static class DenFiles
                 return null;
             }
 
-            return Find(denRoot, relative.Replace(Path.DirectorySeparatorChar, '/'), followFileLink: false);
+            return Find(denRoot, relative.Replace(Path.DirectorySeparatorChar, '/'), pinnedUniverse, followFileLink: false);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
@@ -170,8 +197,11 @@ internal static class DenFiles
             IgnoreInaccessible = true,
             RecurseSubdirectories = false,
         };
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         IEnumerable<FileSystemInfo> entries = file ? folder.EnumerateFiles(name, options) : folder.EnumerateDirectories(name, options);
-        return entries.FirstOrDefault(e => string.Equals(e.Name, name, comparison));
+        return entries.FirstOrDefault(e => string.Equals(e.Name, name, NameComparison));
     }
+
+    /// <summary>How names on disk compare: ignoring case on Windows, whose names ignore it.</summary>
+    private static StringComparison NameComparison =>
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 }

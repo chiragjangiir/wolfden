@@ -366,7 +366,10 @@ The web UI (`wolfden serve`) shows images of these types only: `.png`,
 `.jpg`, `.jpeg`, `.gif`, `.webp`, `.avif`, and `.svg`, in any case. It
 never shows a file whose path has a name starting with `.` (F-LAY-2),
 or one reached through a folder link, and it never serves anything
-outside the den. An image that isn't there, or that it won't show, gets a
+outside the den. Pinned to one universe (`wolfden serve --universe`), it
+doesn't show images in another universe's folder (`universes/<other>/`);
+images outside `universes/`, such as a den-level `images/` folder, still
+show. An image that isn't there, or that it won't show, gets a
 placeholder with the alt text. An address with a scheme or a host
 (`https://...`, `//host/...`) isn't a den path: see F-DEN-8. Image files
 are otherwise ignored, wherever they are (F-LAY-7, F-LAY-8), and an image

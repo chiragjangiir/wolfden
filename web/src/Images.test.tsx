@@ -230,6 +230,23 @@ describe('SC-WEB-39: an image the den doesn’t have', () => {
     expect(outside.getAttribute('title')).toContain('above the den’s folder')
     expect(within(main).getByText('Image not found: Also outside')).toBeTruthy()
   })
+
+  it('says a path that can’t name a file is the problem, not the den’s folder', async () => {
+    showNote('![Slash](images/a%2Fb.png)')
+    const main = await pictures()
+
+    expect(main.querySelectorAll('img')).toHaveLength(0)
+    const placeholder = within(main).getByText('Image not found: Slash').closest('.blocked-image') as HTMLElement
+    expect(placeholder.getAttribute('title')).toContain('can’t name a file')
+    expect(placeholder.getAttribute('title')).not.toContain('above the den')
+  })
+
+  it('loads a name with a bare %, which the markdown parser writes as %25', async () => {
+    showNote('![Chart](images/100%.png)')
+    const main = await pictures()
+
+    expect(within(main).getByRole('img', { name: 'Chart' }).getAttribute('src')).toBe('/den-files/universes/dracula/images/100%25.png')
+  })
 })
 
 describe('denImageUrl', () => {
@@ -251,29 +268,29 @@ describe('denImageUrl', () => {
     ['/Café/ünïcode.png', '/den-files/Caf%C3%A9/%C3%BCn%C3%AFcode.png'],
     ['/images/castle.png?v=2#top', '/den-files/images/castle.png'],
   ])('%s', (src, url) => {
-    expect(denImageUrl(src, note)).toBe(url)
+    expect(denImageUrl(src, note)).toEqual({ kind: 'den', url })
   })
 
-  it.each([
-    ['../../../../../../../castle.png'],
-    ['/../castle.png'],
-    ['/images/../../castle.png'],
-    ['/'],
-    [''],
-    ['/a%2Fb.png'],
-    ['/bad%E0%A4%A.png'],
-  ])('%s doesn’t load', (src) => {
-    expect(denImageUrl(src, note)).toBeNull()
+  it.each([['../../../../../../../castle.png'], ['/../castle.png'], ['/images/../../castle.png']])('%s climbs above the den root, so it’s refused', (src) => {
+    expect(denImageUrl(src, note)).toEqual({ kind: 'outside' })
+  })
+
+  it.each([['/'], [''], ['?v=2'], ['/a%2Fb.png'], ['images/100%.png'], ['/bad%E0%A4%A.png']])('%s can’t name a file in the den', (src) => {
+    expect(denImageUrl(src, note)).toEqual({ kind: 'invalid' })
+  })
+
+  it('reads %25 as a % in a name', () => {
+    expect(denImageUrl('/images/100%25.png', note)).toEqual({ kind: 'den', url: '/den-files/images/100%25.png' })
   })
 
   it('leaves an address with a scheme or a host as written', () => {
-    expect(denImageUrl('http://127.0.0.1:9653/castle.png', note)).toBeUndefined()
-    expect(denImageUrl('//127.0.0.1:9653/castle.png', note)).toBeUndefined()
+    expect(denImageUrl('http://127.0.0.1:9653/castle.png', note)).toEqual({ kind: 'address' })
+    expect(denImageUrl('//127.0.0.1:9653/castle.png', note)).toEqual({ kind: 'address' })
   })
 
   it('starts from the den root for a file at the root', () => {
-    expect(denImageUrl('castle.png', 'README.md')).toBe('/den-files/castle.png')
-    expect(denImageUrl('../castle.png', 'README.md')).toBeNull()
+    expect(denImageUrl('castle.png', 'README.md')).toEqual({ kind: 'den', url: '/den-files/castle.png' })
+    expect(denImageUrl('../castle.png', 'README.md')).toEqual({ kind: 'outside' })
   })
 })
 
