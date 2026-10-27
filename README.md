@@ -54,6 +54,8 @@ To connect Claude or another AI assistant, see
 [Connecting MCP clients](docs/mcp-clients.md).
 For choosing whether a note goes in the universe, a series, or a book, see
 [Where to file things](docs/where-to-file.md).
+For practical tips, such as where to keep images and how to set up
+Obsidian, see [Using Wolfden](docs/using-wolfden.md).
 
 ## Planned features
 

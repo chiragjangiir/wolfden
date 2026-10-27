@@ -344,6 +344,39 @@ diagnostic. F-LAY-7 doesn't apply there, since the den root isn't a
 container. A `den.yaml` inside one of them (`archive/old-den/den.yaml`)
 still gets the F-LAY-1 warning.
 
+**F-LAY-9.** An image kept in the den is written in Markdown as
+`![alt text](path)`, and the path is a path in the den:
+
+- A relative path starts from the folder of the file it's written in (the
+  entity file, or the container or outline file):
+  `![Map](images/castle-map.png)` in
+  `universes/dracula/entities/locations/castle.md` is
+  `universes/dracula/entities/locations/images/castle-map.png`. This is how
+  GitHub, VS Code's preview, and Obsidian's "Relative path to note" setting
+  read it.
+- A path that starts with `/` starts from the den root:
+  `![Seal](/images/seal.png)` is `images/seal.png`.
+- `../` goes up a folder, but never above the den root. A path that
+  climbs out of the den doesn't show.
+- Names are written as in a web address: `%20` is a space, and `?` or `#`
+  ends the path. A space can be written as is inside `<...>`:
+  `![Map](<images/castle map.png>)`.
+
+The web UI (`wolfden serve`) shows images of these types only: `.png`,
+`.jpg`, `.jpeg`, `.gif`, `.webp`, `.avif`, and `.svg`, in any case. It
+never shows a file whose path has a name starting with `.` (F-LAY-2),
+or one reached through a folder link, and it never serves anything
+outside the den. Pinned to one universe (`wolfden serve --universe`), it
+doesn't show images in another universe's folder (`universes/<other>/`);
+images outside `universes/`, such as a den-level `images/` folder, still
+show. An image that isn't there, or that it won't show, gets a
+placeholder with the alt text. An address with a scheme or a host
+(`https://...`, `//host/...`) isn't a den path: see F-DEN-8. Image files
+are otherwise ignored, wherever they are (F-LAY-7, F-LAY-8), and an image
+that's missing gets no diagnostic in v0. The practical side, where to keep
+images and how editors such as Obsidian write their paths, is in
+[`using-wolfden.md`](using-wolfden.md#images).
+
 ### 5.2 `den.yaml`
 
 ```yaml
@@ -407,8 +440,8 @@ is a [warning], and the checks stay off.
 that starts with `//`. It defaults to `false`: such an image doesn't
 load, so opening a note doesn't tell the website that the den was opened,
 and the page shows a placeholder with the image's alt text and its address
-as a link to open in the browser. An image with a relative address isn't
-affected by this setting. A null value is the same as leaving the key
+as a link to open in the browser. An image kept in the den, with a path
+in the den (F-LAY-9), isn't affected by this setting: it always shows. A null value is the same as leaving the key
 out. Any other value that isn't a YAML boolean is a [warning], and remote
 images stay blocked. Apart from that warning, the setting changes only
 what the web UI shows.

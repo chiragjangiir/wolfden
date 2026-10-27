@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import type { EntityPageResult, PageSection } from './api'
-import { imageSource } from './components/Markdown'
+import { denImageUrl, imageSource } from './components/Markdown'
 import { den, entities, page, renderApp, stubApi } from './test/harness'
 
 // Images in a note (#180): one from a website doesn't load unless den.yaml
-// has `remote_images: true`; an image in the den is rendered as written.
+// has `remote_images: true`; an image in the den loads from /den-files (#186).
 
 afterEach(() => {
   cleanup()
@@ -185,19 +185,112 @@ describe('SC-WEB-37: a change to the setting while the page is open', () => {
   })
 })
 
-describe('SC-WEB-38: an image in the den is rendered as before', () => {
-  it('keeps a relative address as written, whatever the setting', async () => {
+describe('SC-WEB-38: an image in the den shows from the den', () => {
+  it('loads a path from the note’s folder, or from the den root, whatever the setting', async () => {
     for (const remoteImages of [false, true]) {
-      showNote('![Map of the castle](images/castle-map.png)\n\n![Seal](/seal.png)', remoteImages)
+      showNote('![Map of the castle](images/castle-map.png)\n\n![Seal](/seal.png)\n\n![Coach](../shared/coach%20and%20horses.jpg)', remoteImages)
       const main = await pictures()
 
-      expect(within(main).getByRole('img', { name: 'Map of the castle' }).getAttribute('src')).toBe('images/castle-map.png')
-      expect(within(main).getByRole('img', { name: 'Seal' }).getAttribute('src')).toBe('/seal.png')
+      // Jonathan's note is universes/dracula/jonathan-harker.md.
+      expect(within(main).getByRole('img', { name: 'Map of the castle' }).getAttribute('src')).toBe('/den-files/universes/dracula/images/castle-map.png')
+      expect(within(main).getByRole('img', { name: 'Seal' }).getAttribute('src')).toBe('/den-files/seal.png')
+      expect(within(main).getByRole('img', { name: 'Coach' }).getAttribute('src')).toBe('/den-files/universes/shared/coach%20and%20horses.jpg')
       expect(within(main).getByRole('img', { name: 'Seal' }).getAttribute('referrerpolicy')).toBeNull()
       expect(main.querySelector('.blocked-image')).toBeNull()
       cleanup()
       vi.unstubAllGlobals()
     }
+  })
+})
+
+describe('SC-WEB-39: an image the den doesn’t have', () => {
+  it('shows a placeholder with the alt text when the image doesn’t load, and doesn’t ask again', async () => {
+    showNote('![Map of the castle](images/castle-map.png)\n\n![](images/gone.png)')
+    const main = await pictures()
+
+    const map = within(main).getByRole('img', { name: 'Map of the castle' })
+    fireEvent.error(map)
+    const placeholder = (await within(main).findByText('Image not found: Map of the castle')).closest('.blocked-image') as HTMLElement
+    expect(placeholder.classList.contains('missing-image')).toBe(true)
+    expect(within(placeholder).getByText('images/castle-map.png')).toBeTruthy()
+    expect(placeholder.getAttribute('title')).toContain('relative to the note’s folder')
+    expect(within(placeholder).queryByRole('link')).toBeNull()
+
+    fireEvent.error(main.querySelector('img[src="/den-files/universes/dracula/images/gone.png"]')!)
+    await within(main).findByText('Image not found')
+    expect(main.querySelectorAll('img')).toHaveLength(0)
+  })
+
+  it('doesn’t load a path that climbs above the den root', async () => {
+    showNote('![Outside](../../../outside.png)\n\n![Also outside](/../outside.png)')
+    const main = await pictures()
+
+    expect(main.querySelectorAll('img')).toHaveLength(0)
+    const outside = within(main).getByText('Image not found: Outside').closest('.blocked-image') as HTMLElement
+    expect(outside.getAttribute('title')).toContain('above the den’s folder')
+    expect(within(main).getByText('Image not found: Also outside')).toBeTruthy()
+  })
+
+  it('says a path that can’t name a file is the problem, not the den’s folder', async () => {
+    showNote('![Slash](images/a%2Fb.png)')
+    const main = await pictures()
+
+    expect(main.querySelectorAll('img')).toHaveLength(0)
+    const placeholder = within(main).getByText('Image not found: Slash').closest('.blocked-image') as HTMLElement
+    expect(placeholder.getAttribute('title')).toContain('can’t name a file')
+    expect(placeholder.getAttribute('title')).not.toContain('above the den')
+  })
+
+  it('loads a name with a bare %, which the markdown parser writes as %25', async () => {
+    showNote('![Chart](images/100%.png)')
+    const main = await pictures()
+
+    expect(within(main).getByRole('img', { name: 'Chart' }).getAttribute('src')).toBe('/den-files/universes/dracula/images/100%25.png')
+  })
+})
+
+describe('denImageUrl', () => {
+  const note = 'universes/dracula/books/dracula/entities/characters/mina-harker.md'
+
+  it.each([
+    ['castle.png', '/den-files/universes/dracula/books/dracula/entities/characters/castle.png'],
+    ['./castle.png', '/den-files/universes/dracula/books/dracula/entities/characters/castle.png'],
+    ['images/castle.png', '/den-files/universes/dracula/books/dracula/entities/characters/images/castle.png'],
+    ['../../images/castle.png', '/den-files/universes/dracula/books/dracula/images/castle.png'],
+    ['../../../../../../images/castle.png', '/den-files/images/castle.png'],
+    ['/images/castle.png', '/den-files/images/castle.png'],
+    ['/images/../maps/castle.png', '/den-files/maps/castle.png'],
+    ['images\\castle.png', '/den-files/universes/dracula/books/dracula/entities/characters/images/castle.png'],
+    ['/castle map.png', '/den-files/castle%20map.png'],
+    ['/castle%20map.png', '/den-files/castle%20map.png'],
+    ['/a#b/c?.png', '/den-files/a'],
+    ['/notes/the year %231893.png', '/den-files/notes/the%20year%20%231893.png'],
+    ['/Café/ünïcode.png', '/den-files/Caf%C3%A9/%C3%BCn%C3%AFcode.png'],
+    ['/images/castle.png?v=2#top', '/den-files/images/castle.png'],
+  ])('%s', (src, url) => {
+    expect(denImageUrl(src, note)).toEqual({ kind: 'den', url })
+  })
+
+  it.each([['../../../../../../../castle.png'], ['/../castle.png'], ['/images/../../castle.png']])('%s climbs above the den root, so it’s refused', (src) => {
+    expect(denImageUrl(src, note)).toEqual({ kind: 'outside' })
+  })
+
+  it.each([['/'], [''], ['?v=2'], ['/a%2Fb.png'], ['images/100%.png'], ['/bad%E0%A4%A.png']])('%s can’t name a file in the den', (src) => {
+    expect(denImageUrl(src, note)).toEqual({ kind: 'invalid' })
+  })
+
+  it('reads %25 as a % in a name', () => {
+    expect(denImageUrl('/images/100%25.png', note)).toEqual({ kind: 'den', url: '/den-files/images/100%25.png' })
+  })
+
+  it('leaves an address with a scheme or a host as written', () => {
+    expect(denImageUrl('http://127.0.0.1:9653/castle.png', note)).toEqual({ kind: 'address' })
+    expect(denImageUrl('//127.0.0.1:9653/castle.png', note)).toEqual({ kind: 'address' })
+  })
+
+  it('starts from the den root for a file at the root', () => {
+    expect(denImageUrl('castle.png', 'README.md')).toEqual({ kind: 'den', url: '/den-files/castle.png' })
+    expect(denImageUrl('../castle.png', 'README.md')).toEqual({ kind: 'outside' })
   })
 })
 

@@ -181,10 +181,10 @@ function EntityArticle({ universe, entity, positions }: { universe: string; enti
         <p className="entry">{entryWords(entity, positions)}</p>
         {entity.aliases && entity.aliases.length > 0 && <p className="aliases">Also: {entity.aliases.join(', ')}</p>}
       </header>
-      {lead && <Markdown text={lead} links={entity.leadLinks} universe={universe} />}
+      {lead && <Markdown text={lead} links={entity.leadLinks} universe={universe} file={entity.path} />}
       {entity.fields.length > 0 && <Fields universe={universe} fields={entity.fields} positions={positions} />}
       {entity.sections.map((s) => (
-        <Section key={s.line} universe={universe} section={s} positions={positions} />
+        <Section key={s.line} universe={universe} section={s} positions={positions} file={entity.path} />
       ))}
       <Backlinks universe={universe} backlinks={entity.backlinks} positions={positions} />
     </article>
@@ -350,7 +350,7 @@ export function FieldValue({ value, links, universe }: { value: unknown; links: 
   return <>{render(value)}</>
 }
 
-function Section({ universe, section, positions }: { universe: string; section: PageSection; positions: PositionView[] }) {
+function Section({ universe, section, positions, file }: { universe: string; section: PageSection; positions: PositionView[]; file: string }) {
   const Heading = `h${Math.min(Math.max(section.level, 2), 6)}` as 'h2'
   return (
     <section className={`section level-${section.level}${section.bookkeeping ? ' bookkeeping' : ''}`}>
@@ -360,7 +360,7 @@ function Section({ universe, section, positions }: { universe: string; section: 
         {section.pinned && <span className="badge">pinned</span>}
         {section.bookkeeping && <span className="badge">bookkeeping</span>}
       </Heading>
-      {section.body.trim() && <Markdown text={section.body} links={section.links} universe={universe} />}
+      {section.body.trim() && <Markdown text={section.body} links={section.links} universe={universe} file={file} />}
     </section>
   )
 }

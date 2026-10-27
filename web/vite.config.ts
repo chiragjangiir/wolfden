@@ -1,10 +1,25 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type ProxyOptions } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // The port 'wolfden serve' listens on: WOLFDEN_PORT if set, or 9653
 // (WolfdenApi.DefaultPort). Run 'wolfden serve --no-open' beside
-// 'npm run dev', and the dev server passes /api on to it.
+// 'npm run dev', and the dev server passes /api and /den-files on to it.
 const servePort = Number(process.env.WOLFDEN_PORT ?? 9653)
+
+const toServe: ProxyOptions = {
+  target: `http://127.0.0.1:${servePort}`,
+  configure: (proxy) => {
+    // The server refuses an Origin other than its own port, and this
+    // page's port is Vite's: drop the Origin of this dev server's own
+    // page only. Any other Origin goes through, so the server refuses it.
+    proxy.on('proxyReq', (proxyRequest, request) => {
+      const origin = request.headers.origin
+      if (typeof origin === 'string' && isDevServerOrigin(origin, request.headers.host)) {
+        proxyRequest.removeHeader('origin')
+      }
+    })
+  },
+}
 
 /**
  * True if `origin` is this dev server's own page: http on localhost or
@@ -25,21 +40,7 @@ export default defineConfig({
   server: {
     // Local only, like 'wolfden serve'.
     host: '127.0.0.1',
-    proxy: {
-      '/api': {
-        target: `http://127.0.0.1:${servePort}`,
-        configure: (proxy) => {
-          // The API refuses an Origin other than its own port, and this
-          // page's port is Vite's: drop the Origin of this dev server's own
-          // page only. Any other Origin goes through, so the API refuses it.
-          proxy.on('proxyReq', (proxyRequest, request) => {
-            const origin = request.headers.origin
-            if (typeof origin === 'string' && isDevServerOrigin(origin, request.headers.host)) {
-              proxyRequest.removeHeader('origin')
-            }
-          })
-        },
-      },
-    },
+    // The API, and the den's own images (#186).
+    proxy: { '/api': toServe, '/den-files': toServe },
   },
 })

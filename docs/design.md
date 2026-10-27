@@ -1062,7 +1062,8 @@ docs/
   http:`; `den.yaml` is read for each page, so a change applies on the
   next load. Everything else, the API's JSON, the UI's files, and error
   pages, gets `default-src 'none'`, and the page that says how to build the UI allows
-  only its own inline style. The policy comes from `serve`, so `npm run
+  only its own inline style. The den's own images, under `/den-files/`,
+  get a policy with `sandbox` ("Images in the den" in §9, #186). The policy comes from `serve`, so `npm run
   dev`, whose page has an inline script for hot reload, isn't affected.
   Hosting for several users (§10) brings its own authentication.
   The API is JSON under `/api`, in camelCase, as is usual for a web
@@ -1222,10 +1223,52 @@ docs/
     rather than showing images the policy would break. The
     blocking is done by the renderer, so it doesn't depend on the browser
     enforcing the Content-Security-Policy, which blocks them too. An image
-    with a relative address is rendered as written, as before; `serve`
-    doesn't serve the den's files, so such an image doesn't show yet.
-    Nothing else in a rendered note fetches anything: links are plain
-    links, and raw HTML is dropped.
+    kept in the den isn't affected by the setting; it loads from `serve`
+    (next item). Nothing else in a rendered note fetches anything: links
+    are plain links, and raw HTML is dropped.
+  - **Images in the den** (maintainer decision on #186, 2026-10-27). An
+    image's path in a note is a path in the den (format.md F-LAY-9):
+    relative to the folder of the file it's written in, as on GitHub, in
+    VS Code's preview, and in Obsidian's "Relative path to note" mode;
+    from the den root if it starts with `/`; and never above the den
+    root. The renderer resolves it against the note's `path` from
+    `/api/entity` (the entity's file), refuses a path whose `../` climbs
+    above the root (such an image never loads), and rewrites it to
+    `/den-files/<path>`, each name percent-encoded. An address with a
+    scheme or a host is left as it is. `serve` answers `GET` and `HEAD`
+    on `/den-files/{**path}`, a prefix that can't be a UI route (`/u/...`)
+    or the API (`/api/...`), and serves the file only if: the path is a
+    den path as the store's writes have it (relative, `/` between names,
+    no `..`, `\`, `:`, wildcards, or names that Windows would change);
+    no name starts with `.`, so nothing under `.wolfden/`, `.git/`, or
+    `.obsidian/` (F-LAY-2); the extension is `.png`, `.jpg`, `.jpeg`,
+    `.gif`, `.webp`, `.avif`, or `.svg`, in any case, which sets the
+    Content-Type; each name is on disk as written (in any case on
+    Windows), so a short name such as `WOLFDE~1` can't stand in for a
+    hidden folder; no folder on the way is a folder link, which the den
+    never follows; and a file that's a symbolic link leads to a file
+    that passes the same checks, so it can't reach outside the den. A
+    server pinned with `serve --universe` serves only that universe, as
+    for the API: a path under another universe's folder
+    (`universes/<other>/`; a universe's key is its folder name, F-KEY-3)
+    is refused, and den-level paths outside `universes/`, such as
+    `/images/`, are still served.
+    Anything else, and a request a browser marks as cross-site, is a
+    404, never a 403, so a request can't tell a refused file from a
+    missing one. A file's response has `X-Content-Type-Options: nosniff`,
+    `Cross-Origin-Resource-Policy: same-origin`, and the
+    Content-Security-Policy `default-src 'none'; style-src
+    'unsafe-inline'; frame-ancestors 'none'; sandbox`, so an SVG opened
+    at its own address can't run its scripts as Wolfden; an image a page
+    loads with `<img>` runs nothing anyway. Writers change images while
+    the page is open, so it's sent with `Cache-Control: no-cache` and an
+    `ETag` and `Last-Modified`: the browser asks each time and gets a 304
+    while the file is the same. An image that doesn't load gets a
+    placeholder like the one for a website's image, "Image not found:
+    <alt text>", with the path as written, and isn't asked for again
+    until its path changes. A lint warning for a missing image is a
+    separate follow-up. Where to keep images, and how to set up
+    Obsidian for them, is in [`using-wolfden.md`](using-wolfden.md#images).
 - **The search page** (#25; v0 behaviour, not a recorded decision). A
   search box sits in the top bar; `/` focuses it from anywhere but a
   text box. Typing searches once it pauses (300 ms), on
