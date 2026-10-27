@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, Outlet, useRouterState } from '@tanstack/react-router'
 import { denQuery } from '../api'
 import { useUniverseKey } from '../hooks'
+import { CheckpointIndicator } from './CheckpointIndicator'
 import { PositionBar } from './PositionBar'
 import { SearchBox } from './SearchBox'
 import { Sidebar } from './Sidebar'
@@ -81,6 +82,7 @@ export function Layout() {
         </Link>
         <SearchBox universe={universe} />
         <PositionBar universe={universe} />
+        <CheckpointIndicator />
       </header>
       <div className="body">
         <aside id="sidebar" className="sidebar" data-open={treeOpen} ref={sidebarRef} tabIndex={-1}>

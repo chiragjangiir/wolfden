@@ -2229,6 +2229,27 @@ decision of 2026-10-26). Covered by:
 `SearchTests.SearchWordsMatchFieldTextAsTheSearchTableDoes`,
 `SearchTests.PhrasesMatchFieldTextAsTheSearchTableDoes`.
 
+### SC-MCP-31. My assistant and I finish a notes pass with one checkpoint
+
+After drafting chapter 12, the writer and the assistant go over the
+notes it touched: the assistant adds to Lucy's and Mina's notes through
+the write tools, and the writer fixes the outline by hand.
+
+- When the pass is done, the assistant calls `checkpoint` once, with a
+  message that says what the pass was, "Notes pass after drafting ch
+  12", not one checkpoint per edit. The server's instructions ask for
+  that: checkpoint at natural stopping points, such as a notes pass or a
+  planning session, with a descriptive message.
+- The checkpoint's message is the assistant's, followed by its
+  `Co-Authored-By` line, and its result lists Lucy and Mina under
+  `written_by_session`; the outline the writer edited is under
+  `changed_outside_session`, so the assistant can say it's in the
+  checkpoint too. The history has one new checkpoint for the pass.
+
+Spec: design.md §6, §8 (maintainer decision of 2026-10-27, #30).
+Covered by: `HistoryToolTests.AfterANotesPassTheAssistantMakesOneCheckpointNamedForIt`,
+`HistoryToolTests.ACheckpointSaysWhichFilesTheSessionWroteAndWhichChangedOutsideIt`.
+
 ## STORE: Wolfden saves, moves, and deletes notes
 
 Background: the den store (design.md §6, #121) is how Wolfden writes a
@@ -3383,3 +3404,173 @@ Spec: design.md §9 (#23, #28). Covered by:
 `WriteEndpointTests.AnEditFromItsOwnPageIsAnswered`,
 `WriteEndpointTests.AnEditEndpointAnswersOnlyPostAndItsOwnMembers`,
 `WriteEndpointTests.APinnedServerEditsOnlyItsUniverse`.
+
+### SC-WEB-50. The top bar tells me what's changed since my last checkpoint
+
+The writer has `wolfden serve` open on a den in a git repository. After
+drafting chapter 12 they do a notes pass: two characters edited, a new
+location, partly in the browser and partly in their editor.
+
+- The top bar shows "3 notes changed since the last checkpoint ·
+  Checkpoint…" ("3 notes not checkpointed yet" before the first
+  checkpoint, when every den file counts), and nothing at all when
+  nothing has changed. It asks again every minute, when the window
+  gets focus back, and straight after a save in the page's editor
+  (SC-WEB-40). If the status can't be read, it shows "History
+  unavailable", which opens the reason, rather than hiding.
+- It opens a dialog (a modal one, not the browser's) that lists the
+  changes for review: den-level files first, then the universe's own
+  notes, then each series and book, with paths shortened within the
+  group and each marked edited, new, deleted, or renamed. A note saved
+  in the page's editor is marked "saved in Wolfden"; the others changed
+  another way (an editor, an assistant through MCP, or before `serve`
+  started), and one saved on the page and then edited by hand isn't
+  marked. Focus starts in the message box, which is empty: the writer
+  names the checkpoint. Cancel closes the dialog; Escape or a click
+  outside does too, but asks first once a name is typed. Focus goes
+  back to the indicator.
+- `GET /api/checkpoint` lists the changes with their kinds and
+  universes; it takes no parameters, and other methods than GET and
+  POST are 405 with `Allow: GET, POST`.
+
+Spec: design.md §6, §9 (maintainer decision of 2026-10-27, #30).
+Covered by:
+`CheckpointEndpointTests.TheStatusListsWhatChangedAndACheckpointRecordsItWithTheWritersMessage`,
+`CheckpointEndpointTests.BeforeTheFirstCheckpointEveryDenFileIsListed`,
+`CheckpointEndpointTests.ASaveThroughThisServerIsToldApartFromAChangeMadeElsewhere`,
+`CheckpointEndpointTests.AWebSaveShowsAsSavedInWolfdenAndStartsAfreshAfterTheCheckpoint`,
+`CheckpointEndpointTests.OtherMethodsAreRefusedWithTheOnesItTakes`,
+`PendingChangesTests.BeforeTheFirstCheckpointEveryDenFileIsPending`,
+`PendingChangesTests.AfterACheckpointOnlyWhatChangedSinceIsPending`,
+`Checkpoint.test.tsx`, `Editing.test.tsx` (web).
+
+### SC-WEB-51. My den has no history yet
+
+The writer keeps the den in a plain folder and opens `wolfden serve`.
+
+- The top bar shows "No history · Turn on…". Its dialog says the den has
+  no history, that edits are still saved in the files, and how to turn
+  history on: `git init` in the den's folder, or `wolfden init --git` for
+  a new den, and not in a synced folder. It offers no checkpoint.
+- `POST /api/checkpoint` is 409 `history_unavailable`, with the same
+  advice. Once the folder is a repository, checkpoints work without
+  restarting `serve`.
+
+Spec: design.md §6, §9 (#30). Covered by:
+`CheckpointEndpointTests.WithoutHistoryTheStatusSaysHowToTurnItOnAndACheckpointIsRefused`,
+`Checkpoint.test.tsx` (web).
+
+### SC-WEB-52. I name a checkpoint after a notes pass
+
+Following on from SC-WEB-50, the writer reviews the list and names the
+checkpoint "Notes pass after drafting ch 12". After a planning session
+another day, they make one named "Planning session: harbour subplot".
+
+- An empty or blank name is refused in the dialog, before anything is
+  sent, and the API refuses one too (`bad_argument`), as it does a
+  message over 5,000 characters, one with control characters, JSON
+  that isn't `{"message": "…"}`, and anything that isn't
+  `application/json` (415 `unsupported_media_type`). A request a
+  browser marks as from another site is 403 `cross_site`. None of these
+  makes a commit.
+- **Checkpoint** records every den file that changed, with the name as
+  the commit's whole message (trimmed) and the writer as its author,
+  with no co-author. The dialog says "Recorded “Notes pass after
+  drafting ch 12”, with 3 notes", the indicator goes quiet, and each
+  note's History tab lists the new checkpoint. A second one straight
+  after has nothing to record, and the dialog says so.
+- If git refuses (a pre-commit hook that fails, signing, a lock), the
+  dialog shows git's reason, keeps the name to try again, gives focus
+  back to it, and nothing is recorded. While the checkpoint is being
+  made, focus stays on the dialog.
+- On a detached HEAD, or in the middle of a rebase, the dialog warns
+  that the checkpoint becomes part of it; the checkpoint is still made,
+  as git would make it, and its result says so too.
+
+Spec: design.md §6, §9 (maintainer decision of 2026-10-27, #30; #28,
+saving never checkpoints). Covered by:
+`CheckpointEndpointTests.TheStatusListsWhatChangedAndACheckpointRecordsItWithTheWritersMessage`,
+`CheckpointEndpointTests.ACheckpointNeedsAMessage`,
+`CheckpointEndpointTests.ATooLongMessageIsRefused`,
+`CheckpointEndpointTests.ACheckpointCantBeMadeFromAnotherSiteOrWithoutJson`,
+`CheckpointEndpointTests.AHookThatRefusesIsReportedAndNothingIsRecorded`,
+`CheckpointEndpointTests.AManualCheckpointOnADetachedHeadIsMadeButWarned`,
+`Checkpoint.test.tsx` (web).
+
+### SC-WEB-53. I turn on automatic checkpoints
+
+The writer adds `auto_checkpoint: 30m` to `den.yaml` and leaves
+`wolfden serve` running while they write.
+
+- Once the den's files have gone 30 minutes without a change, `serve`
+  makes one checkpoint, named for what changed: "Auto-checkpoint: edited
+  1 note", or "Auto-checkpoint: changed 4 notes (2 edited, 1 added, 1
+  renamed)", then one line per file, at most 20 and then "and N more".
+  It makes no more until the files change again; an edit before the 30
+  minutes are up starts the wait again.
+- It never starts while a git write may be running (a checkpoint the
+  writer is making, a git Wolfden stopped waiting for, or another
+  program's `index.lock`), and tries again on the next poll; if git
+  stays busy for five minutes, it says so in the log, once. Nor does it
+  start while git is in the middle of a rebase, merge, cherry-pick,
+  revert, or bisect, or on a detached HEAD: it says so once and makes
+  the checkpoint when git's done. If there's nothing to record (the
+  writer, or another Wolfden, checkpointed first), it does nothing. If
+  git refuses, it logs why once (until the files change) and tries
+  again after another 30 quiet minutes.
+- A save in the browser while an automatic checkpoint waits on git (a
+  signing passphrase prompt, say) isn't held up, and the file saved
+  meanwhile stays marked "saved in Wolfden".
+- `30m`, `2h`, `1h30m`, `5m`, and `24h` are accepted. An unquoted null
+  or `false` leaves it off. `4m`, `25h`, `999999999h`, `1h60m`, `30`,
+  `30s`, `1d`, `30M`, a quoted `"false"`, a block scalar, `true`, a
+  list, or a mapping is an F-DEN-9 warning in `wolfden check` and in
+  `serve`'s log (once), and it stays off. The setting is read on each
+  poll, so turning it on or off needs no restart. In a den without
+  history, `serve` warns once that the setting does nothing.
+- The dialog says when automatic checkpoints are on, and
+  `/api/checkpoint`'s `autoCheckpoint` gives the setting as written.
+  `wolfden mcp` and `wolfden index --watch` never make them.
+
+Spec: format.md F-DEN-9, design.md §6 (opt-in is the maintainer's
+decision of 2026-10-27, #30). Covered by:
+`AutoCheckpointTests.AutoCheckpointIsATimeFromFiveMinutesToADay`,
+`AutoCheckpointTests.AFileThatDoesntLoadLeavesItOff`,
+`AutoCheckpointTests.TheMessageSaysHowManyNotesChangedAndLists`,
+`AutoCheckpointTests.AQuietSpellMakesOneCheckpoint`,
+`AutoCheckpointTests.ANewChangeStartsTheWaitAgain`,
+`AutoCheckpointTests.NothingToRecordDoesNothing`,
+`AutoCheckpointTests.AGitWriteUnderWayIsWaitedFor`,
+`AutoCheckpointTests.ARefusedCheckpointIsTriedAgainAfterAnotherQuietSpell`,
+`AutoCheckpointTests.WithoutTheSettingOrWithABadOneNothingIsMade`,
+`AutoCheckpointTests.WithoutHistoryTheSettingOnlyWarns`,
+`AutoCheckpointTests.NoAutomaticCheckpointWhileGitIsInTheMiddleOfSomething`,
+`AutoCheckpointTests.GitBusyForLongIsSaidOnce`,
+`AutoCheckpointTests.ARefusalIsSaidOnceUntilTheFilesChange`,
+`AutoCheckpointTests.ASaveDuringACheckpointDoesntWaitAndStaysTheHosts`,
+`PendingChangesTests.AnIndexLockMeansAWriteMayBeUnderWay`,
+`PendingChangesTests.GitInTheMiddleOfAnOperationIsSaidAndAutoCheckpointsWait`,
+`CheckpointEndpointTests.ASaveDoesntWaitForACheckpointThatsWaitingOnGit`,
+`CheckpointEndpointTests.TheStatusSaysWhatAutoCheckpointIsSetTo`,
+`Checkpoint.test.tsx` (web).
+
+### SC-WEB-54. A server pinned to one universe checkpoints the whole den
+
+The writer serves the Starfall den with `serve --universe starfall`, and
+has also edited a note in the `drift` universe and `den.yaml`.
+
+- The indicator counts all three changes. The dialog lists `den.yaml`
+  and the Starfall note, and says one more file in another universe is
+  included, without naming it or its universe, as the rest of a pinned
+  server doesn't.
+- The checkpoint records the whole den, the `drift` note included, as
+  design.md §6 says a checkpoint does, and as the MCP tool does in a
+  pinned session. Its result counts the other universe's file the same
+  way.
+- The status gives the latest checkpoint by its id and time only, so a
+  message such as "Drift: the tide subplot" never shows.
+
+Spec: design.md §6, §9 (#30). Covered by:
+`CheckpointEndpointTests.APinnedServerCheckpointsTheWholeDenButNamesOnlyItsUniverse`,
+`CheckpointEndpointTests.APinnedServersLatestCheckpointDoesntNameAnotherUniverse`,
+`Checkpoint.test.tsx` (web).

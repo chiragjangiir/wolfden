@@ -70,12 +70,14 @@ public static class DenEndpoints
         api.MapGet("/den", () => Den(options));
         ReadEndpoints.Map(api, options);
         WriteEndpoints.Map(api, options);
+        CheckpointEndpoints.Map(api, options);
 
         // Anything else under /api: a known path with the wrong method, or no endpoint at all.
         api.Map("/{**rest}", (HttpContext context, string? rest) =>
         {
             var path = rest?.TrimEnd('/') ?? "";
-            var method = GetPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "GET"
+            var method = CheckpointEndpoints.Paths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "GET, POST"
+                : GetPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "GET"
                 : WriteEndpoints.PostPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "POST"
                 : null;
             if (method is not null)

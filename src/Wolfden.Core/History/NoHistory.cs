@@ -40,7 +40,10 @@ public sealed class NoHistory : IHistoryProvider
 
     /// <inheritdoc />
     public HistoryResult<HistoryEntry?> Checkpoint(CheckpointRequest request, CancellationToken cancellationToken = default) =>
-        HistoryResult<HistoryEntry?>.Unavailable(Say("a checkpoint", "Your edits are still saved in the files."));
+        HistoryResult<HistoryEntry?>.Unavailable(CheckpointUnavailable);
+
+    /// <inheritdoc />
+    public string CheckpointUnavailable => Say("a checkpoint", "Your edits are still saved in the files.");
 
     /// <inheritdoc />
     public HistoryResult<HistoryTag> Tag(TagRequest request, CancellationToken cancellationToken = default) =>

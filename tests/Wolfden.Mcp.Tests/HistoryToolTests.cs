@@ -90,6 +90,36 @@ public sealed class HistoryToolTests : IDisposable
     }
 
     [Fact]
+    [Trait("Scenario", "SC-MCP-31")]
+    public void AfterANotesPassTheAssistantMakesOneCheckpointNamedForIt()
+    {
+        RunGit("init", "--quiet");
+        Commit("Start the Dracula notes");
+        var tools = new DenTools(_den.Root) { History = () => GitHistory.ForDen(_den.Root, Git) };
+
+        // The pass: a thread, a character, and the outline's notes, updated after drafting.
+        var lucy = tools.GetEntity("Lucy Westenra").Entity!;
+        tools.AppendSection("Lucy Westenra", "Overview", "After chapter 12 she is sleepwalking every night.", lucy.Hash!);
+        var mina = tools.GetEntity("Mina Harker").Entity!;
+        tools.AppendSection("Mina Harker", "Overview", "She starts to suspect the Count is in Whitby.", mina.Hash!);
+
+        // Meanwhile the writer fixes the outline by hand.
+        const string outline = "universes/dracula/books/dracula/outline.md";
+        _den.Write(outline, _den.Read(outline) + "\n");
+
+        var result = tools.Checkpoint("Notes pass after drafting ch 12", "Claude <noreply@anthropic.com>");
+
+        Assert.True(result.Recorded);
+        var message = RunGit("log", "-1", "--format=%B");
+        Assert.StartsWith("Notes pass after drafting ch 12\n\nCo-Authored-By: Claude <noreply@anthropic.com>", message, StringComparison.Ordinal);
+        Assert.Equal([LucyFile, mina.Path], result.WrittenBySession!.Order(StringComparer.Ordinal));
+        Assert.Equal([outline], result.ChangedOutsideSession!);
+
+        // One checkpoint for the pass, after the one the writer started with.
+        Assert.Equal("2", RunGit("rev-list", "--count", "HEAD").Trim());
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-MCP-14")]
     public void WithoutHistoryTheAnswerSaysSoAndIsntAnError()
     {

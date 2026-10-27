@@ -480,11 +480,11 @@ public sealed partial class DenTools
 
             foreach (var (path, bytes) in files.Where(p => p.Key != to))
             {
-                _sessionWritten[path] = bytes;
+                SessionWritten.Wrote(path, bytes);
             }
 
-            _sessionWritten[to] = final;
-            _sessionWritten[from] = null;
+            SessionWritten.Wrote(to, final);
+            SessionWritten.Deleted(from);
         }
         catch (Exception e)
         {
@@ -514,7 +514,7 @@ public sealed partial class DenTools
             {
                 if (Holds(path, holds))
                 {
-                    _sessionWritten[path] = holds;
+                    SessionWritten.Wrote(path, holds);
                 }
             }
 

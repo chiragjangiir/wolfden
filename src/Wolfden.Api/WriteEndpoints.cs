@@ -67,6 +67,10 @@ public static class WriteEndpoints
             WatcherWait = options.WatcherWait,
             PinnedUniverse = options.PinnedUniverse,
             Words = WriteEndpoints.Words,
+
+            // Every save records itself in the server's ledger, so the checkpoint
+            // dialog marks it "saved in Wolfden" (#30).
+            Ledger = options.Ledger,
         };
 
         api.MapGet("/entity/source", (HttpContext c) => ReadEndpoints.Answer(

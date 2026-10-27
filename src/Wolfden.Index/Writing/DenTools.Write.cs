@@ -51,15 +51,28 @@ public sealed partial class DenTools
     /// The den files this session's writes saved since a checkpoint last
     /// recorded them, each with the bytes the session last wrote, so
     /// <see cref="Checkpoint"/> can tell the session's edits from changes
-    /// made some other way. A file a failed write put back as it was isn't
-    /// here. Paths compare as the file system does (ignoring case on
-    /// Windows and macOS, as git's paths may differ in case there).
-    /// A null value marks a file this session deleted: the old path of a
-    /// file <c>move_entity</c> moved. Guarded by <see cref="_writeLock"/>.
+    /// made some other way (<see cref="CheckpointLedger"/>, shared with
+    /// <c>wolfden serve</c>). A file a failed write put back as it was isn't
+    /// in it. A deletion marks a file this session deleted: the old path of
+    /// a file <c>move_entity</c> moved. Written under <see cref="_writeLock"/>.
     /// </summary>
-    private readonly Dictionary<string, byte[]?> _sessionWritten =
-        new(OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    private CheckpointLedger? _ledger;
     private IDenStore? _store;
+
+    private CheckpointLedger SessionWritten =>
+        _ledger ?? Interlocked.CompareExchange(ref _ledger, new CheckpointLedger(Store), null) ?? _ledger;
+
+    /// <summary>
+    /// The ledger every write records itself in (<see cref="CheckpointLedger.Wrote"/>,
+    /// <see cref="CheckpointLedger.Deleted"/>). By default one of the session's
+    /// own; <c>wolfden serve</c> gives the server's, so the checkpoint dialog
+    /// marks the web UI's saves "saved in Wolfden" (#30).
+    /// </summary>
+    public CheckpointLedger Ledger
+    {
+        get => SessionWritten;
+        init => _ledger = value;
+    }
 
     /// <summary>The den store writes go through; by default the den's folder on disk.</summary>
     public IDenStore Store
@@ -478,85 +491,25 @@ public sealed partial class DenTools
             var history = History();
             try
             {
-                // Before recording: forget the session's writes that are recorded already (the
-                // writer committed them elsewhere), and note what each tracked file holds now,
-                // which is what the checkpoint records.
-                var onDisk = new Dictionary<string, byte[]?>(_sessionWritten.Comparer);
-                foreach (var (path, bytes) in _sessionWritten.ToList())
-                {
-                    if (bytes is null)
-                    {
-                        // Deleted by this session. A file there again was put there some other way,
-                        // so the deletion isn't the session's to claim any more.
-                        onDisk[path] = Store.TryReadFile(path);
-                        if (onDisk[path] is not null)
-                        {
-                            _sessionWritten.Remove(path);
-                        }
-                    }
-                    else if (history.HoldsAtLatest(path, bytes) is { IsAvailable: true, Value: true })
-                    {
-                        _sessionWritten.Remove(path);
-                    }
-                    else
-                    {
-                        onDisk[path] = Store.TryReadFile(path);
-                    }
-                }
-
-                var result = history.Checkpoint(new CheckpointRequest(message.Trim(), given, [coAuthor.Trim()]));
-                if (!result.IsAvailable)
-                {
-                    return new CheckpointResult(DenReader.ResultVersion, history.Name, false, result.Reason, false, null);
-                }
-
-                if (result.Value is not { } e)
-                {
-                    ForgetRecordedDeletions(given);
-                    return new CheckpointResult(DenReader.ResultVersion, history.Name, true, null, false, null);
-                }
-
                 // Which of the recorded files this session's writes saved, and which changed some
                 // other way (the writer's editor, another tool), so the agent can tell the writer
-                // (maintainer decision, 2026-10-25). A file the session wrote and something else
-                // changed after is in both lists. Committed files start afresh.
-                var ours = new List<string>();
-                var theirs = new List<string>();
-                foreach (var change in e.Changes)
+                // (maintainer decision, 2026-10-25). Committed files start afresh.
+                var done = SessionWritten.Checkpoint(history, new CheckpointRequest(message.Trim(), given, [coAuthor.Trim()]));
+                if (!done.Result.IsAvailable)
                 {
-                    var tracked = _sessionWritten.ContainsKey(change.Path) ? change.Path
-                        : change.OldPath is { } was && _sessionWritten.ContainsKey(was) ? was : null;
-                    if (tracked is null)
-                    {
-                        theirs.Add(change.Path);
-                        continue;
-                    }
-
-                    ours.Add(change.Path);
-                    var now = change.Path == tracked ? onDisk.GetValueOrDefault(tracked) : Store.TryReadFile(change.Path);
-                    var wrote = _sessionWritten[tracked];
-                    if (wrote is null ? now is not null : now is null || !now.AsSpan().SequenceEqual(wrote))
-                    {
-                        theirs.Add(change.Path);
-                    }
+                    return new CheckpointResult(DenReader.ResultVersion, history.Name, false, done.Result.Reason, false, null);
                 }
 
-                foreach (var change in e.Changes)
+                if (done.Result.Value is not { } e)
                 {
-                    _sessionWritten.Remove(change.Path);
-                    if (change.OldPath is { } old)
-                    {
-                        _sessionWritten.Remove(old);
-                    }
+                    return new CheckpointResult(DenReader.ResultVersion, history.Name, true, null, false, null);
                 }
-
-                ForgetRecordedDeletions(given);
 
                 return new CheckpointResult(
                     DenReader.ResultVersion, history.Name, true, null, true,
                     new HistoryEntryView(e.Id, e.When, e.Author, e.Message, e.Changes.Select(c => new HistoryChangeView(c.Kind.ToString().ToLowerInvariant(), c.Path, c.OldPath)).ToList()),
-                    ours.Order(StringComparer.Ordinal).ToList(),
-                    theirs.Order(StringComparer.Ordinal).ToList());
+                    done.Written,
+                    done.ChangedElsewhere);
             }
             catch (ArgumentException e)
             {
@@ -569,38 +522,8 @@ public sealed partial class DenTools
         }
     }
 
-    /// <summary>
-    /// After a checkpoint: forgets the session's deletions that the latest
-    /// recorded state no longer holds. A checkpoint records every den file
-    /// it covers (the whole den, or <paramref name="given"/>), so a path it
-    /// covered that's absent now is absent at the latest checkpoint too,
-    /// whether this one recorded the deletion or an earlier commit made
-    /// elsewhere did.
-    /// </summary>
     /// <summary>The paths the session tracks as its own deletions, for tests.</summary>
-    internal IReadOnlyList<string> SessionDeletions
-    {
-        get
-        {
-            lock (_writeLock)
-            {
-                return _sessionWritten.Where(p => p.Value is null).Select(p => p.Key).Order(StringComparer.Ordinal).ToList();
-            }
-        }
-    }
-
-    private void ForgetRecordedDeletions(IReadOnlyList<string>? given)
-    {
-        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        foreach (var (path, bytes) in _sessionWritten.ToList())
-        {
-            var covered = given is null || given.Any(p => string.Equals(path, p, comparison) || path.StartsWith(p + "/", comparison));
-            if (bytes is null && covered && !Store.FileExists(path))
-            {
-                _sessionWritten.Remove(path);
-            }
-        }
-    }
+    internal IReadOnlyList<string> SessionDeletions => SessionWritten.Deletions;
 
     // ---------------------------------------------------------------- create
 
@@ -1041,7 +964,7 @@ public sealed partial class DenTools
             // listed here; FileSystemDenStore's write is one move, so it can't.
             foreach (var path in written)
             {
-                _sessionWritten[path] = files[path];
+                SessionWritten.Wrote(path, files[path]);
             }
         }
         catch (Exception e)
@@ -1054,7 +977,7 @@ public sealed partial class DenTools
             // A file put back is as the session found it; one that still holds the edit is the session's.
             foreach (var path in stuck.Where(p => Store.TryReadFile(p) is { } now && now.AsSpan().SequenceEqual(files[p])))
             {
-                _sessionWritten[path] = files[path];
+                SessionWritten.Wrote(path, files[path]);
             }
             if (e is not (IOException or UnauthorizedAccessException))
             {
