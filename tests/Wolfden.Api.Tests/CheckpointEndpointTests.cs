@@ -213,6 +213,36 @@ public sealed class CheckpointEndpointTests : IDisposable
     }
 
     [Fact]
+    [Trait("Scenario", "SC-WEB-60")]
+    public async Task AWebFieldSaveShowsAsSavedInWolfden()
+    {
+        var den = Repository(TempDen.Dracula());
+        Commit(den, "Start");
+        await using var server = await StartAsync(den);
+
+        // A field save through /api/edit/field (#28, part b) goes through the same DenTools, so the ledger records it.
+        var source = await server.GetJsonAsync("/api/entity/source?entity=Mina%20Harker", HttpStatusCode.OK);
+        using (var response = await server.Client.PostAsync(
+            "/api/edit/field",
+            new StringContent(
+                JsonSerializer.Serialize(new
+                {
+                    entity = "Mina Harker", expectedHash = source.GetProperty("hash").GetString(), field = "placeholder", changes = new[] { new { op = "set", value = true } },
+                }),
+                Encoding.UTF8,
+                "application/json"),
+            Token))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        var status = await server.GetJsonAsync("/api/checkpoint", HttpStatusCode.OK);
+        Assert.Equal(
+            [(MinaFile, true)],
+            status.GetProperty("changes").EnumerateArray().Select(c => (c.GetProperty("path").GetString(), c.GetProperty("savedHere").GetBoolean())));
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-WEB-53")]
     public async Task ASaveDoesntWaitForACheckpointThatsWaitingOnGit()
     {

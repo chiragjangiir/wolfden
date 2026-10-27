@@ -898,3 +898,119 @@ button.danger {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* Editing a note's fields in place (#28, part b). */
+
+.fields dd.field-tools {
+  margin-bottom: 0.25rem;
+}
+
+.fields dd.field-editing {
+  grid-column: 1 / -1;
+}
+
+.field-readonly .muted {
+  font-size: 0.8rem;
+}
+
+.field-about {
+  margin: 0 0 0.5rem;
+}
+
+.field-editor fieldset {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 0 0 0.6rem;
+  padding: 0.4rem 0.75rem 0.5rem;
+  min-width: 0;
+}
+
+.field-editor legend {
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0 0.25rem;
+}
+
+.field-editor .position-input,
+.field-editor .date-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.75rem;
+  align-items: flex-end;
+}
+
+.field-editor textarea {
+  font: inherit;
+  width: 100%;
+}
+
+.inline-form label.checkbox {
+  flex-direction: row;
+  align-items: center;
+}
+
+.entry-facts summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  margin-bottom: 0.4rem;
+}
+
+.list-editor ol {
+  margin: 0 0 0.4rem;
+  padding-left: 1.5rem;
+}
+
+.list-editor li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0 0.4rem;
+}
+
+.item-tools {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.problem,
+.problems {
+  color: var(--broken);
+  font-size: 0.85rem;
+}
+
+.ref-input {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.ref-options {
+  position: absolute;
+  top: 100%;
+  z-index: 5;
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 0;
+  min-width: 16rem;
+  max-width: 100%;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.ref-options li {
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+}
+
+.ref-options li[aria-selected='true'] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.ref-options li[aria-selected='true'] .muted {
+  color: inherit;
+}

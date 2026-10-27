@@ -3284,7 +3284,8 @@ by: `WriteEndpointTests.TheSourceGivesTheFilesHashAndEachSectionsTextAsWritten`,
 - Add section asks for a name (offering the type's standard sections the
   note doesn't have), where it goes (at the end, or before a section, at
   that section's level), and its text. A name typed with the heading's
-  marks (`## Arc`) is refused, with the name to give instead (`Arc`).
+  marks (`## Arc`) is refused, with the name to give instead (`Arc`); a
+  name that only starts with `#`, such as `#1 Fan`, is fine.
 - Renaming or adding a section to a name another section already has is
   saved, and the result says that a link to that name reaches the first
   one (F-LINK-9).
@@ -3307,8 +3308,7 @@ Spec: design.md §9 (#28). Covered by:
 ### SC-WEB-42. I edit the whole file
 
 - Edit file opens the note's whole source, frontmatter included, for
-  anything the other controls can't do (a section comment, or a field
-  until part b of #28).
+  anything the other controls can't do, such as a section comment.
 - Saving writes it with the file's own line breaks and byte order mark.
   The note's id can't be changed or removed there (F-ID-4). A note
   without an id can be given one there, but not one another note or
@@ -3574,3 +3574,124 @@ Spec: design.md §6, §9 (#30). Covered by:
 `CheckpointEndpointTests.APinnedServerCheckpointsTheWholeDenButNamesOnlyItsUniverse`,
 `CheckpointEndpointTests.APinnedServersLatestCheckpointDoesntNameAnotherUniverse`,
 `Checkpoint.test.tsx` (web).
+
+### SC-WEB-60. I edit a field with a control that fits it
+
+The note's type is a den-local `specimen` with a field of every type.
+
+- Each field the type defines has its own Edit. A `string` is a text
+  box, `text` a text area, `number` a text box that has to hold a number
+  (`heavy` is refused in the page, with the message by it and focus on
+  it), `bool` a yes/no dropdown, and `enum` a dropdown of its values. A
+  value written `Dried` shows as `dried`, and isn't rewritten unless I
+  change it.
+- A `date` has its text and an optional sort key: `1893-08-08`, or
+  `1893-08-08 06:40` with the time of day, sorts by itself; "early
+  August" with sort key `1893, 8` is written
+  `{ text: early August, sort: [1893, 8] }`.
+- A `ref` searches as I type a few letters, offers the notes of its
+  types whose name or slug starts so (not notes that only mention it),
+  and the arrow keys and Enter (or a click) write `[[jonathan-harker]]`.
+  If another note of the universe has the same file name, the link is
+  by id, `[[01J...]]`, so it reaches only the note I picked (file names
+  compare ignoring case). A note with no id that no link is sure to
+  reach isn't written; the picker says to add an id with Edit file. Escape
+  closes the list, not the editor.
+- Numbers keep their digits: `2.50` stays `2.50`, and a 20-digit number
+  isn't rounded, read or written; `1e400` is refused (`invalid_edit`).
+  `0x1F`, `0o17`, `1_000`, `.inf`, and `True` keep their form, unquoted,
+  when the field is written whole or an item is moved.
+- Saving changes only that field's value, with its comment kept; a value
+  that doesn't fit its type is saved with the warning.
+
+Spec: design.md §9 "Editing fields", types.md §5. Covered by:
+`FieldEditEndpointTests.TheSourceGivesTheTypesFieldsAndEachValueAsWritten`,
+`FieldEditEndpointTests.EachFieldTypeIsSetAndOnlyItsValueChanges`,
+`FieldEditEndpointTests.AValueThatDoesntFitItsTypeIsSavedWithTheWarning`,
+`FieldEditEndpointTests.NumbersKeepEveryDigitBothWays`,
+`FieldEditEndpointTests.HexOctalAndOtherPlainValuesKeepTheirFormWhenWrittenAgain`,
+`CheckpointEndpointTests.AWebFieldSaveShowsAsSavedInWolfden`,
+`FieldEditing.test.tsx` (web).
+
+### SC-WEB-61. I add, remove, and reorder a list's items
+
+- A list field has Add item, Remove, and move up and down buttons, which
+  keep focus on the item. Saving removes the items taken out, adds new
+  ones where they go, and moves an item by removing it and adding it
+  again; the others keep their bytes, in the list's own style (block or
+  flow). A moved item is written afresh, so a comment on it is dropped,
+  and the result says so, quoting it; moving in place is #197. Removing
+  an item with a comment says the comment went too.
+- Removing the last item leaves `tags:` for a block list and `seen: []`
+  for a flow one (format.md F-RT-6): unset either way, with no warning.
+
+Spec: format.md F-RT-6, types.md F-FT-12. Covered by:
+`FieldEditEndpointTests.ListItemsAreAddedRemovedAndReorderedInTheListsOwnStyle`,
+`FieldEditEndpointTests.RemovingAnItemWithACommentSaysTheCommentWent`,
+`FieldEditing.test.tsx` (web).
+
+### SC-WEB-62. I give a fact dates: from chapter 3 until chapter 9
+
+- A field that changes over the story lists its entries, each with
+  From and Until, picked by book and chapter from the den's books, or
+  typed with "Type a position…". Each says when it holds: "holds from
+  Dracula chapter 3 until Dracula chapter 5".
+- Add a dated entry adds one at the end; Remove entry takes one out;
+  setting Until ends one. Status and Pinned are there for each entry.
+  Only the keys I changed are written (`until: "dracula:5"` added to
+  that entry's line).
+- Unpinning, pinning, or removing a pinned entry is saved, and the result
+  lists the pinned canon it touched.
+- A plain value that gets a second, dated value becomes a list of
+  entries.
+
+Spec: format.md §7.3, §9.3. Covered by:
+`FieldEditEndpointTests.DatedEntriesAreAddedEndedAndRemovedAndPinnedCanonIsReported`,
+`FieldEditing.test.tsx` (web).
+
+### SC-WEB-63. I add a field, clear one, or edit one in the file
+
+- Add field offers the type's fields the note doesn't set (or sets to
+  nothing), in the type's order, and opens that field's form.
+- Clear field asks in the page, with Keep it focused, then removes the
+  field's lines.
+- A field the type doesn't define, or a value the form can't show (such
+  as an unquoted `[[velari]]`, F-FLD-6), shows as written with Edit in
+  file and why.
+
+Spec: design.md §9 "Editing fields". Covered by:
+`FieldEditEndpointTests.ClearingAFieldRemovesItsLinesAndAddingOneGoesAfterTheOthers`,
+`FieldEditing.test.tsx` (web).
+
+### SC-WEB-64. Setting a field back gives back the same bytes
+
+- Setting a field to what it says writes nothing (`changed: false`).
+  In the page, a form I didn't touch sends nothing, whatever the value's
+  shape: an entry's `value: ~` stays `~`, never `[]`.
+- Changing a value, an item, or an entry's From, then changing it back,
+  leaves the file byte for byte as it was.
+
+Spec: format.md §12, F-RT-1, F-RT-3. Covered by:
+`FieldEditEndpointTests.SettingAFieldBackToWhatItWasGivesBackTheSameBytes`,
+`FieldEditing.test.tsx` (web).
+
+### SC-WEB-65. Field edits are guarded
+
+- If only another part of the note changed meanwhile, and my save
+  changes parts of the field rather than setting it whole, it's saved on
+  the new file without asking. If the field's own lines changed (even
+  just a comment on them), or my save sets the field whole, I'm asked. If the field changed, a stale save
+  shows my value (or "(not set)" for Clear field) and the file's side by
+  side: Keep mine saves (or clears) on the new hash, Take theirs drops
+  mine.
+- A From that isn't a position is refused with the errors
+  (`invalid_edit`), and the form stays open. A note in a final book is
+  `frozen`.
+- An edit names one field, and its paths stay under it: a field name
+  that isn't one (F-FLD-1), a path with a dot, an unknown op or member,
+  or no changes is `bad_argument`.
+- Escape closes the form, or asks first if there are changes.
+
+Spec: design.md §8 "Stale files", §9. Covered by:
+`FieldEditEndpointTests.AStaleFrozenOrInvalidFieldEditIsRefusedAndNothingIsWritten`,
+`FieldEditing.test.tsx` (web).

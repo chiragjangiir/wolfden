@@ -159,15 +159,26 @@ public sealed partial class DenTools
     /// <see cref="RenameEntity"/> and <see cref="ChangeAlias"/>, since links
     /// that matched the old text have to follow (F-RT-5).
     /// </summary>
-    public WriteResult UpdateFields(string entity, string expectedHash, JsonElement changes, string? universe = null)
+    /// <param name="entity">The entity.</param>
+    /// <param name="expectedHash">The hash of the file the changes are based on.</param>
+    /// <param name="changes">The changes, in order.</param>
+    /// <param name="universe">The universe, or null.</param>
+    /// <param name="numbersAsText">
+    /// True if a number in a value may also be given as <c>{"$number": "2.50"}</c>, its text as written,
+    /// which is written exactly so. The web UI sends numbers so, since a browser's JSON loses
+    /// <c>2.50</c>'s last digit and a long number's precision.
+    /// </param>
+    public WriteResult UpdateFields(string entity, string expectedHash, JsonElement changes, string? universe = null, bool numbersAsText = false)
     {
         var hash = RequireHash(expectedHash);
-        var ops = Changes(changes, chapter: false);
+        var ops = Changes(changes, chapter: false, numbersAsText);
         return EditEntity(entity, universe, hash, (file, catalog, pinned) =>
         {
             var touched = new List<string>();
             var added = new List<string>();
             var notes = new List<string>();
+            // List items removed with a comment on them, by the list's path, to tell a move (removed, then added again) from a removal.
+            var removedWithComments = new List<(string List, JsonElement Value, string Path, List<string> Comments)>();
             var facts = EntityFacts.For(catalog, new Bookkeeping(catalog.Universe.Den.BookkeepingSections));
             var held = facts.Fields.SelectMany(f => f.Entries.Where(e => e.Pinned).Select(e => $"fields.{f.Name}"))
                 .Concat(facts.Sections.Where(s => s.Pinned && (s.Section.Parent is null || !facts[s.Section.Parent].Pinned)).Select(s => $"section '{s.Section.Name}'"))
@@ -194,16 +205,51 @@ public sealed partial class DenTools
                     added.Add(alias.GetString()!.Trim());
                 }
 
+                var commentsBefore = op.Op == "remove" ? file.FrontmatterComments : [];
+                var removedNode = op.Op == "remove" && path.Count > 1 ? file.GetFrontmatterValue(path) : null;
+                var notesBefore = notes.Count;
                 file = Apply(op.Op switch
                 {
                     "set" => () => file.WithFrontmatterValue(path, op.Value!, inTemplateOrder: true),
                     "add" => () => file.WithNewListItem(path, op.Value!, op.Index, inTemplateOrder: true),
                     _ => () => Remove(file, path, notes),
                 });
+
+                if (op.Op == "remove" && notes.Count == notesBefore && Lost(commentsBefore, file.FrontmatterComments) is { Count: > 0 } lost
+                    && file.GetFrontmatterValue(path.Take(path.Count - 1).ToList()) is YamlSequence or YamlScalar { IsNull: true } or null
+                    && int.TryParse(path[^1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out _))
+                {
+                    removedWithComments.Add((string.Join('.', path.Take(path.Count - 1)), JsonOf(removedNode), string.Join('.', path), lost));
+                }
+                else if (op.Op == "add" && file.GetFrontmatterValue(path) is YamlSequence list)
+                {
+                    var at = op.Index ?? list.Items.Count - 1;
+                    var value = JsonOf(list.Items[at]).GetRawText();
+                    var listPath = string.Join('.', path);
+                    var moved = removedWithComments.FindIndex(r => r.List == listPath && r.Value.GetRawText() == value);
+                    if (moved >= 0)
+                    {
+                        var r = removedWithComments[moved];
+                        removedWithComments.RemoveAt(moved);
+                        notes.Add(
+                            $"Moved an item of {listPath} to item {at}, written afresh, so the comment on it was dropped: {Quoted(r.Comments)}. " +
+                            "Put it back by hand if you want it (moving an item in place is #197).");
+                    }
+                }
             }
 
+            notes.AddRange(removedWithComments.Select(r => $"Removed {r.Path} with the comment on it: {Quoted(r.Comments)}."));
             return (file, (Func<CatalogEntity, CatalogEntity, IEnumerable<string>>)((before, after) =>
                 FieldEffects(before, after, touched).Concat(added.SelectMany(a => AliasEffects(after, a))).Concat(notes).ToList()));
+
+            static string Quoted(List<string> comments) => string.Join(", ", comments.Select(c => $"'# {c.Trim()}'"));
+
+            // The comments in `before` that `after` doesn't have, counting repeats.
+            static List<string> Lost(IReadOnlyList<string> before, IReadOnlyList<string> after)
+            {
+                var left = after.ToList();
+                return before.Where(c => !left.Remove(c)).ToList();
+            }
         });
     }
 
@@ -1113,7 +1159,7 @@ public sealed partial class DenTools
     private static readonly HashSet<string> ReservedChapterNames =
         ["key", "number", "title", "id", "name", "status", "from", "until", "pin", "fields", "row", "placeholder", "scene"];
 
-    private static List<Change> Changes(JsonElement changes, bool chapter)
+    private static List<Change> Changes(JsonElement changes, bool chapter, bool numbersAsText = false)
     {
         if (changes.ValueKind == JsonValueKind.Object)
         {
@@ -1166,7 +1212,7 @@ public sealed partial class DenTools
                 }
             }
 
-            result.Add(new Change(op, path, field, hasValue ? ToYaml(value) : null, Int(item, "index"), Int(item, "item"), hasValue ? value : null));
+            result.Add(new Change(op, path, field, hasValue ? ToYaml(value, numbersAsText) : null, Int(item, "index"), Int(item, "item"), hasValue ? value : null));
         }
 
         return result;
@@ -1483,8 +1529,8 @@ public sealed partial class DenTools
         return fields.EnumerateObject().Select(p => new KeyValuePair<string, YamlValue>(p.Name, ToYaml(p.Value))).ToList();
     }
 
-    /// <summary>A JSON value as YAML to write: text as strings, whole numbers, true and false, null, lists, and mappings.</summary>
-    private static YamlValue ToYaml(JsonElement value)
+    /// <summary>A JSON value as YAML to write: text as strings, numbers (whole or not) written plain, true and false, null, lists, and mappings.</summary>
+    private static YamlValue ToYaml(JsonElement value, bool numbersAsText = false)
     {
         try
         {
@@ -1495,7 +1541,11 @@ public sealed partial class DenTools
                 case JsonValueKind.Number when value.TryGetInt64(out var n):
                     return YamlScalarValue.Integer(n);
                 case JsonValueKind.Number:
-                    throw new DenToolException(ToolErrorCodes.BadArgument, $"{value.GetRawText()} isn't a whole number; write it as text, \"{value.GetRawText()}\".");
+                    return Number(value.GetRawText());
+                case JsonValueKind.Object when numbersAsText && value.EnumerateObject().Count() == 1 && value.TryGetProperty("$number", out var text):
+                    return text.ValueKind == JsonValueKind.String
+                        ? Number(text.GetString()!)
+                        : throw new DenToolException(ToolErrorCodes.BadArgument, "A plain value given as {\"$number\": ...} holds its text, such as \"2.50\".");
                 case JsonValueKind.True or JsonValueKind.False:
                     return YamlScalarValue.Boolean(value.GetBoolean());
                 case JsonValueKind.Null:
@@ -1504,7 +1554,7 @@ public sealed partial class DenTools
                     var list = new YamlSequenceValue();
                     foreach (var item in value.EnumerateArray())
                     {
-                        list.Add(ToYaml(item));
+                        list.Add(ToYaml(item, numbersAsText));
                     }
 
                     return list;
@@ -1512,7 +1562,7 @@ public sealed partial class DenTools
                     var map = new YamlMappingValue();
                     foreach (var p in value.EnumerateObject())
                     {
-                        map.Add(p.Name, ToYaml(p.Value));
+                        map.Add(p.Name, ToYaml(p.Value, numbersAsText));
                     }
 
                     return map;
@@ -1523,6 +1573,29 @@ public sealed partial class DenTools
             throw new DenToolException(ToolErrorCodes.BadArgument, e.Message.Split(" (Parameter", 2)[0]);
         }
     }
+
+    /// <summary>
+    /// A number as written, to write plain: refused if YAML doesn't read it as a number
+    /// (<c>bad_argument</c>), or if it's too large for one (<c>1e400</c>, <c>invalid_edit</c>),
+    /// since types.md F-FT-6 reads such a value as no number at all.
+    /// </summary>
+    private static YamlScalarValue Number(string text)
+    {
+        // A number in decimal must be one a double holds; any other plain value YAML reads as no string
+        // (0x1F, 0o17, 1_000, .inf, True) is written as given, so it keeps its form and never gains quotes.
+        if (!DecimalNumber().IsMatch(text))
+        {
+            return YamlScalarValue.Plain(text);
+        }
+
+        return double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) && double.IsFinite(d)
+            ? YamlScalarValue.Plain(text)
+            : throw new DenToolException(ToolErrorCodes.InvalidEdit, $"{text} is too large to be a number (types.md F-FT-6). Write a smaller one, or write it as text.");
+    }
+
+    /// <summary>A whole or decimal number under YAML 1.2's core schema, such as <c>2.50</c> or <c>1e3</c>.</summary>
+    [GeneratedRegex(@"^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?\z", RegexOptions.CultureInvariant)]
+    private static partial Regex DecimalNumber();
 
     /// <summary>A YAML value as JSON: scalars as their text, nulls as null.</summary>
     private static JsonElement JsonOf(YamlNode? node)

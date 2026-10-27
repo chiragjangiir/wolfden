@@ -1,10 +1,12 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Wolfden.Core.Documents;
 using Wolfden.Core.Entities;
 using Wolfden.Core.Links;
 using Wolfden.Core.Structure;
 using Wolfden.Core.Text;
+using Wolfden.Core.Types;
 using Wolfden.Core.Yaml;
 using Wolfden.Index.Reading;
 
@@ -62,8 +64,48 @@ public sealed partial class DenTools
             new SourceLead(file.LeadLine, EditorText(file.Lead)),
             file.Sections.Select(s => new SourceSection(
                 s.Index, s.Name, s.Level, s.Line, s.Comment?.Text, EditorText(s.Body), facts[s].Pinned, s.Parent?.Index)).ToList(),
-            entity.Definition?.Sections.Select(d => d.Name).ToList() ?? []);
+            entity.Definition?.Sections.Select(d => d.Name).ToList() ?? [],
+            (file.Frontmatter?["fields"] as YamlMapping)?.Entries.Where(e => e.KeyText is not null)
+                .Select(e => new SourceField(e.KeyText!, e.Key.Line, AsWritten(e.Value))).ToList() ?? [],
+            [.. (entity.Definition?.Fields ?? []).Select(FieldTypeOf), Placeholder]);
     }
+
+    /// <summary>The universal <c>placeholder</c> field (types.md F-FT-17), which every entity has.</summary>
+    private static readonly SourceFieldType Placeholder = new(
+        "placeholder", "bool", false, false, false, [], null, "True while the name is a placeholder, waiting on a name check.", null);
+
+    private static SourceFieldType FieldTypeOf(FieldDefinition f) => new(
+        f.Name, f.Kind.ToKey(), f.IsList, f.IsTemporal, f.IsRequired, f.Values, f.Kind == FieldKind.Ref ? f.To : null, f.Description,
+        f.Default is null ? null : AsWritten(f.Default));
+
+    /// <summary>
+    /// A YAML value as JSON, keeping what kind of scalar it is (<see cref="SourceField.Value"/>):
+    /// a plain <c>true</c> or <c>false</c> as a boolean, any other plain scalar that YAML doesn't read as
+    /// a string (a number in any form, <c>.inf</c>, <c>1_000</c>, <c>True</c>, <c>yes</c>, a YAML 1.1
+    /// timestamp) as <c>{"$number": "2.50"}</c> with its text as written (a browser's JSON number would
+    /// lose <c>2.50</c>'s last digit and a long number's precision, and other values their form), a null
+    /// as null, and any other scalar as its text.
+    /// </summary>
+    private static JsonElement AsWritten(YamlNode? node)
+    {
+        return JsonSerializer.SerializeToElement(Plain(node));
+
+        static object? Plain(YamlNode? node) => node switch
+        {
+            null or YamlScalar { IsNull: true } => null,
+            YamlScalar { Style: YamlScalarStyle.Plain, Text: "true" or "false" } s => s.Text == "true",
+            YamlScalar { Style: YamlScalarStyle.Plain } s when YamlScalarValue.IsPlainNonString(s.Text) => new Dictionary<string, string> { ["$number"] = s.Text },
+            YamlScalar s => s.Text,
+            YamlSequence l => l.Items.Select(Plain).ToList(),
+            YamlMapping m => m.Entries.Where(e => e.KeyText is not null).GroupBy(e => e.KeyText!).ToDictionary(g => g.Key, g => Plain(g.First().Value)),
+            _ => null,
+        };
+    }
+
+    /// <summary>A Markdown heading's opening marks (<c>## </c>), or the marks alone.</summary>
+    [GeneratedRegex(@"^#+(?:\s+|\z)", RegexOptions.CultureInvariant)]
+    private static partial Regex HeadingMarks();
+
 
     /// <summary>
     /// Replaces the entity's lead: the text before its first section, title
@@ -358,12 +400,17 @@ public sealed partial class DenTools
             throw new DenToolException(ToolErrorCodes.BadArgument, "A section name is one line of text, not empty.");
         }
 
-        if (trimmed.StartsWith('#'))
+        if (HeadingMarks().Match(trimmed) is { Success: true } marks)
         {
             // Refused rather than stripped: the level comes from where the section goes, and a name the
-            // writer typed is never changed behind their back.
+            // writer typed is never changed behind their back. A name that only starts with '#', such
+            // as '#1 Fan', is a name like any other.
+            var rest = trimmed[marks.Length..];
             throw new DenToolException(
-                ToolErrorCodes.BadArgument, $"Give the section's name without the heading's '#' marks, such as '{trimmed.TrimStart('#').Trim()}'.");
+                ToolErrorCodes.BadArgument,
+                rest.Length == 0
+                    ? "Give the section's name without the heading's '#' marks."
+                    : $"Give the section's name without the heading's '#' marks, such as '{rest}'.");
         }
 
         return trimmed;

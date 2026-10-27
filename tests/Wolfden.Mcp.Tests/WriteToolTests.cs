@@ -118,7 +118,13 @@ public sealed class WriteToolTests : IDisposable
 
         var badFrom = Assert.Throws<DenToolException>(() => Tools.UpdateFields("Mr. Swales", hash, Json("""[{"op": "set", "path": "from", "value": "dracula:7.2"}]""")));
         Assert.Equal(ToolErrorCodes.InvalidEdit, badFrom.Code);
+
+        // A number too large to be one (types.md F-FT-6); one that isn't whole is written plain.
+        var huge = Assert.Throws<DenToolException>(() => Tools.UpdateFields("Mr. Swales", hash, Json("""[{"op": "set", "path": "fields.x_count", "value": 1e400}]""")));
+        Assert.Equal(ToolErrorCodes.InvalidEdit, huge.Code);
         Assert.Equal(before, _den.Read(Swales));
+        Tools.UpdateFields("Mr. Swales", hash, Json("""[{"op": "set", "path": "fields.x_count", "value": 2.50}]"""));
+        Assert.Contains("  x_count: 2.50\n", _den.Read(Swales), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -206,6 +212,24 @@ public sealed class WriteToolTests : IDisposable
         Assert.Equal([Swales, Note], result.Files!.Select(f => f.Path));
         Assert.DoesNotContain(Tools.Check().Diagnostics, d => d.Rule == "F-LINK-9");
         Assert.Equal(result.Files![1].Hash, Tools.GetEntity("Whitby dialect").Entity!.Hash);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-19")]
+    public void RenamingASectionToANameTheNoteHasSaysWhichOneALinkReaches()
+    {
+        var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+
+        // No link names Voice or Arc, so the rename is made, and the effect says a link to 'Arc' reaches the first one (F-LINK-9).
+        var result = Tools.RenameSection("Mr. Swales", "Voice", "Arc", hash);
+
+        Assert.Contains("\n## Arc\nThick Yorkshire dialect", _den.Read(Swales), StringComparison.Ordinal);
+        Assert.Contains(result.Effects, e => e.Contains("already has a section 'Arc'", StringComparison.Ordinal) && e.Contains("F-LINK-9", StringComparison.Ordinal));
+
+        // Renamed back, then the later one renamed to the earlier name: a link reaches the earlier one.
+        var back = Tools.RenameSection("Mr. Swales", "Arc", "Voice", result.Hash, sectionLine: 20);
+        var earlier = Tools.RenameSection("Mr. Swales", "Arc", "Overview", back.Hash);
+        Assert.Contains(earlier.Effects, e => e.Contains("An earlier section, 'Overview'", StringComparison.Ordinal) && e.Contains("F-LINK-9", StringComparison.Ordinal));
     }
 
     [Fact]

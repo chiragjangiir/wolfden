@@ -95,6 +95,9 @@ public sealed partial class MarkdownFile : DenFile
     /// </summary>
     public YamlMapping? Frontmatter => _frontmatter?.RootMapping;
 
+    /// <summary>The text of every YAML comment in the frontmatter, in order, without its <c>#</c>.</summary>
+    public IReadOnlyList<string> FrontmatterComments => _frontmatter?.Comments() ?? [];
+
     /// <summary>The frontmatter as written, including its <c>---</c> lines,
     /// or an empty string.</summary>
     public string FrontmatterText => IsReadable ? Text[.._frontmatterEnd] : "";

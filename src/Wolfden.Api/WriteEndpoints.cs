@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -30,14 +31,14 @@ namespace Wolfden.Api;
 /// (<c>current</c>), so the page can show both versions.
 /// </para>
 /// </remarks>
-public static class WriteEndpoints
+public static partial class WriteEndpoints
 {
     /// <summary>The paths under <c>/api</c> that answer GET here.</summary>
     public static readonly IReadOnlyList<string> GetPaths = ["entity/source"];
 
     /// <summary>The paths under <c>/api</c> that answer POST.</summary>
     public static readonly IReadOnlyList<string> PostPaths =
-        ["edit/lead", "edit/section", "edit/section/add", "edit/section/rename", "edit/section/remove", "edit/file"];
+        ["edit/lead", "edit/section", "edit/section/add", "edit/section/rename", "edit/section/remove", "edit/file", "edit/field"];
 
     /// <summary>
     /// The words the edits' messages use for what to do next. Their errors
@@ -88,7 +89,89 @@ public static class WriteEndpoints
             tools.RemoveSection(entity, b.Int("index"), b.Text("name"), hash, universe));
         MapEdit(api, "/edit/file", tools, ["text"], (b, entity, universe, hash) =>
             tools.ReplaceFile(entity, b.Text("text"), hash, universe));
+        MapEdit(api, "/edit/field", tools, ["field", "changes"], (b, entity, universe, hash) =>
+            tools.UpdateFields(entity, hash, FieldChanges(b.Text("field").Trim(), b.Json("changes")), universe, numbersAsText: true));
     }
+
+    /// <summary>The members a change of <c>/api/edit/field</c> takes.</summary>
+    private static readonly string[] ChangeMembers = ["op", "path", "value", "index"];
+
+    /// <summary>
+    /// The changes of one field, for <see cref="DenTools.UpdateFields"/>: each
+    /// change's <c>path</c> (a list of keys and item numbers, or none for the
+    /// field itself) is under <c>fields.&lt;field&gt;</c>, so an edit of a
+    /// field can't reach any other part of the frontmatter.
+    /// </summary>
+    private static JsonElement FieldChanges(string field, JsonElement changes)
+    {
+        if (!FieldName().IsMatch(field))
+        {
+            throw new DenToolException(ToolErrorCodes.BadArgument, $"'{field}' isn't a field name (F-FLD-1): lowercase letters, digits, and '_', starting with a letter.");
+        }
+
+        if (changes.ValueKind != JsonValueKind.Array || changes.GetArrayLength() == 0)
+        {
+            throw new DenToolException(ToolErrorCodes.BadArgument, "'changes' is a list of changes, such as [{\"op\": \"set\", \"value\": \"...\"}].");
+        }
+
+        var result = new List<Dictionary<string, object?>>();
+        foreach (var change in changes.EnumerateArray())
+        {
+            if (change.ValueKind != JsonValueKind.Object)
+            {
+                throw new DenToolException(ToolErrorCodes.BadArgument, "Each change is an object: {op, path, value, index}.");
+            }
+
+            var copy = new Dictionary<string, object?>(StringComparer.Ordinal);
+            List<string> path = ["fields", field];
+            foreach (var member in change.EnumerateObject())
+            {
+                if (!ChangeMembers.Contains(member.Name, StringComparer.Ordinal))
+                {
+                    throw new DenToolException(ToolErrorCodes.BadArgument, $"A change doesn't take '{member.Name}'. It takes: {string.Join(", ", ChangeMembers)}.");
+                }
+
+                if (!copy.TryAdd(member.Name, member.Value))
+                {
+                    throw new DenToolException(ToolErrorCodes.BadArgument, $"Give '{member.Name}' once in a change.");
+                }
+
+                if (member.Name == "path")
+                {
+                    path.AddRange(PathOf(member.Value));
+                }
+            }
+
+            copy["path"] = path;
+            result.Add(copy);
+        }
+
+        return JsonSerializer.SerializeToElement(result);
+
+        static List<string> PathOf(JsonElement path)
+        {
+            if (path.ValueKind == JsonValueKind.Null)
+            {
+                return [];
+            }
+
+            if (path.ValueKind != JsonValueKind.Array)
+            {
+                throw new DenToolException(
+                    ToolErrorCodes.BadArgument, "A change's 'path' is a list of keys and item numbers under the field, such as [1, \"until\"], or none for the field itself.");
+            }
+
+            return path.EnumerateArray().Select(segment => segment.ValueKind switch
+            {
+                JsonValueKind.Number when segment.TryGetInt32(out var i) && i >= 0 => i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                JsonValueKind.String when segment.GetString() is { Length: > 0 } key && !key.Contains('.', StringComparison.Ordinal) => key,
+                _ => throw new DenToolException(ToolErrorCodes.BadArgument, $"'{segment.GetRawText()}' in a path isn't a key or an item number from 0."),
+            }).ToList();
+        }
+    }
+
+    [GeneratedRegex("^[a-z][a-z0-9_]{0,63}$", RegexOptions.CultureInvariant)]
+    private static partial Regex FieldName();
 
     /// <summary>Maps <c>POST</c> on <paramref name="path"/> to an edit (<see cref="Edit"/>).</summary>
     private static void MapEdit(RouteGroupBuilder api, string path, DenTools tools, string[] members, Func<Body, string, string?, string, WriteResult> edit) =>
@@ -240,6 +323,11 @@ public static class WriteEndpoints
             text = text.Trim();
             return text.Length == 0 ? null : text;
         }
+
+        /// <summary>A JSON member as given; refused if it's missing.</summary>
+        public JsonElement Json(string name) => _members.TryGetValue(name, out var value)
+            ? value
+            : throw new DenToolException(ToolErrorCodes.BadArgument, $"Give '{name}'.");
 
         /// <summary>A whole-number member; refused if it's missing.</summary>
         public int Int(string name) => OptionalInt(name) ?? throw new DenToolException(ToolErrorCodes.BadArgument, $"Give '{name}'.");

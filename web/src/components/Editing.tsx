@@ -19,15 +19,22 @@ export type EditTarget =
   | { kind: 'rename'; line: number; name: string }
   | { kind: 'remove'; line: number; name: string }
   | { kind: 'add' }
-  | { kind: 'file' }
+  | { kind: 'file'; from?: string }
+  | { kind: 'field'; name: string }
+  | { kind: 'add-field' }
 
 /** The id of the button that opens `target`, where focus goes back when it closes. */
 export function editButtonId(target: EditTarget): string {
   switch (target.kind) {
+    case 'file':
+      // Edit in file by a field: focus goes back to that field's button.
+      return target.from ?? 'edit-file'
     case 'lead':
     case 'add':
-    case 'file':
+    case 'add-field':
       return `edit-${target.kind}`
+    case 'field':
+      return `edit-field-${target.name}`
     default:
       return `edit-${target.kind}-${target.line}`
   }
@@ -221,7 +228,7 @@ function UnsavedPrompt({ question, discard, onKeep, onDiscard }: { question: str
 }
 
 /** Asks before Cancel or Escape drops unsaved changes, in the editor that has them. */
-function DiscardPrompt() {
+export function DiscardPrompt() {
   const editing = useEditing()!
   return editing.discarding ? (
     <UnsavedPrompt
@@ -285,7 +292,7 @@ function SaveResult({ saved, onDismiss }: { saved: Saved; onDismiss: () => void 
 }
 
 /** An Edit (or Rename, Remove, …) button, off while the note is frozen or another piece is being edited. */
-export function EditButton({ target, label, children }: { target: EditTarget; label: string; children: ReactNode }) {
+export function EditButton({ target, label, id, children }: { target: EditTarget; label: string; id?: string; children: ReactNode }) {
   const editing = useEditing()
   if (!editing) {
     return null
@@ -296,7 +303,7 @@ export function EditButton({ target, label, children }: { target: EditTarget; la
     <button
       type="button"
       className="edit-button"
-      id={editButtonId(target)}
+      id={id ?? editButtonId(target)}
       aria-label={label}
       disabled={editing.frozen !== null || busy}
       aria-describedby={editing.frozen !== null ? 'frozen-reason' : undefined}
@@ -370,7 +377,7 @@ function useOpenedPiece(target: TextTarget | { kind: 'rename' | 'remove'; line: 
 }
 
 /** Invalidates every cached answer after a save: names, links, lists, searches, and history can all follow from one edit. */
-function useAfterSave() {
+export function useAfterSave() {
   const client = useQueryClient()
   return useCallback(() => client.invalidateQueries(), [client])
 }
@@ -568,7 +575,7 @@ function SectionCommentNote({ target, source }: { target: { line: number; name: 
   ) : null
 }
 
-function SaveError({ error }: { error: Error }) {
+export function SaveError({ error }: { error: Error }) {
   const code = error instanceof EditError ? error.code : null
   return (
     <div className="error" role="alert">
@@ -588,7 +595,7 @@ function SaveError({ error }: { error: Error }) {
  * since the editor opened (by an agent, or another editor), with the lines
  * that differ marked, and the three ways forward.
  */
-function Conflict({
+export function Conflict({
   what,
   mine,
   theirs,
@@ -603,7 +610,8 @@ function Conflict({
   saving: boolean
   onKeepMine: (() => void) | undefined
   onTakeTheirs: () => void
-  onCopyMine: () => void
+  /** Copy mine and reload, where the editor can open again on the file as it is now. */
+  onCopyMine?: () => void
 }) {
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => heading.current?.focus(), [])
@@ -632,12 +640,15 @@ function Conflict({
         <button type="button" onClick={onTakeTheirs} disabled={saving}>
           Take theirs
         </button>
-        <button type="button" onClick={onCopyMine} disabled={saving}>
-          Copy mine and reload
-        </button>
+        {onCopyMine && (
+          <button type="button" onClick={onCopyMine} disabled={saving}>
+            Copy mine and reload
+          </button>
+        )}
       </p>
       <p className="muted">
-        Keep mine saves your version over the new file. Take theirs drops your changes. Copy mine and reload copies your version, then opens the file as it is now.
+        Keep mine saves your version over the new file. Take theirs drops your changes.
+        {onCopyMine && ' Copy mine and reload copies your version, then opens the file as it is now.'}
       </p>
     </div>
   )

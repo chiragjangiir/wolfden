@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within, configure } from '@testing-library/react'
 import { QueryClient } from '@tanstack/react-query'
 import { createBrowserHistory } from '@tanstack/react-router'
 import { App } from './App'
@@ -12,6 +12,11 @@ import { entities, page, renderApp, stubApi } from './test/harness'
 
 // Editing a note in place (#28): the lead and sections in CodeMirror, Edit
 // file, saving with the hash, the conflict view, and the guards around it.
+
+// The first test of a file renders the app cold, which can take over a second
+// when the machine is busy (the whole suite runs files in parallel).
+configure({ asyncUtilTimeout: 5000 })
+vi.setConfig({ testTimeout: 15_000 })
 
 beforeAll(() => {
   // jsdom lays nothing out; CodeMirror measures text ranges.
@@ -52,6 +57,8 @@ function source(hash = 'h1', overview = 'Old text.'): EntitySource {
       { index: 2, name: 'Late arc', level: 3, line: 16, comment: null, body: 'Much later.', pinned: false, parent: 1 },
     ],
     standardSections: ['Overview', 'Appearance', 'Arc'],
+    fields: [],
+    fieldTypes: [],
   }
 }
 
