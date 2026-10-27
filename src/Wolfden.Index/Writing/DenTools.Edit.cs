@@ -80,9 +80,11 @@ public sealed partial class DenTools
 
     /// <summary>
     /// A YAML value as JSON, keeping what kind of scalar it is (<see cref="SourceField.Value"/>):
-    /// a plain boolean as one, a plain number as <c>{"$number": "2.50"}</c> with its text as written
-    /// (a browser's JSON number would lose <c>2.50</c>'s last digit and a long number's precision),
-    /// a null as null, and any other scalar as its text.
+    /// a plain <c>true</c> or <c>false</c> as a boolean, any other plain scalar that YAML doesn't read as
+    /// a string (a number in any form, <c>.inf</c>, <c>1_000</c>, <c>True</c>, <c>yes</c>, a YAML 1.1
+    /// timestamp) as <c>{"$number": "2.50"}</c> with its text as written (a browser's JSON number would
+    /// lose <c>2.50</c>'s last digit and a long number's precision, and other values their form), a null
+    /// as null, and any other scalar as its text.
     /// </summary>
     private static JsonElement AsWritten(YamlNode? node)
     {
@@ -91,8 +93,8 @@ public sealed partial class DenTools
         static object? Plain(YamlNode? node) => node switch
         {
             null or YamlScalar { IsNull: true } => null,
-            YamlScalar { Style: YamlScalarStyle.Plain } s when s.AsBoolean() is { } b => b,
-            YamlScalar { Style: YamlScalarStyle.Plain } s when YamlNumber().IsMatch(s.Text) => new Dictionary<string, string> { ["$number"] = s.Text },
+            YamlScalar { Style: YamlScalarStyle.Plain, Text: "true" or "false" } s => s.Text == "true",
+            YamlScalar { Style: YamlScalarStyle.Plain } s when YamlScalarValue.IsPlainNonString(s.Text) => new Dictionary<string, string> { ["$number"] = s.Text },
             YamlScalar s => s.Text,
             YamlSequence l => l.Items.Select(Plain).ToList(),
             YamlMapping m => m.Entries.Where(e => e.KeyText is not null).GroupBy(e => e.KeyText!).ToDictionary(g => g.Key, g => Plain(g.First().Value)),
@@ -104,9 +106,6 @@ public sealed partial class DenTools
     [GeneratedRegex(@"^#+(?:\s+|\z)", RegexOptions.CultureInvariant)]
     private static partial Regex HeadingMarks();
 
-    /// <summary>A number under YAML 1.2's core schema, as types.md F-FT-6 reads one: an integer or a float, without <c>.inf</c> and <c>.nan</c>.</summary>
-    [GeneratedRegex(@"^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?\z", RegexOptions.CultureInvariant)]
-    private static partial Regex YamlNumber();
 
     /// <summary>
     /// Replaces the entity's lead: the text before its first section, title

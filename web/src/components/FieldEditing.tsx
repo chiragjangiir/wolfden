@@ -31,6 +31,26 @@ import { ErrorState, Loading } from './States'
 // with a From and an Until; a plain value is one entry with neither. Save
 // sends only what changed, through /api/edit/field (the MCP update_fields).
 
+/**
+ * The lines the file gives field `name`, from its key to the next field (or
+ * the end of the frontmatter), or undefined if it doesn't set it.
+ */
+export function fieldText(source: EntitySource, name: string): string | undefined {
+  const field = source.fields.find((f) => f.name === name)
+  if (!field) {
+    return undefined
+  }
+
+  const lines = source.text.split('\n')
+  const next = source.fields.filter((f) => f.line > field.line).map((f) => f.line)
+  let end = next.length > 0 ? Math.min(...next) - 1 : lines.findIndex((l, i) => i >= field.line && l === '---')
+  if (end < 0) {
+    end = lines.length
+  }
+
+  return lines.slice(field.line - 1, end).join('\n')
+}
+
 /** The value the file gives `name`, or undefined if it doesn't set it. */
 function rawOf(source: EntitySource, name: string): Json | undefined {
   return source.fields.find((f) => f.name === name)?.value
@@ -269,8 +289,11 @@ export function FieldEditor({ name, positions }: { name: string; positions: Posi
           editing.close({ what: clear ? `the note (cleared ${name})` : `the field ${name}`, result })
           return
         } catch (e) {
+          // Sent again only if nothing of this field could be overwritten: no change sets it as a whole, and its
+          // lines, comments and quoting included, are byte for byte as they were.
           const current = e instanceof EditError && e.code === 'stale_file' ? e.current : null
-          if (current && attempt < 2 && JSON.stringify(rawOf(current, name)) === JSON.stringify(rawOf(base, name))) {
+          const safe = current !== null && !changes.some((c) => c.path.length === 0) && fieldText(current, name) === fieldText(at, name)
+          if (current && safe && attempt < 2 && JSON.stringify(rawOf(current, name)) === JSON.stringify(rawOf(base, name))) {
             at = current
             continue
           }
@@ -843,9 +866,18 @@ function RefInput({
   const showing = searchable && options.length > 0
   // Every note of the universe, to tell whether a slug reaches only the note picked.
   const all = useQuery(entitiesQuery(universe, undefined))
+  const [refused, setRefused] = useState<string | null>(null)
   const pick = (entity: { path: string; name: string; id: string | null }) => {
-    onChange({ ...draft, text: linkFor(entity, all.data && !all.data.truncated ? all.data.entities : null) })
+    const link = linkFor(entity, all.data && !all.data.truncated ? all.data.entities : null)
     setOpen(false)
+    if (link === null) {
+      // No link is sure to reach it: never write one that's broken or reaches another note.
+      setRefused(`“${entity.name}” has no id, and no link by its file name or name is sure to reach it. Add an id with Edit file on that note, then pick it again.`)
+      return
+    }
+
+    setRefused(null)
+    onChange({ ...draft, text: link })
   }
 
   return (
@@ -890,6 +922,11 @@ function RefInput({
       <span className="muted" id={`${id}-hint`}>
         Type a few letters of the note’s name, then pick it.
       </span>
+      {refused && (
+        <span className="problem" role="alert">
+          {refused}
+        </span>
+      )}
       {showing && (
         <ul className="ref-options" role="listbox" id={listId} aria-label={`Notes for ${label}`}>
           {options.map((e, i) => (

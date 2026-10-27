@@ -174,6 +174,8 @@ describe('SC-WEB-61: the changes a field edit sends', () => {
 
     expect(problems(types.weight, 'heavy')).toEqual(['weight is a number, such as 140 or 2.5.'])
     expect(problems(types.weight, '1e3')).toEqual([])
+    expect(problems(types.weight, '0x1F')).toEqual([])
+    expect(problems(types.weight, '0o17')).toEqual([])
     expect(problems(types.finder, 'Mina')).toEqual(['finder is a link to one note, such as [[mina-harker]]: pick one from the list as you type.'])
     expect(problems(types.found, '1893', 'August')).toEqual(['A sort key is whole numbers separated by commas, such as 1893, 8, 10.'])
     expect(problems(types.label, '')).toEqual(['Give label a value, or use Clear field to take it out of the note.'])
@@ -194,12 +196,22 @@ describe('SC-WEB-61: the changes a field edit sends', () => {
 
     // Another note with the same file name could take the link, or make it ambiguous (F-LINK-7): the id reaches only this one.
     expect(linkFor(pick, [{ path: minaPath }, { path: 'universes/dracula/series/later/entities/characters/mina-harker.md' }])).toBe('[[01M4TF5F0EKGGWD5FNVBAEY8X1]]')
+    // Ignoring case, as links match (F-LINK-4).
+    expect(linkFor(pick, [{ path: minaPath }, { path: 'universes/dracula/entities/notes/Mina-Harker.md' }])).toBe('[[01M4TF5F0EKGGWD5FNVBAEY8X1]]')
+    // Without an id, a shared slug has no sure link: none is written.
+    expect(linkFor({ ...pick, id: null }, [{ path: minaPath }, { path: 'x/MINA-HARKER.md' }])).toBeNull()
     // Not knowing the other notes, the id too.
     expect(linkFor(pick, null)).toBe('[[01M4TF5F0EKGGWD5FNVBAEY8X1]]')
     // A file name that isn't a slug: the id, never a name with | # or ] in it.
     const odd = { path: 'universes/dracula/notes/The Year #1893.md', name: 'The Year #1893 | draft', id: '01M4TF5F0EKGGWD5FNVBAEY8X2' }
     expect(linkFor(odd, [])).toBe('[[01M4TF5F0EKGGWD5FNVBAEY8X2]]')
-    expect(linkFor({ ...odd, id: null }, [])).toBe('[[The Year 1893 draft]]')
+    expect(linkFor({ ...odd, id: null }, [])).toBeNull()
+    // A name that can be written in a link, and that nothing else matches, is used.
+    const year = { path: 'universes/dracula/notes/The Year.md', name: 'The Year', id: null }
+    expect(linkFor(year, [{ path: 'x/other.md', name: 'Other' }])).toBe('[[The Year]]')
+    expect(linkFor(year, [{ path: 'x/the year.md' }])).toBeNull()
+    expect(linkFor(year, [{ path: 'x/other.md', name: 'the  year' }])).toBeNull()
+    expect(linkFor(year, null)).toBeNull()
   })
 
   it('offers notes by their name or slug, not ones that only mention the words', () => {
@@ -209,6 +221,9 @@ describe('SC-WEB-61: the changes a field edit sends', () => {
     expect(nameMatches(jon, 'jon har')).toBe(true)
     expect(nameMatches(jon, 'jonathan-h')).toBe(true)
     expect(nameMatches(jon, 'mina')).toBe(false)
+    // Typed words split as names do.
+    expect(nameMatches({ name: 'Dr. Van Helsing', path: 'x/abraham-van-helsing.md' }, 'dr. van')).toBe(true)
+    expect(nameMatches({ name: 'Dr. Van Helsing', path: 'x/abraham-van-helsing.md' }, 'van_hel')).toBe(true)
     expect(nameMatches({ name: 'Castle Dracula', path: 'x/castle-dracula.md' }, 'Jon')).toBe(false)
   })
 })
@@ -259,6 +274,8 @@ describe('B1: an untouched form sends nothing, whatever the value', () => {
 
 const mina = entities.find((e) => e.key === 'E-MINA')!
 const jonathan = entities.find((e) => e.key === 'E-JONATHAN')!
+// A note without an id whose file name isn't a slug, and whose name has a '#': no link is sure to reach it.
+const year = { ...entities.find((e) => e.id === null)!, type: 'character' }
 
 function pageField(name: string, value: unknown, line: number, extra: Partial<PageField> = {}): PageField {
   return { name, value, kind: 'plain', status: null, pinned: false, from: null, until: null, line, entryIndex: null, live: null, links: [], ...extra }
@@ -285,12 +302,30 @@ const sourceTypes: SourceFieldType[] = [
   type('placeholder', 'bool'),
 ]
 
+// The file the fields come from, each on the line the source gives it.
+const FILE_TEXT = [
+  '---',
+  'name: Mina Harker',
+  'type: character',
+  'status: canon',
+  'fields:',
+  '  role:',
+  '    - { value: A schoolmistress }\n    - { value: A wife, from: "dracula:3" }'.split('\n')[0],
+  '  occupation: [teacher, secretary, typist]',
+  '  state: Dried',
+  '  weight: 12',
+  '  x_odd: kept',
+  '  species: [[velari]]',
+  '---',
+  '',
+].join('\n')
+
 function source(hash = 'h1', fields: EntitySource['fields'] | null = null): EntitySource {
   return {
     version: 1,
     entity: mina,
     hash,
-    text: '---\nname: Mina Harker\n---\n',
+    text: FILE_TEXT,
     lineEndings: 'lf',
     byteOrderMark: false,
     frozen: null,
@@ -341,7 +376,8 @@ function stubFields(options: { onPost?: (post: Post, n: number) => Response | Wr
     if (url.pathname === '/api/search') {
       stub.calls.push(`${url.pathname}${url.search}`)
       const hit = (e: typeof mina) => ({ entity: e, section: null, line: null, snippet: e.name, status: 'canon', inCanon: true, inComment: false })
-      return Response.json({ version: 1, query: url.searchParams.get('query')!, count: 2, truncated: false, hits: [hit(jonathan), hit(mina)] } satisfies SearchResult)
+      const hits = url.searchParams.get('query')!.startsWith('year') ? [hit(year)] : [hit(jonathan), hit(mina)]
+      return Response.json({ version: 1, query: url.searchParams.get('query')!, count: hits.length, truncated: false, hits } satisfies SearchResult)
     }
 
     if (url.pathname.startsWith('/api/edit/')) {
@@ -631,16 +667,52 @@ describe('SC-WEB-65: field edits are guarded', () => {
       onPost: (_, n) => (n === 1 ? Response.json({ code: 'stale_file', message: 'The file changed.', current: file.source }, { status: 409 }) : written()),
     })
     renderApp('/u/dracula/e/E-MINA')
-    const form = await openField('state')
-    // An agent changes another field meanwhile; state is as it was.
-    file.source = source('h9', source().fields.map((f) => (f.name === 'weight' ? { ...f, value: { $number: '14' } } : f)))
-    fireEvent.change(within(form).getByRole('combobox', { name: 'Value' }), { target: { value: 'lost' } })
+    const form = await openField('role')
+    // An agent changes another field meanwhile; role's lines are as they were.
+    file.source = { ...source('h9'), text: FILE_TEXT.replace('  weight: 12', '  weight: 14') }
+    const second = within(form).getByRole('group', { name: /Entry 2 of 2/ })
+    const until = within(second).getByRole('group', { name: 'Until' })
+    fireEvent.change(within(until).getByRole('combobox', { name: 'Book' }), { target: { value: 'dracula' } })
+    fireEvent.change(within(until).getByRole('combobox', { name: 'Chapter' }), { target: { value: 'dracula:5' } })
     fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
 
-    expect(await screen.findByText('Saved the field state.')).toBeTruthy()
+    expect(await screen.findByText('Saved the field role.')).toBeTruthy()
     expect(posts.map((p) => p.body.expectedHash)).toEqual(['h1', 'h9'])
-    expect(posts[1].body.changes).toEqual([{ op: 'set', path: [], value: 'lost' }])
+    expect(posts[1].body.changes).toEqual([{ op: 'set', path: [1, 'until'], value: 'dracula:5' }])
     expect(screen.queryByRole('region', { name: /The note changed/ })).toBeNull()
+  })
+
+  it('asks, rather than saving again, when the field’s own lines changed or the save sets it whole', async () => {
+    const { posts, file } = stubFields({
+      onPost: (_, n) => (n === 1 ? Response.json({ code: 'stale_file', message: 'The file changed.', current: file.source }, { status: 409 }) : written()),
+    })
+    renderApp('/u/dracula/e/E-MINA')
+    const form = await openField('state')
+    // Another editor adds only a comment to state: its value is the same, its lines aren't.
+    file.source = { ...source('h9'), text: FILE_TEXT.replace('  state: Dried', '  state: Dried   # checked') }
+    // Pinning a plain value makes it an entry: a whole-field set.
+    fireEvent.click(within(form).getByRole('checkbox', { name: 'Pinned (hard canon)' }))
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByRole('region', { name: 'The note changed while you were editing the field state' })).toBeTruthy()
+    expect(posts).toHaveLength(1)
+  })
+
+  it('refuses a pick no link is sure to reach, and says how to fix it', async () => {
+    stubFields()
+    renderApp('/u/dracula/e/E-MINA')
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a field' }))
+    const add = await screen.findByRole('form', { name: 'Add a field' })
+    fireEvent.change(within(add).getByRole('combobox', { name: 'Field' }), { target: { value: 'husband' } })
+    fireEvent.click(within(add).getByRole('button', { name: 'Add field' }))
+    const form = await screen.findByRole('form', { name: 'Edit husband' })
+    const input = within(form).getByRole('combobox', { name: 'Value' })
+    fireEvent.change(input, { target: { value: 'year' } })
+    await within(form).findByRole('listbox')
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect((await within(form).findByRole('alert')).textContent).toContain('has no id')
+    expect((input as HTMLInputElement).value).toBe('year')
   })
 
   it('returns focus to the field’s own Edit in file button', async () => {

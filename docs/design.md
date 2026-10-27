@@ -1573,9 +1573,11 @@ docs/
   recorded decision. Chapter fields and inherited values are #138.
   - **The API.** `/api/entity/source` adds `fields` (each field under
     `fields:` in file order: its `name`, the `line` of its key, and its
-    `value` as written, as JSON, with a plain `true`/`false` as one, a
-    plain number as `{"$number": "2.50"}` with its text as written, and
-    every other scalar as its text) and `fieldTypes` (the
+    `value` as written, as JSON, with a plain `true`/`false` as one, any
+    other plain scalar YAML doesn't read as a string (a number in any
+    form, `0x1F`, `1_000`, `.inf`, `True`, `yes`) as
+    `{"$number": "2.50"}` with its text as written, and every other
+    scalar as its text) and `fieldTypes` (the
     type's fields in field order, each with `type`, `list`,
     `temporal`, `required`, enum `values`, ref `to`, `description`,
     and `default`, then the universal `placeholder`; `row` is edited in
@@ -1588,7 +1590,9 @@ docs/
     books, write check, pinned canon, effects, ledger, and lossless
     edits. Numbers go both ways as text (`{"$number": "2.50"}`), since a
     browser's JSON number would turn `2.50` into `2.5` and cut a long
-    number's digits; the server writes the text as given, plain. A
+    number's digits; the server writes the text as given, plain, so a
+    value rewritten whole or moved keeps its form (`0x1F`, `.inf`) and
+    never gains quotes. A
     number that isn't whole is written plain by the MCP tools too now,
     and one too large to be a number (`1e400`) is `invalid_edit` for
     both.
@@ -1632,12 +1636,17 @@ docs/
     statuses or "the note's status", and pin a checkbox.
   - **The link a pick writes.** `[[slug]]`, by the note's file name, as
     the den's own files write links, where no other note of the universe
-    has that file name. A slug is the second tier of resolution
-    (F-LINK-6), so a namesake could take the link or make it ambiguous
-    (F-LINK-7): then, or if the page can't list the universe's notes, or
-    the file name isn't a slug, the link is by id (`[[01J...]]`), which
-    reaches only that note. A note without an id falls back to its slug,
-    or its name with `|`, `#`, `[`, and `]` left out.
+    has that file name, ignoring case as links match (F-LINK-4). A slug
+    is the second tier of resolution (F-LINK-6), so a namesake could
+    take the link or make it ambiguous (F-LINK-7): then, or if the page
+    can't list the universe's notes, or the file name isn't a slug, the
+    link is by id (`[[01J...]]`), which reaches only that note. A note
+    without an id is linked by its name only where the name can be
+    written in a link (no `|`, `#`, `[`, `]`) and no other note's file
+    name or name matches it; otherwise the pick is refused, with "add
+    an id with Edit file", rather than writing a link that may not reach
+    it. Typed words are split as names are, so `dr. van` finds "Dr. Van
+    Helsing".
   - **Checked in the page.** Numbers, links, sort keys, one-line
     strings, empty values, and empty list items are checked before
     sending, with the message by the control and focus on the first.
@@ -1654,10 +1663,12 @@ docs/
   - **Add field and Clear field.** Add field offers the type's fields
     the note doesn't set, or sets to nothing, and opens that field's
     form. Clear field asks in the page, then removes the key.
-  - **A stale save.** If only another part of the note changed (this
-    field's value is as it was when the form opened), nothing of the
-    field is at stake, so the page sends the same changes again on the
-    new hash, without asking. Otherwise it shows the writer's value (or
+  - **A stale save.** If only another part of the note changed, the
+    page sends the same changes again on the new hash without asking,
+    but only where nothing of the field can be overwritten: no change
+    sets the field as a whole, and the field's lines (from its key to
+    the next field), comments and quoting included, are byte for byte
+    as they were. Otherwise it shows the writer's value (or
     "(not set)" for Clear field) and the file's side by side. Keep mine
     sends the same changes on the new hash if the field itself didn't
     change, and otherwise sets the field to the writer's value as a

@@ -361,6 +361,39 @@ public class FieldEditEndpointTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-WEB-60")]
+    public async Task HexOctalAndOtherPlainValuesKeepTheirFormWhenWrittenAgain()
+    {
+        using var den = NewDen();
+        den.Write(BoxPath, Box.Replace("  weight: 12.50\n", "  weight: 0x1F\n", StringComparison.Ordinal)
+            .Replace("    - chapel\n", "    - 0o17\n    - 1_000\n    - .inf\n    - True\n", StringComparison.Ordinal));
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root));
+
+        // Read: each as its text, so the page can send it back as written.
+        var fields = (await SourceAsync(server)).GetProperty("fields").EnumerateArray().ToDictionary(f => f.GetProperty("name").GetString()!, f => f.GetProperty("value"));
+        Assert.Equal("0x1F", fields["weight"].GetProperty("$number").GetString());
+        Assert.Equal(["soil", "box", "0o17", "1_000", ".inf", "True"], fields["tags"].EnumerateArray().Select(t => t.ValueKind == JsonValueKind.String ? t.GetString() : t.GetProperty("$number").GetString()));
+
+        // Moved: still plain, never quoted.
+        await SavedAsync(server, "tags", new object[]
+        {
+            new { op = "remove", path = new object[] { 5 } }, new { op = "add", value = Number("True"), index = 0 },
+            new { op = "remove", path = new object[] { 5 } }, new { op = "add", value = Number(".inf"), index = 0 },
+            new { op = "remove", path = new object[] { 5 } }, new { op = "add", value = Number("1_000"), index = 0 },
+            new { op = "remove", path = new object[] { 5 } }, new { op = "add", value = Number("0o17"), index = 0 },
+        });
+        Assert.Contains("  tags:\n    - 0o17\n    - 1_000\n    - .inf\n    - True\n    - soil\n    - \"box\"   # from Varna\n  seen:", den.Read(BoxPath), StringComparison.Ordinal);
+
+        // Written whole, in an entry: still plain.
+        await SavedAsync(server, "weight", new[] { new { op = "set", value = (object)new { value = Number("0x1F"), pin = true } } });
+        Assert.Contains("  weight: { value: 0x1F, pin: true }\n", den.Read(BoxPath), StringComparison.Ordinal);
+
+        // Text that YAML reads as a string isn't taken as a plain value.
+        var (status, _) = await EditAsync(server, await HashAsync(server), "label", new[] { new { op = "set", value = Number("a box") } });
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-WEB-61")]
     public async Task RemovingAnItemWithACommentSaysTheCommentWent()
     {

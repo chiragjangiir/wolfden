@@ -248,7 +248,8 @@ function isBare(e: EntryDraft): boolean {
   return e.from.trim() === '' && e.until.trim() === '' && e.status === '' && !e.pin && Object.keys(e.extra).length === 0 && !(e.raw && 'pin' in e.raw)
 }
 
-const NUMBER = /^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?$/
+/** A number as types.md F-FT-6 reads one: whole or decimal, or 0o17 and 0x1F. */
+const NUMBER = /^(?:[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?|0o[0-7]+|0x[0-9a-fA-F]+)$/
 const SORT = /^\s*-?[0-9]+(?:\s*,\s*-?[0-9]+)*\s*$/
 
 /** A form value as JSON to write, or the value as written if it wasn't changed. */
@@ -546,20 +547,22 @@ export function slugOf(entity: { path: string }): string | null {
 /**
  * The link to write for a note, as the den writes them: `[[slug]]`, by its
  * file name, where that reaches only this note. A slug is the second tier of
- * link resolution (format.md F-LINK-6), so another note of the universe with
- * the same file name could take the link or make it ambiguous (F-LINK-7):
- * then, or when `others` isn't known, or the file name isn't a slug, the
- * link is by id, `[[01J...]]`, which reaches only this note. A note without
- * an id falls back to its slug, or its name where that can be written in a
- * link (no `|`, `#`, `[`, or `]`).
+ * link resolution (format.md F-LINK-6), so another note of the universe whose
+ * file name matches it, ignoring case, could take the link or make it
+ * ambiguous (F-LINK-7): then, or when `others` isn't known, or the file name
+ * isn't a slug, the link is by id, `[[01J...]]`, which reaches only this
+ * note. A note without an id is linked by its name only where that can be
+ * written in a link (no `|`, `#`, `[`, or `]`) and no other note's slug or
+ * name matches it; otherwise null: no link is sure to reach it.
  */
 export function linkFor(
   entity: { path: string; name: string; id: string | null },
-  others: readonly { path: string }[] | null,
-): string {
+  others: readonly { path: string; name?: string }[] | null,
+): string | null {
   const slug = slugOf(entity)
-  const shared = slug === null || others === null || others.some((o) => o.path !== entity.path && slugOf(o) === slug)
-  if (!shared) {
+  const rivals = others?.filter((o) => o.path !== entity.path) ?? null
+  // Another note's file name competes for the slug as links match, ignoring case (F-LINK-4): Mina-Harker.md with mina-harker.
+  if (slug !== null && rivals !== null && !rivals.some((o) => fileKey(o.path) === slug)) {
     return `[[${slug}]]`
   }
 
@@ -567,8 +570,26 @@ export function linkFor(
     return `[[${entity.id}]]`
   }
 
-  return slug !== null ? `[[${slug}]]` : `[[${entity.name.replace(/[|#[\]]/g, ' ').replace(/\s+/g, ' ').trim()}]]`
+  // No id: by name, only where it can be written in a link and nothing comes first or ties (a slug, F-LINK-6, or a name).
+  const name = normalized(entity.name)
+  const byName =
+    slug === null && rivals !== null && name !== '' && !/[|#[\]]/.test(entity.name)
+    && !rivals.some((o) => fileKey(o.path) === name || (o.name !== undefined && normalized(o.name) === name))
+  return byName ? `[[${entity.name.trim()}]]` : null
 }
+
+/** A link's text as F-LINK-4 matches it: NFC, trimmed, whitespace runs as one space, case ignored. */
+function normalized(text: string): string {
+  return text.normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+/** A note's file name without `.md`, as a link by slug would match it. */
+function fileKey(path: string): string {
+  return normalized((path.split('/').pop() ?? '').replace(/\.md$/i, ''))
+}
+
+/** How names, slugs, and what's typed are split into words for the link picker. */
+const WORDS = /[\s\-_.,:;'’"()]+/
 
 /**
  * True if a note's name or slug matches what was typed for a link: each word
@@ -576,12 +597,12 @@ export function linkFor(
  * Jonathan Harker but a note that only mentions him in its text doesn't.
  */
 export function nameMatches(entity: { name: string; path: string }, typed: string): boolean {
-  const words = typed.toLowerCase().split(/[\s-]+/).filter((w) => w !== '')
+  const words = typed.toLowerCase().split(WORDS).filter((w) => w !== '')
   if (words.length === 0) {
     return false
   }
 
-  const candidates = [entity.name, slugOf(entity) ?? ''].map((t) => t.toLowerCase().split(/[\s\-_.,:;'’"()]+/).filter((w) => w !== ''))
+  const candidates = [entity.name, slugOf(entity) ?? ''].map((t) => t.toLowerCase().split(WORDS).filter((w) => w !== ''))
   return candidates.some((parts) => words.every((w) => parts.some((p) => p.startsWith(w))))
 }
 

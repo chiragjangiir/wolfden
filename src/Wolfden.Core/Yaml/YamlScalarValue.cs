@@ -63,6 +63,32 @@ public sealed partial class YamlScalarValue : YamlValue
             : throw new ArgumentException($"'{text}' isn't a number YAML reads as one, such as 2.5 or 1e3.", nameof(text));
     }
 
+    /// <summary>
+    /// A plain scalar that YAML reads as something other than a string, written
+    /// exactly as given: a number in any form YAML has (<c>2.50</c>, <c>0x1F</c>,
+    /// <c>0o17</c>, <c>1_000</c>, <c>.inf</c>), or another such value
+    /// (<c>True</c>, <c>yes</c>, <c>2291-05-14</c>). It keeps a value's written
+    /// form when it's written again, as a whole or as a moved list item.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="text"/> is one line YAML reads as a string, so it would need quotes.</exception>
+    public static YamlScalarValue Plain(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return IsPlainNonString(text)
+            ? new(Kind.Float, text)
+            : throw new ArgumentException($"'{text}' is text, not a number or other plain value YAML reads as one.", nameof(text));
+    }
+
+    /// <summary>
+    /// True if <paramref name="text"/>, written plain, isn't a string to YAML 1.2's core schema
+    /// or to YAML 1.1: a number, boolean, null, or YAML 1.1 timestamp.
+    /// </summary>
+    public static bool IsPlainNonString(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return !PlainScalarResolver.IsStringInBothSchemas(text);
+    }
+
     /// <summary>A boolean, written <c>true</c> or <c>false</c>.</summary>
     public static YamlScalarValue Boolean(bool value) => new(Kind.Boolean, value ? "true" : "false");
 

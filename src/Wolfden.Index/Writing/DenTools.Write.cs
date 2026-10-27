@@ -1545,7 +1545,7 @@ public sealed partial class DenTools
                 case JsonValueKind.Object when numbersAsText && value.EnumerateObject().Count() == 1 && value.TryGetProperty("$number", out var text):
                     return text.ValueKind == JsonValueKind.String
                         ? Number(text.GetString()!)
-                        : throw new DenToolException(ToolErrorCodes.BadArgument, "A number given as {\"$number\": ...} holds its text, such as \"2.50\".");
+                        : throw new DenToolException(ToolErrorCodes.BadArgument, "A plain value given as {\"$number\": ...} holds its text, such as \"2.50\".");
                 case JsonValueKind.True or JsonValueKind.False:
                     return YamlScalarValue.Boolean(value.GetBoolean());
                 case JsonValueKind.Null:
@@ -1581,11 +1581,21 @@ public sealed partial class DenTools
     /// </summary>
     private static YamlScalarValue Number(string text)
     {
-        var value = YamlScalarValue.Float(text);
+        // A number in decimal must be one a double holds; any other plain value YAML reads as no string
+        // (0x1F, 0o17, 1_000, .inf, True) is written as given, so it keeps its form and never gains quotes.
+        if (!DecimalNumber().IsMatch(text))
+        {
+            return YamlScalarValue.Plain(text);
+        }
+
         return double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) && double.IsFinite(d)
-            ? value
+            ? YamlScalarValue.Plain(text)
             : throw new DenToolException(ToolErrorCodes.InvalidEdit, $"{text} is too large to be a number (types.md F-FT-6). Write a smaller one, or write it as text.");
     }
+
+    /// <summary>A whole or decimal number under YAML 1.2's core schema, such as <c>2.50</c> or <c>1e3</c>.</summary>
+    [GeneratedRegex(@"^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?\z", RegexOptions.CultureInvariant)]
+    private static partial Regex DecimalNumber();
 
     /// <summary>A YAML value as JSON: scalars as their text, nulls as null.</summary>
     private static JsonElement JsonOf(YamlNode? node)

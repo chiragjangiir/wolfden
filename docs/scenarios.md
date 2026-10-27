@@ -3593,10 +3593,14 @@ The note's type is a den-local `specimen` with a field of every type.
   types whose name or slug starts so (not notes that only mention it),
   and the arrow keys and Enter (or a click) write `[[jonathan-harker]]`.
   If another note of the universe has the same file name, the link is
-  by id, `[[01J...]]`, so it reaches only the note I picked. Escape
+  by id, `[[01J...]]`, so it reaches only the note I picked (file names
+  compare ignoring case). A note with no id that no link is sure to
+  reach isn't written; the picker says to add an id with Edit file. Escape
   closes the list, not the editor.
 - Numbers keep their digits: `2.50` stays `2.50`, and a 20-digit number
   isn't rounded, read or written; `1e400` is refused (`invalid_edit`).
+  `0x1F`, `0o17`, `1_000`, `.inf`, and `True` keep their form, unquoted,
+  when the field is written whole or an item is moved.
 - Saving changes only that field's value, with its comment kept; a value
   that doesn't fit its type is saved with the warning.
 
@@ -3605,6 +3609,7 @@ Spec: design.md §9 "Editing fields", types.md §5. Covered by:
 `FieldEditEndpointTests.EachFieldTypeIsSetAndOnlyItsValueChanges`,
 `FieldEditEndpointTests.AValueThatDoesntFitItsTypeIsSavedWithTheWarning`,
 `FieldEditEndpointTests.NumbersKeepEveryDigitBothWays`,
+`FieldEditEndpointTests.HexOctalAndOtherPlainValuesKeepTheirFormWhenWrittenAgain`,
 `CheckpointEndpointTests.AWebFieldSaveShowsAsSavedInWolfden`,
 `FieldEditing.test.tsx` (web).
 
@@ -3672,8 +3677,10 @@ Spec: format.md §12, F-RT-1, F-RT-3. Covered by:
 
 ### SC-WEB-65. Field edits are guarded
 
-- If only another part of the note changed meanwhile, my field is saved
-  on the new file without asking. If the field changed, a stale save
+- If only another part of the note changed meanwhile, and my save
+  changes parts of the field rather than setting it whole, it's saved on
+  the new file without asking. If the field's own lines changed (even
+  just a comment on them), or my save sets the field whole, I'm asked. If the field changed, a stale save
   shows my value (or "(not set)" for Clear field) and the file's side by
   side: Keep mine saves (or clears) on the new hash, Take theirs drops
   mine.

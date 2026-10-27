@@ -189,6 +189,9 @@ internal static class GitProcess
         }
 
         var process = new Process { StartInfo = start };
+        // Set once the stdin thread has closed git's input, so the process
+        // isn't disposed (which closes that writer too) while it does.
+        var stdinDone = new ManualResetEventSlim(false);
         var handedOff = false;
         try
         {
@@ -223,6 +226,10 @@ internal static class GitProcess
                 {
                     // Git exited, or was stopped, without reading its input; its exit code says why.
                 }
+                finally
+                {
+                    stdinDone.Set();
+                }
             });
 
             using var kill = stoppable ? cancellationToken.Register(() => Stop(process)) : default;
@@ -242,7 +249,7 @@ internal static class GitProcess
                 // Never stopped part way: it finishes on its own, and the
                 // task says what it did then. The task owns the process now.
                 handedOff = true;
-                var stillRunning = FinishAsync(process, output, error);
+                var stillRunning = FinishAsync(process, output, error, stdinDone);
                 _ = stillRunning.ContinueWith(
                     t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
                 throw new GitTimeoutException(CommandName(argList), timeout, stillRunning);
@@ -275,7 +282,7 @@ internal static class GitProcess
         {
             if (!handedOff)
             {
-                process.Dispose();
+                Dispose(process, stdinDone);
             }
         }
     }
@@ -325,13 +332,43 @@ internal static class GitProcess
     }
 
     /// <summary>Waits, without holding a thread, for a git left running to exit, then says what it did.</summary>
-    private static async Task<GitRun> FinishAsync(Process process, Capture output, Capture error)
+    private static async Task<GitRun> FinishAsync(Process process, Capture output, Capture error, ManualResetEventSlim stdinDone)
     {
-        using (process)
+        try
         {
             await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
             await Task.WhenAny(Task.WhenAll(output.Completion, error.Completion), Task.Delay(PipeGrace)).ConfigureAwait(false);
             return Result(process, output, error);
+        }
+        finally
+        {
+            Dispose(process, stdinDone);
+        }
+    }
+
+    /// <summary>
+    /// Disposes git's process once the stdin thread is done with its input.
+    /// Disposing closes the input's writer too, and a StreamWriter closed
+    /// from two threads at once can throw "Cannot access a closed pipe"
+    /// (seen on Linux CI); a git that never read its input is let go after
+    /// the grace, and a throw from that close is dropped, as git has
+    /// finished with the pipe either way.
+    /// </summary>
+    private static void Dispose(Process process, ManualResetEventSlim stdinDone)
+    {
+        var done = stdinDone.Wait(PipeGrace);
+        try
+        {
+            process.Dispose();
+        }
+        catch (Exception e) when (e is IOException or ObjectDisposedException)
+        {
+            // The input's pipe was already closed.
+        }
+
+        if (done)
+        {
+            stdinDone.Dispose();
         }
     }
 
