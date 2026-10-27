@@ -1485,7 +1485,7 @@ docs/
     level of the one it goes before, or 2 at the end),
     `/api/edit/section/rename` (`index`, `name`, `newName`),
     `/api/edit/section/remove` (`index`, `name`), and `/api/edit/file`
-    (`text`). Part b adds field edits beside them. Each answers the
+    (`text`). Part b adds `/api/edit/field` beside them (below). Each answers the
     write tools' `WriteResult`. Errors add 409 for `stale_file`,
     `frozen`, `ambiguous_section`, and `already_exists`; 422 for
     `invalid_edit` and `unsupported_edit`; 404 for `unknown_section`;
@@ -1516,7 +1516,8 @@ docs/
     file that mixes them, and the page doesn't send it (Save is off until
     the text changes).
   - **Section names.** A name typed with a heading's `#` marks (`## Arc`)
-    is refused, with the name to give instead, rather than stripped: the
+    is refused, with the name to give instead, rather than stripped (a name
+    that only starts with `#`, such as `#1 Fan`, is a name like any other): the
     level comes from where the section goes, and a writer's text isn't
     changed behind their back. Adding or renaming to a name another
     section has is saved, and `effects` says a link to it reaches the
@@ -1566,6 +1567,74 @@ docs/
     canon it touched, the file's warnings, and that it isn't a
     checkpoint. A note the reader hasn't met can be edited once shown
     with "Show it anyway".
+- **Editing fields** (#28, part b). The maintainer decisions above
+  apply: one field at a time, explicit Save with stale-file conflicts,
+  and the full note while editing. The rest is v0 behaviour, not a
+  recorded decision. Chapter fields and inherited values are #138.
+  - **The API.** `/api/entity/source` adds `fields` (each field under
+    `fields:` in file order: its `name`, the `line` of its key, and its
+    `value` as written, as JSON, with a plain `true`/`false` or number
+    as one and every other scalar as its text) and `fieldTypes` (the
+    type's fields in field order, each with `type`, `list`,
+    `temporal`, `required`, enum `values`, ref `to`, `description`,
+    and `default`, then the universal `placeholder`; `row` is edited in
+    the file). `POST /api/edit/field` takes `field` and `changes`, a
+    list of `{op, path, value, index}` with `op` one of `set`, `add`,
+    and `remove`, and `path` a list of keys and item numbers under the
+    field (none for the field itself). It's `update_fields` with every
+    path under `fields.<field>`, so an edit can't reach `id`, `name`,
+    `status`, or another field, and it has the same hash check, frozen
+    books, write check, pinned canon, effects, ledger, and lossless
+    edits. A number that isn't whole (`2.5`) is written plain now, by
+    the MCP tools too.
+  - **Only what changed.** The page works out the changes from the value
+    as written and the form, following each list item and dated entry
+    from where it came: one taken out is removed, a new one added where
+    it goes, one moved is removed and added again, and one that stayed
+    has only its changed keys set (`[1, "until"]`). A value the writer
+    didn't touch is sent back as written, so `Dried` isn't rewritten
+    `dried`. A plain value that gains a date or a pin, or a field whose
+    shape changes, is set as a whole. Removing the last item leaves the
+    key as F-RT-6 says (`key:` for a block list, `[]` for a flow one).
+  - **One form for every field.** A field is edited as its entries: a
+    plain value is one entry with nothing but its value, and saves as a
+    plain value again unless the writer gives it a From, a status, or a
+    pin. A field that changes over the story (`temporal`) lists each
+    entry with From and Until, and has **Add a dated entry** and
+    **Remove entry**; one that doesn't has one entry, with "Known from",
+    status, and pin under a disclosure (F-TMP-8). Its entries aren't
+    reordered (F-TMP-7). List fields have **Add item**, **Remove**, and
+    move up and down buttons.
+  - **Controls.** `string` an input, `text` a text area, `number` an
+    input checked against F-FT-6, `bool` a yes/no dropdown, `enum` a
+    dropdown of its values (a value written in another case shows as
+    its key; one that isn't a value shows as written, so the form never
+    changes it unasked), `date` its text and an optional sort key (the
+    mapping form of F-FT-11 when there's a sort key), `ref` a combobox
+    that searches `/api/search` as letters are typed, filtered to the
+    field's `to` types, and writes `[[slug]]` (the note's name where the
+    file name isn't a key), and `position`, `from`, and `until` a book
+    and chapter picker from the den's positions, with "Type a
+    position…" for any other text. Status is a dropdown of the six
+    statuses or "the note's status", and pin a checkbox.
+  - **Checked in the page.** Numbers, links, sort keys, one-line
+    strings, empty values, and empty list items are checked before
+    sending, with the message by the control and focus on the first;
+    positions are checked by the server (`invalid_edit`).
+  - **What the form can't show.** A field the type doesn't define (or
+    any field of an untyped note), and a value the form can't hold (a
+    list in a field that isn't a list, such as an unquoted `[[link]]`,
+    F-FLD-6; a list that mixes entries and plain items, F-TMP-1; a date
+    with `calendar`; a mapping that isn't a date) show as written with
+    **Edit in file** and why. An entry's other keys are kept.
+  - **Add field and Clear field.** Add field offers the type's fields
+    the note doesn't set, or sets to nothing, and opens that field's
+    form. Clear field asks in the page, then removes the key.
+  - **A stale save** shows the writer's value and the file's side by
+    side. Keep mine sends the same changes on the new hash if the field
+    itself didn't change meanwhile, and otherwise sets the field to the
+    writer's value as a whole; Take theirs drops it. There's no "Copy
+    mine and reload" for a field.
 
 - **Checkpoints in the web UI** (#30; manual by default is the
   maintainer's decision of 2026-10-27, §12 Q4; the rest is v0

@@ -20,8 +20,8 @@ universe, a series, or a book, see [Where to file things](where-to-file.md).
   **Add section** adds one at the end or before another. Renaming a
   section changes the links to it in every note; removing one asks first.
 - **Edit file** opens the whole note, frontmatter and all, for anything
-  the other controls don't do yet, such as changing a field or a
-  section's `<!-- wolfden: ... -->` comment.
+  the other controls don't do, such as a section's
+  `<!-- wolfden: ... -->` comment.
 - **While you edit, you see everything.** The page shows the whole note,
   whatever the story position, and says "Editing shows everything". The
   position view comes back when you save or cancel.
@@ -35,6 +35,28 @@ universe, a series, or a book, see [Where to file things](where-to-file.md).
 
 Notes in a book marked final can't be edited until the book is
 unfrozen; their Edit controls are off, and the page says why.
+
+### Editing fields
+
+Each field on a note's page has its own **Edit**. The form fits the
+field: a dropdown for a field with set choices, yes or no, a number, a
+date, or a link, where you type a few letters of a note's name and pick
+it. **Add field** offers the fields the note's type has that the note
+doesn't set yet, and **Clear field** takes one out.
+
+A fact that changes over the story is a list of dated values. Each has
+a **From** and an **Until**, picked by book and chapter: "this fact
+holds from chapter 3 until chapter 9". Leave From empty for the start
+of the story, and Until empty for "until the next value". **Add a dated
+entry** gives a field a new value from a later chapter; the one before
+it holds until then. A fact that doesn't change can still have a
+**Known from**, for a reveal the reader only learns later.
+
+Any value can have its own status, such as `candidate` for an option
+you haven't settled, and can be **Pinned** as hard canon.
+
+A field your note's type doesn't define, or one written in a way the
+form can't show, has **Edit in file** instead, which says why.
 
 ## Images
 
