@@ -189,37 +189,25 @@ public sealed class DenIndex : IDisposable
     }
 
     /// <summary>
-    /// Full-text search for every word of <paramref name="text"/>, in any
-    /// order, ignoring case and accents. Words are matched whole; a word
-    /// ending in <c>*</c> matches as a prefix (<c>ambu*</c>). Other FTS5
-    /// syntax is searched for as plain text, and control characters are
-    /// treated as spaces, so no input throws. It finds every status,
-    /// bookkeeping, and HTML comments; see <see cref="SearchHit.IsInCanon"/>.
+    /// Full-text search for every word and phrase of <paramref name="text"/>,
+    /// ignoring case and accents. Words are matched whole, anywhere and in any
+    /// order; a word ending in <c>*</c> matches as a prefix (<c>ambu*</c>).
+    /// Words in a closed pair of double quotes (<c>"silver key"</c>) are a
+    /// phrase: they match side by side, in order, as do the parts of a word
+    /// joined by punctuation (<c>mara-voss</c>), and a <c>*</c> at the end of
+    /// a phrase's last word makes that word a prefix (<c>"silver ke*"</c>).
+    /// An unclosed quote is plain text, and empty quotes are ignored (#185).
+    /// Other FTS5 syntax is searched for as plain text, and control
+    /// characters are treated as spaces, so no input throws. It finds every
+    /// status, bookkeeping, and HTML comments; see <see cref="SearchHit.IsInCanon"/>.
     /// </summary>
     public IReadOnlyList<SearchHit> Search(string text, int limit = 20)
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        // FTS5 reads a query as a C string, so a NUL would end it early.
-        var clean = string.Create(text.Length, text, (span, t) =>
-        {
-            for (var i = 0; i < t.Length; i++)
-            {
-                span[i] = char.IsControl(t[i]) ? ' ' : t[i];
-            }
-        });
-        var terms = clean.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
-            .Select(Term)
-            .Where(t => t.Length > 0)
-            .ToList();
-        return terms.Count == 0 ? [] : SearchMatch(string.Join(' ', terms), limit);
-
-        static string Term(string word)
-        {
-            var prefix = word.EndsWith('*');
-            var bare = word.TrimEnd('*');
-            return bare.Length == 0 ? "" : $"\"{bare.Replace("\"", "\"\"", StringComparison.Ordinal)}\"{(prefix ? "*" : "")}";
-        }
+        // Control characters become spaces: FTS5 reads a query as a C string, so a NUL would end it early.
+        var query = SearchQuery.ToFts5(text);
+        return query.Length == 0 ? [] : SearchMatch(query, limit);
     }
 
     /// <summary>

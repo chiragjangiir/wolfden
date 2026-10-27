@@ -77,6 +77,34 @@ public class FieldSearchEndpointTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-WEB-24")]
+    public async Task AQuotedQueryIsAPhraseWhoseMatchIsOneRange()
+    {
+        using var den = Den();
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root));
+        var tools = new DenTools(den.Root);
+
+        // In text: "Mara Voss" side by side is one match; the words the other way round aren't a phrase (#185).
+        var json = await server.GetJsonAsync("/api/search?universe=starfall&query=%22mara%20voss%22", HttpStatusCode.OK);
+        SameAsMcp.Assert(tools.Search("\"mara voss\"", "starfall"), json);
+        var hit = Hits(json).First(h => h.GetProperty("text").GetString()!.Contains("[[Mara Voss]]", StringComparison.Ordinal));
+        Assert.Contains("[[[Mara Voss]]]", hit.GetProperty("snippet").GetString(), StringComparison.Ordinal);
+        var text = hit.GetProperty("text").GetString()!;
+        Assert.Contains(
+            hit.GetProperty("matches").EnumerateArray(),
+            m => text.Substring(m.GetProperty("start").GetInt32(), m.GetProperty("length").GetInt32()) == "Mara Voss");
+        Assert.NotEmpty(Hits(await server.GetJsonAsync("/api/search?universe=starfall&query=voss%20mara", HttpStatusCode.OK)));
+        Assert.Empty(Hits(await server.GetJsonAsync("/api/search?universe=starfall&query=%22voss%20mara%22", HttpStatusCode.OK)));
+
+        // In one field's values, likewise.
+        var field = Assert.Single(Hits(await server.GetJsonAsync("/api/search?universe=starfall&query=%22saltmarsh%20docks%22&field=home", HttpStatusCode.OK)));
+        var match = Assert.Single(field.GetProperty("matches").EnumerateArray());
+        Assert.Equal(0, match.GetProperty("start").GetInt32());
+        Assert.Equal("Saltmarsh Docks".Length, match.GetProperty("length").GetInt32());
+        Assert.Empty(Hits(await server.GetJsonAsync("/api/search?universe=starfall&query=%22docks%20saltmarsh%22&field=home", HttpStatusCode.OK)));
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-WEB-25")]
     public async Task AsOfAPositionALinkMatchesByNameOnlyWhenTheReaderHasMetItsNote()
     {
