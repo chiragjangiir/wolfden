@@ -149,6 +149,18 @@ describe('SC-WEB-40: editing a section or the opening in place', () => {
     expect(document.activeElement?.id).toBe('edit-saved')
   })
 
+  it('SC-WEB-50: a save makes the checkpoint indicator ask again at once', async () => {
+    const { calls } = stubEditing()
+    renderApp('/u/dracula/e/E-MINA')
+    const { view } = await openSectionEditor()
+    await waitFor(() => expect(calls).toContain('/api/checkpoint'))
+    const before = calls.filter((c) => c === '/api/checkpoint').length
+    replaceText(view, 'New text.')
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await screen.findByText('Saved the section “Overview”.')
+    await waitFor(() => expect(calls.filter((c) => c === '/api/checkpoint').length).toBeGreaterThan(before))
+  })
+
   it('saves with Ctrl+Enter', async () => {
     const { posts } = stubEditing()
     renderApp('/u/dracula/e/E-MINA')

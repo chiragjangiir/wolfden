@@ -264,8 +264,9 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
     }
 
     /// <summary>
-    /// F-DEN-6, F-DEN-7, and F-DEN-8: <c>bookkeeping_sections</c>,
-    /// <c>spoiler_checks</c>, and <c>remote_images</c>. Returns false if
+    /// F-DEN-6 to F-DEN-9: <c>bookkeeping_sections</c>,
+    /// <c>spoiler_checks</c>, <c>remote_images</c>, and
+    /// <c>auto_checkpoint</c>. Returns false if
     /// <c>bookkeeping_sections</c> has the wrong shape, an error that keeps
     /// the den from loading.
     /// </summary>
@@ -283,6 +284,13 @@ internal sealed partial class DenLoader(DenStructure den, IDenSource source)
         {
             den.Add(DenFile, new Diagnostic("F-DEN-8", DiagnosticSeverity.Warning, badImages.Line,
                 $"remote_images must be true or false, not '{Describe(badImages)}', so images from websites stay blocked."));
+        }
+
+        var auto = AutoCheckpoint.Read(file);
+        den.AutoCheckpoint = auto.Every;
+        if (auto.Problem is { } problem)
+        {
+            den.Add(DenFile, new Diagnostic("F-DEN-9", DiagnosticSeverity.Warning, auto.Line, problem));
         }
 
         var patterns = file.GetValue("bookkeeping_sections");

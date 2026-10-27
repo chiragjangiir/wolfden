@@ -51,7 +51,8 @@ public static class WolfdenMcpServer
         of an existing file takes the hash the file had when you read it (from get_entity, get_chapter, get_chapter_defaults, or
         your last write), and is refused if the file has changed since. An edit that would leave an error is refused, and
         nothing in a final (frozen) book can be changed. Edits to hard canon are allowed, but the result lists them: check them
-        with the writer. Writes aren't committed: call checkpoint once at the end of a session of edits, naming yourself as
+        with the writer. Writes aren't committed: call checkpoint at a natural stopping point, such as the end of a notes pass
+        or a planning session, with a message that says what the pass was ('Notes pass after drafting ch 12'), naming yourself as
         co_author.
         """;
 

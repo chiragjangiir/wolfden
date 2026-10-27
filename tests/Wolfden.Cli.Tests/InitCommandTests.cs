@@ -50,6 +50,7 @@ public class InitCommandTests
             # name: My Notes           # display name; defaults to the folder's name
             # spoiler_checks: true     # flag links to things the reader hasn't met yet (F-DEN-7)
             # remote_images: true      # let the web UI load images from websites in notes (F-DEN-8)
+            # auto_checkpoint: 30m     # wolfden serve checkpoints after this long without changes (F-DEN-9)
 
             """.ReplaceLineEndings("\n"),
             folder.Read("den.yaml"));

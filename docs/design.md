@@ -478,9 +478,56 @@ With git as the backend:
 - **Per-entity history** is `git log` on the entity's file, with diffs, shown
   in the UI and exposed through MCP.
 - **Saving vs. committing:** edits are written to the working tree straight
-  away. **Checkpoints** are commits with a message, made by the user ("end of
-  Ch 14 session") or automatically after a configurable idle period. Commits
-  made by AI agents through MCP record the agent as `Co-Authored-By`.
+  away, and saving never makes a checkpoint (#28). **Checkpoints** are
+  commits with a message. **Decided (maintainer, 2026-10-27, #30):** they
+  are manual by default: made when the writer asks in the web UI (§9,
+  "Checkpoints in the web UI"), naming it ("Notes pass after drafting
+  ch 12"), or when an AI agent asks through the MCP `checkpoint` tool.
+  Commits made by AI agents through MCP record the agent as
+  `Co-Authored-By`. Automatic checkpoints are opt-in, below.
+- **Automatic checkpoints** (#30; opt-in is the maintainer's decision,
+  the rest v0 behaviour). With `auto_checkpoint: 30m` in `den.yaml`
+  (format.md F-DEN-9; from `5m` to `24h`), a running `wolfden serve`
+  makes a checkpoint once the den's files have gone that long without a
+  change. Only `serve` runs the timer: `mcp` doesn't, since an agent
+  makes its own checkpoints with a descriptive message and a
+  co-author, and an automatic one in its process would take its
+  session's edits without either; `index --watch` doesn't, since it
+  only keeps the index. The server looks at the den's files every 30
+  seconds (paths, sizes, and times, never contents or hidden files); a
+  change restarts the wait, and once they've been still that long it
+  records what changed since the latest checkpoint, with a generated
+  message: `Auto-checkpoint: edited 3 notes`, or `Auto-checkpoint:
+  changed 4 notes (2 edited, 1 added, 1 deleted)`, then a blank line and
+  a line per file (`edited universes/…`, at most 20, then "and N more").
+  It makes one checkpoint per quiet spell, not one per poll. It never
+  starts while a git write may be running (`IHistoryProvider.IsWriting`:
+  a checkpoint in this process, a git Wolfden stopped waiting for, or an
+  `index.lock` there) and tries again on the next poll; after ten busy
+  polls in a row (five minutes, as a stale `index.lock` would make) it
+  says so in the log, once. It never stops git. Nor does it start while
+  git is in the middle of something (`IHistoryProvider.InterruptedOperation`:
+  `rebase-merge/`, `rebase-apply/`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`,
+  `REVERT_HEAD`, or `BISECT_LOG`, found through `git rev-parse
+  --git-path`, or a detached HEAD), since the commit would land inside
+  it or on no branch; it says so once and makes the checkpoint after.
+  A manual checkpoint is still made then, as git would make it (git
+  itself refuses one during a merge), and the web UI warns. The
+  per-repository gate is in-process only, so two Wolfdens on one den (or
+  the writer's own git) may race: nothing to record does nothing, and a
+  checkpoint git refuses is logged once until the files change, and
+  tried again after another quiet spell, never in a loop. Without
+  history the setting does nothing apart from a warning in `serve`'s
+  log. The setting is read from `den.yaml` on each poll, so it needs no
+  restart. A signed commit needs the passphrase cached (by `gpg-agent`,
+  say), or git waits on a prompt; while it waits, saving isn't blocked,
+  since the ledger is never locked across git (§9, "Saved here or
+  elsewhere"). Two limits: the fingerprint misses a change that keeps a
+  file's size and time to the tick, which the next checkpoint, manual
+  or after another change, records anyway; and an automatic checkpoint
+  in `serve` records whatever an MCP session saved and hasn't
+  checkpointed yet, without that agent's `Co-Authored-By` (its later
+  `checkpoint` then has those files no more).
 - **Remotes:** optional. Wolfden can push and pull a configured remote but
   never requires one.
 
@@ -587,7 +634,7 @@ commands, and `wolfden <command> --help` describes each one:
 | `wolfden query [<universe>] [--universe <key>] [--at <position>]` | Canon as of a position (format.md F-VIEW-1), from the index, of one universe (see "Which universe" below; `*` is refused, since a view is of one universe). `--series` or `--book` narrows the view, `--type` (any type an enabled pack defines) and `--entity` (matched as a link is, F-LINK-6, among the entities in the view, so one the reader meets later can't shadow one they've met) pick entities out of it, `--pinned` gives pinned canon (F-VIEW-2), and `--brief` lists one line per entity. |
 | `wolfden copy <entity> <new name> [--to <scope>] [--universe <key>] [--slug <slug>] [--allow-relinks]` | Copies an entity under a new name, with a new id, as the MCP tool `copy_entity` does (§8, #129): beside the original, or `--to` a universe (`<universe>`, or `<universe>/`) or one of its series or books (`<universe>/<key>`, or `<universe>/series:<key>` or `<universe>/book:<key>` when a series and a book share the key). In a den with one universe, a bare series or book key (or `series:<key>`, `book:<key>`) will do (as for `check`, #127), unless it's also the universe's key, which is refused with every spelling suggested. It writes the den's files only. Its messages name its options (`--allow-relinks`, `--slug`) and commands (`wolfden check`), not the tool's parameters: the tools take the words their advice uses as a setting, and names the writer gave come through as written. It exits 2 when the copy is refused. |
 | `wolfden new-id [<count>]` | Prints new ids for files made by hand (format.md F-ID-5). |
-| `wolfden serve [<den>] [--universe <key>] [--port <n>] [--no-open] [--no-watch]` | Serves the web UI and the API on 127.0.0.1 (§9, #23), opens the default browser unless `--no-open`, and runs until Ctrl+C. The port is 9653 by default (WOLF on a phone keypad); `--port 0` picks a free one, and the address is printed either way. A port in use, or one the system won't let it use (reserved, or below 1024 on Linux), exits 2 and says so. `--universe` serves only that universe, as `mcp --universe` pins one; a key the den doesn't have exits 2. It hosts the same watcher as `mcp`, unless `--no-watch`. Without a built UI, the API still works and the page says how to build the UI. |
+| `wolfden serve [<den>] [--universe <key>] [--port <n>] [--no-open] [--no-watch]` | Serves the web UI and the API on 127.0.0.1 (§9, #23), opens the default browser unless `--no-open`, and runs until Ctrl+C. The port is 9653 by default (WOLF on a phone keypad); `--port 0` picks a free one, and the address is printed either way. A port in use, or one the system won't let it use (reserved, or below 1024 on Linux), exits 2 and says so. `--universe` serves only that universe, as `mcp --universe` pins one; a key the den doesn't have exits 2. It hosts the same watcher as `mcp`, unless `--no-watch`. It's the one command that makes automatic checkpoints, when `den.yaml` sets `auto_checkpoint` (§6). Without a built UI, the API still works and the page says how to build the UI. |
 | `wolfden mcp [<den>] [--universe <key>] [--no-watch]` | Runs the MCP server over stdio for an AI client (§8, #20) until the client disconnects or Ctrl+C. `--universe` pins the session to one universe (§8); a key the den doesn't have exits 2. Standard output carries only the protocol; log messages go to standard error. It exits 2 if there's no den and 3 if it stops because of a failure after it started, but serves a den whose `den.yaml` doesn't load, so the client can call `check` to find out why. |
 
 They share one surface:
@@ -1519,6 +1566,77 @@ docs/
     canon it touched, the file's warnings, and that it isn't a
     checkpoint. A note the reader hasn't met can be edited once shown
     with "Show it anyway".
+
+- **Checkpoints in the web UI** (#30; manual by default is the
+  maintainer's decision of 2026-10-27, §12 Q4; the rest is v0
+  behaviour, not a recorded decision).
+  - **The API.** `GET /api/checkpoint` says whether the den has
+    history that can make checkpoints, the latest checkpoint (its id and
+    time only, since its message could name another universe's notes),
+    what git is in the middle of, if anything (`inProgress`: a rebase, a
+    merge, a detached HEAD), and the den files a checkpoint now would
+    record (`IHistoryProvider.Pending`: what changed since the latest
+    checkpoint, or every den file before the first, from one raw diff
+    with names and no patches), each with its kind and universe.
+    `POST /api/checkpoint`
+    takes `{"message": "…"}` and makes one. Both go through the same
+    `CheckpointLedger` (`Wolfden.Core`) and history provider as the MCP
+    `checkpoint` tool, so a checkpoint records only den files and
+    leaves what the writer staged alone; the writer is the author, with
+    no co-author. The message is required, at most 5,000 characters,
+    and has no control characters but line breaks and tabs. On top of
+    the API's cross-site guard, a POST must be `application/json`
+    (anything else is 415 `unsupported_media_type`), which a page on
+    another site can't send without a CORS preflight the server never
+    answers. Without history, the status says why and how to turn it
+    on (`git init` in the den's folder, or `wolfden init --git` for a
+    new den, which refuses a folder that's already a den), and a POST
+    is 409 `history_unavailable`. A refusal by git (a hook, signing,
+    a lock) or a git that didn't finish in time is 500
+    `history_failed`, with git's reason. A checkpoint made while git is
+    in the middle of something says so in its result (`inProgress`).
+  - **Saved here or elsewhere.** The server keeps a ledger of the files
+    its own write endpoints saved (#28): the editing endpoints' `DenTools`
+    records each save in the server's `CheckpointLedger`, as an MCP
+    session's does in its own, so each change says whether this server
+    saved it and nothing changed it since (`savedHere`). Anything else
+    changed another way: in an editor, by an agent through MCP (another
+    process), or before the server started. The ledger's lock is held
+    only to take a snapshot before a checkpoint and to reconcile after
+    it, never while git runs, so a save or a status never waits on a
+    checkpoint (one waiting on a passphrase prompt, say). A file saved
+    while a checkpoint runs may or may not be in it, so it stays the
+    server's; the next checkpoint forgets it if the history holds it.
+  - **Pinned.** A checkpoint covers the den (§6), as the
+    MCP tool's does in a pinned session, so `serve --universe` records
+    every den file too. It doesn't name files in other universes, as for
+    the rest of a pinned server: it lists the pinned universe's files
+    and the den-level ones, and counts the rest (`otherUniverses`).
+  - **The indicator.** The top bar shows "3 notes changed since the
+    last checkpoint · Checkpoint…" ("not checkpointed yet" before the
+    first), and nothing when nothing has changed. It asks again every
+    minute, when the window gets focus back, and whenever its query
+    (`['checkpoint-status']`) is invalidated, which the editor's save
+    does (it invalidates every cached answer). Without history it says
+    "No history · Turn on…"; when the status can't be read, "History
+    unavailable", which opens the reason.
+  - **The dialog.** A modal dialog (not the browser's): focus goes to
+    the message box and stays in the dialog, on the dialog itself while
+    the checkpoint is being made and back on the box after an error.
+    Cancel closes it; Escape or a click outside does too, but asks
+    first if a name has been typed, as the editor asks before
+    discarding. Focus goes back to the indicator. While git is in the
+    middle of a rebase or the like, or HEAD is detached, it warns that
+    the checkpoint becomes part of it. It lists the changes grouped
+    for reviewing a notes pass: den-level files first, then each
+    universe's own files, then each series and book, paths shortened
+    within the group, with "saved in Wolfden" on the server's own saves.
+    The message box starts empty: the writer names the checkpoint, and
+    an empty name is refused before anything is sent. The result, or
+    git's reason for refusing, shows in the dialog; afterwards the
+    indicator and the History tabs (#27) ask again, so the new
+    checkpoint shows. Without history, the dialog explains how to turn
+    it on instead.
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and
   unknown content. This gets heavy test coverage, since it decides whether
   people trust the tool with their notes.
@@ -1570,8 +1688,12 @@ demos, and test fixtures.
    **Decided (#5):** not in v0. Crossovers mean one universe, incarnations
    are copies, and links resolve within a universe (§2). Timeless Author and
    den notes are planned (#45), and their folder names are reserved now.
-4. **Auto-checkpoint defaults:** an idle-time commit, or manual only by
-   default?
+4. ~~**Auto-checkpoint defaults:** an idle-time commit, or manual only by
+   default?~~ **Decided (#30, 2026-10-27):** manual by default. The web
+   UI shows a quiet "N notes changed since the last checkpoint ·
+   Checkpoint…" indicator with a dialog to name one, agents checkpoint
+   through MCP, and `auto_checkpoint` in `den.yaml` (format.md F-DEN-9)
+   opts in to idle-time checkpoints in `wolfden serve` (§6, §9).
 5. **Desktop packaging:** is a localhost web app enough, or wrap it later
    (Tauri, Electron, .NET MAUI)?
 6. **Name for the invented sample universe.**

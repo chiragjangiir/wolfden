@@ -225,6 +225,7 @@ internal static class InitCommand
             : YamlFile.Parse(Utf8.GetBytes(start)).WithValue("name", YamlScalarValue.String(name)).Text;
         text += "# spoiler_checks: true     # flag links to things the reader hasn't met yet (F-DEN-7)\n";
         text += "# remote_images: true      # let the web UI load images from websites in notes (F-DEN-8)\n";
+        text += "# auto_checkpoint: 30m     # wolfden serve checkpoints after this long without changes (F-DEN-9)\n";
         return Utf8.GetBytes(text);
     }
 

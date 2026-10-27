@@ -615,7 +615,33 @@ public sealed partial class GitHistory : IHistoryProvider
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(
         OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
-    private SemaphoreSlim Gate() => Gates.GetOrAdd(Path.TrimEndingDirectorySeparator(RepositoryRoot), _ => new SemaphoreSlim(1, 1));
+    private SemaphoreSlim Gate() => Gates.GetOrAdd(GateKey, _ => new SemaphoreSlim(1, 1));
+
+    private string GateKey => Path.TrimEndingDirectorySeparator(RepositoryRoot);
+
+    /// <summary>
+    /// For each repository, how many git writes Wolfden stopped waiting for
+    /// are still running (#145), so <see cref="IsWriting"/> can say so.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, int> StillRunning = new(
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+    /// <summary>
+    /// Counts <paramref name="running"/>, a git write left running, until it
+    /// ends. It's an exception filter's test, so it always says false and
+    /// the exception goes on as it was.
+    /// </summary>
+    private bool Track(Task<GitRun> running)
+    {
+        var key = GateKey;
+        StillRunning.AddOrUpdate(key, 1, (_, n) => n + 1);
+        _ = running.ContinueWith(
+            _ => StillRunning.AddOrUpdate(key, 0, (_, n) => Math.Max(0, n - 1)),
+            CancellationToken.None,
+            TaskContinuationOptions.None,
+            TaskScheduler.Default);
+        return false;
+    }
 
     /// <summary>
     /// Takes the intent-to-add marks off <paramref name="untracked"/> (git's
@@ -798,6 +824,121 @@ public sealed partial class GitHistory : IHistoryProvider
         var recorded = OutputOf(at, "rev-parse").Trim();
         var mine = Git(["hash-object", "--stdin", $"--path={spec}"], cancellationToken, input: Encoding.UTF8.GetString(content)).Trim();
         return HistoryResult<bool>.Done(recorded.Length > 0 && recorded == mine);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The same comparison as a diff since the latest checkpoint (new files
+    /// included, through a temporary index, #142), but before the first
+    /// checkpoint it compares with nothing, so every den file is added.
+    /// </remarks>
+    public HistoryResult<IReadOnlyList<HistoryFileChange>> Pending(CancellationToken cancellationToken = default)
+    {
+        var from = LatestCheckpoint(cancellationToken) ?? EmptyTree(cancellationToken);
+
+        // As DiffWithFiles, but names only: one raw diff of the whole den, hidden paths
+        // in so a rename into or out of one reads as the delete or add it is
+        // (ParseChanges), and no patches, since the indicator asks every minute.
+        var index = Path.Combine(Path.GetTempPath(), $"wolfden-{Guid.NewGuid():N}.index");
+        var environment = new Dictionary<string, string?> { ["GIT_INDEX_FILE"] = index };
+        try
+        {
+            Git([.. TempIndexSettings, "read-tree", Head(cancellationToken) ?? "--empty"], cancellationToken, environment: environment);
+            KeepSparseCheckout(environment, cancellationToken);
+            var den = Pathspecs(null, withHidden: true);
+            _ = Run([.. TempIndexSettings, "add", "--refresh", "--", .. den], cancellationToken, environment: environment);
+            ListNewFiles(den, from.Length == 64 ? EmptyBlobSha256 : EmptyBlobSha1, environment, cancellationToken);
+            var raw = Git([.. TempIndexSettings, "diff", .. DiffOptions, "--raw", "-z", from, "--", .. den], cancellationToken, environment: environment);
+            return HistoryResult<IReadOnlyList<HistoryFileChange>>.Done(
+                ParseChanges(SplitRawAndPatch(raw).Tokens).Select(c => c.Change).OfType<HistoryFileChange>().ToList());
+        }
+        finally
+        {
+            Delete(index);
+            Delete(index + ".lock");
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A rebase (<c>rebase-merge/</c>, <c>rebase-apply/</c>), a merge
+    /// (<c>MERGE_HEAD</c>), a cherry-pick, a revert, or a bisect under way,
+    /// each found where git keeps it (<c>git rev-parse --git-path</c>), or a
+    /// detached HEAD.
+    /// </remarks>
+    public string? InterruptedOperation
+    {
+        get
+        {
+            (string Path, string What)[] states =
+            [
+                ("rebase-merge", "a rebase"), ("rebase-apply", "a rebase"), ("MERGE_HEAD", "a merge"),
+                ("CHERRY_PICK_HEAD", "a cherry-pick"), ("REVERT_HEAD", "a revert"), ("BISECT_LOG", "a bisect"),
+            ];
+            var run = Run(["rev-parse", .. states.SelectMany(s => new[] { "--git-path", s.Path })], CancellationToken.None);
+            var paths = OutputOf(run, "rev-parse").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (!run.Succeeded || paths.Length != states.Length)
+            {
+                throw Failed("rev-parse", run);
+            }
+
+            for (var i = 0; i < states.Length; i++)
+            {
+                var full = Path.IsPathRooted(paths[i]) ? paths[i] : Path.Combine(DenRoot, paths[i]);
+                if (File.Exists(full) || Directory.Exists(full))
+                {
+                    return states[i].What;
+                }
+            }
+
+            // A detached HEAD: a checkpoint would go on no branch.
+            var head = Run(["symbolic-ref", "--quiet", "HEAD"], CancellationToken.None);
+            return head.ExitCode == 1 ? "a detached HEAD (no branch is checked out)" : null;
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// True while a checkpoint of this repository is under way in this
+    /// process, while a git write Wolfden stopped waiting for is still
+    /// running (#145), or while the repository's <c>index.lock</c> is there,
+    /// which is how git shows that another program is writing. Wolfden never
+    /// deletes that file, so a lock left by a git that crashed keeps this
+    /// true until the writer removes it, as git itself asks.
+    /// </remarks>
+    public bool IsWriting
+    {
+        get
+        {
+            if (Gate().CurrentCount == 0 || (StillRunning.TryGetValue(GateKey, out var running) && running > 0))
+            {
+                return true;
+            }
+
+            try
+            {
+                var run = Run(["rev-parse", "--git-path", "index.lock"], CancellationToken.None);
+                if (!run.Succeeded)
+                {
+                    return true;
+                }
+
+                var path = OutputOf(run, "rev-parse").Trim();
+                return path.Length > 0 && File.Exists(Path.IsPathRooted(path) ? path : Path.Combine(DenRoot, path));
+            }
+            catch (HistoryException)
+            {
+                // Can't tell, so take it as busy and try again later.
+                return true;
+            }
+        }
+    }
+
+    /// <summary>The empty tree's id in this repository's hash (SHA-1 or SHA-256).</summary>
+    private string EmptyTree(CancellationToken cancellationToken)
+    {
+        var run = Run(["rev-parse", "--show-object-format"], cancellationToken);
+        return run.Succeeded && OutputOf(run, "rev-parse").Trim() == "sha256" ? EmptyTreeSha256 : EmptyTreeSha1;
     }
 
     /// <summary>The newest commit that changed the den, or null if none has.</summary>
@@ -1515,6 +1656,10 @@ public sealed partial class GitHistory : IHistoryProvider
         try
         {
             return GitProcess.Run(_options, DenRoot, args, input, environment, cancellationToken, kind);
+        }
+        catch (GitTimeoutException e) when (e.StillRunning is { } running && Track(running))
+        {
+            throw;
         }
         catch (GitNotFoundException e)
         {
