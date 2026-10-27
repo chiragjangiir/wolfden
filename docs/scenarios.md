@@ -2589,8 +2589,8 @@ search, and history pages come in M3 (#24 to #27); their read API comes
 first, and SC-WEB-4 to SC-WEB-10 describe what it answers. SC-WEB-11
 to SC-WEB-17 describe the browsing pages, SC-WEB-18 to SC-WEB-21 the
 search page, and SC-WEB-22 and SC-WEB-23 the history page. SC-WEB-24
-and SC-WEB-25 describe field search (#179). SC-WEB-35 to SC-WEB-38
-cover images in notes and what a page may load (#180).
+and SC-WEB-25 describe field search (#179). SC-WEB-35 to SC-WEB-39
+cover images in notes and what a page may load (#180, #186).
 
 ### SC-WEB-1. I open my den in the browser
 
@@ -3145,10 +3145,48 @@ Spec: format.md F-DEN-8, design.md §9 (#180). Covered by:
 
 ### SC-WEB-38. A note shows an image kept in the den
 
-A note has `![Map of the castle](images/castle-map.png)`.
+Jonathan's note, `universes/dracula/jonathan-harker.md`, has
+`![Map of the castle](images/castle-map.png)`, `![Seal](/seal.png)`,
+and `![Coach](../shared/coach%20and%20horses.jpg)`.
 
-- The image is rendered with its address as written, whatever
-  `remote_images` says, as before #180. (`serve` doesn't serve the
-  den's own files yet, so it doesn't show.)
+- The images show, whatever `remote_images` says. Each path starts from
+  the note's folder, or from the den root if it starts with `/`, and
+  loads from `serve` at `/den-files/universes/dracula/images/castle-map.png`,
+  `/den-files/seal.png`, and
+  `/den-files/universes/shared/coach%20and%20horses.jpg`.
+- `serve` sends each with its image type, `nosniff`,
+  `Cross-Origin-Resource-Policy: same-origin`, and a
+  Content-Security-Policy with `sandbox`, so an SVG opened at its own
+  address runs no script. It's sent with `Cache-Control: no-cache`
+  and an `ETag`: after the writer replaces the image, the next load
+  shows the new one, and until then the browser gets a 304.
 
-Spec: design.md §9 (#180). Covered by: `Images.test.tsx` (web).
+Spec: format.md F-LAY-9, design.md §9 (#186). Covered by:
+`DenFileTests.AnImageInTheDenIsServedWithItsTypeAndAPolicyThatRunsNothing`,
+`DenFileTests.EachImageTypeHasItsContentType`,
+`DenFileTests.TheBrowserRevalidatesAndGetsA304WhileTheFileIsTheSame`,
+`Images.test.tsx` (web).
+
+### SC-WEB-39. A note's image isn't there, or isn't one to show
+
+- An image the den doesn't have shows a placeholder, "Image not found:
+  <alt text>" (or "Image not found" without alt text), with the path as
+  written, and the page doesn't ask for it again. So does a path that
+  climbs above the den root (`../../../../outside.png` or
+  `/../outside.png`), which the page doesn't ask for at all.
+- `serve` answers 404, the same as for a missing file, for anything under
+  `/den-files/` that isn't an image in the den: a file that isn't an
+  image (`den.yaml`, a `.md` note), a hidden file or folder at any depth
+  (`.wolfden/`, `.git/`, `.obsidian/`), a `..` that would leave the den,
+  written plainly or percent-encoded, a backslash, a drive, a stream, or
+  a wildcard, a folder link (to inside the den or out of it), a file link
+  to a file outside the den or to one that isn't an image, and a request
+  a browser marks as cross-site.
+
+Spec: format.md F-LAY-9, design.md §9 (#186). Covered by:
+`DenFileTests.AnythingButAnImageInTheDenIsA404`,
+`DenFileTests.AnEscapeSentAsWrittenIsA404`,
+`DenFileTests.PathsThatLeaveTheDenOrArentWrittenAsDenPathsAreRefused`,
+`DenFileTests.AFolderLinkIsntFollowedEvenToImagesInTheDen`,
+`DenFileTests.AFileLinkIsServedOnlyIfItLeadsToAnImageInTheDen`,
+`DenFileTests.ARequestFromAnotherSiteIsA404`, `Images.test.tsx` (web).

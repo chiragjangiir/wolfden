@@ -32,6 +32,7 @@ namespace Wolfden.Api;
 /// coming from another site (<see cref="CrossSiteGuard"/>). It sends no
 /// CORS headers, so a browser never lets another site read an answer.
 /// Every response has a Content-Security-Policy (<see cref="PagePolicy"/>, #180).
+/// The den's images are served under <c>/den-files</c> (<see cref="DenFiles"/>, #186).
 /// Hosting for several users is a later phase (design.md §10), with its own
 /// authentication.
 /// </para>
@@ -97,6 +98,7 @@ public static class WolfdenApi
         app.UseWhen(context => context.Request.Path.StartsWithSegments("/api"), api => api.Use(CrossSiteGuard));
         MapWebUi(app, options.WebRoot);
         app.MapWolfdenApi(options);
+        app.MapDenFiles(options);
         return app;
     }
 
@@ -120,10 +122,7 @@ public static class WolfdenApi
     /// </summary>
     internal static Task CrossSiteGuard(HttpContext context, RequestDelegate next)
     {
-        var headers = context.Request.Headers;
-        var crossSite = string.Equals(headers["Sec-Fetch-Site"], "cross-site", StringComparison.OrdinalIgnoreCase);
-        var origin = headers.Origin.ToString();
-        if (!crossSite && (origin.Length == 0 || IsThisServer(origin, context.Connection.LocalPort)))
+        if (!IsCrossSite(context))
         {
             return next(context);
         }
@@ -131,6 +130,19 @@ public static class WolfdenApi
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         return context.Response.WriteAsJsonAsync(new ApiError(
             "cross_site", "Wolfden's API answers only its own pages, not requests from another site."));
+    }
+
+    /// <summary>
+    /// True if a browser says the request comes from another site, as
+    /// <see cref="CrossSiteGuard"/> decides it. The den's files
+    /// (<see cref="DenFiles"/>) refuse such a request too, with a 404.
+    /// </summary>
+    internal static bool IsCrossSite(HttpContext context)
+    {
+        var headers = context.Request.Headers;
+        var crossSite = string.Equals(headers["Sec-Fetch-Site"], "cross-site", StringComparison.OrdinalIgnoreCase);
+        var origin = headers.Origin.ToString();
+        return crossSite || (origin.Length > 0 && !IsThisServer(origin, context.Connection.LocalPort));
 
         static bool IsThisServer(string origin, int port) =>
             Uri.TryCreate(origin, UriKind.Absolute, out var uri)

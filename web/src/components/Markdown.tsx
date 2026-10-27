@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import { denQuery, remoteImagesAtLoad, type LinkView } from '../api'
@@ -10,7 +10,9 @@ import { WIKI_LINK, WikiLink, createLinkMatcher } from './Links'
 // in-app links through the API's resolved `links`. An image from a website
 // doesn't load unless den.yaml has `remote_images: true` (#180), so opening
 // a note doesn't tell that website the den was opened; the page's
-// Content-Security-Policy blocks it too, as a second line of defence.
+// Content-Security-Policy blocks it too, as a second line of defence. An
+// image kept in the den loads from the server's /den-files/, from a path
+// relative to the note's own file (#186).
 
 // The scheme of the links the plugin makes. It's random for each page load,
 // so a link written in a note can't pass for one.
@@ -88,6 +90,63 @@ export function imageSource(src: string, base: string = window.location.href): {
   return url.origin === new URL(base).origin ? { kind: 'local' } : { kind: 'remote', url }
 }
 
+/** Where `wolfden serve` serves the den's own images (DenFiles.Prefix). */
+export const DEN_FILES = '/den-files/'
+
+/**
+ * The server address of an image kept in the den (format.md F-LAY-9, #186),
+ * for a local `src` written in the den file at den-relative `file`:
+ * relative to that file's folder, or to the den root if it starts with `/`.
+ * `../` may climb, but not above the den root: such a path is `null`, and
+ * doesn't load. Each name is decoded as written (`%20` is a space) and
+ * encoded again for the address; `?query` and `#fragment` are dropped, as
+ * a file has neither. A `src` with a scheme or a host (an address on this
+ * server, such as `http://127.0.0.1:9653/x.png`) isn't a den path: it's
+ * `undefined`, and is rendered as written.
+ */
+export function denImageUrl(src: string, file: string): string | null | undefined {
+  // `\` reads as `/`, as browsers read it in an address.
+  const path = src.replace(/\\/g, '/').replace(/[?#].*$/s, '')
+  if (/^[a-z][a-z\d+.-]*:/i.test(path) || path.startsWith('//')) {
+    return undefined
+  }
+
+  if (path === '') {
+    return null
+  }
+
+  const names = path.startsWith('/') ? [] : file.split('/').slice(0, -1)
+  for (const written of path.split('/')) {
+    let name: string
+    try {
+      name = decodeURIComponent(written)
+    } catch {
+      return null
+    }
+
+    if (name === '' || name === '.') {
+      continue
+    }
+
+    if (name === '..') {
+      if (names.length === 0) {
+        return null
+      }
+
+      names.pop()
+      continue
+    }
+
+    if (name.includes('/') || name.includes('\\')) {
+      return null
+    }
+
+    names.push(name)
+  }
+
+  return names.length === 0 ? null : DEN_FILES + names.map(encodeURIComponent).join('/')
+}
+
 /** True inside a note's link, where a placeholder mustn't hold a link of its own. */
 const InLink = createContext(false)
 
@@ -128,15 +187,56 @@ function useRemoteImages(): { allowed: boolean; reload: boolean } {
   return { allowed: live && atLoad, reload: live && !atLoad }
 }
 
-/** A note's image: as written if it's local, and from a website only if the den allows it. */
-function Image({ src, alt, title, remoteImages }: { src: unknown; alt?: string; title?: string; remoteImages: { allowed: boolean; reload: boolean } }) {
+/** What shows in place of an image kept in the den that isn't there, or that the server won't serve. */
+function MissingImage({ src, alt, outside }: { src: string; alt: string | undefined; outside: boolean }) {
+  const label = alt?.trim() ? `Image not found: ${alt.trim()}` : 'Image not found'
+  const title = outside
+    ? 'This path goes above the den’s folder, so the image can’t be shown.'
+    : 'No image at this path in the den, or it isn’t a kind Wolfden shows (png, jpg, gif, webp, avif, svg). Paths are relative to the note’s folder; one starting with / is from the den’s folder.'
+  return (
+    <span className="blocked-image missing-image" title={title}>
+      <span className="blocked-image-label">{label}</span> <span className="blocked-image-address">{src}</span>
+    </span>
+  )
+}
+
+/** An image kept in the den; if it doesn't load, the placeholder, with no retry. */
+function DenImage({ src, url, alt, title }: { src: string; url: string; alt?: string; title?: string }) {
+  // Keyed by address, so a failure is forgotten only when the address changes.
+  const [failed, setFailed] = useState<string | null>(null)
+  if (failed === url) {
+    return <MissingImage src={src} alt={alt} outside={false} />
+  }
+
+  return <img src={url} alt={alt} title={title} onError={() => setFailed(url)} />
+}
+
+/** A note's image: from the den if it's local, and from a website only if the den allows it. */
+function Image({
+  src,
+  alt,
+  title,
+  file,
+  remoteImages,
+}: {
+  src: unknown
+  alt?: string
+  title?: string
+  file: string
+  remoteImages: { allowed: boolean; reload: boolean }
+}) {
   if (typeof src !== 'string') {
     return null
   }
 
   const source = imageSource(src)
   if (source.kind === 'local') {
-    return <img src={src} alt={alt} title={title} />
+    const url = denImageUrl(src, file)
+    if (url === undefined) {
+      return <img src={src} alt={alt} title={title} />
+    }
+
+    return url === null ? <MissingImage src={src} alt={alt} outside={src !== ''} /> : <DenImage src={src} url={url} alt={alt} title={title} />
   }
 
   if (!remoteImages.allowed || !source.url) {
@@ -157,8 +257,12 @@ function NoteLink({ href, children }: { href: string; children: ReactNode }) {
   )
 }
 
-/** A note's markdown, with its `[[...]]` links resolved as the API resolved them. */
-export function Markdown({ text, links, universe }: { text: string; links: readonly LinkView[]; universe: string }) {
+/**
+ * A note's markdown, with its `[[...]]` links resolved as the API resolved
+ * them. `file` is the den-relative path of the file the markdown is written
+ * in, which its images' relative paths start from.
+ */
+export function Markdown({ text, links, universe, file }: { text: string; links: readonly LinkView[]; universe: string; file: string }) {
   const { allowed, reload } = useRemoteImages()
   const remoteImages = useMemo(() => ({ allowed, reload }), [allowed, reload])
   const { plugin, resolved } = useMemo(() => {
@@ -176,12 +280,12 @@ export function Markdown({ text, links, universe }: { text: string; links: reado
 
         return href ? <NoteLink href={href}>{children}</NoteLink> : <>{children}</>
       },
-      img: ({ src, alt, title }) => <Image src={src} alt={alt} title={title} remoteImages={remoteImages} />,
+      img: ({ src, alt, title }) => <Image src={src} alt={alt} title={title} file={file} remoteImages={remoteImages} />,
       // A note's own headings sit under the section's heading.
       h1: ({ children }) => <h3>{children}</h3>,
       h2: ({ children }) => <h3>{children}</h3>,
     }),
-    [resolved, universe, remoteImages],
+    [resolved, universe, file, remoteImages],
   )
 
   return (

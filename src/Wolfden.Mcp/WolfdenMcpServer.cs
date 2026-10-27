@@ -42,6 +42,9 @@ public static class WolfdenMcpServer
         reader meets later. Use check for continuity problems, and get_history for the checkpoints that changed an entity and
         what changed since.
 
+        An image kept in the den is written in a note as ![alt text](path), with the path relative to the folder of the note's own
+        file, or from the den root if it starts with '/'. move_entity and copy_entity don't move images or rewrite their paths.
+
         The write tools (create_entity, update_fields, append_section, add_idea, rename_section, rename_entity, change_alias, copy_entity,
         move_entity, update_chapter_fields, update_chapter_defaults) change the den's files, keeping everything they don't change as the
         writer wrote it. A rename or a move rewrites the links that depend on it, in the same change, and a copy gets a new id. Each edit
