@@ -5,8 +5,9 @@ using Wolfden.Core.Links;
 using Wolfden.Core.Positions;
 using Wolfden.Core.Structure;
 using Wolfden.Core.Yaml;
+using Wolfden.Index.Reading;
 
-namespace Wolfden.Mcp;
+namespace Wolfden.Index.Writing;
 
 /// <summary>
 /// Moving an entity's file to another scope of its universe (#89): the
@@ -72,7 +73,7 @@ public sealed partial class DenTools
             if (scope == target.Scope)
             {
                 return new WriteResult(
-                    ToolJson.Version, false, path, HashOf(original), Summary(target), [$"Nothing changed: '{target.Name}' is filed in {EntityMove.Describe(scope)} already."], [], []);
+                    DenReader.ResultVersion, false, path, HashOf(original), Summary(target), [$"Nothing changed: '{target.Name}' is filed in {EntityMove.Describe(scope)} already."], [], []);
             }
 
             if (scope is Book { Status: BookStatus.Final } frozen)
@@ -255,7 +256,7 @@ public sealed partial class DenTools
                 ? new List<string> { "'from' changes for the entity that holds pinned canon, so it changes where those facts enter canon views" }
                 : [];
             return new WriteResult(
-                ToolJson.Version, true, plan.To, HashOf(files[plan.To]), Summary(after), effects, pinned, Warnings(check),
+                DenReader.ResultVersion, true, plan.To, HashOf(files[plan.To]), Summary(after), effects, pinned, Warnings(check),
                 files.OrderBy(p => p.Key == plan.To ? 0 : 1).ThenBy(p => p.Key, StringComparer.Ordinal)
                     .Select(p => p.Key == plan.To ? new WrittenFileView(p.Key, HashOf(p.Value), Created: true, MovedFrom: path) : new WrittenFileView(p.Key, HashOf(p.Value)))
                     .ToList(),

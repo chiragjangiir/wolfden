@@ -9,9 +9,9 @@ using Wolfden.Core.Links;
 using Wolfden.Core.Structure;
 using Wolfden.Core.Types;
 using Wolfden.Core.Yaml;
-using Wolfden.Index;
+using Wolfden.Index.Reading;
 
-namespace Wolfden.Mcp;
+namespace Wolfden.Index.Writing;
 
 /// <summary>
 /// The write tools (design.md §8, #21). Every write is checked as the den
@@ -310,7 +310,7 @@ public sealed partial class DenTools
             }
 
             return new WriteResult(
-                ToolJson.Version, true, path, HashOf(files[path]), Summary(after), effects, pinned, Warnings(check),
+                DenReader.ResultVersion, true, path, HashOf(files[path]), Summary(after), effects, pinned, Warnings(check),
                 files.OrderBy(p => p.Key == path ? 0 : 1).ThenBy(p => p.Key, StringComparer.Ordinal).Select(p => new WrittenFileView(p.Key, HashOf(p.Value))).ToList(),
                 IdAdded: idAdded);
         }
@@ -333,7 +333,7 @@ public sealed partial class DenTools
         var found = FindBook(structure, universeKey, book.Trim());
         var chapters = chapter is null ? found.Chapters.ToList() : [FindChapter(found, chapter)];
         return new GetChapterResult(
-            ToolJson.Version, universeKey, found.Key, found.FilePath, HashOf(found.File.ToBytes()), found.Status == BookStatus.Final,
+            DenReader.ResultVersion, universeKey, found.Key, found.FilePath, HashOf(found.File.ToBytes()), found.Status == BookStatus.Final,
             chapters.Count, chapters.Select(ChapterOf).ToList());
     }
 
@@ -407,7 +407,7 @@ public sealed partial class DenTools
             {
                 // A write that changes nothing never adds an id (F-ID-6).
                 return new WriteResult(
-                    ToolJson.Version, false, path, HashOf(original), null, ["Nothing changed: book.md already says that."], [], [],
+                    DenReader.ResultVersion, false, path, HashOf(original), null, ["Nothing changed: book.md already says that."], [], [],
                     Chapter: ChapterOf(ch));
             }
 
@@ -420,7 +420,7 @@ public sealed partial class DenTools
             var afterBook = FindBook(check.Structure, universeKey, target.Key);
             var afterChapter = afterBook.FindChapter(ch.Key)!;
             return new WriteResult(
-                ToolJson.Version, true, path, HashOf(bytes), null, [.. ChapterEffects(ch, afterChapter, touched.Distinct().ToList()), .. notes], [], Warnings(check),
+                DenReader.ResultVersion, true, path, HashOf(bytes), null, [.. ChapterEffects(ch, afterChapter, touched.Distinct().ToList()), .. notes], [], Warnings(check),
                 Chapter: ChapterOf(afterChapter), IdAdded: idAdded);
         }
     }
@@ -494,13 +494,13 @@ public sealed partial class DenTools
                 var result = history.Checkpoint(new CheckpointRequest(message.Trim(), given, [coAuthor.Trim()]));
                 if (!result.IsAvailable)
                 {
-                    return new CheckpointResult(ToolJson.Version, history.Name, false, result.Reason, false, null);
+                    return new CheckpointResult(DenReader.ResultVersion, history.Name, false, result.Reason, false, null);
                 }
 
                 if (result.Value is not { } e)
                 {
                     ForgetRecordedDeletions(given);
-                    return new CheckpointResult(ToolJson.Version, history.Name, true, null, false, null);
+                    return new CheckpointResult(DenReader.ResultVersion, history.Name, true, null, false, null);
                 }
 
                 // Which of the recorded files this session's writes saved, and which changed some
@@ -540,7 +540,7 @@ public sealed partial class DenTools
                 ForgetRecordedDeletions(given);
 
                 return new CheckpointResult(
-                    ToolJson.Version, history.Name, true, null, true,
+                    DenReader.ResultVersion, history.Name, true, null, true,
                     new HistoryEntryView(e.Id, e.When, e.Author, e.Message, e.Changes.Select(c => new HistoryChangeView(c.Kind.ToString().ToLowerInvariant(), c.Path, c.OldPath)).ToList()),
                     ours.Order(StringComparer.Ordinal).ToList(),
                     theirs.Order(StringComparer.Ordinal).ToList());
@@ -672,7 +672,7 @@ public sealed partial class DenTools
             }
 
             return new WriteResult(
-                ToolJson.Version, true, made.Path, HashOf(bytes), Summary(entity), effects, [], Warnings(check),
+                DenReader.ResultVersion, true, made.Path, HashOf(bytes), Summary(entity), effects, [], Warnings(check),
                 [new WrittenFileView(made.Path, HashOf(bytes), Created: true)]);
         }
     }
@@ -878,12 +878,12 @@ public sealed partial class DenTools
                 said.Add($"The file had no id, so it was given {idAdded} (F-ID-6).");
             }
 
-            return new WriteResult(ToolJson.Version, true, path, HashOf(bytes), Summary(after), said, pinned.Distinct().ToList(), Warnings(check), IdAdded: idAdded);
+            return new WriteResult(DenReader.ResultVersion, true, path, HashOf(bytes), Summary(after), said, pinned.Distinct().ToList(), Warnings(check), IdAdded: idAdded);
         }
     }
 
     private static WriteResult Unchanged(string path, byte[] bytes, CatalogEntity entity) =>
-        new(ToolJson.Version, false, path, HashOf(bytes), Summary(entity), ["Nothing changed: the file already says that."], [], []);
+        new(DenReader.ResultVersion, false, path, HashOf(bytes), Summary(entity), ["Nothing changed: the file already says that."], [], []);
 
     /// <summary>The entity's path in the index, and every id the den uses (for a missing id, F-ID-6).</summary>
     private (string Path, HashSet<string> Ids) Locate(string entity, string? universe)

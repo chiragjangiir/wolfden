@@ -1,9 +1,9 @@
 using Wolfden.Core.Checks;
 using Wolfden.Core.Documents;
 using Wolfden.Core.History;
-using Wolfden.Index;
+using Wolfden.Index.Reading;
 
-namespace Wolfden.Mcp;
+namespace Wolfden.Index.Writing;
 
 /// <summary>
 /// The tools of the MCP server (design.md §8, #20), over one den. The read
@@ -172,7 +172,7 @@ public sealed partial class DenTools
             .ToList();
         var shown = matching.Take(limit).ToList();
         return new CheckResult(
-            ToolJson.Version, scope, check.IsLoaded, check.IsLoaded ? check.Structure.SpoilerChecks : null, check.Catalog.Entities.Count,
+            DenReader.ResultVersion, scope, check.IsLoaded, check.IsLoaded ? check.Structure.SpoilerChecks : null, check.Catalog.Entities.Count,
             check.ErrorCount, check.WarningCount, shown.Count, matching.Count, matching.Count > limit, shown, note);
 
         static string Severity(DiagnosticSeverity s) => s == DiagnosticSeverity.Error ? "error" : "warning";

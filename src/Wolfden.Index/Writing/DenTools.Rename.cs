@@ -4,8 +4,9 @@ using Wolfden.Core.Entities;
 using Wolfden.Core.Links;
 using Wolfden.Core.Structure;
 using Wolfden.Core.Yaml;
+using Wolfden.Index.Reading;
 
-namespace Wolfden.Mcp;
+namespace Wolfden.Index.Writing;
 
 /// <summary>
 /// Renaming an entity, and changing or removing one of its aliases, with
@@ -342,7 +343,7 @@ public sealed partial class DenTools
             }
 
             return new WriteResult(
-                ToolJson.Version, true, path, HashOf(files[path]), Summary(after), effects, [], Warnings(check),
+                DenReader.ResultVersion, true, path, HashOf(files[path]), Summary(after), effects, [], Warnings(check),
                 files.OrderBy(p => p.Key == path ? 0 : 1).ThenBy(p => p.Key, StringComparer.Ordinal).Select(p => new WrittenFileView(p.Key, HashOf(p.Value))).ToList(),
                 IdAdded: idAdded);
         }

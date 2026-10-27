@@ -6,8 +6,9 @@ using Wolfden.Core.Links;
 using Wolfden.Core.Structure;
 using Wolfden.Core.Types;
 using Wolfden.Core.Yaml;
+using Wolfden.Index.Reading;
 
-namespace Wolfden.Mcp;
+namespace Wolfden.Index.Writing;
 
 /// <summary>
 /// Reading and editing a container's <c>chapter_defaults</c> (format.md
@@ -61,7 +62,7 @@ public sealed partial class DenTools
         var container = FindContainer(DenStructure.Load(Snapshot()), universeKey, series, book);
         var view = DefaultsOf(container);
         return new GetChapterDefaultsResult(
-            ToolJson.Version, universeKey, view.Kind, view.Key, view.Path, HashOf(container.File.ToBytes()), container is Book { Status: BookStatus.Final },
+            DenReader.ResultVersion, universeKey, view.Kind, view.Key, view.Path, HashOf(container.File.ToBytes()), container is Book { Status: BookStatus.Final },
             view.Fields, BooksBelow(container).Select(b => new BookBelowView(b.Key, b.Status == BookStatus.Final, b.Chapters.Count, b.FilePath)).ToList());
     }
 
@@ -115,7 +116,7 @@ public sealed partial class DenTools
             {
                 // A write that changes nothing never adds an id (F-ID-6).
                 return new WriteResult(
-                    ToolJson.Version, false, path, HashOf(original), null, [$"Nothing changed: {path[(path.LastIndexOf('/') + 1)..]} already says that."], [], [],
+                    DenReader.ResultVersion, false, path, HashOf(original), null, [$"Nothing changed: {path[(path.LastIndexOf('/') + 1)..]} already says that."], [], [],
                     ChapterDefaults: DefaultsOf(target));
             }
 
@@ -158,7 +159,7 @@ public sealed partial class DenTools
             }
 
             return new WriteResult(
-                ToolJson.Version, true, path, HashOf(bytes), null, effects, [], Warnings(check), IdAdded: idAdded, ChapterDefaults: DefaultsOf(after));
+                DenReader.ResultVersion, true, path, HashOf(bytes), null, effects, [], Warnings(check), IdAdded: idAdded, ChapterDefaults: DefaultsOf(after));
         }
     }
 

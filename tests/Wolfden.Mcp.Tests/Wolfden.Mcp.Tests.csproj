@@ -12,6 +12,7 @@
   <!-- The den's shared read queries and their results (DenReader). -->
   <ItemGroup>
     <Using Include="Wolfden.Index.Reading" />
+    <Using Include="Wolfden.Index.Writing" />
   </ItemGroup>
 
 </Project>
