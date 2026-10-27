@@ -7,8 +7,26 @@ import type { SourceFieldType } from './editApi'
 // entry came from where, so only what the writer changed is sent: an
 // untouched item, entry, or key keeps its bytes (format.md §12).
 
-/** A JSON value, as the source gives a field's value as written. */
+/**
+ * A JSON value, as the source gives a field's value as written. A plain
+ * number comes as `{ $number: "2.50" }`, its text as written, since a JSON
+ * number would lose `2.50`'s last digit or a long number's precision; the
+ * page sends numbers back the same way.
+ */
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
+
+/** A number as written: `{ $number: "2.50" }`. */
+export type NumberText = { $number: string }
+
+/** True for a number as written (`{ $number: "2.50" }`), which is a scalar, not a mapping. */
+export function isNumberText(v: unknown): v is NumberText {
+  return typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 1 && typeof (v as NumberText).$number === 'string'
+}
+
+/** A number to send, as its text. */
+export function numberText(text: string): NumberText {
+  return { $number: text }
+}
 
 /** One change of /api/edit/field: `path` is under the field, `[]` for the field itself. */
 export interface FieldChange {
@@ -70,8 +88,9 @@ let nextId = 1
 
 const ENTRY_KEYS = ['value', 'from', 'until', 'status', 'pin']
 
+/** True for a mapping; a number as written isn't one. */
 function isObject(v: unknown): v is { [key: string]: Json } {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
+  return typeof v === 'object' && v !== null && !Array.isArray(v) && !isNumberText(v)
 }
 
 function isEntry(v: unknown): v is { [key: string]: Json } {
@@ -79,7 +98,7 @@ function isEntry(v: unknown): v is { [key: string]: Json } {
 }
 
 function textOf(v: Json | undefined): string {
-  return v === null || v === undefined ? '' : String(v)
+  return v === null || v === undefined ? '' : isNumberText(v) ? v.$number : String(v)
 }
 
 /** A form value for `raw`, or null if the form can't show it (a list or mapping where a scalar goes, a date with other keys). */
@@ -94,13 +113,13 @@ export function draftOf(type: SourceFieldType, raw: Json | undefined): Draft | n
     }
 
     const sort = raw.sort
-    const ints = typeof sort === 'number' ? [sort] : Array.isArray(sort) ? sort : sort === undefined || sort === null ? [] : null
-    if (ints === null || ints.some((n) => typeof n !== 'number' || !Number.isInteger(n)) || (raw.text !== undefined && raw.text !== null && typeof raw.text !== 'string')) {
+    const ints = isNumberText(sort) ? [sort] : Array.isArray(sort) ? sort : sort === undefined || sort === null ? [] : null
+    if (ints === null || ints.some((n) => !isNumberText(n) || !/^-?[0-9]+$/.test(n.$number)) || (raw.text !== undefined && raw.text !== null && typeof raw.text !== 'string')) {
       return null
     }
 
     const text = textOf(raw.text)
-    const sortText = ints.join(', ')
+    const sortText = ints.map(textOf).join(', ')
     return { text, sort: sortText, initial: text, initialSort: sortText, raw }
   }
 
@@ -191,8 +210,13 @@ export function newItem(): ItemDraft {
  */
 export function fieldDraftOf(type: SourceFieldType, raw: Json | undefined): FieldDraft | string {
   const why = "It's written in a way this form can't show"
-  if (raw === undefined || raw === null) {
-    return { shape: raw === undefined ? 'none' : 'plain', entries: [newEntry(type)] }
+  if (raw === undefined) {
+    return { shape: 'none', entries: [newEntry(type)] }
+  }
+
+  if (raw === null) {
+    // Written with no value (`born:`): unset, and sent back as it is unless the writer gives it one.
+    return { shape: 'plain', entries: [plainEntry(valueDraftOf(type, null)!)] }
   }
 
   if (Array.isArray(raw) && raw.length > 0 && raw.some(isEntry)) {
@@ -236,7 +260,8 @@ function jsonOfDraft(type: SourceFieldType, d: Draft): Json {
   const text = type.type === 'string' || type.type === 'text' ? d.text : d.text.trim()
   switch (type.type) {
     case 'number':
-      return NUMBER.test(text) && Number.isFinite(Number(text)) ? Number(text) : text
+      // Sent as its text, so `2.50` is written `2.50`; the server reads it as a number.
+      return NUMBER.test(text) && Number.isFinite(Number(text)) ? numberText(text) : text
     case 'bool':
       return text === 'true' ? true : text === 'false' ? false : text
     case 'date': {
@@ -244,7 +269,7 @@ function jsonOfDraft(type: SourceFieldType, d: Draft): Json {
         return text
       }
 
-      const ints = d.sort.split(',').map((n) => Number(n.trim()))
+      const ints = d.sort.split(',').map((n) => numberText(n.trim()))
       const sort = ints.length === 1 ? ints[0] : ints
       return text === '' ? { sort } : { text, sort }
     }
@@ -253,10 +278,43 @@ function jsonOfDraft(type: SourceFieldType, d: Draft): Json {
   }
 }
 
+function untouched(d: Draft): boolean {
+  return d.text === d.initial && d.sort === d.initialSort && d.raw !== undefined
+}
+
+/**
+ * True for a list value whose items are all as written, in their places, with
+ * none added or taken out: it's sent back as written, so a null value or a
+ * single scalar isn't turned into a list.
+ */
+function untouchedList(v: Extract<ValueDraft, { kind: 'list' }>): boolean {
+  if (v.raw === undefined) {
+    return false
+  }
+
+  if (v.raw === null) {
+    return v.items.length === 0
+  }
+
+  if (!Array.isArray(v.raw)) {
+    return v.items.length === 1 && v.items[0].orig === null && untouched(v.items[0].draft)
+  }
+
+  return v.items.length === v.raw.length && v.items.every((item, i) => item.orig === i && untouched(item.draft))
+}
+
 function jsonOfValue(type: SourceFieldType, v: ValueDraft): Json {
   if (v.kind === 'one') {
+    if (untouched(v.draft)) {
+      return v.draft.raw as Json
+    }
+
     const json = jsonOfDraft(type, v.draft)
     return json === '' ? null : json
+  }
+
+  if (untouchedList(v)) {
+    return v.raw as Json
   }
 
   return v.items.map((i) => jsonOfDraft(type, i.draft))
@@ -347,6 +405,10 @@ function diff(path: (string | number)[], before: Json | undefined, after: Json, 
 export function fieldChanges(type: SourceFieldType, before: Json | undefined, field: FieldDraft): FieldChange[] {
   const { value: after, origins } = jsonOfField(type, field)
   const out: FieldChange[] = []
+  if (same(before, after)) {
+    return []
+  }
+
   if (after === undefined) {
     return before === undefined ? [] : [{ op: 'remove', path: [] }]
   }
@@ -410,7 +472,7 @@ export function controlId(base: string, entry: EntryDraft, part: string, item?: 
 }
 
 function draftProblem(type: SourceFieldType, d: Draft): string | null {
-  if (d.text === d.initial && d.sort === d.initialSort && d.raw !== undefined) {
+  if (untouched(d)) {
     return null
   }
 
@@ -474,11 +536,53 @@ export function fieldProblems(type: SourceFieldType, field: FieldDraft, base: st
   return problems
 }
 
-/** The link to write for a note, as the den writes them: by its file name (slug) where that's a key, else by its name. */
-export function linkFor(entity: { path: string; name: string }): string {
+/** A note's slug: its file name, where that's a key (F-KEY-4), else null. */
+export function slugOf(entity: { path: string }): string | null {
   const file = entity.path.split('/').pop() ?? ''
   const slug = file.endsWith('.md') ? file.slice(0, -3) : ''
-  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ? `[[${slug}]]` : `[[${entity.name}]]`
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ? slug : null
+}
+
+/**
+ * The link to write for a note, as the den writes them: `[[slug]]`, by its
+ * file name, where that reaches only this note. A slug is the second tier of
+ * link resolution (format.md F-LINK-6), so another note of the universe with
+ * the same file name could take the link or make it ambiguous (F-LINK-7):
+ * then, or when `others` isn't known, or the file name isn't a slug, the
+ * link is by id, `[[01J...]]`, which reaches only this note. A note without
+ * an id falls back to its slug, or its name where that can be written in a
+ * link (no `|`, `#`, `[`, or `]`).
+ */
+export function linkFor(
+  entity: { path: string; name: string; id: string | null },
+  others: readonly { path: string }[] | null,
+): string {
+  const slug = slugOf(entity)
+  const shared = slug === null || others === null || others.some((o) => o.path !== entity.path && slugOf(o) === slug)
+  if (!shared) {
+    return `[[${slug}]]`
+  }
+
+  if (entity.id) {
+    return `[[${entity.id}]]`
+  }
+
+  return slug !== null ? `[[${slug}]]` : `[[${entity.name.replace(/[|#[\]]/g, ' ').replace(/\s+/g, ' ').trim()}]]`
+}
+
+/**
+ * True if a note's name or slug matches what was typed for a link: each word
+ * typed starts a word of the name or slug, ignoring case, so `jon har` finds
+ * Jonathan Harker but a note that only mentions him in its text doesn't.
+ */
+export function nameMatches(entity: { name: string; path: string }, typed: string): boolean {
+  const words = typed.toLowerCase().split(/[\s-]+/).filter((w) => w !== '')
+  if (words.length === 0) {
+    return false
+  }
+
+  const candidates = [entity.name, slugOf(entity) ?? ''].map((t) => t.toLowerCase().split(/[\s\-_.,:;'’"()]+/).filter((w) => w !== ''))
+  return candidates.some((parts) => words.every((w) => parts.some((p) => p.startsWith(w))))
 }
 
 /** A value as the lines of YAML-like text a writer reads, for the conflict view. */
@@ -502,6 +606,6 @@ export function valueLines(value: Json | undefined): string {
       return `{ ${Object.entries(v).map(([k, x]) => `${k}: ${flow(x)}`).join(', ')} }`
     }
 
-    return v === null ? '~' : typeof v === 'string' ? JSON.stringify(v) : String(v)
+    return v === null ? '~' : typeof v === 'string' ? JSON.stringify(v) : isNumberText(v) ? v.$number : String(v)
   }
 }

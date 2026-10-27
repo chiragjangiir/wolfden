@@ -53,6 +53,29 @@ internal sealed class YamlBlock
 
     public IReadOnlyList<Diagnostic> Diagnostics => _diagnostics;
 
+    /// <summary>The text of every YAML comment in the region, in order, without its <c>#</c>; none if it doesn't scan.</summary>
+    public IReadOnlyList<string> Comments()
+    {
+        var comments = new List<string>();
+        try
+        {
+            var scanner = new Scanner(new StringReader(_source.Text.Substring(RegionStart, RegionEnd - RegionStart)), skipComments: false);
+            while (scanner.MoveNext())
+            {
+                if (scanner.Current is YamlDotNet.Core.Tokens.Comment comment)
+                {
+                    comments.Add(comment.Value);
+                }
+            }
+        }
+        catch (YamlException)
+        {
+            return [];
+        }
+
+        return comments;
+    }
+
     public static YamlBlock Parse(SourceText source, int start, int end)
     {
         var block = new YamlBlock(source, start, end);

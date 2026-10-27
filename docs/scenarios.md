@@ -3590,8 +3590,13 @@ The note's type is a den-local `specimen` with a field of every type.
   August" with sort key `1893, 8` is written
   `{ text: early August, sort: [1893, 8] }`.
 - A `ref` searches as I type a few letters, offers the notes of its
-  types, and the arrow keys and Enter (or a click) write
-  `[[jonathan-harker]]`. Escape closes the list, not the editor.
+  types whose name or slug starts so (not notes that only mention it),
+  and the arrow keys and Enter (or a click) write `[[jonathan-harker]]`.
+  If another note of the universe has the same file name, the link is
+  by id, `[[01J...]]`, so it reaches only the note I picked. Escape
+  closes the list, not the editor.
+- Numbers keep their digits: `2.50` stays `2.50`, and a 20-digit number
+  isn't rounded, read or written; `1e400` is refused (`invalid_edit`).
 - Saving changes only that field's value, with its comment kept; a value
   that doesn't fit its type is saved with the warning.
 
@@ -3599,6 +3604,7 @@ Spec: design.md §9 "Editing fields", types.md §5. Covered by:
 `FieldEditEndpointTests.TheSourceGivesTheTypesFieldsAndEachValueAsWritten`,
 `FieldEditEndpointTests.EachFieldTypeIsSetAndOnlyItsValueChanges`,
 `FieldEditEndpointTests.AValueThatDoesntFitItsTypeIsSavedWithTheWarning`,
+`FieldEditEndpointTests.NumbersKeepEveryDigitBothWays`,
 `CheckpointEndpointTests.AWebFieldSaveShowsAsSavedInWolfden`,
 `FieldEditing.test.tsx` (web).
 
@@ -3608,12 +3614,15 @@ Spec: design.md §9 "Editing fields", types.md §5. Covered by:
   keep focus on the item. Saving removes the items taken out, adds new
   ones where they go, and moves an item by removing it and adding it
   again; the others keep their bytes, in the list's own style (block or
-  flow).
+  flow). A moved item is written afresh, so a comment on it is dropped,
+  and the result says so, quoting it; moving in place is #197. Removing
+  an item with a comment says the comment went too.
 - Removing the last item leaves `tags:` for a block list and `seen: []`
   for a flow one (format.md F-RT-6): unset either way, with no warning.
 
 Spec: format.md F-RT-6, types.md F-FT-12. Covered by:
 `FieldEditEndpointTests.ListItemsAreAddedRemovedAndReorderedInTheListsOwnStyle`,
+`FieldEditEndpointTests.RemovingAnItemWithACommentSaysTheCommentWent`,
 `FieldEditing.test.tsx` (web).
 
 ### SC-WEB-62. I give a fact dates: from chapter 3 until chapter 9
@@ -3652,16 +3661,22 @@ Spec: design.md §9 "Editing fields". Covered by:
 ### SC-WEB-64. Setting a field back gives back the same bytes
 
 - Setting a field to what it says writes nothing (`changed: false`).
+  In the page, a form I didn't touch sends nothing, whatever the value's
+  shape: an entry's `value: ~` stays `~`, never `[]`.
 - Changing a value, an item, or an entry's From, then changing it back,
   leaves the file byte for byte as it was.
 
 Spec: format.md §12, F-RT-1, F-RT-3. Covered by:
-`FieldEditEndpointTests.SettingAFieldBackToWhatItWasGivesBackTheSameBytes`.
+`FieldEditEndpointTests.SettingAFieldBackToWhatItWasGivesBackTheSameBytes`,
+`FieldEditing.test.tsx` (web).
 
 ### SC-WEB-65. Field edits are guarded
 
-- A stale save shows my value and the file's side by side: Keep mine
-  saves on the new hash, Take theirs drops mine.
+- If only another part of the note changed meanwhile, my field is saved
+  on the new file without asking. If the field changed, a stale save
+  shows my value (or "(not set)" for Clear field) and the file's side by
+  side: Keep mine saves (or clears) on the new hash, Take theirs drops
+  mine.
 - A From that isn't a position is refused with the errors
   (`invalid_edit`), and the form stays open. A note in a final book is
   `frozen`.

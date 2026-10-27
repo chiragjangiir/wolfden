@@ -19,16 +19,18 @@ export type EditTarget =
   | { kind: 'rename'; line: number; name: string }
   | { kind: 'remove'; line: number; name: string }
   | { kind: 'add' }
-  | { kind: 'file' }
+  | { kind: 'file'; from?: string }
   | { kind: 'field'; name: string }
   | { kind: 'add-field' }
 
 /** The id of the button that opens `target`, where focus goes back when it closes. */
 export function editButtonId(target: EditTarget): string {
   switch (target.kind) {
+    case 'file':
+      // Edit in file by a field: focus goes back to that field's button.
+      return target.from ?? 'edit-file'
     case 'lead':
     case 'add':
-    case 'file':
     case 'add-field':
       return `edit-${target.kind}`
     case 'field':

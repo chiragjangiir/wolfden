@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { STATUSES, apiPath, getJson, type PositionView, type SearchResult } from '../api'
+import { STATUSES, apiPath, entitiesQuery, getJson, type PositionView, type SearchResult } from '../api'
 import { EditError, postEdit, sourceQuery, type EntitySource, type SourceFieldType } from '../editApi'
 import {
   controlId,
@@ -9,6 +9,7 @@ import {
   fieldProblems,
   jsonOfField,
   linkFor,
+  nameMatches,
   newEntry,
   newItem,
   valueLines,
@@ -83,7 +84,7 @@ export function FieldTools({ name, source }: { name: string; source: EntitySourc
     </EditButton>
   ) : (
     <span className="field-readonly">
-      <EditButton target={{ kind: 'file' }} id={`edit-file-${name}`} label={`Edit in file: ${name} can only be changed in the note's file`}>
+      <EditButton target={{ kind: 'file', from: `edit-file-${name}` }} id={`edit-file-${name}`} label={`Edit in file: ${name} can only be changed in the note's file`}>
         Edit in file
       </EditButton>{' '}
       <span className="muted">{reason}</span>
@@ -163,6 +164,8 @@ export function FieldEditor({ name, positions }: { name: string; positions: Posi
   const [saving, setSaving] = useState(false)
   const [conflict, setConflict] = useState<EntitySource | null>(null)
   const [clearing, setClearing] = useState(false)
+  // True when the save that met a conflict was Clear field, so Keep mine clears it.
+  const [pendingClear, setPendingClear] = useState(false)
   const idBase = `f${useId().replace(/[^a-zA-Z0-9]/g, '')}`
   const type = base?.fieldTypes.find((t) => t.name === name)
 
@@ -235,15 +238,49 @@ export function FieldEditor({ name, positions }: { name: string; positions: Posi
     return after === undefined ? [{ op: 'remove', path: [] }] : [{ op: 'set', path: [], value: after }]
   }
 
-  const send = async (on: EntitySource, changes: FieldChange[], what: string) => {
+  /**
+   * Sends the field's changes on `on`, or, for Clear field, its removal. If
+   * the file changed meanwhile but this field didn't (another field or a
+   * section did), nothing of the field is at stake, so it's sent again on
+   * the new file; otherwise the writer sees both values (a conflict).
+   */
+  const send = async (on: EntitySource, clear: boolean) => {
     setSaving(true)
     setError(null)
+    let at = on
     try {
-      const result = await postEdit('field', { entity: editing.entityKey, universe: editing.universe, expectedHash: on.hash, field: name, changes })
-      await afterSave()
-      editing.close({ what, result })
+      for (let attempt = 0; ; attempt++) {
+        if (clear && rawOf(at, name) === undefined) {
+          // Already gone from the file: nothing to clear.
+          editing.close()
+          return
+        }
+
+        const changes: FieldChange[] = clear ? [{ op: 'remove', path: [] }] : changesOn(at)
+        if (changes.length === 0) {
+          // Nothing to save: no request, and the file is left as it is.
+          editing.close()
+          return
+        }
+
+        try {
+          const result = await postEdit('field', { entity: editing.entityKey, universe: editing.universe, expectedHash: at.hash, field: name, changes })
+          await afterSave()
+          editing.close({ what: clear ? `the note (cleared ${name})` : `the field ${name}`, result })
+          return
+        } catch (e) {
+          const current = e instanceof EditError && e.code === 'stale_file' ? e.current : null
+          if (current && attempt < 2 && JSON.stringify(rawOf(current, name)) === JSON.stringify(rawOf(base, name))) {
+            at = current
+            continue
+          }
+
+          throw e
+        }
+      }
     } catch (e) {
       if (e instanceof EditError && e.code === 'stale_file' && e.current) {
+        setPendingClear(clear)
         setConflict(e.current)
       } else {
         setError(e as Error)
@@ -265,27 +302,20 @@ export function FieldEditor({ name, positions }: { name: string; positions: Posi
       return
     }
 
-    const changes = changesOn(on)
-    if (changes.length === 0) {
-      // Nothing to save: no request, and the file is left as it is.
-      editing.close()
-      return
-    }
-
-    await send(on, changes, `the field ${name}`)
+    await send(on, false)
   }
 
   if (conflict) {
     return (
       <Conflict
         what={`the field ${name}`}
-        mine={valueLines(jsonOfField(type, draft).value)}
+        mine={pendingClear ? valueLines(undefined) : valueLines(jsonOfField(type, draft).value)}
         theirs={valueLines(rawOf(conflict, name))}
         saving={saving}
         onKeepMine={() => {
           const on = conflict
           setConflict(null)
-          void save(on)
+          void (pendingClear ? send(on, true) : save(on))
         }}
         onTakeTheirs={() => {
           void afterSave()
@@ -363,7 +393,7 @@ export function FieldEditor({ name, positions }: { name: string; positions: Posi
         <div className="confirm" role="group" aria-labelledby={`${idBase}-clear`}>
           <p id={`${idBase}-clear`}>Clear {name}? It's taken out of the note's file, with every entry it has.</p>
           <p className="editor-actions">
-            <button type="button" className="danger" disabled={saving} onClick={() => void send(base, [{ op: 'remove', path: [] }], `the note (cleared ${name})`)}>
+            <button type="button" className="danger" disabled={saving} onClick={() => void send(base, true)}>
               {saving ? 'Clearing…' : 'Clear field'}
             </button>
             <button type="button" autoFocus onClick={() => setClearing(false)}>
@@ -805,13 +835,16 @@ function RefInput({
     const seen = new Set<string>()
     return (search.data?.hits ?? [])
       .map((h) => h.entity)
-      .filter((e) => (!to || to.includes(e.type)) && !seen.has(e.key) && (seen.add(e.key), true))
+      // Only notes whose name or slug matches what's typed, not ones that just mention it.
+      .filter((e) => (!to || to.includes(e.type)) && nameMatches(e, words) && !seen.has(e.key) && (seen.add(e.key), true))
       .slice(0, 8)
-  }, [search.data, to])
+  }, [search.data, to, words])
   const listId = `${id}-options`
   const showing = searchable && options.length > 0
-  const pick = (entity: { path: string; name: string }) => {
-    onChange({ ...draft, text: linkFor(entity) })
+  // Every note of the universe, to tell whether a slug reaches only the note picked.
+  const all = useQuery(entitiesQuery(universe, undefined))
+  const pick = (entity: { path: string; name: string; id: string | null }) => {
+    onChange({ ...draft, text: linkFor(entity, all.data && !all.data.truncated ? all.data.entities : null) })
     setOpen(false)
   }
 
@@ -822,7 +855,7 @@ function RefInput({
         id={id}
         role="combobox"
         aria-expanded={showing}
-        aria-controls={listId}
+        aria-controls={showing ? listId : undefined}
         aria-autocomplete="list"
         aria-activedescendant={showing ? `${listId}-${active}` : undefined}
         aria-invalid={invalid || undefined}

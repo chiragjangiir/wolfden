@@ -40,13 +40,13 @@ public class FieldEditEndpointTests
         "status: canon\n" +
         "fields:\n" +
         "  label: Earth box   # the label on the lid\n" +
-        "  weight: 12.5\n" +
+        "  weight: 12.50\n" +
         "  preserved: false\n" +
         "  found: \"1893-08-08\"\n" +
         "  state: Dried\n" +
         "  tags:\n" +
         "    - soil\n" +
-        "    - \"box\"\n" +
+        "    - \"box\"   # from Varna\n" +
         "    - chapel\n" +
         "  seen: [\"dracula:1\", \"dracula:7\"]\n" +
         "  keeper:\n" +
@@ -94,6 +94,8 @@ public class FieldEditEndpointTests
         return json;
     }
 
+    private static Dictionary<string, string> Number(string text) => new() { ["$number"] = text };
+
     private static string[] Rules(JsonElement result) => result.GetProperty("warnings").EnumerateArray().Select(w => w.GetProperty("rule").GetString()!).ToArray();
 
     private static string[] Strings(JsonElement json, string name) => json.GetProperty(name).EnumerateArray().Select(e => e.GetString()!).ToArray();
@@ -111,7 +113,7 @@ public class FieldEditEndpointTests
         Assert.Equal(["label", "weight", "preserved", "found", "state", "tags", "seen", "keeper", "x_extra"], fields.Keys);
         Assert.Equal(7, fields["label"].GetProperty("line").GetInt32());
         Assert.Equal("Earth box", fields["label"].GetProperty("value").GetString());
-        Assert.Equal(12.5, fields["weight"].GetProperty("value").GetDouble());
+        Assert.Equal("12.50", fields["weight"].GetProperty("value").GetProperty("$number").GetString());
         Assert.Equal(JsonValueKind.False, fields["preserved"].GetProperty("value").ValueKind);
         Assert.Equal("1893-08-08", fields["found"].GetProperty("value").GetString());
         Assert.Equal(["soil", "box", "chapel"], fields["tags"].GetProperty("value").EnumerateArray().Select(e => e.GetString()));
@@ -138,7 +140,7 @@ public class FieldEditEndpointTests
         await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root));
 
         await SavedAsync(server, "label", new[] { new { op = "set", value = "Box of earth" } });
-        await SavedAsync(server, "weight", new[] { new { op = "set", value = 3.25 } });
+        await SavedAsync(server, "weight", new[] { new { op = "set", value = Number("3.250") } });
         await SavedAsync(server, "preserved", new[] { new { op = "set", value = true } });
         await SavedAsync(server, "found", new[] { new { op = "set", value = (object)new { text = "early August", sort = new[] { 1893, 8 } } } });
         await SavedAsync(server, "state", new[] { new { op = "set", value = "lost" } });
@@ -148,7 +150,7 @@ public class FieldEditEndpointTests
         var text = den.Read(BoxPath);
         Assert.Equal(
             Box.Replace("  label: Earth box   # the label on the lid\n", "  label: Box of earth   # the label on the lid\n", StringComparison.Ordinal)
-                .Replace("  weight: 12.5\n", "  weight: 3.25\n", StringComparison.Ordinal)
+                .Replace("  weight: 12.50\n", "  weight: 3.250\n", StringComparison.Ordinal)
                 .Replace("  preserved: false\n", "  preserved: true\n", StringComparison.Ordinal)
                 .Replace("  found: \"1893-08-08\"\n", "  found: { text: early August, sort: [1893, 8] }\n", StringComparison.Ordinal)
                 .Replace("  state: Dried\n", "  state: lost\n", StringComparison.Ordinal)
@@ -166,9 +168,17 @@ public class FieldEditEndpointTests
 
         // Add at the end, then move 'chapel' (now item 2) to the front: a removal and an add, saved together.
         await SavedAsync(server, "tags", new[] { new { op = "add", value = "Carfax" } });
-        Assert.Contains("  tags:\n    - soil\n    - \"box\"\n    - chapel\n    - Carfax\n  seen:", den.Read(BoxPath), StringComparison.Ordinal);
-        await SavedAsync(server, "tags", new object[] { new { op = "remove", path = new object[] { 2 } }, new { op = "add", value = "chapel", index = 0 } });
-        Assert.Contains("  tags:\n    - chapel\n    - soil\n    - \"box\"\n    - Carfax\n  seen:", den.Read(BoxPath), StringComparison.Ordinal);
+        Assert.Contains("  tags:\n    - soil\n    - \"box\"   # from Varna\n    - chapel\n    - Carfax\n  seen:", den.Read(BoxPath), StringComparison.Ordinal);
+        var moved = await SavedAsync(server, "tags", new object[] { new { op = "remove", path = new object[] { 2 } }, new { op = "add", value = "chapel", index = 0 } });
+        Assert.Contains("  tags:\n    - chapel\n    - soil\n    - \"box\"   # from Varna\n    - Carfax\n  seen:", den.Read(BoxPath), StringComparison.Ordinal);
+        Assert.DoesNotContain(Strings(moved, "effects"), e => e.Contains("comment", StringComparison.Ordinal));
+
+        // A moved item is written afresh, so a comment on it goes (#197), and the result says so.
+        moved = await SavedAsync(server, "tags", new object[] { new { op = "remove", path = new object[] { 2 } }, new { op = "add", value = "box", index = 0 } });
+        Assert.Contains("  tags:\n    - box\n    - chapel\n    - soil\n    - Carfax\n  seen:", den.Read(BoxPath), StringComparison.Ordinal);
+        Assert.Contains(
+            Strings(moved, "effects"),
+            e => e.StartsWith("Moved an item of fields.tags to item 0", StringComparison.Ordinal) && e.Contains("'# from Varna'", StringComparison.Ordinal) && e.Contains("#197", StringComparison.Ordinal));
 
         // A flow list keeps its brackets; an item is set where it is.
         await SavedAsync(server, "seen", new[] { new { op = "set", path = new object[] { 1 }, value = "dracula:8" } });
@@ -315,6 +325,52 @@ public class FieldEditEndpointTests
         Assert.Equal(HttpStatusCode.Conflict, status);
         Assert.Equal("frozen", json.GetProperty("code").GetString());
         Assert.Equal(before, den.Read(BoxPath));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-60")]
+    public async Task NumbersKeepEveryDigitBothWays()
+    {
+        using var den = NewDen();
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root));
+
+        // Read: as written, '2.50' and a 20-digit number alike.
+        await SavedAsync(server, "label", new[] { new { op = "set", value = Number("12345678901234567890") } });
+        var fields = (await SourceAsync(server)).GetProperty("fields").EnumerateArray().ToDictionary(f => f.GetProperty("name").GetString()!, f => f.GetProperty("value"));
+        Assert.Equal("12345678901234567890", fields["label"].GetProperty("$number").GetString());
+        Assert.Equal("12.50", fields["weight"].GetProperty("$number").GetString());
+
+        // Written: as given, in a whole value too.
+        await SavedAsync(server, "keeper", new[] { new { op = "set", value = (object)new[] { new { value = (object)Number("2.50"), from = "dracula:1" } } } });
+        var text = den.Read(BoxPath);
+        Assert.Contains("  label: 12345678901234567890   # the label on the lid\n", text, StringComparison.Ordinal);
+        Assert.Contains("  keeper:\n    - { value: 2.50, from: \"dracula:1\" }\n", text, StringComparison.Ordinal);
+
+        // A number too large to be one is refused, as text or as a JSON number; so is text that isn't a number.
+        var hash = await HashAsync(server);
+        var (status, json) = await EditAsync(server, hash, "weight", new[] { new { op = "set", value = Number("1e400") } });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, status);
+        Assert.Equal("invalid_edit", json.GetProperty("code").GetString());
+        (status, json) = await EditAsync(server, hash, "weight", new[] { new { op = "set", value = Number("heavy") } });
+        Assert.Equal(HttpStatusCode.BadRequest, status);
+        using var content = new StringContent(
+            $$"""{"entity": "{{BoxPath}}", "expectedHash": "{{hash}}", "field": "weight", "changes": [{"op": "set", "value": 1e400}]}""", Encoding.UTF8, "application/json");
+        using var response = await server.Client.PostAsync("/api/edit/field", content, Token);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Equal(text, den.Read(BoxPath));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-61")]
+    public async Task RemovingAnItemWithACommentSaysTheCommentWent()
+    {
+        using var den = NewDen();
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root));
+
+        var removed = await SavedAsync(server, "tags", new[] { new { op = "remove", path = new object[] { 1 } } });
+
+        Assert.Contains("Removed fields.tags.1 with the comment on it: '# from Varna'.", Strings(removed, "effects"));
+        Assert.Contains("  tags:\n    - soil\n    - chapel\n  seen:", den.Read(BoxPath), StringComparison.Ordinal);
     }
 
     [Fact]

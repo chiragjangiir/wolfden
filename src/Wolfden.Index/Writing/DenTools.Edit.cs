@@ -80,7 +80,9 @@ public sealed partial class DenTools
 
     /// <summary>
     /// A YAML value as JSON, keeping what kind of scalar it is (<see cref="SourceField.Value"/>):
-    /// a plain boolean or number as one, a null as null, and any other scalar as its text.
+    /// a plain boolean as one, a plain number as <c>{"$number": "2.50"}</c> with its text as written
+    /// (a browser's JSON number would lose <c>2.50</c>'s last digit and a long number's precision),
+    /// a null as null, and any other scalar as its text.
     /// </summary>
     private static JsonElement AsWritten(YamlNode? node)
     {
@@ -90,7 +92,7 @@ public sealed partial class DenTools
         {
             null or YamlScalar { IsNull: true } => null,
             YamlScalar { Style: YamlScalarStyle.Plain } s when s.AsBoolean() is { } b => b,
-            YamlScalar { Style: YamlScalarStyle.Plain } s when JsonNumber().IsMatch(s.Text) => JsonDocument.Parse(s.Text).RootElement.Clone(),
+            YamlScalar { Style: YamlScalarStyle.Plain } s when YamlNumber().IsMatch(s.Text) => new Dictionary<string, string> { ["$number"] = s.Text },
             YamlScalar s => s.Text,
             YamlSequence l => l.Items.Select(Plain).ToList(),
             YamlMapping m => m.Entries.Where(e => e.KeyText is not null).GroupBy(e => e.KeyText!).ToDictionary(g => g.Key, g => Plain(g.First().Value)),
@@ -102,9 +104,9 @@ public sealed partial class DenTools
     [GeneratedRegex(@"^#+(?:\s+|\z)", RegexOptions.CultureInvariant)]
     private static partial Regex HeadingMarks();
 
-    /// <summary>A number as JSON writes one, which is also one under YAML 1.2's core schema.</summary>
-    [GeneratedRegex(@"^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?\z", RegexOptions.CultureInvariant)]
-    private static partial Regex JsonNumber();
+    /// <summary>A number under YAML 1.2's core schema, as types.md F-FT-6 reads one: an integer or a float, without <c>.inf</c> and <c>.nan</c>.</summary>
+    [GeneratedRegex(@"^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?\z", RegexOptions.CultureInvariant)]
+    private static partial Regex YamlNumber();
 
     /// <summary>
     /// Replaces the entity's lead: the text before its first section, title

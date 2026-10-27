@@ -1573,8 +1573,9 @@ docs/
   recorded decision. Chapter fields and inherited values are #138.
   - **The API.** `/api/entity/source` adds `fields` (each field under
     `fields:` in file order: its `name`, the `line` of its key, and its
-    `value` as written, as JSON, with a plain `true`/`false` or number
-    as one and every other scalar as its text) and `fieldTypes` (the
+    `value` as written, as JSON, with a plain `true`/`false` as one, a
+    plain number as `{"$number": "2.50"}` with its text as written, and
+    every other scalar as its text) and `fieldTypes` (the
     type's fields in field order, each with `type`, `list`,
     `temporal`, `required`, enum `values`, ref `to`, `description`,
     and `default`, then the universal `placeholder`; `row` is edited in
@@ -1585,15 +1586,25 @@ docs/
     path under `fields.<field>`, so an edit can't reach `id`, `name`,
     `status`, or another field, and it has the same hash check, frozen
     books, write check, pinned canon, effects, ledger, and lossless
-    edits. A number that isn't whole (`2.5`) is written plain now, by
-    the MCP tools too.
+    edits. Numbers go both ways as text (`{"$number": "2.50"}`), since a
+    browser's JSON number would turn `2.50` into `2.5` and cut a long
+    number's digits; the server writes the text as given, plain. A
+    number that isn't whole is written plain by the MCP tools too now,
+    and one too large to be a number (`1e400`) is `invalid_edit` for
+    both.
   - **Only what changed.** The page works out the changes from the value
     as written and the form, following each list item and dated entry
     from where it came: one taken out is removed, a new one added where
     it goes, one moved is removed and added again, and one that stayed
-    has only its changed keys set (`[1, "until"]`). A value the writer
-    didn't touch is sent back as written, so `Dried` isn't rewritten
-    `dried`. A plain value that gains a date or a pin, or a field whose
+    has only its changed keys set (`[1, "until"]`). Core has no in-place
+    move yet (#197), so a moved item is written afresh: it takes the
+    quoting of the item before it, and a comment on it is dropped, which
+    `effects` says ("Moved an item of fields.tags to item 0, written
+    afresh, so the comment on it was dropped: '# from Varna'"); removing
+    an item with a comment says so too. A value the writer didn't touch,
+    and a list whose items are all as they were, is sent back as
+    written, so `Dried` isn't rewritten `dried` and an entry's
+    `value: ~` stays `~`. A plain value that gains a date or a pin, or a field whose
     shape changes, is set as a whole. Removing the last item leaves the
     key as F-RT-6 says (`key:` for a block list, `[]` for a flow one).
   - **One form for every field.** A field is edited as its entries: a
@@ -1611,16 +1622,29 @@ docs/
     its key; one that isn't a value shows as written, so the form never
     changes it unasked), `date` its text and an optional sort key (the
     mapping form of F-FT-11 when there's a sort key), `ref` a combobox
-    that searches `/api/search` as letters are typed, filtered to the
-    field's `to` types, and writes `[[slug]]` (the note's name where the
-    file name isn't a key), and `position`, `from`, and `until` a book
+    that searches `/api/search` as letters are typed and offers the notes
+    of the field's `to` types whose name or slug has a word starting with
+    each word typed (not notes that only mention it; a lookup by alias
+    needs a name-and-alias endpoint, a follow-up), and `position`,
+    `from`, and `until` a book
     and chapter picker from the den's positions, with "Type a
     position…" for any other text. Status is a dropdown of the six
     statuses or "the note's status", and pin a checkbox.
+  - **The link a pick writes.** `[[slug]]`, by the note's file name, as
+    the den's own files write links, where no other note of the universe
+    has that file name. A slug is the second tier of resolution
+    (F-LINK-6), so a namesake could take the link or make it ambiguous
+    (F-LINK-7): then, or if the page can't list the universe's notes, or
+    the file name isn't a slug, the link is by id (`[[01J...]]`), which
+    reaches only that note. A note without an id falls back to its slug,
+    or its name with `|`, `#`, `[`, and `]` left out.
   - **Checked in the page.** Numbers, links, sort keys, one-line
     strings, empty values, and empty list items are checked before
-    sending, with the message by the control and focus on the first;
-    positions are checked by the server (`invalid_edit`).
+    sending, with the message by the control and focus on the first.
+    Positions are checked by the server: a `from` or `until` that isn't
+    a position is an error, so `invalid_edit`, but a `position` field's
+    value that isn't one is saved with the F-FT-10 warning, as a
+    field's data.
   - **What the form can't show.** A field the type doesn't define (or
     any field of an untyped note), and a value the form can't hold (a
     list in a field that isn't a list, such as an unquoted `[[link]]`,
@@ -1630,11 +1654,17 @@ docs/
   - **Add field and Clear field.** Add field offers the type's fields
     the note doesn't set, or sets to nothing, and opens that field's
     form. Clear field asks in the page, then removes the key.
-  - **A stale save** shows the writer's value and the file's side by
-    side. Keep mine sends the same changes on the new hash if the field
-    itself didn't change meanwhile, and otherwise sets the field to the
-    writer's value as a whole; Take theirs drops it. There's no "Copy
-    mine and reload" for a field.
+  - **A stale save.** If only another part of the note changed (this
+    field's value is as it was when the form opened), nothing of the
+    field is at stake, so the page sends the same changes again on the
+    new hash, without asking. Otherwise it shows the writer's value (or
+    "(not set)" for Clear field) and the file's side by side. Keep mine
+    sends the same changes on the new hash if the field itself didn't
+    change, and otherwise sets the field to the writer's value as a
+    whole, or removes it again for Clear field; Take theirs drops it.
+    There's no "Copy mine and reload" for a field.
+  - **Focus.** Edit in file by a field returns focus to that field's
+    button when it closes.
 
 - **Checkpoints in the web UI** (#30; manual by default is the
   maintainer's decision of 2026-10-27, §12 Q4; the rest is v0

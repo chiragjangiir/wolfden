@@ -90,7 +90,7 @@ public static partial class WriteEndpoints
         MapEdit(api, "/edit/file", tools, ["text"], (b, entity, universe, hash) =>
             tools.ReplaceFile(entity, b.Text("text"), hash, universe));
         MapEdit(api, "/edit/field", tools, ["field", "changes"], (b, entity, universe, hash) =>
-            tools.UpdateFields(entity, hash, FieldChanges(b.Text("field").Trim(), b.Json("changes")), universe));
+            tools.UpdateFields(entity, hash, FieldChanges(b.Text("field").Trim(), b.Json("changes")), universe, numbersAsText: true));
     }
 
     /// <summary>The members a change of <c>/api/edit/field</c> takes.</summary>

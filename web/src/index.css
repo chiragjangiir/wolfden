@@ -1010,3 +1010,7 @@ button.danger {
   background: var(--accent);
   color: var(--accent-text);
 }
+
+.ref-options li[aria-selected='true'] .muted {
+  color: inherit;
+}

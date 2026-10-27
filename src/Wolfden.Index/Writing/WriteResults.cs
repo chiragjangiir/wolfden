@@ -176,8 +176,9 @@ public sealed record EntitySourceResult(
 /// <param name="Line">The line its key is on.</param>
 /// <param name="Value">
 /// Its value as written, whatever its shape (a plain value, an entry, or a temporal list, format.md §7.3), as JSON:
-/// a plain <c>true</c> or <c>false</c> as a boolean, a plain number as a number, a null as null, lists and mappings
-/// as arrays and objects, and every other scalar, quoted or not, as a string of its text.
+/// a plain <c>true</c> or <c>false</c> as a boolean, a plain number as <c>{"$number": "2.50"}</c> with its text as
+/// written, a null as null, lists and mappings as arrays and objects, and every other scalar, quoted or not, as a
+/// string of its text. <c>/api/edit/field</c> takes numbers in that form too.
 /// </param>
 public sealed record SourceField(string Name, int Line, JsonElement Value);
 

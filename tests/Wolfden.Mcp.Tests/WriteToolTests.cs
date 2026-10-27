@@ -118,7 +118,13 @@ public sealed class WriteToolTests : IDisposable
 
         var badFrom = Assert.Throws<DenToolException>(() => Tools.UpdateFields("Mr. Swales", hash, Json("""[{"op": "set", "path": "from", "value": "dracula:7.2"}]""")));
         Assert.Equal(ToolErrorCodes.InvalidEdit, badFrom.Code);
+
+        // A number too large to be one (types.md F-FT-6); one that isn't whole is written plain.
+        var huge = Assert.Throws<DenToolException>(() => Tools.UpdateFields("Mr. Swales", hash, Json("""[{"op": "set", "path": "fields.x_count", "value": 1e400}]""")));
+        Assert.Equal(ToolErrorCodes.InvalidEdit, huge.Code);
         Assert.Equal(before, _den.Read(Swales));
+        Tools.UpdateFields("Mr. Swales", hash, Json("""[{"op": "set", "path": "fields.x_count", "value": 2.50}]"""));
+        Assert.Contains("  x_count: 2.50\n", _den.Read(Swales), StringComparison.Ordinal);
     }
 
     [Fact]

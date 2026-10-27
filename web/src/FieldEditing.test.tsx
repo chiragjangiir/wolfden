@@ -1,13 +1,18 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within, configure } from '@testing-library/react'
 import type { EntityPageResult, PageField, SearchResult } from './api'
 import type { EntitySource, SourceFieldType, WriteResult } from './editApi'
-import { fieldChanges, fieldDraftOf, fieldProblems, linkFor, newEntry, newItem, type FieldDraft, type Json } from './fieldModel'
+import { fieldChanges, fieldDraftOf, fieldProblems, linkFor, nameMatches, newEntry, newItem, type FieldDraft, type Json } from './fieldModel'
 import { entities, page, renderApp, stubApi } from './test/harness'
 
 // Editing a note's fields in place (#28, part b): the changes worked out from
 // the form, the controls for each field type, and saving one field.
+
+// The first test of a file renders the app cold, which can take over a second
+// when the machine is busy (the whole suite runs files in parallel).
+configure({ asyncUtilTimeout: 5000 })
+vi.setConfig({ testTimeout: 15_000 })
 
 beforeAll(() => {
   // jsdom lays nothing out; CodeMirror (Edit file) measures text ranges.
@@ -132,17 +137,24 @@ describe('SC-WEB-61: the changes a field edit sends', () => {
   })
 
   it('reads numbers, dates with a sort key, and booleans, and changes a date mapping key by key', () => {
-    const w = draft(types.weight, 12.5)
-    ;(w.entries[0].value as { kind: 'one'; draft: { text: string } }).draft.text = '3.25'
-    expect(fieldChanges(types.weight, 12.5, w)).toEqual([{ op: 'set', path: [], value: 3.25 }])
+    // Numbers come and go as their text, so 2.50 stays 2.50 and a long one keeps every digit.
+    const w = draft(types.weight, { $number: '12.50' })
+    expect(w.entries[0].value).toMatchObject({ draft: { text: '12.50' } })
+    expect(fieldChanges(types.weight, { $number: '12.50' }, w)).toEqual([])
+    ;(w.entries[0].value as { kind: 'one'; draft: { text: string } }).draft.text = '3.250'
+    expect(fieldChanges(types.weight, { $number: '12.50' }, w)).toEqual([{ op: 'set', path: [], value: { $number: '3.250' } }])
+    const serial = draft(types.label, { $number: '12345678901234567890' })
+    expect(serial.entries[0].value).toMatchObject({ draft: { text: '12345678901234567890' } })
 
     const f = draft(types.found, '1893-08-08')
     const fv = f.entries[0].value as { kind: 'one'; draft: { text: string; sort: string } }
     fv.draft.text = 'early August'
     fv.draft.sort = '1893, 8'
-    expect(fieldChanges(types.found, '1893-08-08', f)).toEqual([{ op: 'set', path: [], value: { text: 'early August', sort: [1893, 8] } }])
+    expect(fieldChanges(types.found, '1893-08-08', f)).toEqual([
+      { op: 'set', path: [], value: { text: 'early August', sort: [{ $number: '1893' }, { $number: '8' }] } },
+    ])
 
-    const before: Json = { text: 'early August', sort: [1893, 8] }
+    const before: Json = { text: 'early August', sort: [{ $number: '1893' }, { $number: '8' }] }
     const m = draft(types.found, before)
     ;(m.entries[0].value as { kind: 'one'; draft: { text: string } }).draft.text = 'August'
     expect(fieldChanges(types.found, before, m)).toEqual([{ op: 'set', path: ['text'], value: 'August' }])
@@ -175,9 +187,71 @@ describe('SC-WEB-61: the changes a field edit sends', () => {
     expect(fieldDraftOf(types.label, { x: 1 })).toMatch(/can't show/)
   })
 
-  it('writes a link by the file name, as the den writes them', () => {
-    expect(linkFor({ path: 'universes/dracula/books/dracula/entities/characters/mina-harker.md', name: 'Mina Harker' })).toBe('[[mina-harker]]')
-    expect(linkFor({ path: 'universes/dracula/notes/The Year.md', name: 'The Year' })).toBe('[[The Year]]')
+  it('writes a link by the file name where that reaches only the note, else by its id', () => {
+    const minaPath = 'universes/dracula/books/dracula/entities/characters/mina-harker.md'
+    const pick = { path: minaPath, name: 'Mina Harker', id: '01M4TF5F0EKGGWD5FNVBAEY8X1' }
+    expect(linkFor(pick, [{ path: minaPath }, { path: 'universes/dracula/entities/notes/whitby.md' }])).toBe('[[mina-harker]]')
+
+    // Another note with the same file name could take the link, or make it ambiguous (F-LINK-7): the id reaches only this one.
+    expect(linkFor(pick, [{ path: minaPath }, { path: 'universes/dracula/series/later/entities/characters/mina-harker.md' }])).toBe('[[01M4TF5F0EKGGWD5FNVBAEY8X1]]')
+    // Not knowing the other notes, the id too.
+    expect(linkFor(pick, null)).toBe('[[01M4TF5F0EKGGWD5FNVBAEY8X1]]')
+    // A file name that isn't a slug: the id, never a name with | # or ] in it.
+    const odd = { path: 'universes/dracula/notes/The Year #1893.md', name: 'The Year #1893 | draft', id: '01M4TF5F0EKGGWD5FNVBAEY8X2' }
+    expect(linkFor(odd, [])).toBe('[[01M4TF5F0EKGGWD5FNVBAEY8X2]]')
+    expect(linkFor({ ...odd, id: null }, [])).toBe('[[The Year 1893 draft]]')
+  })
+
+  it('offers notes by their name or slug, not ones that only mention the words', () => {
+    const jon = { name: 'Jonathan Harker', path: 'x/jonathan-harker.md' }
+    expect(nameMatches(jon, 'Jon')).toBe(true)
+    expect(nameMatches(jon, 'har')).toBe(true)
+    expect(nameMatches(jon, 'jon har')).toBe(true)
+    expect(nameMatches(jon, 'jonathan-h')).toBe(true)
+    expect(nameMatches(jon, 'mina')).toBe(false)
+    expect(nameMatches({ name: 'Castle Dracula', path: 'x/castle-dracula.md' }, 'Jon')).toBe(false)
+  })
+})
+
+describe('B1: an untouched form sends nothing, whatever the value', () => {
+  const n = (t: string) => ({ $number: t })
+  const scalars: Json[] = ['text', 'Dried', n('2.50'), n('12345678901234567890'), true, false, '[[mina-harker]]', 'dracula:5', '1893-08-08', '']
+  const lists: Json[] = [[], ['a', 'b'], [n('1'), 'x'], ['[[a]]']]
+  const dates: Json[] = [{ text: 'late spring' }, { sort: n('1893') }, { text: 'x', sort: [n('1893'), n('8')] }]
+  const values: Json[] = [null, ...scalars, ...lists, ...dates]
+  const shapes: Json[] = [
+    ...values,
+    ...values.map((v): Json => ({ value: v })),
+    ...values.map((v): Json => ({ value: v, from: 'b:5', pin: true, status: 'candidate', note: 'kept' })),
+    ...values.map((v): Json => [{ value: v, from: 'b:1' }, { value: null, from: 'b:5' }, { value: v, until: 'b:9', pin: false }]),
+    [{ value: ['a'], from: 'b:1' }, { value: null, from: 'b:5' }],
+    [{ value: '~', from: '~' }],
+  ]
+  const allTypes = Object.values(types).flatMap((t) => [t, { ...t, list: !t.list }, { ...t, temporal: !t.temporal }])
+
+  it('for every value shape the server can send, and every field type', () => {
+    let checked = 0
+    for (const t of allTypes) {
+      for (const raw of shapes) {
+        const d = fieldDraftOf(t, raw)
+        if (typeof d === 'string') {
+          continue
+        }
+
+        checked++
+        expect([t.name, t.list, raw, fieldChanges(t, raw, d)]).toEqual([t.name, t.list, raw, []])
+      }
+    }
+
+    expect(checked).toBeGreaterThan(200)
+  })
+
+  it('keeps an entry whose value is null when another entry changes', () => {
+    const t = { ...types.tags, temporal: true }
+    const before: Json = [{ value: ['a'], from: 'b:1' }, { value: null, from: 'b:5' }]
+    const d = draft(t, before)
+    d.entries = [{ ...d.entries[0], until: 'b:3' }, d.entries[1]]
+    expect(fieldChanges(t, before, d)).toEqual([{ op: 'set', path: [0, 'until'], value: 'b:3' }])
   })
 })
 
@@ -227,7 +301,7 @@ function source(hash = 'h1', fields: EntitySource['fields'] | null = null): Enti
       { name: 'role', line: 6, value: [{ value: 'A schoolmistress' }, { value: 'A wife', from: 'dracula:3' }] },
       { name: 'occupation', line: 8, value: ['teacher', 'secretary', 'typist'] },
       { name: 'state', line: 9, value: 'Dried' },
-      { name: 'weight', line: 10, value: 12 },
+      { name: 'weight', line: 10, value: { $number: '12' } },
       { name: 'x_odd', line: 11, value: 'kept' },
       { name: 'species', line: 12, value: [['velari']] },
     ],
@@ -294,7 +368,7 @@ describe('SC-WEB-60: editing a field with a control for its type', () => {
     const form = await openField('state')
 
     const select = within(form).getByRole('combobox', { name: 'Value' })
-    expect(document.activeElement).toBe(select)
+    await waitFor(() => expect(document.activeElement).toBe(select))
     expect((select as HTMLSelectElement).value).toBe('dried')
     expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual(['fresh', 'dried', 'lost'])
     expect((within(form).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
@@ -325,7 +399,7 @@ describe('SC-WEB-60: editing a field with a control for its type', () => {
     fireEvent.change(input, { target: { value: '12.75' } })
     fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true })
     await waitFor(() => expect(posts).toHaveLength(1))
-    expect(posts[0].body.changes).toEqual([{ op: 'set', path: [], value: 12.75 }])
+    expect(posts[0].body.changes).toEqual([{ op: 'set', path: [], value: { $number: '12.75' } }])
   })
 
   it('moves, removes, and adds list items with the keyboard-reachable buttons', async () => {
@@ -410,9 +484,9 @@ describe('SC-WEB-60: editing a field with a control for its type', () => {
     const input = within(form).getByRole('combobox', { name: 'Value' })
     fireEvent.change(input, { target: { value: 'Jon' } })
     const list = await within(form).findByRole('listbox')
-    expect(within(list).getAllByRole('option').map((o) => o.textContent)).toEqual(['Jonathan Harker character', 'Mina Harker character'])
+    expect(within(list).getAllByRole('option').map((o) => o.textContent)).toEqual(['Jonathan Harker character'])
     fireEvent.keyDown(input, { key: 'ArrowDown' })
-    expect(input.getAttribute('aria-activedescendant')).toMatch(/-1$/)
+    expect(input.getAttribute('aria-activedescendant')).toMatch(/-0$/)
     fireEvent.keyDown(input, { key: 'ArrowUp' })
     fireEvent.keyDown(input, { key: 'Enter' })
     expect((input as HTMLInputElement).value).toBe('[[jonathan-harker]]')
@@ -448,7 +522,7 @@ describe('SC-WEB-63: adding and clearing fields, and what only the file can chan
     fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
 
     await waitFor(() => expect(posts).toHaveLength(1))
-    expect(posts[0].body).toMatchObject({ field: 'born', changes: [{ op: 'set', path: [], value: { text: 'the year of the storm', sort: 1870 } }] })
+    expect(posts[0].body).toMatchObject({ field: 'born', changes: [{ op: 'set', path: [], value: { text: 'the year of the storm', sort: { $number: '1870' } } }] })
   })
 
   it('clears a field after asking in the page', async () => {
@@ -530,5 +604,51 @@ describe('SC-WEB-65: field edits are guarded', () => {
 
     expect(await within(form).findByText(/It wasn't saved, because the note would have errors/)).toBeTruthy()
     expect(screen.getByRole('form', { name: 'Edit role' })).toBeTruthy()
+  })
+
+  it('keeps clearing the field after a conflict: Keep mine sends the removal again', async () => {
+    const { posts, file } = stubFields({
+      onPost: (_, n) => (n === 1 ? Response.json({ code: 'stale_file', message: 'The file changed.', current: file.source }, { status: 409 }) : written()),
+    })
+    renderApp('/u/dracula/e/E-MINA')
+    const form = await openField('weight')
+    file.source = source('h9', source().fields.map((f) => (f.name === 'weight' ? { ...f, value: { $number: '14' } } : f)))
+    fireEvent.click(within(form).getByRole('button', { name: 'Clear field' }))
+    fireEvent.click(within(within(form).getByRole('group', { name: /Clear weight\?/ })).getByRole('button', { name: 'Clear field' }))
+
+    const conflict = await screen.findByRole('region', { name: 'The note changed while you were editing the field weight' })
+    expect(conflict.textContent).toContain('(not set)')
+    expect(conflict.textContent).toContain('14')
+    fireEvent.click(within(conflict).getByRole('button', { name: 'Keep mine' }))
+
+    await waitFor(() => expect(posts).toHaveLength(2))
+    expect(posts[1].body).toMatchObject({ expectedHash: 'h9', changes: [{ op: 'remove', path: [] }] })
+    expect(await screen.findByText('Saved the note (cleared weight).')).toBeTruthy()
+  })
+
+  it('saves again on the new file, without asking, when only another part of the note changed', async () => {
+    const { posts, file } = stubFields({
+      onPost: (_, n) => (n === 1 ? Response.json({ code: 'stale_file', message: 'The file changed.', current: file.source }, { status: 409 }) : written()),
+    })
+    renderApp('/u/dracula/e/E-MINA')
+    const form = await openField('state')
+    // An agent changes another field meanwhile; state is as it was.
+    file.source = source('h9', source().fields.map((f) => (f.name === 'weight' ? { ...f, value: { $number: '14' } } : f)))
+    fireEvent.change(within(form).getByRole('combobox', { name: 'Value' }), { target: { value: 'lost' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText('Saved the field state.')).toBeTruthy()
+    expect(posts.map((p) => p.body.expectedHash)).toEqual(['h1', 'h9'])
+    expect(posts[1].body.changes).toEqual([{ op: 'set', path: [], value: 'lost' }])
+    expect(screen.queryByRole('region', { name: /The note changed/ })).toBeNull()
+  })
+
+  it('returns focus to the field’s own Edit in file button', async () => {
+    stubFields()
+    renderApp('/u/dracula/e/E-MINA')
+    fireEvent.click(await screen.findByRole('button', { name: "Edit in file: x_odd can only be changed in the note's file" }))
+    expect(await screen.findByText('Editing the whole file')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(document.activeElement?.id).toBe('edit-file-x_odd'))
   })
 })
