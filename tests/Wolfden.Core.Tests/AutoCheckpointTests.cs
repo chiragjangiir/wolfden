@@ -59,6 +59,16 @@ public sealed class AutoCheckpointTests : IDisposable
     [InlineData("auto_checkpoint: true", null, "F-DEN-9")]
     [InlineData("auto_checkpoint: [30m]", null, "F-DEN-9")]
     [InlineData("auto_checkpoint: { every: 30m }", null, "F-DEN-9")]
+    [InlineData("auto_checkpoint: 999999999h", null, "F-DEN-9")]
+    [InlineData("auto_checkpoint: 999999999h999999999m", null, "F-DEN-9")]
+    [InlineData("auto_checkpoint: 999999999m", null, "F-DEN-9")]
+    [InlineData("auto_checkpoint: 9999999999m", null, "F-DEN-9")]
+    [InlineData("auto_checkpoint: 1h60m", null, "F-DEN-9")]
+    [InlineData("auto_checkpoint: 1h59m", 119, null)]
+    [InlineData("auto_checkpoint: 90m", 90, null)]
+    [InlineData("auto_checkpoint: |\n  30m", null, "F-DEN-9")]
+    [InlineData("auto_checkpoint: \"false\"", null, "F-DEN-9")]
+    [InlineData("auto_checkpoint: 'null'", null, "F-DEN-9")]
     public void AutoCheckpointIsATimeFromFiveMinutesToADay(string line, int? minutes, string? warning)
     {
         var text = $"format: 1\n{line}\n";
@@ -261,6 +271,107 @@ public sealed class AutoCheckpointTests : IDisposable
 
     [Fact]
     [Trait("Scenario", "SC-WEB-53")]
+    public void NoAutomaticCheckpointWhileGitIsInTheMiddleOfSomething()
+    {
+        var (auto, clock, history, _) = Make(TimeSpan.FromMinutes(30), out var log);
+        history.Pending = [new HistoryFileChange(HistoryChangeKind.Modified, "a.md")];
+        history.Interrupted = "a rebase";
+
+        clock.Advance(TimeSpan.FromMinutes(30));
+        Assert.Equal(AutoCheckpointOutcome.Interrupted, auto.Tick());
+        clock.Advance(AutoCheckpointer.PollInterval);
+        Assert.Equal(AutoCheckpointOutcome.Interrupted, auto.Tick());
+        Assert.Equal(0, history.Checkpoints);
+        Assert.Single(log, l => l.Contains("in the middle of a rebase", StringComparison.Ordinal));
+
+        // Once git has finished, the next poll makes it.
+        history.Interrupted = null;
+        clock.Advance(AutoCheckpointer.PollInterval);
+        Assert.Equal(AutoCheckpointOutcome.Recorded, auto.Tick());
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-53")]
+    public void GitBusyForLongIsSaidOnce()
+    {
+        var (auto, clock, history, _) = Make(TimeSpan.FromMinutes(30), out var log);
+        history.Pending = [new HistoryFileChange(HistoryChangeKind.Modified, "a.md")];
+        history.Writing = true;
+        clock.Advance(TimeSpan.FromMinutes(30));
+        for (var i = 0; i < AutoCheckpointer.BusyPollsBeforeSaying * 3; i++)
+        {
+            Assert.Equal(AutoCheckpointOutcome.Busy, auto.Tick());
+            clock.Advance(AutoCheckpointer.PollInterval);
+        }
+
+        Assert.Single(log, l => l.Contains("index.lock", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-53")]
+    public void ARefusalIsSaidOnceUntilTheFilesChange()
+    {
+        var (auto, clock, history, files) = Make(TimeSpan.FromMinutes(30), out var log);
+        history.Pending = [new HistoryFileChange(HistoryChangeKind.Modified, "a.md")];
+        history.Refuse = "Git refused the checkpoint (a hook).";
+        for (var i = 0; i < 3; i++)
+        {
+            clock.Advance(TimeSpan.FromMinutes(30));
+            Assert.Equal(AutoCheckpointOutcome.Failed, auto.Tick());
+        }
+
+        Assert.Single(log, l => l.Contains("a hook", StringComparison.Ordinal));
+
+        files.Print = "edited";
+        auto.Tick();
+        clock.Advance(TimeSpan.FromMinutes(30));
+        Assert.Equal(AutoCheckpointOutcome.Failed, auto.Tick());
+        Assert.Equal(2, log.Count(l => l.Contains("a hook", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-53")]
+    public async Task ASaveDuringACheckpointDoesntWaitAndStaysTheHosts()
+    {
+        File.WriteAllText(Path.Combine(_root, "a.md"), "one\n");
+        File.WriteAllText(Path.Combine(_root, "b.md"), "one\n");
+        var ledger = new CheckpointLedger(new FileSystemDenStore(_root));
+        ledger.Wrote("a.md", Encoding.UTF8.GetBytes("one\n"));
+        using var hold = new ManualResetEventSlim();
+        var history = new FakeHistory
+        {
+            Pending = [new HistoryFileChange(HistoryChangeKind.Modified, "a.md"), new HistoryFileChange(HistoryChangeKind.Modified, "b.md")],
+            Hold = hold,
+        };
+
+        // The checkpoint waits, as on a passphrase prompt.
+        var checkpoint = Task.Run(() => ledger.Checkpoint(history, new CheckpointRequest("Notes pass after drafting ch 12")), TestContext.Current.CancellationToken);
+        Assert.True(history.Committing.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+
+        // A save, and a status, meanwhile: neither waits for git.
+        var save = Task.Run(
+            () =>
+            {
+                File.WriteAllText(Path.Combine(_root, "b.md"), "two\n");
+                ledger.Wrote("b.md", Encoding.UTF8.GetBytes("two\n"));
+                return ledger.IsOwn(new HistoryFileChange(HistoryChangeKind.Modified, "b.md"));
+            },
+            TestContext.Current.CancellationToken);
+        Assert.True(await save.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken), "A save waited on a running checkpoint.");
+
+
+        hold.Set();
+        var done = await checkpoint;
+        Assert.Equal(["a.md"], done.Written);
+
+        // a.md was the host's before the checkpoint and is recorded: forgotten. b.md was
+        // saved during it, so it may not be in it: still the host's.
+        Assert.False(ledger.IsOwn(new HistoryFileChange(HistoryChangeKind.Modified, "a.md")));
+        Assert.True(ledger.IsOwn(new HistoryFileChange(HistoryChangeKind.Modified, "b.md")));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-53")]
     public void WithoutHistoryTheSettingOnlyWarns()
     {
         var clock = new ManualClock();
@@ -364,12 +475,23 @@ public sealed class AutoCheckpointTests : IDisposable
 
         public bool IsWriting => Writing;
 
+        public string? Interrupted { get; set; }
+
+        public string? InterruptedOperation => Interrupted;
+
+        /// <summary>When set, a checkpoint waits for it, as git waits on a passphrase prompt.</summary>
+        public ManualResetEventSlim? Hold { get; set; }
+
+        public ManualResetEventSlim Committing { get; } = new();
+
         HistoryResult<IReadOnlyList<HistoryFileChange>> IHistoryProvider.Pending(CancellationToken cancellationToken) =>
             HistoryResult<IReadOnlyList<HistoryFileChange>>.Done(Pending);
 
         public HistoryResult<HistoryEntry?> Checkpoint(CheckpointRequest request, CancellationToken cancellationToken = default)
         {
             Checkpoints++;
+            Committing.Set();
+            Hold?.Wait(TimeSpan.FromSeconds(30));
             if (Refuse is { } why)
             {
                 throw new HistoryException(why);

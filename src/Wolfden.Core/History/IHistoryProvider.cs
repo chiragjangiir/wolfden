@@ -145,6 +145,22 @@ public interface IHistoryProvider
     /// running (#145). It's a hint, not a lock: it can change straight after.
     /// </summary>
     bool IsWriting => false;
+
+    /// <summary>
+    /// What the history is in the middle of, in words for the writer, or
+    /// null if nothing: for git, a rebase, merge, cherry-pick, revert, or
+    /// bisect under way, or a detached HEAD. A checkpoint made then would
+    /// land inside that operation, or on no branch, so automatic
+    /// checkpoints wait, and the web UI warns before a manual one (#30).
+    /// </summary>
+    /// <exception cref="HistoryException">The backend couldn't tell.</exception>
+    string? InterruptedOperation => null;
+
+    /// <summary>
+    /// Why this backend can't make checkpoints, in words for the writer, or
+    /// null if it can. A den without history says how to get it.
+    /// </summary>
+    string? CheckpointUnavailable => Capabilities.HasFlag(HistoryCapabilities.Checkpoint) ? null : "This den's history can't make checkpoints.";
 }
 
 /// <summary>What a history backend can do for a den.</summary>

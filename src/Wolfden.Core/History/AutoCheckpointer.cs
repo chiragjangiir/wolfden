@@ -65,6 +65,12 @@ public sealed class AutoCheckpointer : IDisposable
     private bool _settled;
     private string? _problemSaid;
     private bool _noHistorySaid;
+    private bool _refusalSaid;
+    private bool _interruptedSaid;
+    private int _busyPolls;
+
+    /// <summary>How many polls in a row may find git busy before it's said, once: five minutes' worth.</summary>
+    public const int BusyPollsBeforeSaying = 10;
 
     /// <summary>Automatic checkpoints for the den at <paramref name="denRoot"/>.</summary>
     /// <param name="denRoot">The den's folder.</param>
@@ -144,6 +150,7 @@ public sealed class AutoCheckpointer : IDisposable
                 _print = print;
                 _lastChange = now;
                 _settled = false;
+                _refusalSaid = false;
             }
 
             var setting = Setting();
@@ -178,13 +185,37 @@ public sealed class AutoCheckpointer : IDisposable
             }
 
             _noHistorySaid = false;
-            if (history.IsWriting)
-            {
-                return AutoCheckpointOutcome.Busy;
-            }
-
             try
             {
+                if (history.IsWriting)
+                {
+                    return Busy();
+                }
+
+                string? operation;
+                try
+                {
+                    operation = history.InterruptedOperation;
+                }
+                catch (HistoryException)
+                {
+                    // Git couldn't say: take it as busy, and look again on the next poll.
+                    return Busy();
+                }
+
+                if (operation is not null)
+                {
+                    if (!_interruptedSaid)
+                    {
+                        _interruptedSaid = true;
+                        _log($"No automatic checkpoint while git is in the middle of {operation}: it would land inside it. Wolfden makes one once that's finished.");
+                    }
+
+                    return AutoCheckpointOutcome.Interrupted;
+                }
+
+                _busyPolls = 0;
+                _interruptedSaid = false;
                 var pending = history.Pending();
                 if (!pending.IsAvailable)
                 {
@@ -214,9 +245,15 @@ public sealed class AutoCheckpointer : IDisposable
             }
             catch (HistoryException e)
             {
-                // Another program may hold the lock, or a hook refused: wait for another quiet spell.
+                // Another program may hold the lock, or a hook refused: wait for another quiet
+                // spell, and say so once until the files change, not on every try.
                 _lastChange = now;
-                _log($"Couldn't make an automatic checkpoint: {e.Message} Wolfden will try again after {AutoCheckpoint.Format(every)} more without changes.");
+                if (!_refusalSaid)
+                {
+                    _refusalSaid = true;
+                    _log($"Couldn't make an automatic checkpoint: {e.Message} Wolfden will try again after {AutoCheckpoint.Format(every)} more without changes.");
+                }
+
                 return AutoCheckpointOutcome.Failed;
             }
         }
@@ -224,6 +261,19 @@ public sealed class AutoCheckpointer : IDisposable
         {
             _tickLock.Exit();
         }
+    }
+
+    /// <summary>A poll that found git busy; after <see cref="BusyPollsBeforeSaying"/> in a row, it says so, once.</summary>
+    private AutoCheckpointOutcome Busy()
+    {
+        if (++_busyPolls == BusyPollsBeforeSaying)
+        {
+            _log(
+                "Automatic checkpoints have been waiting a while: git looks busy. Another git command may be running, or one that " +
+                "stopped left the repository's index.lock behind; if no git is running, git's own message says how to remove it.");
+        }
+
+        return AutoCheckpointOutcome.Busy;
     }
 
     private AutoCheckpointOutcome NoHistory(DateTimeOffset now, TimeSpan every)
@@ -395,6 +445,9 @@ public enum AutoCheckpointOutcome
 
     /// <summary>The den has no history.</summary>
     NoHistory,
+
+    /// <summary>Git is in the middle of a rebase, merge, or the like, or HEAD is detached; tried again on the next poll.</summary>
+    Interrupted,
 
     /// <summary>Nothing changed since the last checkpoint.</summary>
     NothingToRecord,

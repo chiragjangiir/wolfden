@@ -35,7 +35,9 @@ internal sealed class UnavailableGit : IHistoryProvider
         HistoryResult<HistoryDiff>.Unavailable(Say("comparing with an earlier version"));
 
     public HistoryResult<HistoryEntry?> Checkpoint(CheckpointRequest request, CancellationToken cancellationToken = default) =>
-        HistoryResult<HistoryEntry?>.Unavailable(Say("a checkpoint", "Your edits are still saved in the files."));
+        HistoryResult<HistoryEntry?>.Unavailable(CheckpointUnavailable);
+
+    public string CheckpointUnavailable => Say("a checkpoint", "Your edits are still saved in the files.");
 
     public HistoryResult<HistoryTag> Tag(TagRequest request, CancellationToken cancellationToken = default) =>
         HistoryResult<HistoryTag>.Unavailable(Say("a tag"));

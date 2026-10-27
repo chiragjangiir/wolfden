@@ -12,6 +12,7 @@ public sealed class WolfdenApiOptions
     {
         ArgumentNullException.ThrowIfNull(denRoot);
         DenRoot = Path.GetFullPath(denRoot);
+        Ledger = new CheckpointLedger(new FileSystemDenStore(DenRoot));
     }
 
     /// <summary>The den's folder, as a full path.</summary>
@@ -62,13 +63,7 @@ public sealed class WolfdenApiOptions
     /// save in it (<see cref="CheckpointLedger.Wrote"/>); by default it
     /// reads the den's folder on disk.
     /// </summary>
-    public CheckpointLedger Ledger
-    {
-        get => _ledger ??= new CheckpointLedger(new FileSystemDenStore(DenRoot));
-        init => _ledger = value;
-    }
-
-    private CheckpointLedger? _ledger;
+    public CheckpointLedger Ledger { get; init; }
 
     /// <summary>
     /// True if the server makes automatic checkpoints when <c>den.yaml</c>

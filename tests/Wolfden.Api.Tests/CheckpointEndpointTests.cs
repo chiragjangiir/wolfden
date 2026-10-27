@@ -91,7 +91,8 @@ public sealed class CheckpointEndpointTests : IDisposable
         Assert.True(clean.GetProperty("available").GetBoolean());
         Assert.Equal(0, clean.GetProperty("count").GetInt32());
         Assert.Equal(first, clean.GetProperty("latest").GetProperty("id").GetString());
-        Assert.Equal("Start the Dracula notes", clean.GetProperty("latest").GetProperty("message").GetString());
+        Assert.Equal(["id", "when"], clean.GetProperty("latest").EnumerateObject().Select(p => p.Name));
+        Assert.Equal(JsonValueKind.Null, clean.GetProperty("inProgress").ValueKind);
 
         // A notes pass after drafting a chapter: two notes edited, one added.
         den.Write(MinaFile, den.Read(MinaFile) + "\nShe keeps a diary in shorthand.\n");
@@ -312,6 +313,41 @@ public sealed class CheckpointEndpointTests : IDisposable
         // The whole den was recorded, the other universe's file included.
         Assert.Contains("universes/drift/universe.md", RunGit(den, "show", "--name-only", "--format=", "HEAD"), StringComparison.Ordinal);
         Assert.Equal(0, (await server.GetJsonAsync("/api/checkpoint", HttpStatusCode.OK)).GetProperty("count").GetInt32());
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-54")]
+    public async Task APinnedServersLatestCheckpointDoesntNameAnotherUniverse()
+    {
+        var den = Repository(TempDen.Starfall());
+        Commit(den, "Start");
+        den.Write("universes/drift/universe.md", den.Read("universes/drift/universe.md") + "\nA secret project.\n");
+        Commit(den, "Drift: the tide subplot in universes/drift");
+        await using var server = await Server.StartAsync(
+            new WolfdenApiOptions(den.Root) { PinnedUniverse = "starfall", History = () => GitHistory.ForDen(den.Root, Git) });
+
+        var status = await server.GetJsonAsync("/api/checkpoint", HttpStatusCode.OK);
+        Assert.Equal(JsonValueKind.String, status.GetProperty("latest").GetProperty("id").ValueKind);
+        Assert.DoesNotContain("drift", status.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-52")]
+    public async Task AManualCheckpointOnADetachedHeadIsMadeButWarned()
+    {
+        var den = Repository(TempDen.Dracula());
+        Commit(den, "Start");
+        RunGit(den, "checkout", "--quiet", "--detach");
+        den.Write(MinaFile, den.Read(MinaFile) + "\nMore.\n");
+        await using var server = await StartAsync(den);
+
+        var status = await server.GetJsonAsync("/api/checkpoint", HttpStatusCode.OK);
+        Assert.StartsWith("a detached HEAD", status.GetProperty("inProgress").GetString(), StringComparison.Ordinal);
+
+        var (code, made) = await PostAsync(server, """{"message": "Notes pass after drafting ch 12"}""");
+        Assert.Equal(HttpStatusCode.OK, code);
+        Assert.True(made.GetProperty("recorded").GetBoolean());
+        Assert.StartsWith("a detached HEAD", made.GetProperty("inProgress").GetString(), StringComparison.Ordinal);
     }
 
     [Theory]

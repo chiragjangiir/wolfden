@@ -16,9 +16,16 @@ namespace Wolfden.Core.History;
 /// case on Windows and macOS, where git's paths may differ in case.
 /// </para>
 /// <para>
-/// It's safe to use from several threads. A host that must keep a write
-/// from landing in the middle of a checkpoint, as the MCP tools do, holds
-/// its own write lock around both.
+/// <b>Never locked across git.</b> A checkpoint can wait minutes on git
+/// (a signing passphrase prompt, a slow hook, #143), so the ledger's lock
+/// is held only to take a snapshot before it and to reconcile after it,
+/// never while git runs: a save that records itself (<see cref="Wrote"/>)
+/// or a status that asks (<see cref="IsOwn"/>) doesn't wait for a
+/// checkpoint. A write recorded while a checkpoint runs may or may not be
+/// in it, so it stays tracked as the host's: the next checkpoint forgets
+/// it if the history already holds it. A host that must keep a write from
+/// landing in the middle of a checkpoint, as the MCP tools do, holds its
+/// own write lock around both.
 /// </para>
 /// </remarks>
 public sealed class CheckpointLedger
@@ -31,8 +38,14 @@ public sealed class CheckpointLedger
 
     private readonly Lock _lock = new();
 
-    /// <summary>Each path's last written bytes; null marks a file the host deleted (or moved away).</summary>
-    private readonly Dictionary<string, byte[]?> _written = new(PathComparer);
+    /// <summary>
+    /// Each path's last written bytes (null marks a file the host deleted or
+    /// moved away), and the number of the write that recorded it, so a
+    /// checkpoint forgets an entry only if no write changed it meanwhile.
+    /// </summary>
+    private readonly Dictionary<string, (byte[]? Bytes, long Write)> _written = new(PathComparer);
+
+    private long _writes;
 
     /// <summary>A ledger for writes that go through <paramref name="store"/>.</summary>
     public CheckpointLedger(IDenStore store)
@@ -51,7 +64,7 @@ public sealed class CheckpointLedger
         ArgumentNullException.ThrowIfNull(bytes);
         lock (_lock)
         {
-            _written[path] = bytes;
+            _written[path] = (bytes, ++_writes);
         }
     }
 
@@ -61,7 +74,7 @@ public sealed class CheckpointLedger
         ArgumentNullException.ThrowIfNull(path);
         lock (_lock)
         {
-            _written[path] = null;
+            _written[path] = (null, ++_writes);
         }
     }
 
@@ -72,7 +85,7 @@ public sealed class CheckpointLedger
         {
             lock (_lock)
             {
-                return _written.Where(p => p.Value is null).Select(p => p.Key).Order(StringComparer.Ordinal).ToList();
+                return _written.Where(p => p.Value.Bytes is null).Select(p => p.Key).Order(StringComparer.Ordinal).ToList();
             }
         }
     }
@@ -81,21 +94,29 @@ public sealed class CheckpointLedger
     /// True if <paramref name="change"/> is the host's own and nothing else
     /// has changed the file since: it holds what the host last wrote, or
     /// the host deleted it and it's still absent. A rename counts when the
-    /// host wrote its new path or deleted its old one.
+    /// host wrote its new path or deleted its old one. It reads the file
+    /// outside the lock, so it never waits on a checkpoint.
     /// </summary>
     public bool IsOwn(HistoryFileChange change)
     {
         ArgumentNullException.ThrowIfNull(change);
+        (byte[]? Bytes, long Write) entry;
+        bool tracked;
+        (byte[]? Bytes, long Write) old = default;
+        bool oldTracked;
         lock (_lock)
         {
-            if (_written.TryGetValue(change.Path, out var bytes))
-            {
-                var now = Store.TryReadFile(change.Path);
-                return bytes is null ? now is null : now is not null && now.AsSpan().SequenceEqual(bytes);
-            }
-
-            return change.OldPath is { } old && _written.TryGetValue(old, out var was) && was is null && !Store.FileExists(old);
+            tracked = _written.TryGetValue(change.Path, out entry);
+            oldTracked = change.OldPath is { } o && _written.TryGetValue(o, out old);
         }
+
+        if (tracked)
+        {
+            var now = Store.TryReadFile(change.Path);
+            return entry.Bytes is null ? now is null : now is not null && now.AsSpan().SequenceEqual(entry.Bytes);
+        }
+
+        return oldTracked && old.Bytes is null && !Store.FileExists(change.OldPath!);
     }
 
     /// <summary>
@@ -103,7 +124,8 @@ public sealed class CheckpointLedger
     /// of the files it recorded the host wrote and which changed some other
     /// way. A file the host wrote and something else changed after is in
     /// both lists. Recorded files start afresh, so a later checkpoint lists
-    /// only what was written since.
+    /// only what was written since, except a file written again while the
+    /// checkpoint ran, which stays the host's.
     /// </summary>
     /// <exception cref="ArgumentException">The request isn't one the backend takes, such as a message with control characters.</exception>
     /// <exception cref="HistoryException">The backend failed: git refused the commit, or didn't finish in time.</exception>
@@ -111,78 +133,133 @@ public sealed class CheckpointLedger
     {
         ArgumentNullException.ThrowIfNull(history);
         ArgumentNullException.ThrowIfNull(request);
+
+        // 1. A snapshot, under the lock.
+        Dictionary<string, (byte[]? Bytes, long Write)> snapshot;
         lock (_lock)
         {
-            // Before recording: forget the writes that are recorded already (the writer
-            // committed them elsewhere), and note what each tracked file holds now, which is
-            // what the checkpoint records.
-            var onDisk = new Dictionary<string, byte[]?>(PathComparer);
-            foreach (var (path, bytes) in _written.ToList())
+            snapshot = new Dictionary<string, (byte[]? Bytes, long Write)>(_written, PathComparer);
+        }
+
+        // 2. Outside it: what each tracked file holds now, which is what the checkpoint
+        // records, and which writes are recorded already (the writer committed them
+        // elsewhere). A deleted file that's there again was put there some other way.
+        var onDisk = new Dictionary<string, byte[]?>(PathComparer);
+        var stale = new Dictionary<string, (byte[]? Bytes, long Write)>(PathComparer);
+        foreach (var (path, (bytes, write)) in snapshot)
+        {
+            if (bytes is null)
             {
-                if (bytes is null)
+                onDisk[path] = Store.TryReadFile(path);
+                if (onDisk[path] is not null)
                 {
-                    // Deleted by the host. A file there again was put there some other way,
-                    // so the deletion isn't the host's to claim any more.
-                    onDisk[path] = Store.TryReadFile(path);
-                    if (onDisk[path] is not null)
-                    {
-                        _written.Remove(path);
-                    }
-                }
-                else if (history.HoldsAtLatest(path, bytes, cancellationToken) is { IsAvailable: true, Value: true })
-                {
-                    _written.Remove(path);
-                }
-                else
-                {
-                    onDisk[path] = Store.TryReadFile(path);
+                    stale[path] = (bytes, write);
                 }
             }
-
-            var result = history.Checkpoint(request, cancellationToken);
-            if (!result.IsAvailable)
+            else if (history.HoldsAtLatest(path, bytes, cancellationToken) is { IsAvailable: true, Value: true })
             {
-                return new LedgerCheckpoint(result, [], []);
+                stale[path] = (bytes, write);
+            }
+            else
+            {
+                onDisk[path] = Store.TryReadFile(path);
+            }
+        }
+
+        foreach (var path in stale.Keys)
+        {
+            snapshot.Remove(path);
+        }
+
+        // 3. The commit, outside the lock: it can wait minutes on a passphrase prompt.
+        HistoryResult<HistoryEntry?> result;
+        try
+        {
+            result = history.Checkpoint(request, cancellationToken);
+        }
+        finally
+        {
+            // What was found recorded already is forgotten either way, unless written again since.
+            lock (_lock)
+            {
+                foreach (var path in stale.Keys)
+                {
+                    Forget(path, stale);
+                }
+            }
+        }
+
+        if (!result.IsAvailable)
+        {
+            return new LedgerCheckpoint(result, [], []);
+        }
+
+        if (result.Value is not { } e)
+        {
+            lock (_lock)
+            {
+                ForgetRecordedDeletions(request.Paths, snapshot);
             }
 
-            if (result.Value is not { } e)
+            return new LedgerCheckpoint(result, [], []);
+        }
+
+        // 4. Reconcile, under the lock, from the snapshot.
+        var ours = new List<string>();
+        var theirs = new List<string>();
+        foreach (var change in e.Changes)
+        {
+            var tracked = snapshot.ContainsKey(change.Path) ? change.Path
+                : change.OldPath is { } was && snapshot.ContainsKey(was) ? was : null;
+            if (tracked is null)
             {
-                ForgetRecordedDeletions(request.Paths);
-                return new LedgerCheckpoint(result, [], []);
+                theirs.Add(change.Path);
+                continue;
             }
 
-            var ours = new List<string>();
-            var theirs = new List<string>();
+            ours.Add(change.Path);
+            var now = change.Path == tracked ? onDisk.GetValueOrDefault(tracked) : Store.TryReadFile(change.Path);
+            var wrote = snapshot[tracked].Bytes;
+            if (wrote is null ? now is not null : now is null || !now.AsSpan().SequenceEqual(wrote))
+            {
+                theirs.Add(change.Path);
+            }
+        }
+
+        lock (_lock)
+        {
             foreach (var change in e.Changes)
             {
-                var tracked = _written.ContainsKey(change.Path) ? change.Path
-                    : change.OldPath is { } was && _written.ContainsKey(was) ? was : null;
-                if (tracked is null)
-                {
-                    theirs.Add(change.Path);
-                    continue;
-                }
-
-                ours.Add(change.Path);
-                var now = change.Path == tracked ? onDisk.GetValueOrDefault(tracked) : Store.TryReadFile(change.Path);
-                var wrote = _written[tracked];
-                if (wrote is null ? now is not null : now is null || !now.AsSpan().SequenceEqual(wrote))
-                {
-                    theirs.Add(change.Path);
-                }
-            }
-
-            foreach (var change in e.Changes)
-            {
-                _written.Remove(change.Path);
+                Forget(change.Path, snapshot);
                 if (change.OldPath is { } old)
                 {
-                    _written.Remove(old);
+                    Forget(old, snapshot);
                 }
             }
 
-            ForgetRecordedDeletions(request.Paths);
-            return new LedgerCheckpoint(result, ours.Order(StringComparer.Ordinal).ToList(), theirs.Order(StringComparer.Ordinal).ToList());
+            ForgetRecordedDeletions(request.Paths, snapshot);
+        }
+
+        return new LedgerCheckpoint(result, ours.Order(StringComparer.Ordinal).ToList(), theirs.Order(StringComparer.Ordinal).ToList());
+    }
+
+    /// <summary>
+    /// Forgets <paramref name="path"/> after a checkpoint recorded it, unless
+    /// a write recorded it again while the checkpoint ran: that write may not
+    /// be in the checkpoint, so it stays the host's. Under the lock.
+    /// </summary>
+    private void Forget(string path, Dictionary<string, (byte[]? Bytes, long Write)> snapshot)
+    {
+        if (!_written.TryGetValue(path, out var now))
+        {
+            return;
+        }
+
+        // Tracked before the checkpoint and unchanged since: forget it. Not tracked
+        // before it: written during it, so keep it.
+        if (snapshot.TryGetValue(path, out var then) && then.Write == now.Write)
+        {
+            _written.Remove(path);
         }
     }
 
@@ -192,14 +269,15 @@ public sealed class CheckpointLedger
     /// it covers (the whole den, or <paramref name="given"/>), so a path it
     /// covered that's absent now is absent at the latest checkpoint too,
     /// whether this one recorded the deletion or an earlier commit made
-    /// elsewhere did.
+    /// elsewhere did. A deletion recorded while the checkpoint ran is kept.
+    /// Under the lock.
     /// </summary>
-    private void ForgetRecordedDeletions(IReadOnlyList<string>? given)
+    private void ForgetRecordedDeletions(IReadOnlyList<string>? given, Dictionary<string, (byte[]? Bytes, long Write)> snapshot)
     {
-        foreach (var (path, bytes) in _written.ToList())
+        foreach (var (path, (bytes, write)) in _written.ToList())
         {
             var covered = given is null || given.Any(p => string.Equals(path, p, PathComparison) || path.StartsWith(p + "/", PathComparison));
-            if (bytes is null && covered && !Store.FileExists(path))
+            if (bytes is null && covered && snapshot.TryGetValue(path, out var then) && then.Write == write && !Store.FileExists(path))
             {
                 _written.Remove(path);
             }

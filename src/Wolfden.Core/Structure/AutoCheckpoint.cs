@@ -72,7 +72,10 @@ public static partial class AutoCheckpoint
     /// <summary>
     /// A wait written as hours, minutes, or both, in that order, each a
     /// whole number with its unit straight after (<c>30m</c>, <c>2h</c>,
-    /// <c>1h30m</c>), or null if <paramref name="text"/> isn't one.
+    /// <c>1h30m</c>), or null if <paramref name="text"/> isn't one. With
+    /// hours, the minutes must be under 60 (<c>1h60m</c> isn't one). A time
+    /// too long to hold is <see cref="TimeSpan.MaxValue"/>, which is out of
+    /// range, never an overflow.
     /// </summary>
     public static TimeSpan? Parse(string text)
     {
@@ -83,10 +86,18 @@ public static partial class AutoCheckpoint
             return null;
         }
 
-        // At most nine digits each, so the sum can't overflow.
+        // At most nine digits each, so neither the numbers nor the sum overflow a long.
         static long Number(Group g) => g.Success ? long.Parse(g.Value, NumberStyles.None, CultureInfo.InvariantCulture) : 0;
 
-        return TimeSpan.FromMinutes((Number(match.Groups["h"]) * 60) + Number(match.Groups["m"]));
+        var hours = Number(match.Groups["h"]);
+        var minutes = Number(match.Groups["m"]);
+        if (match.Groups["h"].Success && minutes >= 60)
+        {
+            return null;
+        }
+
+        var total = (hours * 60) + minutes;
+        return total > (long)Longest.TotalMinutes ? TimeSpan.MaxValue : TimeSpan.FromMinutes(total);
     }
 
     /// <summary>Says a wait as the setting would: <c>30m</c>, <c>2h</c>, <c>1h30m</c>.</summary>
@@ -97,7 +108,8 @@ public static partial class AutoCheckpoint
         return h == 0 ? $"{m}m" : m == 0 ? $"{h}h" : $"{h}h{m}m";
     }
 
-    [GeneratedRegex(@"^(?:(?<h>[0-9]{1,9})h)?(?:(?<m>[0-9]{1,9})m)?$", RegexOptions.CultureInvariant)]
+    // \A and \z, not ^ and $: '$' also matches before a final line break, as in a block scalar.
+    [GeneratedRegex(@"\A(?:(?<h>[0-9]{1,9})h)?(?:(?<m>[0-9]{1,9})m)?\z", RegexOptions.CultureInvariant)]
     private static partial Regex DurationPattern();
 }
 

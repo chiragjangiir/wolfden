@@ -102,11 +102,10 @@ public static class CheckpointEndpoints
     {
         var auto = AutoView(options);
         var history = options.History();
-        if (!history.Capabilities.HasFlag(HistoryCapabilities.Checkpoint))
+        if (history.CheckpointUnavailable is { } why)
         {
-            var why = history.Checkpoint(new CheckpointRequest("status")).Reason ?? "This den's history can't make checkpoints.";
             return new CheckpointStatusResult(
-                ResultVersion, history.Name, false, why, history is NoHistory ? EnableHistory : null, null, 0, [], 0, auto);
+                ResultVersion, history.Name, false, why, history is NoHistory ? EnableHistory : null, null, null, 0, [], 0, auto);
         }
 
         try
@@ -114,13 +113,16 @@ public static class CheckpointEndpoints
             var pending = history.Pending();
             if (!pending.IsAvailable)
             {
-                return new CheckpointStatusResult(ResultVersion, history.Name, false, pending.Reason, null, null, 0, [], 0, auto);
+                return new CheckpointStatusResult(ResultVersion, history.Name, false, pending.Reason, null, null, null, 0, [], 0, auto);
             }
 
+            // Only the latest checkpoint's id and time: its message and files could name
+            // another universe's notes, which a pinned server doesn't show.
             var log = history.Log(new HistoryLogQuery(Limit: 1));
-            var latest = log.IsAvailable && log.Value.Count > 0 ? Summary(log.Value[0]) : null;
+            var latest = log.IsAvailable && log.Value.Count > 0 ? new LatestCheckpoint(log.Value[0].Id, log.Value[0].When) : null;
             var (shown, hidden) = Split(options, pending.Value, options.Ledger.IsOwn);
-            return new CheckpointStatusResult(ResultVersion, history.Name, true, null, null, latest, shown.Count + hidden, shown, hidden, auto);
+            return new CheckpointStatusResult(
+                ResultVersion, history.Name, true, null, null, latest, InProgress(history), shown.Count + hidden, shown, hidden, auto);
         }
         catch (HistoryException e)
         {
@@ -133,8 +135,17 @@ public static class CheckpointEndpoints
     {
         var history = options.History();
         LedgerCheckpoint done;
+        string? inProgress = null;
         try
         {
+            // A manual checkpoint is made even in the middle of a rebase or on a detached
+            // HEAD, as git would make it, but the result warns (git itself refuses one
+            // during a merge).
+            if (history.CheckpointUnavailable is null)
+            {
+                inProgress = InProgress(history);
+            }
+
             done = options.Ledger.Checkpoint(history, new CheckpointRequest(message));
         }
         catch (ArgumentException e)
@@ -154,13 +165,26 @@ public static class CheckpointEndpoints
 
         if (done.Result.Value is not { } entry)
         {
-            return Results.Json(new CheckpointMadeResult(ResultVersion, history.Name, false, null, [], 0));
+            return Results.Json(new CheckpointMadeResult(ResultVersion, history.Name, false, null, inProgress, [], 0));
         }
 
         var elsewhere = done.ChangedElsewhere.ToHashSet(StringComparer.Ordinal);
         var mine = done.Written.Where(p => !elsewhere.Contains(p)).ToHashSet(StringComparer.Ordinal);
         var (shown, hidden) = Split(options, entry.Changes, c => mine.Contains(c.Path));
-        return Results.Json(new CheckpointMadeResult(ResultVersion, history.Name, true, Summary(entry), shown, hidden));
+        return Results.Json(new CheckpointMadeResult(ResultVersion, history.Name, true, Summary(entry), inProgress, shown, hidden));
+    }
+
+    /// <summary>What git is in the middle of, or null; null too if git can't say, since it's only a warning.</summary>
+    private static string? InProgress(IHistoryProvider history)
+    {
+        try
+        {
+            return history.InterruptedOperation;
+        }
+        catch (HistoryException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -302,14 +326,24 @@ public static class CheckpointEndpoints
 /// <param name="Available">True if the den has history that can make checkpoints.</param>
 /// <param name="Reason">Why it can't, in words for the writer, or null.</param>
 /// <param name="Enable">For a den without history, how to turn it on; otherwise null.</param>
-/// <param name="Latest">The latest checkpoint of the den, or null if there's none yet.</param>
+/// <param name="Latest">The latest checkpoint of the den, by id and time only, or null if there's none yet.</param>
+/// <param name="InProgress">What git is in the middle of (a rebase, a merge, a detached HEAD), in words, or null: a checkpoint now would land inside it.</param>
 /// <param name="Count">How many den files a checkpoint now would record, those in <paramref name="Changes"/> and <paramref name="OtherUniverses"/>.</param>
 /// <param name="Changes">The changed den files a checkpoint now would record, in path order (not those in <paramref name="OtherUniverses"/>).</param>
 /// <param name="OtherUniverses">For a pinned server, how many changed files are in other universes; they're recorded too, but not named.</param>
 /// <param name="AutoCheckpoint">What <c>auto_checkpoint</c> says (F-DEN-9).</param>
 public sealed record CheckpointStatusResult(
-    int Version, string Backend, bool Available, string? Reason, string? Enable, CheckpointSummary? Latest, int Count,
+    int Version, string Backend, bool Available, string? Reason, string? Enable, LatestCheckpoint? Latest, string? InProgress, int Count,
     IReadOnlyList<PendingChange> Changes, int OtherUniverses, AutoCheckpointView AutoCheckpoint);
+
+/// <summary>
+/// The den's latest checkpoint, as the status gives it: its id and time
+/// only, since its message and files could name notes in a universe a
+/// pinned server doesn't show.
+/// </summary>
+/// <param name="Id">Its id (a commit hash, for git).</param>
+/// <param name="When">When it was recorded.</param>
+public sealed record LatestCheckpoint(string Id, DateTimeOffset When);
 
 /// <summary>A den file that changed since the latest checkpoint, or that a checkpoint recorded.</summary>
 /// <param name="Kind">added, modified, deleted, or renamed.</param>
@@ -342,7 +376,8 @@ public sealed record AutoCheckpointView(string? Every, string? Problem, bool Run
 /// <param name="Backend">The history backend's name.</param>
 /// <param name="Recorded">True if a checkpoint was made; false if nothing had changed since the last one.</param>
 /// <param name="Checkpoint">The checkpoint made, or null.</param>
+/// <param name="InProgress">What git was in the middle of when it was made, in words, or null.</param>
 /// <param name="Changes">The files it recorded, in path order (not those in <paramref name="OtherUniverses"/>).</param>
 /// <param name="OtherUniverses">For a pinned server, how many recorded files are in other universes.</param>
 public sealed record CheckpointMadeResult(
-    int Version, string Backend, bool Recorded, CheckpointSummary? Checkpoint, IReadOnlyList<PendingChange> Changes, int OtherUniverses);
+    int Version, string Backend, bool Recorded, CheckpointSummary? Checkpoint, string? InProgress, IReadOnlyList<PendingChange> Changes, int OtherUniverses);

@@ -835,8 +835,66 @@ public sealed partial class GitHistory : IHistoryProvider
     public HistoryResult<IReadOnlyList<HistoryFileChange>> Pending(CancellationToken cancellationToken = default)
     {
         var from = LatestCheckpoint(cancellationToken) ?? EmptyTree(cancellationToken);
-        var diff = DiffWithFiles(from, null, cancellationToken);
-        return HistoryResult<IReadOnlyList<HistoryFileChange>>.Done(diff.Value.Files.Select(f => f.Change).ToList());
+
+        // As DiffWithFiles, but names only: one raw diff of the whole den, hidden paths
+        // in so a rename into or out of one reads as the delete or add it is
+        // (ParseChanges), and no patches, since the indicator asks every minute.
+        var index = Path.Combine(Path.GetTempPath(), $"wolfden-{Guid.NewGuid():N}.index");
+        var environment = new Dictionary<string, string?> { ["GIT_INDEX_FILE"] = index };
+        try
+        {
+            Git([.. TempIndexSettings, "read-tree", Head(cancellationToken) ?? "--empty"], cancellationToken, environment: environment);
+            KeepSparseCheckout(environment, cancellationToken);
+            var den = Pathspecs(null, withHidden: true);
+            _ = Run([.. TempIndexSettings, "add", "--refresh", "--", .. den], cancellationToken, environment: environment);
+            ListNewFiles(den, from.Length == 64 ? EmptyBlobSha256 : EmptyBlobSha1, environment, cancellationToken);
+            var raw = Git([.. TempIndexSettings, "diff", .. DiffOptions, "--raw", "-z", from, "--", .. den], cancellationToken, environment: environment);
+            return HistoryResult<IReadOnlyList<HistoryFileChange>>.Done(
+                ParseChanges(SplitRawAndPatch(raw).Tokens).Select(c => c.Change).OfType<HistoryFileChange>().ToList());
+        }
+        finally
+        {
+            Delete(index);
+            Delete(index + ".lock");
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A rebase (<c>rebase-merge/</c>, <c>rebase-apply/</c>), a merge
+    /// (<c>MERGE_HEAD</c>), a cherry-pick, a revert, or a bisect under way,
+    /// each found where git keeps it (<c>git rev-parse --git-path</c>), or a
+    /// detached HEAD.
+    /// </remarks>
+    public string? InterruptedOperation
+    {
+        get
+        {
+            (string Path, string What)[] states =
+            [
+                ("rebase-merge", "a rebase"), ("rebase-apply", "a rebase"), ("MERGE_HEAD", "a merge"),
+                ("CHERRY_PICK_HEAD", "a cherry-pick"), ("REVERT_HEAD", "a revert"), ("BISECT_LOG", "a bisect"),
+            ];
+            var run = Run(["rev-parse", .. states.SelectMany(s => new[] { "--git-path", s.Path })], CancellationToken.None);
+            var paths = OutputOf(run, "rev-parse").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (!run.Succeeded || paths.Length != states.Length)
+            {
+                throw Failed("rev-parse", run);
+            }
+
+            for (var i = 0; i < states.Length; i++)
+            {
+                var full = Path.IsPathRooted(paths[i]) ? paths[i] : Path.Combine(DenRoot, paths[i]);
+                if (File.Exists(full) || Directory.Exists(full))
+                {
+                    return states[i].What;
+                }
+            }
+
+            // A detached HEAD: a checkpoint would go on no branch.
+            var head = Run(["symbolic-ref", "--quiet", "HEAD"], CancellationToken.None);
+            return head.ExitCode == 1 ? "a detached HEAD (no branch is checked out)" : null;
+        }
     }
 
     /// <inheritdoc />
