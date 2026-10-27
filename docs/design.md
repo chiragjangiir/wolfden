@@ -1277,10 +1277,23 @@ docs/
   full-text hits run past the raw cap a filtered search fetches (1,000,
   or 20 times the limit), field hits aren't added at all, since more
   full-text hits would come before them; the result says `truncated`,
-  and a narrower query or the Field filter reaches them. Phrase search
-  (`"a note"`) isn't supported yet: the words of a query match anywhere
-  in the text, in any order. Only a word joined by punctuation, such as
-  `mara-voss`, matches its parts side by side.
+  and a narrower query or the Field filter reaches them.
+- **Phrase search** (#185; v0 behaviour, not a recorded decision). A
+  query's words match anywhere in the text, in any order, except a
+  phrase: words in a closed pair of double quotes, such as
+  `"silver key"`, match side by side and in order, as the parts of a
+  word joined by punctuation (`mara-voss`) always have. Phrases and
+  words mix (`"silver key" harbour`), and the same rules hold for text,
+  field values, and a linked note's name, in the search page,
+  `/api/search`, and the MCP `search` tool. Punctuation between a
+  phrase's words doesn't matter, so `"silver key"` matches
+  "silver-key", and a phrase can run across sentences, or across a
+  list value's items, as it can across any punctuation. An unclosed quote is plain text, so its words are
+  ordinary words, and empty quotes are ignored; no query is an error. A
+  `*` at the end of a phrase's last word, inside the quotes or just
+  after them (`"silver ke*"`, `"silver ke"*`), makes that word a
+  prefix; a `*` anywhere else in a phrase is punctuation. A snippet
+  marks a phrase as one match.
 - **The history page** (#27; v0 behaviour, not a recorded decision,
   except the reveal, which applies the #26 decision). An entity page
   has Note and History tabs, below the breadcrumb on both. History is
