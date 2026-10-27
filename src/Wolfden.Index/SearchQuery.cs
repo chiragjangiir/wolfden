@@ -17,13 +17,30 @@ internal sealed record SearchTerm(string Text, bool Prefix);
 /// (<see cref="SearchWords"/>). Words are split at white space. A closed
 /// pair of double quotes makes a phrase, whose words match side by side and
 /// in order; an unclosed quote is plain text, and empty quotes are ignored.
-/// A <c>*</c> at the end of a word, or of a phrase's last word (inside or
-/// just after its closing quote), makes that word a prefix. Any other
-/// <c>*</c> or punctuation is plain text, which splits words as it does in
+/// Typographic quotes count too: any opening quote (<c>"</c>, <c>＂</c>,
+/// <c>“</c>, <c>„</c>) is closed by any closing one (<c>"</c>, <c>＂</c>,
+/// <c>“</c>, <c>”</c>). A <c>*</c> at the end of a word makes it a prefix,
+/// and so does one touching the end of a phrase's last word, inside or
+/// just after its closing quote (<c>"silver ke*"</c>, <c>"silver ke"*</c>).
+/// Any other <c>*</c>, such as one standing alone (<c>"silver *"</c>), and
+/// any other punctuation, is plain text, which splits words as it does in
 /// notes. Control characters are spaces, so no input throws.
 /// </summary>
 internal static class SearchQuery
 {
+    /// <summary>The closing double quotes: ASCII, fullwidth, and typographic (“ closes a German „…“).</summary>
+    private static readonly System.Buffers.SearchValues<char> Closing = System.Buffers.SearchValues.Create("\"＂“”");
+
+    /// <summary>An opening double quote: ASCII, fullwidth, or typographic (“ or German „).</summary>
+    private static bool IsOpening(char c) => c is '"' or '＂' or '“' or '„';
+
+    /// <summary>True if <paramref name="text"/>'s last word runs to its end, so a <c>*</c> after it touches it.</summary>
+    private static bool EndsInWord(string text)
+    {
+        var tokens = SearchWords.Tokens(text);
+        return tokens.Count > 0 && tokens[^1].Start + tokens[^1].Length == text.Length;
+    }
+
     /// <summary>The terms of <paramref name="query"/>, in order, without those that hold no words.</summary>
     public static IReadOnlyList<SearchTerm> Parse(string query)
     {
@@ -42,20 +59,34 @@ internal static class SearchQuery
         while (i < text.Length)
         {
             var c = text[i];
-            var close = c == '"' ? text.IndexOf('"', i + 1) : -1;
+            var close = IsOpening(c) ? text.AsSpan(i + 1).IndexOfAny(Closing) : -1;
             if (close >= 0)
             {
                 AddWord();
-                var phrase = text[(i + 1)..close].TrimEnd();
-                var prefix = phrase.EndsWith('*');
-                i = close + 1;
-                while (i < text.Length && text[i] == '*')
+                close += i + 1;
+                var phrase = text[(i + 1)..close];
+                var inner = phrase.TrimEnd();
+                var bare = inner.TrimEnd('*');
+                var prefix = false;
+                if (bare.Length < inner.Length && EndsInWord(bare))
                 {
+                    // A star inside the quotes, touching the last word.
+                    phrase = bare;
                     prefix = true;
-                    i++;
                 }
 
-                Add(phrase.TrimEnd('*'), prefix);
+                i = close + 1;
+                if (i < text.Length && text[i] == '*')
+                {
+                    // A star just after the quotes, touching the last word.
+                    prefix |= EndsInWord(phrase);
+                    while (i < text.Length && text[i] == '*')
+                    {
+                        i++;
+                    }
+                }
+
+                Add(phrase, prefix);
                 continue;
             }
 

@@ -266,13 +266,28 @@ public sealed class SearchTests : IClassFixture<SearchTests.Built>
     [InlineData("\"silver ke\"", new string[0])]
     [InlineData("\"silver ke*\"", new[] { "Old Lantern" })]
     [InlineData("\"silver ke\"*", new[] { "Old Lantern" })]
-    [InlineData("\"silver ke * \"", new[] { "Old Lantern" })]
+    [InlineData("\"silver ke* \"", new[] { "Old Lantern" })]
+    [InlineData("\"silver ke * \"", new string[0])]
+    [InlineData("\"silver ke \"*", new string[0])]
+    [InlineData("\"silver ke-*\"", new string[0])]
+    [InlineData("\"silver *\"", new[] { "Old Lantern", "Rusted Chain" })]
+    [InlineData("\"silver key\" *", new[] { "Old Lantern" })]
     [InlineData("\"silver* key\"", new[] { "Old Lantern" })]
     [InlineData("\"rusted key", new[] { "Rusted Chain" })]
     [InlineData("\"rusted key\"", new string[0])]
     [InlineData("\"\" chain", new[] { "Rusted Chain" })]
     [InlineData("chain \"", new[] { "Rusted Chain" })]
     [InlineData("\"key, rusted\"", new[] { "Rusted Chain" })]
+    [InlineData("“silver key”", new[] { "Old Lantern" })]
+    [InlineData("„silver key“", new[] { "Old Lantern" })]
+    [InlineData("„silver key”", new[] { "Old Lantern" })]
+    [InlineData("＂silver key＂", new[] { "Old Lantern" })]
+    [InlineData("\"silver key”", new[] { "Old Lantern" })]
+    [InlineData("“silver key\"", new[] { "Old Lantern" })]
+    [InlineData("“silver ke”*", new[] { "Old Lantern" })]
+    [InlineData("”rusted key”", new[] { "Rusted Chain" })]
+    [InlineData("“rusted key", new[] { "Rusted Chain" })]
+    [InlineData("„key silver”", new string[0])]
     public void AQuotedQueryIsAPhrase(string query, string[] names)
     {
         // "Old Lantern" has "silver-key", side by side; "Rusted Chain" has both words, apart (#185).
@@ -309,6 +324,12 @@ public sealed class SearchTests : IClassFixture<SearchTests.Built>
     [InlineData("\"cafe noir\" x", "Café Noir, x", true)]
     [InlineData("\"silver key", "key of silver", true)]
     [InlineData("\"\" silver", "key of silver", true)]
+    [InlineData("\"silver *\"", "silver key", true)]
+    [InlineData("\"silver ke *\"", "Silver Keys", false)]
+    [InlineData("\"silver ke \"*", "Silver Keys", false)]
+    [InlineData("„silver ke*“", "Silver Keys", true)]
+    [InlineData("“silver key”", "a key of silver", false)]
+    [InlineData("＂silver key\"", "the silver key", true)]
     public void PhrasesMatchFieldTextAsTheSearchTableDoes(string query, string text, bool matches)
     {
         var words = SearchWords.Parse(query);
