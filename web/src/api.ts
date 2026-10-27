@@ -210,6 +210,8 @@ export interface EntityPage {
   entry: EntryView
   leadLinks: LinkView[]
   backlinks: BacklinkView[]
+  /** Why the note can't be edited, since it's in a final book (#28), or null (or left out) if it can be. */
+  frozen?: string | null
 }
 
 export interface EntityPageResult {

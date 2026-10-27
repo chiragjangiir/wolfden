@@ -454,14 +454,22 @@ the den's files have gone that long without a change (design.md §6,
 or an agent asks. The time is hours, minutes, or both, in that order,
 each a whole number with its unit straight after and no spaces: `30m`,
 `2h`, `1h30m`. Units are lowercase `h` and `m`; there are no seconds or
-days. It must be from `5m` to `24h`, inclusive. A null value, or `false`,
-is the same as leaving the key out. Any other value is a [warning], and
-automatic checkpoints stay off: a time out of range (`4m`, `25h`), a
-bare number (`30`), another unit (`30s`, `1d`), an uppercase unit,
-`true`, a list, or a mapping. A den without history isn't a format
-matter: the setting is valid there, and `wolfden serve` warns that it
-does nothing. Apart from that, the setting changes only when checkpoints
-are made, never what the den means.
+days, and with hours, the minutes are under 60 (`1h60m` isn't a time;
+write `2h`). It must be from `5m` to `24h`, inclusive. An unquoted null
+(or no value) or an unquoted `false` is the same as leaving the key out;
+a quoted `"false"` or `"null"` is text, not one of those. Any other value
+is a [warning], and automatic checkpoints stay off: a time out of range
+(`4m`, `25h`, `999999999h`), a bare number (`30`), another unit (`30s`,
+`1d`), an uppercase unit, `1h60m`, a block scalar, `true`, a list, or a
+mapping. A den without history isn't a format matter: the setting is
+valid there, and `wolfden serve` warns that it does nothing. Apart from
+that, the setting changes only when checkpoints are made, never what the
+den means.
+
+*Note:* an automatic checkpoint is a commit made by the writer's own
+git, so if git signs commits (with GPG, say), it needs the passphrase
+cached by an agent, or it waits on a prompt. While it waits, saving
+isn't blocked: edits go to the files as usual (design.md §6).
 
 ## 6. Containers: universe, series, book
 

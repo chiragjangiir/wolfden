@@ -23,6 +23,14 @@ namespace Wolfden.Index.Reading;
 /// start a sentence: <c>This session is pinned to universe '{0}' (wolfden mcp --universe)</c>.
 /// </param>
 /// <param name="AllUniverseReads">What alone takes every universe at once, after "is only for": <c>search and list_entities</c>.</param>
+/// <param name="NameLinks">
+/// What rewrites the links that used an entity's old name, as a sentence:
+/// <c>Renaming the note (rename_entity) rewrites them.</c>
+/// </param>
+/// <param name="AliasLinks">
+/// What rewrites the links that used a removed alias, as a sentence:
+/// <c>Changing an alias with change_alias rewrites them.</c>
+/// </param>
 /// <param name="AskAgain">
 /// How to ask again for one of an ambiguous name's matches, as a sentence:
 /// <c>Ask again with one's key or path, or name its universe.</c>
@@ -31,7 +39,9 @@ public sealed record ToolWords(
     string AllowRelinks, string NewName, string Slug, string Universe, string FindEntity, string CheckDen, string CheckTool, string CheckPath,
     string PinnedTo = "This session is pinned to universe '{0}' (wolfden mcp --universe)",
     string AllUniverseReads = "search and list_entities",
-    string AskAgain = "Ask again with one's key or path, or name its universe.")
+    string AskAgain = "Ask again with one's key or path, or name its universe.",
+    string NameLinks = "Renaming the note (rename_entity) rewrites them.",
+    string AliasLinks = "Changing an alias with change_alias rewrites them.")
 {
     /// <summary>The MCP tools' own words, the default.</summary>
     public static ToolWords Mcp { get; } = new(

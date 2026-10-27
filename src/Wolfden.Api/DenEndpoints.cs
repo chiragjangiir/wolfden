@@ -40,8 +40,10 @@ public sealed record UniverseResult(string Key, string Name, string? Id, int Ser
 /// <param name="Code">The code.</param>
 /// <param name="Message">What went wrong, and what to do next.</param>
 /// <param name="Candidates">For <c>ambiguous_entity</c>, the entities the name matches; left out otherwise.</param>
+/// <param name="Current">For an edit refused with <c>stale_file</c>, the file as it is now, if it can still be read (#28); left out otherwise.</param>
 public sealed record ApiError(
-    string Code, string Message, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<EntitySummary>? Candidates = null);
+    string Code, string Message, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<EntitySummary>? Candidates = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EntitySourceResult? Current = null);
 
 /// <summary>
 /// The API's endpoints, under <c>/api</c> (#23). They read the index the
@@ -56,7 +58,8 @@ public static class DenEndpoints
 
     /// <summary>
     /// Maps <c>GET /api/health</c>, <c>GET /api/den</c>, the read endpoints
-    /// (<see cref="ReadEndpoints"/>), and a JSON 404 for anything else under <c>/api</c>.
+    /// (<see cref="ReadEndpoints"/>), the editing endpoints (<see cref="WriteEndpoints"/>),
+    /// and a JSON 404 for anything else under <c>/api</c>.
     /// </summary>
     public static IEndpointRouteBuilder MapWolfdenApi(this IEndpointRouteBuilder endpoints, WolfdenApiOptions options)
     {
@@ -66,27 +69,24 @@ public static class DenEndpoints
         api.MapGet("/health", () => new HealthResult("ok", options.Version));
         api.MapGet("/den", () => Den(options));
         ReadEndpoints.Map(api, options);
+        WriteEndpoints.Map(api, options);
         CheckpointEndpoints.Map(api, options);
 
         // Anything else under /api: a known path with the wrong method, or no endpoint at all.
         api.Map("/{**rest}", (HttpContext context, string? rest) =>
         {
-            if (CheckpointEndpoints.Paths.Contains(rest?.TrimEnd('/') ?? "", StringComparer.OrdinalIgnoreCase))
+            var path = rest?.TrimEnd('/') ?? "";
+            var method = CheckpointEndpoints.Paths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "GET, POST"
+                : GetPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "GET"
+                : WriteEndpoints.PostPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "POST"
+                : null;
+            if (method is not null)
             {
-                context.Response.Headers.Allow = "GET, POST";
+                context.Response.Headers.Allow = method;
                 return Error(
                     StatusCodes.Status405MethodNotAllowed,
                     "method_not_allowed",
-                    $"'/api/{rest}' answers GET and POST, not {context.Request.Method}.");
-            }
-
-            if (GetPaths.Contains(rest?.TrimEnd('/') ?? "", StringComparer.OrdinalIgnoreCase))
-            {
-                context.Response.Headers.Allow = "GET";
-                return Error(
-                    StatusCodes.Status405MethodNotAllowed,
-                    "method_not_allowed",
-                    $"'/api/{rest}' answers GET, not {context.Request.Method}.");
+                    $"'/api/{rest}' answers {method}, not {context.Request.Method}.");
             }
 
             return Error(StatusCodes.Status404NotFound, "not_found", $"There's no API endpoint '/api/{rest}'.");
@@ -95,7 +95,7 @@ public static class DenEndpoints
     }
 
     /// <summary>The paths under <c>/api</c> that answer GET.</summary>
-    private static readonly string[] GetPaths = ["health", "den", .. ReadEndpoints.Paths];
+    private static readonly string[] GetPaths = ["health", "den", .. ReadEndpoints.Paths, .. WriteEndpoints.GetPaths];
 
     /// <summary>The den's name and its universes, or the pinned one.</summary>
     internal static IResult Den(WolfdenApiOptions options)

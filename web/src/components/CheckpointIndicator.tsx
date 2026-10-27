@@ -35,6 +35,19 @@ export function CheckpointIndicator() {
   const data = status.data
   const visible = data !== undefined && (!data.available || data.count > 0)
 
+  // The status couldn't be read (git failed, or the server's gone): say so, quietly,
+  // rather than hide the indicator as if nothing had changed.
+  if (status.isError && data === undefined) {
+    return (
+      <>
+        <button type="button" ref={triggerRef} className="checkpoint-indicator" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+          History unavailable
+        </button>
+        {open && <UnavailableDialog message={status.error.message} onClose={close} />}
+      </>
+    )
+  }
+
   return (
     <>
       {visible && (
@@ -61,6 +74,62 @@ export function CheckpointIndicator() {
       )}
       {open && data !== undefined && <CheckpointDialog status={data} onClose={close} />}
     </>
+  )
+}
+
+/** Keeps Tab and Shift+Tab inside a dialog; with nothing to focus, on the dialog itself. */
+function trapTab(e: ReactKeyboardEvent<HTMLDivElement>, dialog: HTMLDivElement | null) {
+  const focusable = [...(dialog?.querySelectorAll<HTMLElement>('button, textarea, a[href], input') ?? [])].filter((el) => !el.hasAttribute('disabled'))
+  if (focusable.length === 0) {
+    e.preventDefault()
+    dialog?.focus()
+    return
+  }
+
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (e.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+    e.preventDefault()
+    last.focus()
+  } else if (!e.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
+    e.preventDefault()
+    first.focus()
+  }
+}
+
+/** What the indicator opens when the status couldn't be read. */
+function UnavailableDialog({ message, onClose }: { message: string; onClose: () => void }) {
+  const titleId = useId()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useEffect(() => dialogRef.current?.querySelector<HTMLElement>('button')?.focus(), [])
+  return (
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div
+        className="dialog checkpoint-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        ref={dialogRef}
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.stopPropagation()
+            onClose()
+          } else if (e.key === 'Tab') {
+            trapTab(e, dialogRef.current)
+          }
+        }}
+      >
+        <h2 id={titleId}>History unavailable</h2>
+        <p>Wolfden couldn't tell what's changed since the last checkpoint: {message}</p>
+        <p className="muted">Your edits are still saved in the files. The page asks again in a minute.</p>
+        <div className="dialog-actions">
+          <button type="button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -101,37 +170,52 @@ export function CheckpointDialog({ status, onClose }: { status: CheckpointStatus
   }, [checkpoint.isSuccess])
 
   const busy = checkpoint.isPending
-  const dismiss = () => {
-    if (!busy) {
-      onClose()
+  const [confirming, setConfirming] = useState(false)
+
+  // While the request runs, the box and buttons are disabled, so focus stays on the
+  // dialog itself rather than falling to the page behind it; after an error, it goes
+  // back to the box, to try again.
+  useEffect(() => {
+    if (busy) {
+      dialogRef.current?.focus()
     }
+  }, [busy])
+
+  useEffect(() => {
+    if (checkpoint.isError) {
+      messageRef.current?.focus()
+    }
+  }, [checkpoint.isError])
+
+  /** A click outside, or Escape: closes, but asks first if a name has been typed, as the editor does. */
+  const dismiss = () => {
+    if (busy) {
+      return
+    }
+
+    if (message.trim() !== '' && !checkpoint.isSuccess) {
+      setConfirming(true)
+      return
+    }
+
+    onClose()
   }
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Escape') {
       e.stopPropagation()
-      dismiss()
+      if (confirming) {
+        setConfirming(false)
+        messageRef.current?.focus()
+      } else {
+        dismiss()
+      }
+
       return
     }
 
     if (e.key === 'Tab') {
-      // Keep focus in the dialog.
-      const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>('button, textarea, a[href], input') ?? [])].filter(
-        (el) => !el.hasAttribute('disabled'),
-      )
-      if (focusable.length === 0) {
-        return
-      }
-
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault()
-        last.focus()
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault()
-        first.focus()
-      }
+      trapTab(e, dialogRef.current)
     }
   }
 
@@ -156,6 +240,8 @@ export function CheckpointDialog({ status, onClose }: { status: CheckpointStatus
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
         ref={dialogRef}
+        tabIndex={-1}
+        aria-busy={busy}
         onKeyDown={onKeyDown}
       >
         {!shown.available ? (
@@ -195,6 +281,12 @@ export function CheckpointDialog({ status, onClose }: { status: CheckpointStatus
               for what you did, such as a notes pass after a chapter or a planning session.
             </p>
             <Changes status={shown} />
+            {shown.inProgress && (
+              <p className="banner checkpoint-warning">
+                Git is in the middle of {shown.inProgress}. A checkpoint now becomes part of it, so you may want to finish that in git
+                first.
+              </p>
+            )}
             <label htmlFor={messageId} className="checkpoint-label">
               Name this checkpoint
             </label>
@@ -227,14 +319,35 @@ export function CheckpointDialog({ status, onClose }: { status: CheckpointStatus
               </div>
             )}
             <AutoNote status={shown} />
-            <div className="dialog-actions">
-              <button type="submit" className="primary" disabled={busy}>
-                {busy ? 'Making the checkpoint…' : 'Checkpoint'}
-              </button>
-              <button type="button" onClick={dismiss} disabled={busy}>
-                Cancel
-              </button>
-            </div>
+            {confirming ? (
+              <div className="banner leave-prompt" role="alertdialog" aria-labelledby={`${titleId}-discard`}>
+                <p id={`${titleId}-discard`}>Close without making the checkpoint? The name you typed isn't kept.</p>
+                <p className="banner-actions">
+                  <button
+                    type="button"
+                    autoFocus
+                    onClick={() => {
+                      setConfirming(false)
+                      messageRef.current?.focus()
+                    }}
+                  >
+                    Keep it open
+                  </button>
+                  <button type="button" onClick={onClose}>
+                    Close without a checkpoint
+                  </button>
+                </p>
+              </div>
+            ) : (
+              <div className="dialog-actions">
+                <button type="submit" className="primary" disabled={busy}>
+                  {busy ? 'Making the checkpoint…' : 'Checkpoint'}
+                </button>
+                <button type="button" onClick={onClose} disabled={busy}>
+                  Cancel
+                </button>
+              </div>
+            )}
           </form>
         )}
       </div>
@@ -301,9 +414,12 @@ function Outcome({ made }: { made: CheckpointMade }) {
 
   const firstLine = made.checkpoint.message.split('\n', 1)[0]
   return (
-    <p>
-      Recorded “{firstLine}”, with {count(made.checkpoint.files, 'note', 'notes')}, as checkpoint <code>{made.checkpoint.id.slice(0, 10)}</code>.
-      Each note's History tab lists it.
-    </p>
+    <>
+      <p>
+        Recorded “{firstLine}”, with {count(made.checkpoint.files, 'note', 'notes')}, as checkpoint <code>{made.checkpoint.id.slice(0, 10)}</code>.
+        Each note's History tab lists it.
+      </p>
+      {made.inProgress && <p className="banner checkpoint-warning">Git was in the middle of {made.inProgress}, so the checkpoint is part of it.</p>}
+    </>
   )
 }

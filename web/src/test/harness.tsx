@@ -163,6 +163,7 @@ function answer(path: string, params: URLSearchParams, at: string | null, option
         reason: null,
         enable: null,
         latest: null,
+        inProgress: null,
         count: 0,
         changes: [],
         otherUniverses: 0,

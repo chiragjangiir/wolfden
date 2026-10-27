@@ -178,6 +178,91 @@ public sealed class CheckpointEndpointTests : IDisposable
         Assert.All(status.GetProperty("changes").EnumerateArray(), c => Assert.False(c.GetProperty("savedHere").GetBoolean()));
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-WEB-50")]
+    public async Task AWebSaveShowsAsSavedInWolfdenAndStartsAfreshAfterTheCheckpoint()
+    {
+        var den = Repository(TempDen.Dracula());
+        Commit(den, "Start");
+        den.Write(LucyFile, den.Read(LucyFile) + "\nEdited in another editor.\n");
+        await using var server = await StartAsync(den);
+
+        // A save through the web UI's write endpoints (#28).
+        var source = await server.GetJsonAsync("/api/entity/source?entity=Mina%20Harker", HttpStatusCode.OK);
+        using (var response = await server.Client.PostAsync(
+            "/api/edit/lead",
+            new StringContent(
+                JsonSerializer.Serialize(new { entity = "Mina Harker", expectedHash = source.GetProperty("hash").GetString(), text = "# Mina Harker\n\nShe keeps a diary in shorthand." }),
+                Encoding.UTF8,
+                "application/json"),
+            Token))
+        {
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        var status = await server.GetJsonAsync("/api/checkpoint", HttpStatusCode.OK);
+        Assert.Equal(
+            [(LucyFile, false), (MinaFile, true)],
+            status.GetProperty("changes").EnumerateArray().Select(c => (c.GetProperty("path").GetString(), c.GetProperty("savedHere").GetBoolean())));
+
+        var (code, made) = await PostAsync(server, """{"message": "Notes pass after drafting ch 12"}""");
+        Assert.Equal(HttpStatusCode.OK, code);
+        Assert.Equal(
+            [(LucyFile, false), (MinaFile, true)],
+            made.GetProperty("changes").EnumerateArray().Select(c => (c.GetProperty("path").GetString(), c.GetProperty("savedHere").GetBoolean())));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-53")]
+    public async Task ASaveDoesntWaitForACheckpointThatsWaitingOnGit()
+    {
+        var den = Repository(TempDen.Dracula());
+        Commit(den, "Start");
+        den.Write(LucyFile, den.Read(LucyFile) + "\nMore.\n");
+
+        // A pre-commit hook that waits, as git waits on a signing passphrase prompt.
+        var gate = Path.Combine(den.Root, ".git", "release");
+        var hook = Path.Combine(den.Root, ".git", "hooks", "pre-commit");
+        Directory.CreateDirectory(Path.GetDirectoryName(hook)!);
+        File.WriteAllText(hook, "#!/bin/sh\nwhile [ ! -f .git/release ]; do sleep 0.1; done\nexit 0\n", new UTF8Encoding(false));
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(hook, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        await using var server = await StartAsync(den);
+        var source = await server.GetJsonAsync("/api/entity/source?entity=Mina%20Harker", HttpStatusCode.OK);
+        var checkpoint = PostAsync(server, """{"message": "Planning session: harbour subplot"}""");
+        await Task.Delay(TimeSpan.FromSeconds(1), Token);
+        Assert.False(checkpoint.IsCompleted);
+
+        // A save, and the status, while git waits.
+        var save = server.Client.PostAsync(
+            "/api/edit/lead",
+            new StringContent(
+                JsonSerializer.Serialize(new { entity = "Mina Harker", expectedHash = source.GetProperty("hash").GetString(), text = "# Mina Harker\n\nSaved meanwhile." }),
+                Encoding.UTF8,
+                "application/json"),
+            Token);
+        using (var saved = await save.WaitAsync(TimeSpan.FromSeconds(20), Token))
+        {
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        }
+
+        Assert.False(checkpoint.IsCompleted);
+        File.WriteAllText(gate, "");
+        var (code, _) = await checkpoint;
+        Assert.Equal(HttpStatusCode.OK, code);
+
+        // Saved during the checkpoint, so it may not be in it: still marked as the server's.
+        var status = await server.GetJsonAsync("/api/checkpoint", HttpStatusCode.OK);
+        var mina = status.GetProperty("changes").EnumerateArray().SingleOrDefault(c => c.GetProperty("path").GetString() == MinaFile);
+        if (mina.ValueKind != JsonValueKind.Undefined)
+        {
+            Assert.True(mina.GetProperty("savedHere").GetBoolean());
+        }
+    }
+
     [Theory]
     [Trait("Scenario", "SC-WEB-50")]
     [InlineData("""{"message": ""}""", "bad_argument")]

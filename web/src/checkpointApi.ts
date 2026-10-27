@@ -38,7 +38,10 @@ export interface CheckpointStatus {
   reason: string | null
   /** For a den without history, how to turn it on. */
   enable: string | null
-  latest: CheckpointSummary | null
+  /** The latest checkpoint, by id and time only (its message could name another universe's notes on a pinned server). */
+  latest: { id: string; when: string } | null
+  /** What git is in the middle of (a rebase, a merge, a detached HEAD), or null. */
+  inProgress: string | null
   count: number
   changes: PendingChange[]
   /** For a pinned server: changed files in other universes, recorded too but not named. */
@@ -51,6 +54,7 @@ export interface CheckpointMade {
   backend: string
   recorded: boolean
   checkpoint: CheckpointSummary | null
+  inProgress: string | null
   changes: PendingChange[]
   otherUniverses: number
 }

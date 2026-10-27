@@ -143,3 +143,12 @@
   margin: 0.25rem 0;
   color: var(--broken);
 }
+
+.checkpoint-warning {
+  margin: 0.5rem 0;
+  padding: 0.4rem 0.75rem;
+}
+
+.checkpoint-dialog:focus {
+  outline: none;
+}

@@ -7,6 +7,35 @@ in. It grows as features land. The exact rules are in
 [`design.md`](design.md). For choosing whether a note belongs to the
 universe, a series, or a book, see [Where to file things](where-to-file.md).
 
+## Editing notes
+
+`wolfden serve` lets you edit a note on its page, one piece at a time.
+
+- **In place.** Each section has **Edit**, **Rename**, and **Remove**,
+  and the opening (the text before the first section) has **Edit
+  opening**. Edit opens the text as Markdown, as it's written in the
+  file. Type `[[` and a few letters to pick a note to link to, and use
+  **Preview** to see it as the page shows it. **Save** (or Ctrl+Enter,
+  ⌘+Enter on a Mac) saves; **Cancel** (or Escape) leaves it as it was.
+  **Add section** adds one at the end or before another. Renaming a
+  section changes the links to it in every note; removing one asks first.
+- **Edit file** opens the whole note, frontmatter and all, for anything
+  the other controls don't do yet, such as changing a field or a
+  section's `<!-- wolfden: ... -->` comment.
+- **While you edit, you see everything.** The page shows the whole note,
+  whatever the story position, and says "Editing shows everything". The
+  position view comes back when you save or cancel.
+- **If something else changed the note meanwhile,** such as an AI
+  assistant working through Wolfden, or you in another editor, the save
+  is refused and you see both versions. Choose **Keep mine** (save yours
+  over it), **Take theirs** (drop yours), or **Copy mine and reload**
+  (copy yours, then edit the note as it is now).
+- **Saving isn't a checkpoint.** It saves the file; it doesn't record a
+  version in the den's history. Make a checkpoint as you do now.
+
+Notes in a book marked final can't be edited until the book is
+unfrozen; their Edit controls are off, and the page says why.
+
 ## Images
 
 Notes can show pictures: a map, a sketch of a ship, a family tree. Keep
@@ -139,7 +168,7 @@ point:
 **Name every checkpoint.** The name is how you'll find this version
 later, in a long list of them, so say what the pass was rather than
 "edits" or the date (the date is recorded anyway). Wolfden never names a
-checkpoint for you.
+checkpoint for you, unless you turn on automatic checkpoints (below).
 
 ### Making one
 
@@ -179,3 +208,9 @@ such as `2h` or `1h30m`. Remove the line, or set it to `false`, to turn
 it off. Automatic checkpoints don't replace named ones: their names say
 only what changed, not why, so keep naming your passes and planning
 sessions. See [format.md F-DEN-9](format.md) for the exact rule.
+
+It waits while git is busy with something of yours, such as a rebase or
+a merge, and makes the checkpoint once that's done. If your git signs
+commits (with GPG, say), keep the passphrase cached (`gpg-agent` does
+this), or an automatic checkpoint waits on the passphrase prompt. Saving
+still works while it waits.

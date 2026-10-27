@@ -4,4 +4,9 @@
     <ProjectReference Include="..\..\src\Wolfden.Cli\Wolfden.Cli.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Using Include="Wolfden.Index.Reading" />
+    <Using Include="Wolfden.Index.Writing" />
+  </ItemGroup>
+
 </Project>

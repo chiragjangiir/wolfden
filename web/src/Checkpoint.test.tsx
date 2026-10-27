@@ -25,7 +25,8 @@ function status(extra: Partial<CheckpointStatus> = {}): CheckpointStatus {
     available: true,
     reason: null,
     enable: null,
-    latest: { id: 'c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', when: '2026-10-26T20:00:00Z', author: 'Test Writer', message: 'Start', files: 40 },
+    latest: { id: 'c1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', when: '2026-10-26T20:00:00Z' },
+    inProgress: null,
     count: changes.length + (extra.otherUniverses ?? 0),
     changes,
     otherUniverses: 0,
@@ -139,12 +140,14 @@ describe('SC-WEB-52: I name a checkpoint after a notes pass', () => {
     const { posted, calls } = stubCheckpoints(
       () => current,
       (body) => {
-        current = status({ changes: [], latest: { id: 'c2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', when: '2026-10-27T09:00:00Z', author: 'Test Writer', message: body.message, files: 3 } })
+        const made = { id: 'c2bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', when: '2026-10-27T09:00:00Z', author: 'Test Writer', message: body.message, files: 3 }
+        current = status({ changes: [], latest: { id: made.id, when: made.when } })
         return {
           version: 1,
           backend: 'git',
           recorded: true,
-          checkpoint: current.latest,
+          checkpoint: made,
+          inProgress: null,
           changes: [change(MINA), change(LUCY), change(KRONE, 'added')],
           otherUniverses: 0,
         }
@@ -204,7 +207,7 @@ describe('SC-WEB-52: I name a checkpoint after a notes pass', () => {
   it('says when there was nothing to record', async () => {
     stubCheckpoints(
       () => status(),
-      () => ({ version: 1, backend: 'git', recorded: false, checkpoint: null, changes: [], otherUniverses: 0 }),
+      () => ({ version: 1, backend: 'git', recorded: false, checkpoint: null, inProgress: null, changes: [], otherUniverses: 0 }),
     )
     renderApp('/u/dracula')
     fireEvent.click(await screen.findByRole('button', { name: /3 notes changed/ }))
@@ -223,6 +226,58 @@ describe('SC-WEB-52: I name a checkpoint after a notes pass', () => {
     fireEvent.keyDown(dialog, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     await waitFor(() => expect(document.activeElement).toBe(indicator))
+  })
+
+  it('keeps focus in the dialog while the checkpoint is made, and gives it back to the box after an error', async () => {
+    let answer: (r: Response) => void = () => {}
+    stubCheckpoints(
+      () => status(),
+      () => new Promise<Response>((resolve) => (answer = resolve)) as unknown as Response,
+    )
+    renderApp('/u/dracula')
+    fireEvent.click(await screen.findByRole('button', { name: /3 notes changed/ }))
+    const dialog = await screen.findByRole('dialog')
+    const box = within(dialog).getByLabelText('Name this checkpoint')
+    fireEvent.change(box, { target: { value: 'Notes pass after drafting ch 12' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Checkpoint' }))
+
+    await within(dialog).findByRole('button', { name: 'Making the checkpoint…' })
+    await waitFor(() => expect(document.activeElement).toBe(dialog))
+    answer(new Response(JSON.stringify({ code: 'history_failed', message: 'Git hasn’t finished the checkpoint after 2 minutes.' }), { status: 500 }))
+
+    await within(dialog).findByRole('alert')
+    await waitFor(() => expect(document.activeElement).toBe(box))
+  })
+
+  it('asks before a click outside drops a typed name, and closes at once without one', async () => {
+    stubCheckpoints(() => status())
+    renderApp('/u/dracula')
+    fireEvent.click(await screen.findByRole('button', { name: /3 notes changed/ }))
+    let dialog = await screen.findByRole('dialog')
+    const backdrop = dialog.parentElement!
+    fireEvent.change(within(dialog).getByLabelText('Name this checkpoint'), { target: { value: 'Planning session: harbour subplot' } })
+
+    fireEvent.mouseDown(backdrop)
+    const ask = within(dialog).getByRole('alertdialog')
+    expect(ask.textContent).toMatch(/Close without making the checkpoint/)
+    fireEvent.click(within(ask).getByRole('button', { name: 'Keep it open' }))
+    expect((within(dialog).getByLabelText('Name this checkpoint') as HTMLTextAreaElement).value).toBe('Planning session: harbour subplot')
+
+    fireEvent.mouseDown(backdrop)
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close without a checkpoint' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    fireEvent.click(screen.getByRole('button', { name: /3 notes changed/ }))
+    dialog = await screen.findByRole('dialog')
+    fireEvent.mouseDown(dialog.parentElement!)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('warns when git is in the middle of something', async () => {
+    stubCheckpoints(() => status({ inProgress: 'a rebase' }))
+    renderApp('/u/dracula')
+    fireEvent.click(await screen.findByRole('button', { name: /3 notes changed/ }))
+    expect((await screen.findByRole('dialog')).textContent).toMatch(/Git is in the middle of a rebase/)
   })
 
   it('mentions automatic checkpoints when they’re on', async () => {
@@ -248,6 +303,21 @@ describe('SC-WEB-51: without history, the indicator says how to turn it on', () 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(posted).toEqual([])
+  })
+})
+
+describe('SC-WEB-50: when the status can’t be read', () => {
+  it('shows a quiet "History unavailable" with the reason, rather than hiding', async () => {
+    stubCheckpoints(
+      () =>
+        new Response(JSON.stringify({ code: 'history_failed', message: 'git diff failed: fatal: bad object' }), { status: 500 }) as unknown as CheckpointStatus,
+    )
+    renderApp('/u/dracula')
+    fireEvent.click(await screen.findByRole('button', { name: 'History unavailable' }))
+    const dialog = await screen.findByRole('dialog', { name: 'History unavailable' })
+    expect(dialog.textContent).toMatch(/fatal: bad object/)
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
 })
 

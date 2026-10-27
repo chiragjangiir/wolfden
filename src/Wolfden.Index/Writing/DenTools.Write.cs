@@ -9,9 +9,9 @@ using Wolfden.Core.Links;
 using Wolfden.Core.Structure;
 using Wolfden.Core.Types;
 using Wolfden.Core.Yaml;
-using Wolfden.Index;
+using Wolfden.Index.Reading;
 
-namespace Wolfden.Mcp;
+namespace Wolfden.Index.Writing;
 
 /// <summary>
 /// The write tools (design.md §8, #21). Every write is checked as the den
@@ -61,6 +61,18 @@ public sealed partial class DenTools
 
     private CheckpointLedger SessionWritten =>
         _ledger ?? Interlocked.CompareExchange(ref _ledger, new CheckpointLedger(Store), null) ?? _ledger;
+
+    /// <summary>
+    /// The ledger every write records itself in (<see cref="CheckpointLedger.Wrote"/>,
+    /// <see cref="CheckpointLedger.Deleted"/>). By default one of the session's
+    /// own; <c>wolfden serve</c> gives the server's, so the checkpoint dialog
+    /// marks the web UI's saves "saved in Wolfden" (#30).
+    /// </summary>
+    public CheckpointLedger Ledger
+    {
+        get => SessionWritten;
+        init => _ledger = value;
+    }
 
     /// <summary>The den store writes go through; by default the den's folder on disk.</summary>
     public IDenStore Store
@@ -231,8 +243,17 @@ public sealed partial class DenTools
             throw new DenToolException(ToolErrorCodes.BadArgument, "Give the section's name in 'section' and its new name in 'new_name'.");
         }
 
+        return RenameSection(entity, file => FindSection(file, section, null, sectionLine), newName, hash, universe);
+    }
+
+    /// <summary>
+    /// Renames the section <paramref name="pick"/> finds in the entity's
+    /// file, as <see cref="RenameSection(string, string, string, string, string?, int?)"/> does.
+    /// </summary>
+    private WriteResult RenameSection(string entity, Func<MarkdownFile, Section> pick, string newName, string hash, string? universe)
+    {
         newName = newName.Trim();
-        if (newName.Any(char.IsControl))
+        if (newName.Length == 0 || newName.Any(char.IsControl))
         {
             throw new DenToolException(ToolErrorCodes.BadArgument, "A section name is one line of text.");
         }
@@ -245,11 +266,11 @@ public sealed partial class DenTools
             var catalog = EntityCatalog.Load(structure, den);
             var target = catalog.FindByPath(path) ?? throw (den.FileExists(path)
                 ? new DenToolException(
-                    ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. Call check with path '{path}' to see them.")
+                    ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. {ToolWords.Cap(Words.CheckFile(path))} to see them.")
                 : Gone(path));
             CheckHash(path, target.File.ToBytes(), hash);
             CheckNotFrozen(target);
-            var found = FindSection(target.File, section, null, sectionLine);
+            var found = pick(target.File);
             var facts = EntityFacts.For(target, new Bookkeeping(structure.BookkeepingSections));
             var pinned = facts[found].Pinned ? new List<string> { $"section '{found.Name}' (line {found.Line}) is pinned canon" } : [];
             if (found.Name == newName)
@@ -295,6 +316,10 @@ public sealed partial class DenTools
             {
                 effects.Add($"An earlier section, '{earlier.Name}' at line {earlier.Line}, already has that name, so a link to '{newName}' reaches that one first (F-LINK-9).");
             }
+            else if (target.File.Sections.FirstOrDefault(s => s.Index > found.Index && LinkText.Matches(s.Name, newName)) is { } later)
+            {
+                effects.Add($"The note already has a section '{later.Name}' (line {later.Line}), and a link to '{newName}' reaches the first one (F-LINK-9).");
+            }
 
             if (plan.SkippedPaths.Count > 0)
             {
@@ -311,7 +336,7 @@ public sealed partial class DenTools
             }
 
             return new WriteResult(
-                ToolJson.Version, true, path, HashOf(files[path]), Summary(after), effects, pinned, Warnings(check),
+                DenReader.ResultVersion, true, path, HashOf(files[path]), Summary(after), effects, pinned, Warnings(check),
                 files.OrderBy(p => p.Key == path ? 0 : 1).ThenBy(p => p.Key, StringComparer.Ordinal).Select(p => new WrittenFileView(p.Key, HashOf(p.Value))).ToList(),
                 IdAdded: idAdded);
         }
@@ -334,7 +359,7 @@ public sealed partial class DenTools
         var found = FindBook(structure, universeKey, book.Trim());
         var chapters = chapter is null ? found.Chapters.ToList() : [FindChapter(found, chapter)];
         return new GetChapterResult(
-            ToolJson.Version, universeKey, found.Key, found.FilePath, HashOf(found.File.ToBytes()), found.Status == BookStatus.Final,
+            DenReader.ResultVersion, universeKey, found.Key, found.FilePath, HashOf(found.File.ToBytes()), found.Status == BookStatus.Final,
             chapters.Count, chapters.Select(ChapterOf).ToList());
     }
 
@@ -408,7 +433,7 @@ public sealed partial class DenTools
             {
                 // A write that changes nothing never adds an id (F-ID-6).
                 return new WriteResult(
-                    ToolJson.Version, false, path, HashOf(original), null, ["Nothing changed: book.md already says that."], [], [],
+                    DenReader.ResultVersion, false, path, HashOf(original), null, ["Nothing changed: book.md already says that."], [], [],
                     Chapter: ChapterOf(ch));
             }
 
@@ -421,7 +446,7 @@ public sealed partial class DenTools
             var afterBook = FindBook(check.Structure, universeKey, target.Key);
             var afterChapter = afterBook.FindChapter(ch.Key)!;
             return new WriteResult(
-                ToolJson.Version, true, path, HashOf(bytes), null, [.. ChapterEffects(ch, afterChapter, touched.Distinct().ToList()), .. notes], [], Warnings(check),
+                DenReader.ResultVersion, true, path, HashOf(bytes), null, [.. ChapterEffects(ch, afterChapter, touched.Distinct().ToList()), .. notes], [], Warnings(check),
                 Chapter: ChapterOf(afterChapter), IdAdded: idAdded);
         }
     }
@@ -472,16 +497,16 @@ public sealed partial class DenTools
                 var done = SessionWritten.Checkpoint(history, new CheckpointRequest(message.Trim(), given, [coAuthor.Trim()]));
                 if (!done.Result.IsAvailable)
                 {
-                    return new CheckpointResult(ToolJson.Version, history.Name, false, done.Result.Reason, false, null);
+                    return new CheckpointResult(DenReader.ResultVersion, history.Name, false, done.Result.Reason, false, null);
                 }
 
                 if (done.Result.Value is not { } e)
                 {
-                    return new CheckpointResult(ToolJson.Version, history.Name, true, null, false, null);
+                    return new CheckpointResult(DenReader.ResultVersion, history.Name, true, null, false, null);
                 }
 
                 return new CheckpointResult(
-                    ToolJson.Version, history.Name, true, null, true,
+                    DenReader.ResultVersion, history.Name, true, null, true,
                     new HistoryEntryView(e.Id, e.When, e.Author, e.Message, e.Changes.Select(c => new HistoryChangeView(c.Kind.ToString().ToLowerInvariant(), c.Path, c.OldPath)).ToList()),
                     done.Written,
                     done.ChangedElsewhere);
@@ -583,7 +608,7 @@ public sealed partial class DenTools
             }
 
             return new WriteResult(
-                ToolJson.Version, true, made.Path, HashOf(bytes), Summary(entity), effects, [], Warnings(check),
+                DenReader.ResultVersion, true, made.Path, HashOf(bytes), Summary(entity), effects, [], Warnings(check),
                 [new WrittenFileView(made.Path, HashOf(bytes), Created: true)]);
         }
     }
@@ -766,7 +791,7 @@ public sealed partial class DenTools
             CheckHash(path, original, hash);
             var read = EntityCatalog.ReadEntityFile(structure, path, original);
             var before = read.Entity ?? throw new DenToolException(
-                ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. Call check with path '{path}' to see them.");
+                ToolErrorCodes.InvalidEdit, $"{path} has errors now, so the den leaves it out and it can't be edited here. {ToolWords.Cap(Words.CheckFile(path))} to see them.");
             CheckNotFrozen(before);
             var pinned = new List<string>();
             var (file, effects) = edit(before.File, before, pinned);
@@ -789,12 +814,12 @@ public sealed partial class DenTools
                 said.Add($"The file had no id, so it was given {idAdded} (F-ID-6).");
             }
 
-            return new WriteResult(ToolJson.Version, true, path, HashOf(bytes), Summary(after), said, pinned.Distinct().ToList(), Warnings(check), IdAdded: idAdded);
+            return new WriteResult(DenReader.ResultVersion, true, path, HashOf(bytes), Summary(after), said, pinned.Distinct().ToList(), Warnings(check), IdAdded: idAdded);
         }
     }
 
     private static WriteResult Unchanged(string path, byte[] bytes, CatalogEntity entity) =>
-        new(ToolJson.Version, false, path, HashOf(bytes), Summary(entity), ["Nothing changed: the file already says that."], [], []);
+        new(DenReader.ResultVersion, false, path, HashOf(bytes), Summary(entity), ["Nothing changed: the file already says that."], [], []);
 
     /// <summary>The entity's path in the index, and every id the den uses (for a missing id, F-ID-6).</summary>
     private (string Path, HashSet<string> Ids) Locate(string entity, string? universe)
@@ -872,20 +897,24 @@ public sealed partial class DenTools
 
     private static void CheckNotFrozen(CatalogEntity entity)
     {
+        if (FrozenReason(entity) is { } reason)
+        {
+            throw new DenToolException(ToolErrorCodes.Frozen, reason);
+        }
+    }
+
+    /// <summary>Why the entity can't be edited because it's frozen, or null if it can be.</summary>
+    private static string? FrozenReason(CatalogEntity entity)
+    {
         if (entity.Scope is Book { Status: BookStatus.Final } book)
         {
-            throw new DenToolException(
-                ToolErrorCodes.Frozen,
-                $"{entity.Path} is in book '{book.Key}', which is final (frozen), so it can't be edited until the book is unfrozen (F-BOOK-1).");
+            return $"{entity.Path} is in book '{book.Key}', which is final (frozen), so it can't be edited until the book is unfrozen (F-BOOK-1).";
         }
 
         // A backstop: `status: final` on an entity is an F-ENT-5 error, so such a
         // file never loads and never gets here. It's kept so that if the format
         // ever lets an entity be final on its own, it's refused, not edited.
-        if (entity.File.Frontmatter?["status"] is YamlScalar { Text: "final" })
-        {
-            throw new DenToolException(ToolErrorCodes.Frozen, $"{entity.Path} is marked final, so it can't be edited.");
-        }
+        return entity.File.Frontmatter?["status"] is YamlScalar { Text: "final" } ? $"{entity.Path} is marked final, so it can't be edited." : null;
     }
 
     private static DenToolException Gone(string path) =>

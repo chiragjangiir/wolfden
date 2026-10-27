@@ -16,7 +16,7 @@ export function EntityRoute() {
   const { view, at } = route.useSearch()
   return (
     <RevealProvider id={JSON.stringify([universe, key, at ?? null])}>
-      {view === 'history' ? <HistoryPage key={JSON.stringify([universe, key])} /> : <EntityPageView />}
+      {view === 'history' ? <HistoryPage key={JSON.stringify([universe, key])} /> : <EntityPageView key={JSON.stringify([universe, key, at ?? null])} />}
     </RevealProvider>
   )
 }

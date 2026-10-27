@@ -503,13 +503,31 @@ With git as the backend:
   It makes one checkpoint per quiet spell, not one per poll. It never
   starts while a git write may be running (`IHistoryProvider.IsWriting`:
   a checkpoint in this process, a git Wolfden stopped waiting for, or an
-  `index.lock` there) and tries again on the next poll; it never stops
-  git. The per-repository gate is in-process only, so two Wolfdens on
-  one den (or the writer's own git) may race: nothing to record does
-  nothing, and a checkpoint git refuses is logged and tried again after
-  another quiet spell, never in a loop. Without history the setting does
-  nothing apart from a warning in `serve`'s log. The setting is read
-  from `den.yaml` on each poll, so it needs no restart.
+  `index.lock` there) and tries again on the next poll; after ten busy
+  polls in a row (five minutes, as a stale `index.lock` would make) it
+  says so in the log, once. It never stops git. Nor does it start while
+  git is in the middle of something (`IHistoryProvider.InterruptedOperation`:
+  `rebase-merge/`, `rebase-apply/`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`,
+  `REVERT_HEAD`, or `BISECT_LOG`, found through `git rev-parse
+  --git-path`, or a detached HEAD), since the commit would land inside
+  it or on no branch; it says so once and makes the checkpoint after.
+  A manual checkpoint is still made then, as git would make it (git
+  itself refuses one during a merge), and the web UI warns. The
+  per-repository gate is in-process only, so two Wolfdens on one den (or
+  the writer's own git) may race: nothing to record does nothing, and a
+  checkpoint git refuses is logged once until the files change, and
+  tried again after another quiet spell, never in a loop. Without
+  history the setting does nothing apart from a warning in `serve`'s
+  log. The setting is read from `den.yaml` on each poll, so it needs no
+  restart. A signed commit needs the passphrase cached (by `gpg-agent`,
+  say), or git waits on a prompt; while it waits, saving isn't blocked,
+  since the ledger is never locked across git (§9, "Saved here or
+  elsewhere"). Two limits: the fingerprint misses a change that keeps a
+  file's size and time to the tick, which the next checkpoint, manual
+  or after another change, records anyway; and an automatic checkpoint
+  in `serve` records whatever an MCP session saved and hasn't
+  checkpointed yet, without that agent's `Co-Authored-By` (its later
+  `checkpoint` then has those files no more).
 - **Remotes:** optional. Wolfden can push and pull a configured remote but
   never requires one.
 
@@ -1414,14 +1432,153 @@ docs/
     index leaves out, has no History tab yet, though `/api/history`
     gives its history by its path (#181). Without history, the page
     gives the API's reason and how to start one.
+- **Editing notes** (#28, part a). Four choices are maintainer
+  decisions (on #28, 2026-10-27):
+  - **One piece at a time.** Each field, the lead, and each section has
+    its own Edit control and is edited in place, so the rest of the note
+    stays readable. **Edit file** opens the whole file's Markdown and
+    YAML source for anything the other controls can't do.
+  - **A Markdown source editor with a preview.** The lead and sections
+    are edited as Markdown in CodeMirror 6 (MIT), with highlighting,
+    `[[link]]` autocomplete, and a Preview toggle. There's no rich-text
+    (WYSIWYG) editor: it would rewrite Markdown the writer didn't touch
+    and break lossless edits (format.md §12).
+  - **Explicit Save.** A Save button or Ctrl/⌘+Enter, and a warning
+    before leaving with unsaved changes. Every save carries the hash of
+    the file it was based on, as the MCP write tools do (§8, "Stale
+    files"); if the file changed meanwhile, the save is refused and the
+    writer sees both versions and chooses. Saving never makes a
+    checkpoint (checkpoints are #30).
+  - **Editing shows everything.** Editing works on the full note, every
+    dated entry and section, whatever the story position, with an
+    "Editing shows everything" badge. The position view comes back when
+    the edit ends.
+
+  Fields, with dated entries' `from` and `until`, are part b of #28;
+  chapter fields and inherited values are #138. The rest is v0
+  behaviour, not a recorded decision.
+  - **One write path.** The write tools moved from `Wolfden.Mcp` to
+    `Wolfden.Index.Writing` (`DenTools`), as the read queries did
+    (`DenReader`, #174), and the API's edits go through their edit loop:
+    the same `DenWriteCheck` (`invalid_edit`), hash checks
+    (`stale_file`), frozen books (`frozen`), F-ID-6 ids, warnings,
+    `effects`, and `pinned_canon`, which the API calls `pinnedCanon`.
+    `serve` holds one `DenTools` for the server, so its writes are made
+    one at a time. A lead or section edit replaces the piece's text
+    between the blank lines around it (`MarkdownFile.WithLead`,
+    `WithSectionBody`); a section rename is `rename_section`'s den-wide
+    link rewrite. Every edit lists the pinned facts it changed, added,
+    or removed, comparing the note's facts before and after.
+  - **The API.** `GET /api/entity/source` (`entity`, `universe`) reads
+    the file itself, not the index: its `hash`, its whole `text` (LF
+    line breaks, no byte order mark, with `lineEndings` and
+    `byteOrderMark` saying what the file has), `frozen` (why it can't be
+    edited, or null), the `lead`, each section's `index`, `name`,
+    `level`, `line`, `comment`, own `body`, `pinned`, and `parent`, and
+    the type's `standardSections`. `/api/entity` adds `frozen` too, so
+    the page can turn its controls off without asking. Edits are `POST`
+    with a JSON body of `entity`, `universe`, `expectedHash`, and the
+    edit's own members, each at most once: `/api/edit/lead` (`text`),
+    `/api/edit/section` (`index`, `name`, `text`),
+    `/api/edit/section/add` (`name`, `text`, and `beforeIndex` with
+    `beforeName`, or neither for the end; the new section takes the
+    level of the one it goes before, or 2 at the end),
+    `/api/edit/section/rename` (`index`, `name`, `newName`),
+    `/api/edit/section/remove` (`index`, `name`), and `/api/edit/file`
+    (`text`). Part b adds field edits beside them. Each answers the
+    write tools' `WriteResult`. Errors add 409 for `stale_file`,
+    `frozen`, `ambiguous_section`, and `already_exists`; 422 for
+    `invalid_edit` and `unsupported_edit`; 404 for `unknown_section`;
+    and 500 for `write_failed`. A `stale_file` error has `current`, the
+    file's source as it is now, so the page can show both versions.
+  - **Naming a section.** A section is sent by its `index` (its place
+    among the file's sections, subsections included) and its `name`
+    together, both checked against the file the hash names; a mismatch
+    is `unknown_section`. So neither a stale page nor two sections of one
+    name can send an edit to the wrong one.
+  - **Not from another site.** Besides the cross-site guard and host
+    filter (#23), an edit must be sent as `application/json`, or it's
+    415 `unsupported_media_type`: a plain HTML form can't send that, and
+    a script on another site needs a CORS preflight, which the server
+    never allows. An edit endpoint answers only `POST`. `serve
+    --universe` pins edits as it pins reads.
+  - **What the editor holds.** A section's editor holds its own text as
+    written, with HTML comments, up to its first subsection; its section
+    comment (`<!-- wolfden: ... -->`, format.md §9.2) is kept aside,
+    shown above the editor, and changed with Edit file, so a body edit
+    can't change a section's status, range, or pin by accident. Text
+    that would add a heading or section comment is refused
+    (`bad_argument`), as `WithSectionBody` refuses it. The lead's editor
+    holds the lead as written, title heading included. Line breaks are
+    LF in the editor and written as the file's own (the more common one
+    in a file that mixes them), and the byte order mark is kept. Text
+    that equals the piece's, line breaks aside, writes nothing, even in a
+    file that mixes them, and the page doesn't send it (Save is off until
+    the text changes).
+  - **Section names.** A name typed with a heading's `#` marks (`## Arc`)
+    is refused, with the name to give instead, rather than stripped: the
+    level comes from where the section goes, and a writer's text isn't
+    changed behind their back. Adding or renaming to a name another
+    section has is saved, and `effects` says a link to it reaches the
+    first one (F-LINK-9); `rename_section` says so too now.
+  - **Edit file.** It refuses a change to, or removal of, an existing id
+    (F-ID-4, `unsupported_edit`). A note without one may be given one,
+    but not an id another file of the den has (`already_exists`), checked
+    through the index across universes. `DenWriteCheck` reads only the
+    file written (F-GEN-4), so it doesn't see F-ID-3, which compares
+    files; the MCP tools never take an id by hand, so only Edit file
+    needs the check. An id that isn't one is F-ID-1, an error, so
+    `invalid_edit`. Edit file doesn't rewrite links when the name or an
+    alias changes; the result says so.
+  - **Words for writers.** The edits' errors and effects are shown on the
+    page, so the API's `DenTools` uses its own `ToolWords`
+    (`WriteEndpoints.Words`): they name the search box, an editor, and
+    `wolfden check`, and say that an AI assistant working through Wolfden
+    can rename a note or change an alias and rewrite the links, where the
+    MCP tools' words name `rename_entity` and `change_alias`. The MCP
+    tools' and the command line's words are unchanged.
+  - **Removing a section** takes its subsections, and doesn't rewrite
+    links to it by heading: `effects` lists them, and what they reach
+    now (a later section of that name, or only the note).
+  - **The page.** CodeMirror is loaded the first time an editor opens,
+    and mounted in a shadow root: its styles are a constructed style
+    sheet there, which the page's Content-Security-Policy doesn't
+    govern, where in the page they'd be an inline `<style>` that
+    `style-src 'self'` refuses. `[[` autocomplete asks `/api/search` for
+    the words typed so far, as a prefix. Preview uses the page's own
+    renderer, with links shown as written until the note is saved. One
+    piece is edited at a time, and an editor opens only on the source
+    fetched when it opened, never a cached answer. Leaving through the
+    app with unsaved changes (a link, Back, or the position bar) asks in
+    the page (TanStack Router's blocker), and closing or reloading the
+    tab makes the browser ask (`beforeunload`); Cancel or Escape asks the
+    same way before dropping unsaved text. A change of position ends the
+    edit: the page is made again for the new position. Remove asks
+    in the page, never in a browser dialog. A stale save shows the
+    writer's version and the file's side by side, with the lines that
+    differ marked, and offers Keep mine (save it again on the new hash,
+    to the section at the same index with the same name, or the only one
+    of that name),
+    Take theirs, and Copy mine and reload (copy it to the clipboard, and
+    open the editor on the file as it is now). A save refreshes every
+    cached answer, since a rename or a new name can change lists,
+    searches, and links anywhere, and shows its effects, the pinned
+    canon it touched, the file's warnings, and that it isn't a
+    checkpoint. A note the reader hasn't met can be edited once shown
+    with "Show it anyway".
+
 - **Checkpoints in the web UI** (#30; manual by default is the
   maintainer's decision of 2026-10-27, §12 Q4; the rest is v0
   behaviour, not a recorded decision).
   - **The API.** `GET /api/checkpoint` says whether the den has
-    history that can make checkpoints, the latest checkpoint, and the
-    den files a checkpoint now would record (`IHistoryProvider.Pending`:
-    what changed since the latest checkpoint, or every den file before
-    the first), each with its kind and universe. `POST /api/checkpoint`
+    history that can make checkpoints, the latest checkpoint (its id and
+    time only, since its message could name another universe's notes),
+    what git is in the middle of, if anything (`inProgress`: a rebase, a
+    merge, a detached HEAD), and the den files a checkpoint now would
+    record (`IHistoryProvider.Pending`: what changed since the latest
+    checkpoint, or every den file before the first, from one raw diff
+    with names and no patches), each with its kind and universe.
+    `POST /api/checkpoint`
     takes `{"message": "…"}` and makes one. Both go through the same
     `CheckpointLedger` (`Wolfden.Core`) and history provider as the MCP
     `checkpoint` tool, so a checkpoint records only den files and
@@ -1436,13 +1593,20 @@ docs/
     new den, which refuses a folder that's already a den), and a POST
     is 409 `history_unavailable`. A refusal by git (a hook, signing,
     a lock) or a git that didn't finish in time is 500
-    `history_failed`, with git's reason.
+    `history_failed`, with git's reason. A checkpoint made while git is
+    in the middle of something says so in its result (`inProgress`).
   - **Saved here or elsewhere.** The server keeps a ledger of the files
-    its own write endpoints saved (#28), as an MCP session does, so each
-    change says whether this server saved it and nothing changed it
-    since (`savedHere`). Anything else changed another way: in an
-    editor, by an agent through MCP (another process), or before the
-    server started.
+    its own write endpoints saved (#28): the editing endpoints' `DenTools`
+    records each save in the server's `CheckpointLedger`, as an MCP
+    session's does in its own, so each change says whether this server
+    saved it and nothing changed it since (`savedHere`). Anything else
+    changed another way: in an editor, by an agent through MCP (another
+    process), or before the server started. The ledger's lock is held
+    only to take a snapshot before a checkpoint and to reconcile after
+    it, never while git runs, so a save or a status never waits on a
+    checkpoint (one waiting on a passphrase prompt, say). A file saved
+    while a checkpoint runs may or may not be in it, so it stays the
+    server's; the next checkpoint forgets it if the history holds it.
   - **Pinned.** A checkpoint covers the den (§6), as the
     MCP tool's does in a pinned session, so `serve --universe` records
     every den file too. It doesn't name files in other universes, as for
@@ -1452,11 +1616,18 @@ docs/
     last checkpoint · Checkpoint…" ("not checkpointed yet" before the
     first), and nothing when nothing has changed. It asks again every
     minute, when the window gets focus back, and whenever its query
-    (`['checkpoint-status']`) is invalidated, which the editor does
-    after a save. Without history it says "No history · Turn on…".
+    (`['checkpoint-status']`) is invalidated, which the editor's save
+    does (it invalidates every cached answer). Without history it says
+    "No history · Turn on…"; when the status can't be read, "History
+    unavailable", which opens the reason.
   - **The dialog.** A modal dialog (not the browser's): focus goes to
-    the message box and stays in the dialog, Escape or Cancel closes it,
-    and focus goes back to the indicator. It lists the changes grouped
+    the message box and stays in the dialog, on the dialog itself while
+    the checkpoint is being made and back on the box after an error.
+    Cancel closes it; Escape or a click outside does too, but asks
+    first if a name has been typed, as the editor asks before
+    discarding. Focus goes back to the indicator. While git is in the
+    middle of a rebase or the like, or HEAD is detached, it warns that
+    the checkpoint becomes part of it. It lists the changes grouped
     for reviewing a notes pass: den-level files first, then each
     universe's own files, then each series and book, paths shortened
     within the group, with "saved in Wolfden" on the server's own saves.
