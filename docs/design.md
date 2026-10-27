@@ -1385,6 +1385,114 @@ docs/
     index leaves out, has no History tab yet, though `/api/history`
     gives its history by its path (#181). Without history, the page
     gives the API's reason and how to start one.
+- **Editing notes** (#28, part a). Four choices are maintainer
+  decisions (on #28, 2026-10-27):
+  - **One piece at a time.** Each field, the lead, and each section has
+    its own Edit control and is edited in place, so the rest of the note
+    stays readable. **Edit file** opens the whole file's Markdown and
+    YAML source for anything the other controls can't do.
+  - **A Markdown source editor with a preview.** The lead and sections
+    are edited as Markdown in CodeMirror 6 (MIT), with highlighting,
+    `[[link]]` autocomplete, and a Preview toggle. There's no rich-text
+    (WYSIWYG) editor: it would rewrite Markdown the writer didn't touch
+    and break lossless edits (format.md §12).
+  - **Explicit Save.** A Save button or Ctrl/⌘+Enter, and a warning
+    before leaving with unsaved changes. Every save carries the hash of
+    the file it was based on, as the MCP write tools do (§8, "Stale
+    files"); if the file changed meanwhile, the save is refused and the
+    writer sees both versions and chooses. Saving never makes a
+    checkpoint (checkpoints are #30).
+  - **Editing shows everything.** Editing works on the full note, every
+    dated entry and section, whatever the story position, with an
+    "Editing shows everything" badge. The position view comes back when
+    the edit ends.
+
+  Fields, with dated entries' `from` and `until`, are part b of #28;
+  chapter fields and inherited values are #138. The rest is v0
+  behaviour, not a recorded decision.
+  - **One write path.** The write tools moved from `Wolfden.Mcp` to
+    `Wolfden.Index.Writing` (`DenTools`), as the read queries did
+    (`DenReader`, #174), and the API's edits go through their edit loop:
+    the same `DenWriteCheck` (`invalid_edit`), hash checks
+    (`stale_file`), frozen books (`frozen`), F-ID-6 ids, warnings,
+    `effects`, and `pinned_canon`, which the API calls `pinnedCanon`.
+    `serve` holds one `DenTools` for the server, so its writes are made
+    one at a time. A lead or section edit replaces the piece's text
+    between the blank lines around it (`MarkdownFile.WithLead`,
+    `WithSectionBody`); a section rename is `rename_section`'s den-wide
+    link rewrite. Every edit lists the pinned facts it changed, added,
+    or removed, comparing the note's facts before and after.
+  - **The API.** `GET /api/entity/source` (`entity`, `universe`) reads
+    the file itself, not the index: its `hash`, its whole `text` (LF
+    line breaks, no byte order mark, with `lineEndings` and
+    `byteOrderMark` saying what the file has), `frozen` (why it can't be
+    edited, or null), the `lead`, each section's `index`, `name`,
+    `level`, `line`, `comment`, own `body`, `pinned`, and `parent`, and
+    the type's `standardSections`. `/api/entity` adds `frozen` too, so
+    the page can turn its controls off without asking. Edits are `POST`
+    with a JSON body of `entity`, `universe`, `expectedHash`, and the
+    edit's own members, each at most once: `/api/edit/lead` (`text`),
+    `/api/edit/section` (`index`, `name`, `text`),
+    `/api/edit/section/add` (`name`, `text`, and `beforeIndex` with
+    `beforeName`, or neither for the end; the new section takes the
+    level of the one it goes before, or 2 at the end),
+    `/api/edit/section/rename` (`index`, `name`, `newName`),
+    `/api/edit/section/remove` (`index`, `name`), and `/api/edit/file`
+    (`text`). Part b adds field edits beside them. Each answers the
+    write tools' `WriteResult`. Errors add 409 for `stale_file`,
+    `frozen`, `ambiguous_section`, and `already_exists`; 422 for
+    `invalid_edit` and `unsupported_edit`; 404 for `unknown_section`;
+    and 500 for `write_failed`. A `stale_file` error has `current`, the
+    file's source as it is now, so the page can show both versions.
+  - **Naming a section.** A section is sent by its `index` (its place
+    among the file's sections, subsections included) and its `name`
+    together, both checked against the file the hash names; a mismatch
+    is `unknown_section`. So neither a stale page nor two sections of one
+    name can send an edit to the wrong one.
+  - **Not from another site.** Besides the cross-site guard and host
+    filter (#23), an edit must be sent as `application/json`, or it's
+    415 `unsupported_media_type`: a plain HTML form can't send that, and
+    a script on another site needs a CORS preflight, which the server
+    never allows. An edit endpoint answers only `POST`. `serve
+    --universe` pins edits as it pins reads.
+  - **What the editor holds.** A section's editor holds its own text as
+    written, with HTML comments, up to its first subsection; its section
+    comment (`<!-- wolfden: ... -->`, format.md §9.2) is kept aside,
+    shown above the editor, and changed with Edit file, so a body edit
+    can't change a section's status, range, or pin by accident. Text
+    that would add a heading or section comment is refused
+    (`bad_argument`), as `WithSectionBody` refuses it. The lead's editor
+    holds the lead as written, title heading included. Line breaks are
+    LF in the editor and written as the file's own (the more common one
+    in a file that mixes them), and the byte order mark is kept, so
+    saving unchanged text writes nothing.
+  - **Edit file.** It refuses a change to, or removal of, an existing id
+    (F-ID-4, `unsupported_edit`). It doesn't rewrite links when the name
+    or an alias changes; the result says so, and `rename_entity` and
+    `change_alias` (or a later UI) do that.
+  - **Removing a section** takes its subsections, and doesn't rewrite
+    links to it by heading: `effects` lists them, and what they reach
+    now (a later section of that name, or only the note).
+  - **The page.** CodeMirror is loaded the first time an editor opens,
+    and mounted in a shadow root: its styles are a constructed style
+    sheet there, which the page's Content-Security-Policy doesn't
+    govern, where in the page they'd be an inline `<style>` that
+    `style-src 'self'` refuses. `[[` autocomplete asks `/api/search` for
+    the words typed so far, as a prefix. Preview uses the page's own
+    renderer, with links shown as written until the note is saved. One
+    piece is edited at a time. Leaving through the app with unsaved
+    changes asks in the page (TanStack Router's blocker), and closing or
+    reloading the tab makes the browser ask (`beforeunload`). Remove asks
+    in the page, never in a browser dialog. A stale save shows the
+    writer's version and the file's side by side, with the lines that
+    differ marked, and offers Keep mine (save it again on the new hash),
+    Take theirs, and Copy mine and reload (copy it to the clipboard, and
+    open the editor on the file as it is now). A save refreshes every
+    cached answer, since a rename or a new name can change lists,
+    searches, and links anywhere, and shows its effects, the pinned
+    canon it touched, the file's warnings, and that it isn't a
+    checkpoint. A note the reader hasn't met can be edited once shown
+    with "Show it anyway".
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and
   unknown content. This gets heavy test coverage, since it decides whether
   people trust the tool with their notes.
