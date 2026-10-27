@@ -69,6 +69,13 @@ public sealed class DenStructure
     public bool RemoteImages { get; internal set; }
 
     /// <summary>
+    /// How long a running <c>wolfden serve</c> waits with no further changes
+    /// before it makes a checkpoint by itself, from <c>auto_checkpoint</c>
+    /// (F-DEN-9), or null when that's off, as it is by default.
+    /// </summary>
+    public TimeSpan? AutoCheckpoint { get; internal set; }
+
+    /// <summary>
     /// Reads <c>remote_images</c> (F-DEN-8) straight from <c>den.yaml</c>'s
     /// bytes, without loading the den, as <c>wolfden serve</c> does for each
     /// page it sends. True only when the file parses, its <c>format</c> is

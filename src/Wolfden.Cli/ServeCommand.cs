@@ -38,7 +38,9 @@ internal static class ServeCommand
         it in your default browser, and runs until Ctrl+C. It keeps the den's
         index up to date as files change while it runs. If another Wolfden is
         already watching the den (such as 'wolfden index --watch'), it relies on
-        that one, and on a check of the files before each request.
+        that one, and on a check of the files before each request. With
+        'auto_checkpoint: 30m' (or another time) in den.yaml, it also makes a
+        checkpoint once the den has gone that long without a change.
 
           <den>, --den <den>  the den's folder; by default, the current folder or
                               the nearest folder above it with a den.yaml
@@ -113,6 +115,9 @@ internal static class ServeCommand
             Version = CliApp.Version,
             Log = log,
             History = () => GitHistory.ForDen(root, CliApp.Git),
+
+            // serve is the one command that makes automatic checkpoints (F-DEN-9, #30).
+            AutoCheckpoints = true,
         });
 
         CliApp.RunsUntilStopped = true;

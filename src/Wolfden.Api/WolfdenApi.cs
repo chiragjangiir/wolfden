@@ -10,6 +10,7 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Net.Http.Headers;
+using Wolfden.Core.History;
 using Wolfden.Core.Structure;
 
 namespace Wolfden.Api;
@@ -99,7 +100,26 @@ public static class WolfdenApi
         MapWebUi(app, options.WebRoot);
         app.MapWolfdenApi(options);
         app.MapDenFiles(options);
+        if (options.AutoCheckpoints)
+        {
+            StartAutoCheckpoints(app, options);
+        }
+
         return app;
+    }
+
+    /// <summary>
+    /// Makes automatic checkpoints while the server runs, when <c>den.yaml</c>
+    /// sets <c>auto_checkpoint</c> (format.md F-DEN-9, #30): from when the
+    /// server has started until it starts to stop. What it does is logged.
+    /// </summary>
+    private static void StartAutoCheckpoints(WebApplication app, WolfdenApiOptions options)
+    {
+        var log = options.Log;
+        var auto = new AutoCheckpointer(
+            options.DenRoot, options.History, options.Ledger, options.Time, line => log?.WriteLine($"wolfden serve: {line}"));
+        app.Lifetime.ApplicationStarted.Register(auto.Start);
+        app.Lifetime.ApplicationStopping.Register(auto.Dispose);
     }
 
     /// <summary>The addresses <paramref name="app"/> listens on that aren't on the loopback interface. After <c>StartAsync</c>, there should be none.</summary>

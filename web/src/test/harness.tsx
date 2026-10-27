@@ -121,7 +121,7 @@ export function page(summary: EntitySummary, extra: Partial<EntityPage> = {}): E
   }
 }
 
-export type Responder = (path: string, params: URLSearchParams) => unknown | Promise<unknown>
+export type Responder = (path: string, params: URLSearchParams, init?: RequestInit) => unknown | Promise<unknown>
 
 /**
  * Stubs fetch with the test den's API. `entityPage` answers /api/entity;
@@ -130,12 +130,12 @@ export type Responder = (path: string, params: URLSearchParams) => unknown | Pro
  */
 export function stubApi(options: { entityPage?: (key: string, at: string | null) => EntityPageResult; override?: Responder; den?: DenSummary } = {}) {
   const calls: string[] = []
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1')
     calls.push(`${url.pathname}${url.search}`)
     const params = url.searchParams
     const at = params.get('asOf')
-    const body = (await options.override?.(url.pathname, params)) ?? answer(url.pathname, params, at, options)
+    const body = (await options.override?.(url.pathname, params, init)) ?? answer(url.pathname, params, at, options)
     if (body instanceof Response) {
       return body
     }
@@ -154,6 +154,20 @@ function answer(path: string, params: URLSearchParams, at: string | null, option
   switch (path) {
     case '/api/den':
       return options.den ?? den
+    case '/api/checkpoint':
+      // Nothing changed since the last checkpoint, so the indicator is hidden.
+      return {
+        version: 1,
+        backend: 'git',
+        available: true,
+        reason: null,
+        enable: null,
+        latest: null,
+        count: 0,
+        changes: [],
+        otherUniverses: 0,
+        autoCheckpoint: { every: null, problem: null, runs: true },
+      }
     case '/api/positions':
       return { version: 1, universe: 'dracula', count: positions.length, positions } satisfies PositionsResult
     case '/api/hierarchy':

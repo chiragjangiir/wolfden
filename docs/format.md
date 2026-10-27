@@ -389,6 +389,7 @@ packs: [space-opera]
 bookkeeping_sections: ["Scratch", "* working notes"]
 spoiler_checks: true
 remote_images: false
+auto_checkpoint: 30m
 ```
 
 **F-DEN-1.** `format` is REQUIRED and is an integer. This spec is format
@@ -445,6 +446,22 @@ in the den (F-LAY-9), isn't affected by this setting: it always shows. A null va
 out. Any other value that isn't a YAML boolean is a [warning], and remote
 images stay blocked. Apart from that warning, the setting changes only
 what the web UI shows.
+
+**F-DEN-9.** `auto_checkpoint` is an optional time that turns on
+automatic checkpoints: a running `wolfden serve` makes a checkpoint once
+the den's files have gone that long without a change (design.md §6,
+#30). It's off by default, so checkpoints are made only when the writer
+or an agent asks. The time is hours, minutes, or both, in that order,
+each a whole number with its unit straight after and no spaces: `30m`,
+`2h`, `1h30m`. Units are lowercase `h` and `m`; there are no seconds or
+days. It must be from `5m` to `24h`, inclusive. A null value, or `false`,
+is the same as leaving the key out. Any other value is a [warning], and
+automatic checkpoints stay off: a time out of range (`4m`, `25h`), a
+bare number (`30`), another unit (`30s`, `1d`), an uppercase unit,
+`true`, a list, or a mapping. A den without history isn't a format
+matter: the setting is valid there, and `wolfden serve` warns that it
+does nothing. Apart from that, the setting changes only when checkpoints
+are made, never what the den means.
 
 ## 6. Containers: universe, series, book
 

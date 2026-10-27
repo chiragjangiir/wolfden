@@ -1,0 +1,145 @@
+/* Checkpoints (#30): the top bar's quiet indicator and the checkpoint dialog. */
+
+.checkpoint-indicator {
+  margin-left: auto;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  white-space: nowrap;
+}
+
+.checkpoint-indicator:hover {
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.checkpoint-action {
+  color: var(--link);
+}
+
+@media (max-width: 52rem) {
+  .checkpoint-indicator {
+    margin-left: 0;
+    white-space: normal;
+    text-align: left;
+  }
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 4rem 1rem 1rem;
+  background: rgb(0 0 0 / 0.35);
+  overflow-y: auto;
+}
+
+.dialog {
+  width: min(40rem, 100%);
+  max-height: calc(100vh - 6rem);
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 0.5rem 2rem rgb(0 0 0 / 0.3);
+  font-family: var(--font-ui);
+  font-size: 0.95rem;
+}
+
+.dialog h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.2rem;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.dialog-actions button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+.checkpoint-changes {
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-sunken);
+  border-radius: 6px;
+}
+
+.checkpoint-changes > p {
+  margin: 0.25rem 0;
+}
+
+.checkpoint-group h3 {
+  margin: 0.6rem 0 0.2rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.checkpoint-group ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.checkpoint-group li {
+  overflow-wrap: anywhere;
+}
+
+.change-kind {
+  display: inline-block;
+  min-width: 4.2rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.kind-added {
+  color: var(--link);
+}
+
+.kind-deleted {
+  color: var(--broken);
+}
+
+.checkpoint-label {
+  display: block;
+  margin-top: 0.75rem;
+  font-weight: 600;
+}
+
+.checkpoint-dialog textarea {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.4rem 0.5rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: vertical;
+}
+
+.checkpoint-dialog textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.checkpoint-dialog textarea[aria-invalid='true'] {
+  border-color: var(--broken);
+}
+
+.field-error {
+  margin: 0.25rem 0;
+  color: var(--broken);
+}

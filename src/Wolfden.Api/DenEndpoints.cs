@@ -66,10 +66,20 @@ public static class DenEndpoints
         api.MapGet("/health", () => new HealthResult("ok", options.Version));
         api.MapGet("/den", () => Den(options));
         ReadEndpoints.Map(api, options);
+        CheckpointEndpoints.Map(api, options);
 
         // Anything else under /api: a known path with the wrong method, or no endpoint at all.
         api.Map("/{**rest}", (HttpContext context, string? rest) =>
         {
+            if (CheckpointEndpoints.Paths.Contains(rest?.TrimEnd('/') ?? "", StringComparer.OrdinalIgnoreCase))
+            {
+                context.Response.Headers.Allow = "GET, POST";
+                return Error(
+                    StatusCodes.Status405MethodNotAllowed,
+                    "method_not_allowed",
+                    $"'/api/{rest}' answers GET and POST, not {context.Request.Method}.");
+            }
+
             if (GetPaths.Contains(rest?.TrimEnd('/') ?? "", StringComparer.OrdinalIgnoreCase))
             {
                 context.Response.Headers.Allow = "GET";

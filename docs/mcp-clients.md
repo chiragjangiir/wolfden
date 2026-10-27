@@ -245,6 +245,10 @@ prompts. This list is for knowing what the assistant can do.
   `checkpoint` commits them, and lists which files the session wrote and
   which were changed outside it, so your own edits are never hidden in an
   assistant's commit. Until then, `git diff` shows exactly what changed.
+  The server's instructions ask the assistant to checkpoint at natural
+  stopping points, such as the end of a notes pass or a planning
+  session, with a message that says what the pass was ("Notes pass after
+  drafting ch 12"), rather than after every edit.
 - **One universe at a time.** Every tool but `check` and `checkpoint`
   reads one universe; `search` and `list_entities` also take `*` for
   every universe. `--universe` pins a session to one.

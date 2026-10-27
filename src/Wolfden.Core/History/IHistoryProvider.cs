@@ -120,6 +120,31 @@ public interface IHistoryProvider
     /// </summary>
     HistoryResult<bool> HoldsAtLatest(string path, byte[] content, CancellationToken cancellationToken = default) =>
         HistoryResult<bool>.Unavailable("This history backend can't compare a file with its latest recorded state.");
+
+    /// <summary>
+    /// The den files that a checkpoint made now would record: what changed
+    /// since the latest checkpoint, or every den file when nothing has been
+    /// checkpointed yet (#30). Paths only, no patches. By default it's
+    /// <see cref="Diff"/> since the latest checkpoint, which a backend
+    /// without one can't give.
+    /// </summary>
+    HistoryResult<IReadOnlyList<HistoryFileChange>> Pending(CancellationToken cancellationToken = default)
+    {
+        var diff = Diff(new HistoryDiffQuery(), cancellationToken);
+        return diff.IsAvailable
+            ? HistoryResult<IReadOnlyList<HistoryFileChange>>.Done(diff.Value.Files.Select(f => f.Change).ToList())
+            : HistoryResult<IReadOnlyList<HistoryFileChange>>.Unavailable(diff.Reason!);
+    }
+
+    /// <summary>
+    /// True if a write to the history may be under way right now: for git,
+    /// a checkpoint or tag in this process, a git command Wolfden stopped
+    /// waiting for that's still running, or another program holding the
+    /// repository's index lock. Automatic checkpoints wait while it's true
+    /// (#30), since they must never start while a git write could be
+    /// running (#145). It's a hint, not a lock: it can change straight after.
+    /// </summary>
+    bool IsWriting => false;
 }
 
 /// <summary>What a history backend can do for a den.</summary>

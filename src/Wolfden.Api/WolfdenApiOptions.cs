@@ -1,4 +1,5 @@
 using Wolfden.Core.History;
+using Wolfden.Core.Structure;
 using Wolfden.Index;
 
 namespace Wolfden.Api;
@@ -53,4 +54,30 @@ public sealed class WolfdenApiOptions
     /// none (<see cref="NoHistory"/>); <c>wolfden serve</c> uses git (#19).
     /// </summary>
     public Func<IHistoryProvider> History { get; init; } = () => NoHistory.Instance;
+
+    /// <summary>
+    /// The den files this server saved since a checkpoint last recorded
+    /// them (#30), so the checkpoint dialog can tell the web UI's own saves
+    /// from changes made some other way. The write endpoints record each
+    /// save in it (<see cref="CheckpointLedger.Wrote"/>); by default it
+    /// reads the den's folder on disk.
+    /// </summary>
+    public CheckpointLedger Ledger
+    {
+        get => _ledger ??= new CheckpointLedger(new FileSystemDenStore(DenRoot));
+        init => _ledger = value;
+    }
+
+    private CheckpointLedger? _ledger;
+
+    /// <summary>
+    /// True if the server makes automatic checkpoints when <c>den.yaml</c>
+    /// sets <c>auto_checkpoint</c> (format.md F-DEN-9, #30). <c>wolfden
+    /// serve</c> turns it on; it's off by default, so a server built for a
+    /// test commits nothing by itself.
+    /// </summary>
+    public bool AutoCheckpoints { get; init; }
+
+    /// <summary>The clock and timers automatic checkpoints use; tests replace it.</summary>
+    public TimeProvider Time { get; init; } = TimeProvider.System;
 }
