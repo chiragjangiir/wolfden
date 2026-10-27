@@ -830,6 +830,85 @@ public sealed partial class MarkdownFile : DenFile
     }
 
     /// <summary>
+    /// Replaces the lead's text (format.md F-SEC-2): everything between the
+    /// frontmatter and the first section, title heading included, as
+    /// <see cref="WithSectionBody"/> replaces a section's. The blank lines
+    /// around the old text are kept, and blank lines at the start and end of
+    /// <paramref name="text"/> are dropped. Line breaks in
+    /// <paramref name="text"/> are converted to the file's own. The
+    /// frontmatter and every section are kept as written; the title may
+    /// change, since it's part of the lead.
+    /// </summary>
+    /// <exception cref="ArgumentException">The text would add or change a heading or section comment.</exception>
+    /// <exception cref="EditVerificationException">The edit didn't read back as intended (a bug).</exception>
+    public MarkdownFile WithLead(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        EnsureEditable();
+
+        var source = Source!;
+        var nl = source.Newline;
+        var newLines = SplitLines(text);
+        int first = -1, last = -1;
+        if (_leadEnd > _bodyStart)
+        {
+            for (var i = source.LineIndexOf(_bodyStart); i < source.Lines.Count && source.Lines[i].Start < _leadEnd; i++)
+            {
+                if (!IsBlank(source.LineText(i)))
+                {
+                    first = first < 0 ? i : first;
+                    last = i;
+                }
+            }
+        }
+
+        if (first < 0)
+        {
+            // No text yet: replacing it is adding it.
+            return WithTextAddedToLead(text);
+        }
+
+        var contentStart = source.Lines[first].Start;
+        var lastLine = source.Lines[last];
+        var hasTerminator = lastLine.TerminatorLength > 0;
+        TextEdit edit;
+        if (newLines.Length > 0)
+        {
+            edit = new TextEdit(contentStart, lastLine.EndIncludingTerminator - contentStart, string.Join(nl, newLines) + (hasTerminator ? nl : ""));
+        }
+        else if (hasTerminator)
+        {
+            edit = new TextEdit(contentStart, lastLine.EndIncludingTerminator - contentStart, "");
+        }
+        else
+        {
+            // Clearing a lead at the end of a file with no final newline: drop
+            // the line break before it too, unless that's the frontmatter's.
+            var from = first > 0 && source.Lines[first - 1].Start >= _bodyStart ? source.Lines[first - 1].End : contentStart;
+            edit = new TextEdit(from, lastLine.End - from, "");
+        }
+
+        var result = Reparse([edit]);
+        if (result.FrontmatterText != FrontmatterText)
+        {
+            throw new EditVerificationException("Replacing the lead changed the frontmatter, so the edit was refused.");
+        }
+
+        if (!Shapes().SequenceEqual(result.Shapes()))
+        {
+            throw new ArgumentException(
+                "The new text would add or change a heading or section comment, so it can't go in the lead. Edit one section at a time.", nameof(text));
+        }
+
+        if (TrimBlankLines(result.Lead) != string.Join(nl, newLines))
+        {
+            throw new EditVerificationException("The lead didn't read back as written, so the edit was refused.");
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Replaces ranges of the body's text, such as the heading part of links
     /// rewritten after a section rename (format.md F-RT-5). Each range must
     /// lie in the body. The frontmatter, the title, and every section's

@@ -230,8 +230,17 @@ public sealed partial class DenTools
             throw new DenToolException(ToolErrorCodes.BadArgument, "Give the section's name in 'section' and its new name in 'new_name'.");
         }
 
+        return RenameSection(entity, file => FindSection(file, section, null, sectionLine), newName, hash, universe);
+    }
+
+    /// <summary>
+    /// Renames the section <paramref name="pick"/> finds in the entity's
+    /// file, as <see cref="RenameSection(string, string, string, string, string?, int?)"/> does.
+    /// </summary>
+    private WriteResult RenameSection(string entity, Func<MarkdownFile, Section> pick, string newName, string hash, string? universe)
+    {
         newName = newName.Trim();
-        if (newName.Any(char.IsControl))
+        if (newName.Length == 0 || newName.Any(char.IsControl))
         {
             throw new DenToolException(ToolErrorCodes.BadArgument, "A section name is one line of text.");
         }
@@ -248,7 +257,7 @@ public sealed partial class DenTools
                 : Gone(path));
             CheckHash(path, target.File.ToBytes(), hash);
             CheckNotFrozen(target);
-            var found = FindSection(target.File, section, null, sectionLine);
+            var found = pick(target.File);
             var facts = EntityFacts.For(target, new Bookkeeping(structure.BookkeepingSections));
             var pinned = facts[found].Pinned ? new List<string> { $"section '{found.Name}' (line {found.Line}) is pinned canon" } : [];
             if (found.Name == newName)
@@ -961,20 +970,24 @@ public sealed partial class DenTools
 
     private static void CheckNotFrozen(CatalogEntity entity)
     {
+        if (FrozenReason(entity) is { } reason)
+        {
+            throw new DenToolException(ToolErrorCodes.Frozen, reason);
+        }
+    }
+
+    /// <summary>Why the entity can't be edited because it's frozen, or null if it can be.</summary>
+    private static string? FrozenReason(CatalogEntity entity)
+    {
         if (entity.Scope is Book { Status: BookStatus.Final } book)
         {
-            throw new DenToolException(
-                ToolErrorCodes.Frozen,
-                $"{entity.Path} is in book '{book.Key}', which is final (frozen), so it can't be edited until the book is unfrozen (F-BOOK-1).");
+            return $"{entity.Path} is in book '{book.Key}', which is final (frozen), so it can't be edited until the book is unfrozen (F-BOOK-1).";
         }
 
         // A backstop: `status: final` on an entity is an F-ENT-5 error, so such a
         // file never loads and never gets here. It's kept so that if the format
         // ever lets an entity be final on its own, it's refused, not edited.
-        if (entity.File.Frontmatter?["status"] is YamlScalar { Text: "final" })
-        {
-            throw new DenToolException(ToolErrorCodes.Frozen, $"{entity.Path} is marked final, so it can't be edited.");
-        }
+        return entity.File.Frontmatter?["status"] is YamlScalar { Text: "final" } ? $"{entity.Path} is marked final, so it can't be edited." : null;
     }
 
     private static DenToolException Gone(string path) =>

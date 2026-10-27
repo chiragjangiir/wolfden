@@ -75,7 +75,8 @@ internal static class EntityPages
                 Chain(containers, record.ScopeId),
                 Entry(record, containers),
                 links.Where(l => l.Site == "entity_lead").Select(Link).ToList(),
-                Backlinks(index, record, containers, canon, asOf is null ? null : index.PointOf(view.Universe, asOf)));
+                Backlinks(index, record, containers, canon, asOf is null ? null : index.PointOf(view.Universe, asOf)),
+                Frozen(record, containers));
             return new EntityPageResult(ReadEndpoints.ResultVersion, found.View, found.Position, found.InView, found.Note, page);
         });
     }
@@ -177,6 +178,15 @@ internal static class EntityPages
                 l.OutlineRow, l.Status, l.IsBookkeeping))
             .ToList();
     }
+
+    /// <summary>
+    /// Why the entity can't be edited: it's filed in a final book (format.md
+    /// F-BOOK-1), as the write tools refuse it (<c>frozen</c>). Null if it can be.
+    /// </summary>
+    private static string? Frozen(EntityRecord entity, Dictionary<int, ContainerRecord> containers) =>
+        containers[entity.ScopeId] is { Kind: "book", BookStatus: "final" } book
+            ? $"{entity.Path} is in book '{book.Key}', which is final (frozen), so it can't be edited until the book is unfrozen (F-BOOK-1)."
+            : null;
 
     /// <summary>The container chain of a scope: the universe, then any series, then any book.</summary>
     private static List<ContainerRef> Chain(Dictionary<int, ContainerRecord> containers, int scopeId)

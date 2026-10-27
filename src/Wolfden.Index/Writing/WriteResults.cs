@@ -149,3 +149,37 @@ public sealed record GetChapterDefaultsResult(
 public sealed record CheckpointResult(
     int Version, string Backend, bool Available, string? Reason, bool Recorded, HistoryEntryView? Checkpoint,
     IReadOnlyList<string>? WrittenBySession = null, IReadOnlyList<string>? ChangedOutsideSession = null);
+
+/// <summary>
+/// An entity's file as an editor needs it (the web UI's editing, #28): read
+/// from the file, not the index, so its hash is the one an edit must give.
+/// </summary>
+/// <param name="Version">The shape version.</param>
+/// <param name="Entity">The entity.</param>
+/// <param name="Hash">The SHA-256 of the file's bytes, in lowercase hex: the hash an edit of it must give.</param>
+/// <param name="Text">The whole file, with its line breaks as LF and without a byte order mark.</param>
+/// <param name="LineEndings">The file's own line breaks: <c>lf</c>, <c>crlf</c>, or <c>mixed</c>. An edit writes them so.</param>
+/// <param name="ByteOrderMark">True if the file starts with a byte order mark, which an edit keeps.</param>
+/// <param name="Frozen">Why the file can't be edited (it's in a final book, F-BOOK-1), or null if it can.</param>
+/// <param name="Lead">The lead.</param>
+/// <param name="Sections">Every section, in file order, subsections included.</param>
+/// <param name="StandardSections">The standard sections of the entity's type, in the type's order, or none for an untyped entity.</param>
+public sealed record EntitySourceResult(
+    int Version, EntitySummary Entity, string Hash, string Text, string LineEndings, bool ByteOrderMark, string? Frozen, SourceLead Lead,
+    IReadOnlyList<SourceSection> Sections, IReadOnlyList<string> StandardSections);
+
+/// <summary>The lead of an entity's file (format.md F-SEC-2): the text before its first section, title heading included.</summary>
+/// <param name="Line">The line it starts at.</param>
+/// <param name="Text">Its text as written, with line breaks as LF and without the blank lines at either end.</param>
+public sealed record SourceLead(int Line, string Text);
+
+/// <summary>One section of an entity's file, as an editor needs it.</summary>
+/// <param name="Index">Its place among the file's sections, from 0, in file order, subsections included. An edit names it by this and its name.</param>
+/// <param name="Name">Its name, the heading's text (F-SEC-3).</param>
+/// <param name="Level">2 for a section, 3 to 6 for a subsection.</param>
+/// <param name="Line">The line its heading starts at.</param>
+/// <param name="Comment">Its section comment as written (<c>&lt;!-- wolfden: ... --&gt;</c>, format.md §9.2), or null. It isn't part of <paramref name="Body"/>, and an edit of the body keeps it.</param>
+/// <param name="Body">Its own text as written, after the heading and section comment, up to the next heading (subsections aren't included), with line breaks as LF and without the blank lines at either end. Other HTML comments in it are part of it.</param>
+/// <param name="Pinned">True if it's pinned canon (F-PIN-1), by its own comment or a parent's.</param>
+/// <param name="Parent">The index of the section that holds it, or null for a level-2 section.</param>
+public sealed record SourceSection(int Index, string Name, int Level, int Line, string? Comment, string Body, bool Pinned, int? Parent);
