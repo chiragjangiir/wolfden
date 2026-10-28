@@ -31,6 +31,23 @@ export interface AutoCheckpointView {
   runs: boolean
 }
 
+/** For a den without history: whether this server can turn it on (#195), and what git still needs. */
+export interface TurnOnView {
+  possible: boolean
+  /** Why it can't, or null. */
+  reason: string | null
+  /** True if git has no name for the den, so the writer gives one. */
+  needsName: boolean
+  /** True if git has no email for the den, so the writer gives one (a placeholder will do). */
+  needsEmail: boolean
+  /**
+   * True if needsName and needsEmail are final. False before the den is a
+   * repository: git may have them for it after all (includeIf "gitdir:…"),
+   * so the fields are optional, and the server asks again only if needed.
+   */
+  identityCertain: boolean
+}
+
 export interface CheckpointStatus {
   version: number
   backend: string
@@ -47,6 +64,8 @@ export interface CheckpointStatus {
   /** For a pinned server: changed files in other universes, recorded too but not named. */
   otherUniverses: number
   autoCheckpoint: AutoCheckpointView
+  /** For a den without history, whether this server can turn it on; otherwise null. */
+  turnOn?: TurnOnView | null
 }
 
 export interface CheckpointMade {
@@ -86,11 +105,42 @@ export function invalidateCheckpointStatus(client: QueryClient): Promise<void> {
  * Makes a checkpoint with the writer's message. It's sent as JSON, which
  * the server requires of every write, so another site can't make one.
  */
-export async function makeCheckpoint(message: string): Promise<CheckpointMade> {
-  const response = await fetch('/api/checkpoint', {
+export function makeCheckpoint(message: string): Promise<CheckpointMade> {
+  return postJson<CheckpointMade>('/api/checkpoint', { message }, 'the checkpoint')
+}
+
+/** What turning history on asks for (#195). */
+export interface TurnOnRequest {
+  /** Only when git has no name for the den. */
+  authorName?: string
+  /** Only when git has no email for the den. */
+  authorEmail?: string
+  firstCheckpoint: boolean
+}
+
+/** What turning history on did. */
+export interface HistoryTurnedOn {
+  version: number
+  backend: string
+  /** What was done, in order, in words. */
+  steps: string[]
+  repositoryMade: boolean
+  gitIgnore: 'created' | 'added' | 'present' | null
+  identitySaved: string[]
+  /** The first checkpoint, or null if none was made. */
+  checkpoint: CheckpointSummary | null
+}
+
+/** Turns history on for a den that has none: a git repository, its .gitignore, and a first checkpoint (#195). */
+export function turnOnHistory(request: TurnOnRequest): Promise<HistoryTurnedOn> {
+  return postJson<HistoryTurnedOn>('/api/history/turn-on', request, 'turning history on')
+}
+
+async function postJson<T>(path: string, request: unknown, what: string): Promise<T> {
+  const response = await fetch(path, {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify(request),
   })
   const body: unknown = await response.json().catch(() => undefined)
   if (!response.ok) {
@@ -102,10 +152,10 @@ export async function makeCheckpoint(message: string): Promise<CheckpointMade> {
   }
 
   if (typeof body !== 'object' || body === null) {
-    throw new ApiRequestError('bad_response', "The server's answer to the checkpoint wasn't the JSON the page expects.")
+    throw new ApiRequestError('bad_response', `The server's answer to ${what} wasn't the JSON the page expects.`)
   }
 
-  return body as CheckpointMade
+  return body as T
 }
 
 /** One group of changes in the dialog: a universe's, one of its books' or series', or the den's own files. */

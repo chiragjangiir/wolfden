@@ -117,7 +117,10 @@ public static class WolfdenApi
     {
         var log = options.Log;
         var auto = new AutoCheckpointer(
-            options.DenRoot, options.History, options.Ledger, options.Time, line => log?.WriteLine($"wolfden serve: {line}"));
+            options.DenRoot, options.History, options.Ledger, options.Time, line => log?.WriteLine($"wolfden serve: {line}"))
+        {
+            Gate = options.HistorySetupGate,
+        };
         app.Lifetime.ApplicationStarted.Register(auto.Start);
         app.Lifetime.ApplicationStopping.Register(auto.Dispose);
     }

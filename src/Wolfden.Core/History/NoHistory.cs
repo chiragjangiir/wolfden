@@ -11,7 +11,7 @@ public sealed class NoHistory : IHistoryProvider
 {
     /// <summary>What every message ends with: how to get history.</summary>
     public const string Hint =
-        "Wolfden can keep history with git if the den is in a git repository that isn't in a synced folder (Dropbox, OneDrive, iCloud); use a private remote for backup.";
+        "To keep history, run 'wolfden init --git' in the den's folder, or use Turn on history in the web UI's checkpoint dialog. Wolfden keeps it with git, which shouldn't be in a synced folder (Dropbox, OneDrive, iCloud); use a private remote for backup.";
 
     private NoHistory()
     {

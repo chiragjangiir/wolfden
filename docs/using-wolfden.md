@@ -220,12 +220,59 @@ tab lists the checkpoints that changed it, and shows what changed between
 them. Saving never makes a checkpoint by itself, so you decide when a
 version is worth keeping.
 
-Checkpoints need history turned on: the den's folder must be a git
-repository. Run `git init` in the den's folder (or start a new den with
-`wolfden init --git`). Don't keep a git repository in a synced folder
-(Dropbox, OneDrive, iCloud); use a private remote for a backup instead.
-Without history your notes still work, and `wolfden serve` says how to
-turn it on.
+Checkpoints need history turned on. Without it your notes still work,
+and the top bar of `wolfden serve` says **No history · Turn on…**.
+
+### Turning on history
+
+Wolfden keeps the history with git, in the den's folder, but you don't
+need to know git to use it. In `wolfden serve`, choose **No history ·
+Turn on…** in the top bar, then **Turn on history**. Or, from the command
+line, in the den's folder:
+
+```text
+wolfden init --git
+```
+
+Either way, Wolfden makes the den's folder a git repository, adds
+`.wolfden/` (its index, which it rebuilds from your notes) to the folder's
+`.gitignore`, and makes a first checkpoint, "Start of history", of the den
+as it is. Untick **Make a first checkpoint** (or add `--no-checkpoint`) to
+start with none. The page picks it up straight away: no restart.
+
+Git records a name and email with each checkpoint. If it doesn't have
+them yet, Wolfden asks: fields in the dialog, or `--author-name` and
+`--author-email` on the command line:
+
+```text
+wolfden init --git --author-name "Ash Calloway" --author-email ash@example.com
+```
+
+Any name will do, a pen name included, and the email can be a
+placeholder. They're saved for this den only, never for the rest of your
+computer. If git already has a name and email, nothing is asked, and if
+you give one anyway, Wolfden says it used git's instead. (If your git
+settings give a name only inside certain folders, the dialog can't tell
+until the den is a repository: it shows the fields, but you can leave
+them empty, and Wolfden asks again only if they're really needed.)
+
+A few things to know:
+
+- **Not in a synced folder.** Don't turn on history for a den in Dropbox,
+  OneDrive, or iCloud: two machines syncing while git writes can corrupt
+  it. Use a private remote for a backup instead.
+- **A den that's part of a bigger repository** already has history there,
+  so there's nothing to turn on, and Wolfden says so.
+- **If a step fails** (a git hook refuses the first checkpoint, say),
+  Wolfden says what it did and what it didn't. History is on by then, so
+  make the first checkpoint from the dialog once the problem is fixed, or
+  run `wolfden init --git` again: it picks up where it stopped.
+- **A new den** can start with history: `wolfden init my-notes --git`.
+- **For scripts:** `wolfden init` exits 0 when its main job is done. For
+  a new den that job is making the den, so a new den inside a larger
+  repository, or on a computer without git, still exits 0. For an
+  existing den the job is turning on history, so the same situations
+  exit 2.
 
 ### The habit: one checkpoint per notes pass
 

@@ -73,6 +73,7 @@ public static class DenEndpoints
         ReadEndpoints.Map(api, options);
         WriteEndpoints.Map(api, options);
         CheckpointEndpoints.Map(api, options);
+        HistorySetupEndpoints.Map(api, options);
 
         // Anything else under /api: a known path with the wrong method, or no endpoint at all.
         api.Map("/{**rest}", (HttpContext context, string? rest) =>
@@ -83,7 +84,8 @@ public static class DenEndpoints
                 : GetPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "GET"
                 : WriteEndpoints.PostPaths.Contains(path, StringComparer.OrdinalIgnoreCase)
                     || FreezeEndpoints.PostPaths.Contains(path, StringComparer.OrdinalIgnoreCase)
-                    || CreateEndpoints.PostPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "POST"
+                    || CreateEndpoints.PostPaths.Contains(path, StringComparer.OrdinalIgnoreCase)
+                    || HistorySetupEndpoints.PostPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "POST"
                 : null;
             if (method is not null)
             {

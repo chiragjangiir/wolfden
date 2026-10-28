@@ -101,6 +101,14 @@ public sealed class AutoCheckpointer : IDisposable
     public Func<AutoCheckpointSetting> Setting { get; init; }
 
     /// <summary>
+    /// Held by the host while it turns history on (#195), or null. A poll
+    /// that would checkpoint takes it without waiting, and skips (<see
+    /// cref="AutoCheckpointOutcome.Busy"/>) if it's held, so an automatic
+    /// checkpoint never lands in the middle of a turn-on.
+    /// </summary>
+    public SemaphoreSlim? Gate { get; init; }
+
+    /// <summary>
     /// Starts polling, from now. A setting that isn't valid, or one set in
     /// a den without history, is said straight away.
     /// </summary>
@@ -178,88 +186,106 @@ public sealed class AutoCheckpointer : IDisposable
                 return AutoCheckpointOutcome.Waiting;
             }
 
-            var history = _history();
-            if (!history.Capabilities.HasFlag(HistoryCapabilities.Checkpoint))
+            if (Gate is { } gate && !gate.Wait(0))
             {
-                return NoHistory(now, every);
+                return AutoCheckpointOutcome.Busy;
             }
 
-            _noHistorySaid = false;
             try
             {
-                if (history.IsWriting)
-                {
-                    return Busy();
-                }
-
-                string? operation;
-                try
-                {
-                    operation = history.InterruptedOperation;
-                }
-                catch (HistoryException)
-                {
-                    // Git couldn't say: take it as busy, and look again on the next poll.
-                    return Busy();
-                }
-
-                if (operation is not null)
-                {
-                    if (!_interruptedSaid)
-                    {
-                        _interruptedSaid = true;
-                        _log($"No automatic checkpoint while git is in the middle of {operation}: it would land inside it. Wolfden makes one once that's finished.");
-                    }
-
-                    return AutoCheckpointOutcome.Interrupted;
-                }
-
-                _busyPolls = 0;
-                _interruptedSaid = false;
-                var pending = history.Pending();
-                if (!pending.IsAvailable)
-                {
-                    return NoHistory(now, every);
-                }
-
-                if (pending.Value.Count == 0)
-                {
-                    _settled = true;
-                    return AutoCheckpointOutcome.NothingToRecord;
-                }
-
-                var done = _ledger.Checkpoint(history, new CheckpointRequest(Message(pending.Value)));
-                if (!done.Result.IsAvailable)
-                {
-                    return NoHistory(now, every);
-                }
-
-                _settled = true;
-                if (done.Result.Value is not { } entry)
-                {
-                    return AutoCheckpointOutcome.NothingToRecord;
-                }
-
-                _log($"Made an automatic checkpoint after {AutoCheckpoint.Format(every)} without changes: {FirstLine(entry.Message)} ({ShortId(entry.Id)}).");
-                return AutoCheckpointOutcome.Recorded;
+                return Checkpoint(now, every);
             }
-            catch (HistoryException e)
+            finally
             {
-                // Another program may hold the lock, or a hook refused: wait for another quiet
-                // spell, and say so once until the files change, not on every try.
-                _lastChange = now;
-                if (!_refusalSaid)
-                {
-                    _refusalSaid = true;
-                    _log($"Couldn't make an automatic checkpoint: {e.Message} Wolfden will try again after {AutoCheckpoint.Format(every)} more without changes.");
-                }
-
-                return AutoCheckpointOutcome.Failed;
+                Gate?.Release();
             }
         }
         finally
         {
             _tickLock.Exit();
+        }
+    }
+
+    /// <summary>The part of a poll that may checkpoint: the den has been still long enough.</summary>
+    private AutoCheckpointOutcome Checkpoint(DateTimeOffset now, TimeSpan every)
+    {
+        var history = _history();
+        if (!history.Capabilities.HasFlag(HistoryCapabilities.Checkpoint))
+        {
+            return NoHistory(now, every);
+        }
+
+        _noHistorySaid = false;
+        try
+        {
+            if (history.IsWriting)
+            {
+                return Busy();
+            }
+
+            string? operation;
+            try
+            {
+                operation = history.InterruptedOperation;
+            }
+            catch (HistoryException)
+            {
+                // Git couldn't say: take it as busy, and look again on the next poll.
+                return Busy();
+            }
+
+            if (operation is not null)
+            {
+                if (!_interruptedSaid)
+                {
+                    _interruptedSaid = true;
+                    _log($"No automatic checkpoint while git is in the middle of {operation}: it would land inside it. Wolfden makes one once that's finished.");
+                }
+
+                return AutoCheckpointOutcome.Interrupted;
+            }
+
+            _busyPolls = 0;
+            _interruptedSaid = false;
+            var pending = history.Pending();
+            if (!pending.IsAvailable)
+            {
+                return NoHistory(now, every);
+            }
+
+            if (pending.Value.Count == 0)
+            {
+                _settled = true;
+                return AutoCheckpointOutcome.NothingToRecord;
+            }
+
+            var done = _ledger.Checkpoint(history, new CheckpointRequest(Message(pending.Value)));
+            if (!done.Result.IsAvailable)
+            {
+                return NoHistory(now, every);
+            }
+
+            _settled = true;
+            if (done.Result.Value is not { } entry)
+            {
+                return AutoCheckpointOutcome.NothingToRecord;
+            }
+
+            _log($"Made an automatic checkpoint after {AutoCheckpoint.Format(every)} without changes: {FirstLine(entry.Message)} ({ShortId(entry.Id)}).");
+            return AutoCheckpointOutcome.Recorded;
+        }
+        catch (HistoryException e)
+        {
+            // Another program may hold the lock, or a hook refused: wait for another quiet
+            // spell, and say so once until the files change, not on every try.
+            _lastChange = now;
+            if (!_refusalSaid)
+            {
+                _refusalSaid = true;
+                _log($"Couldn't make an automatic checkpoint: {e.Message} Wolfden will try again after {AutoCheckpoint.Format(every)} more without changes.");
+            }
+
+            return AutoCheckpointOutcome.Failed;
         }
     }
 
@@ -285,7 +311,8 @@ public sealed class AutoCheckpointer : IDisposable
             _noHistorySaid = true;
             _log(
                 "den.yaml sets auto_checkpoint, but the den has no history, so no automatic checkpoints are made. " +
-                "To keep history, run 'git init' in the den's folder (not in a synced folder such as Dropbox, OneDrive, or iCloud).");
+                "To keep history, run 'wolfden init --git' in the den's folder, or use Turn on history in the web UI's checkpoint dialog " +
+                "(not for a den in a synced folder such as Dropbox, OneDrive, or iCloud). Automatic checkpoints start once it's on.");
         }
 
         return AutoCheckpointOutcome.NoHistory;

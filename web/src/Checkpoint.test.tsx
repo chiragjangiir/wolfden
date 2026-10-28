@@ -1,7 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { CHECKPOINT_STATUS_KEY, groupChanges, invalidateCheckpointStatus, type CheckpointMade, type CheckpointStatus, type PendingChange } from './checkpointApi'
+import {
+  CHECKPOINT_STATUS_KEY,
+  groupChanges,
+  invalidateCheckpointStatus,
+  type CheckpointMade,
+  type CheckpointStatus,
+  type HistoryTurnedOn,
+  type PendingChange,
+  type TurnOnRequest,
+  type TurnOnView,
+} from './checkpointApi'
 import { renderApp, stubApi } from './test/harness'
 
 afterEach(() => {
@@ -40,7 +50,7 @@ const NO_HISTORY: CheckpointStatus = {
   backend: 'none',
   available: false,
   reason: "This den has no history, so a checkpoint isn't available. Your edits are still saved in the files.",
-  enable: "To keep history, make the den's folder a git repository: run 'git init' in it, or start a new den with 'wolfden init --git'.",
+  enable: "To keep history, turn it on: with Turn on history in the checkpoint dialog, or by running 'wolfden init --git' in the den's folder.",
   latest: null,
   count: 0,
 }
@@ -289,20 +299,184 @@ describe('SC-WEB-52: I name a checkpoint after a notes pass', () => {
 })
 
 describe('SC-WEB-51: without history, the indicator says how to turn it on', () => {
-  it('explains git init instead of offering a checkpoint', async () => {
+  it('on a server that can’t turn it on, says how to from the command line instead of offering a checkpoint', async () => {
     const { posted } = stubCheckpoints(() => NO_HISTORY)
     renderApp('/u/dracula')
     fireEvent.click(await screen.findByRole('button', { name: /No history · Turn on…/ }))
 
     const dialog = await screen.findByRole('dialog', { name: 'History is off' })
-    expect(dialog.textContent).toMatch(/git init/)
     expect(dialog.textContent).toMatch(/wolfden init --git/)
+    expect(within(dialog).queryByRole('button', { name: 'Turn on history' })).toBeNull()
     expect(dialog.textContent).toMatch(/still saved in the files/)
     expect(within(dialog).queryByLabelText('Name this checkpoint')).toBeNull()
     expect(within(dialog).queryByRole('button', { name: 'Checkpoint' })).toBeNull()
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(posted).toEqual([])
+  })
+})
+
+const TURNED_ON: HistoryTurnedOn = {
+  version: 1,
+  backend: 'git',
+  steps: [
+    "Made the den's folder a git repository.",
+    ".gitignore already leaves out .wolfden/.",
+    'Made the first checkpoint, "Start of history", of 42 files.',
+  ],
+  repositoryMade: true,
+  gitIgnore: 'present',
+  identitySaved: [],
+  checkpoint: { id: 'c0ffee0000000000000000000000000000000000', when: '2026-10-28T09:00:00Z', author: 'Test Writer', message: 'Start of history', files: 42 },
+}
+
+/** A den without history on a server that can turn it on; `turnOn` overrides what git still needs. */
+function noHistory(turnOn: Partial<TurnOnView> = {}): CheckpointStatus {
+  return { ...NO_HISTORY, turnOn: { possible: true, reason: null, needsName: false, needsEmail: false, identityCertain: true, ...turnOn } }
+}
+
+/** Answers /api/checkpoint with `current`, and /api/history/turn-on with `answer`; records what was sent to turn it on. */
+function stubTurnOn(current: () => CheckpointStatus, answer: (body: TurnOnRequest) => Response | HistoryTurnedOn = () => TURNED_ON) {
+  const sent: TurnOnRequest[] = []
+  const api = stubApi({
+    override: (path, _params, init) => {
+      if (path === '/api/history/turn-on') {
+        expect(init?.method).toBe('POST')
+        expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json')
+        const body = JSON.parse(String(init?.body)) as TurnOnRequest
+        sent.push(body)
+        return answer(body)
+      }
+
+      return path === '/api/checkpoint' ? current() : undefined
+    },
+  })
+  return { ...api, sent }
+}
+
+async function openTurnOn() {
+  renderApp('/u/dracula')
+  fireEvent.click(await screen.findByRole('button', { name: /No history · Turn on…/ }))
+  return screen.findByRole('dialog', { name: 'History is off' })
+}
+
+describe('SC-WEB-55: I turn on history from the checkpoint dialog', () => {
+  it('turns it on with a first checkpoint, says what it did, and the indicator catches up', async () => {
+    let current = noHistory()
+    const { sent, calls } = stubTurnOn(
+      () => current,
+      () => {
+        current = status({ changes: [], latest: { id: TURNED_ON.checkpoint!.id, when: TURNED_ON.checkpoint!.when } })
+        return TURNED_ON
+      },
+    )
+    const dialog = await openTurnOn()
+
+    expect(dialog.textContent).toMatch(/synced folder/)
+    expect(within(dialog).queryByLabelText('Name')).toBeNull()
+    expect(within(dialog).queryByLabelText('Email')).toBeNull()
+    const first = within(dialog).getByLabelText(/Make a first checkpoint, “Start of history”/) as HTMLInputElement
+    expect(first.checked).toBe(true)
+    const statusCalls = calls.filter((c) => c === '/api/checkpoint').length
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Turn on history' }))
+
+    const done = await screen.findByRole('dialog', { name: 'History is on' })
+    expect(sent).toEqual([{ firstCheckpoint: true }])
+    expect(within(done).getByText('Made the first checkpoint, "Start of history", of 42 files.')).toBeTruthy()
+    await waitFor(() => expect(calls.filter((c) => c === '/api/checkpoint').length).toBeGreaterThan(statusCalls))
+    fireEvent.click(within(done).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('button', { name: /No history/ })).toBeNull())
+  })
+
+  it('leaves out the first checkpoint when it’s unticked', async () => {
+    const { sent } = stubTurnOn(() => noHistory())
+    const dialog = await openTurnOn()
+
+    fireEvent.click(within(dialog).getByLabelText(/Make a first checkpoint/))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Turn on history' }))
+
+    await screen.findByRole('dialog', { name: 'History is on' })
+    expect(sent).toEqual([{ firstCheckpoint: false }])
+  })
+
+  it('asks for a name and email when git has none, and sends only those', async () => {
+    const { sent } = stubTurnOn(() => noHistory({ needsName: true, needsEmail: true }))
+    const dialog = await openTurnOn()
+
+    expect(within(dialog).getByText(/a pen name included/)).toBeTruthy()
+    expect(within(dialog).getByText(/can be a placeholder/)).toBeTruthy()
+    const name = within(dialog).getByLabelText('Name') as HTMLInputElement
+    const email = within(dialog).getByLabelText('Email') as HTMLInputElement
+    expect(document.activeElement).toBe(name)
+
+    // Nothing given: asked again, and nothing is sent.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Turn on history' }))
+    expect((await within(dialog).findByRole('alert')).textContent).toMatch(/Give a name/)
+    expect(name.getAttribute('aria-invalid')).toBe('true')
+    expect(sent).toEqual([])
+
+    fireEvent.change(name, { target: { value: '  Ash Calloway ' } })
+    fireEvent.change(email, { target: { value: 'ash@example.invalid' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Turn on history' }))
+
+    await screen.findByRole('dialog', { name: 'History is on' })
+    expect(sent).toEqual([{ firstCheckpoint: true, authorName: 'Ash Calloway', authorEmail: 'ash@example.invalid' }])
+  })
+
+  it('before the den is a repository, offers the fields without requiring them, and shows what git used instead', async () => {
+    const usedOwn: HistoryTurnedOn = {
+      ...TURNED_ON,
+      steps: [...TURNED_ON.steps, 'Git already has a name for this den (Ash Calloway), so the one given (Mara Voss) wasn’t used.'],
+    }
+    const { sent } = stubTurnOn(() => noHistory({ needsName: true, needsEmail: true, identityCertain: false }), () => usedOwn)
+    const dialog = await openTurnOn()
+
+    expect(dialog.textContent).toMatch(/doesn't seem to have them/)
+    const name = within(dialog).getByLabelText('Name') as HTMLInputElement
+    expect(name.required).toBe(false)
+    fireEvent.change(name, { target: { value: 'Mara Voss' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Turn on history' }))
+
+    const done = await screen.findByRole('dialog', { name: 'History is on' })
+    expect(sent).toEqual([{ firstCheckpoint: true, authorName: 'Mara Voss' }])
+    expect(within(done).getByText(/so the one given \(Mara Voss\) wasn’t used/)).toBeTruthy()
+  })
+
+  it('asks only for what’s missing', async () => {
+    stubTurnOn(() => noHistory({ needsEmail: true }))
+    const dialog = await openTurnOn()
+    expect(within(dialog).queryByLabelText('Name')).toBeNull()
+    expect(within(dialog).getByLabelText('Email')).toBeTruthy()
+  })
+
+  it('shows the server’s refusal, and asks for a name and email when git turns out to need them', async () => {
+    const { sent } = stubTurnOn(
+      () => noHistory(),
+      () =>
+        new Response(
+          JSON.stringify({ code: 'identity_needed', message: 'Git records who made each checkpoint, and it has no name or email for this den.' }),
+          { status: 400 },
+        ),
+    )
+    const dialog = await openTurnOn()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Turn on history' }))
+
+    expect((await within(dialog).findByRole('alert')).textContent).toMatch(/has no name or email for this den/)
+    expect(within(dialog).getByLabelText('Name')).toBeTruthy()
+    expect(within(dialog).getByLabelText('Email')).toBeTruthy()
+    expect(sent).toHaveLength(1)
+  })
+
+  it('says why when it can’t be turned on here, and offers no button', async () => {
+    stubTurnOn(() =>
+      noHistory({ possible: false, reason: "Git isn't installed, or Wolfden can't find it on the PATH, so history can't be turned on." }),
+    )
+    const dialog = await openTurnOn()
+
+    expect(dialog.textContent).toMatch(/Git isn't installed/)
+    expect(within(dialog).queryByRole('button', { name: 'Turn on history' })).toBeNull()
   })
 })
 
