@@ -332,7 +332,7 @@ const TURNED_ON: HistoryTurnedOn = {
 
 /** A den without history on a server that can turn it on; `turnOn` overrides what git still needs. */
 function noHistory(turnOn: Partial<TurnOnView> = {}): CheckpointStatus {
-  return { ...NO_HISTORY, turnOn: { possible: true, reason: null, needsName: false, needsEmail: false, ...turnOn } }
+  return { ...NO_HISTORY, turnOn: { possible: true, reason: null, needsName: false, needsEmail: false, identityCertain: true, ...turnOn } }
 }
 
 /** Answers /api/checkpoint with `current`, and /api/history/turn-on with `answer`; records what was sent to turn it on. */
@@ -422,6 +422,25 @@ describe('SC-WEB-55: I turn on history from the checkpoint dialog', () => {
 
     await screen.findByRole('dialog', { name: 'History is on' })
     expect(sent).toEqual([{ firstCheckpoint: true, authorName: 'Ash Calloway', authorEmail: 'ash@example.invalid' }])
+  })
+
+  it('before the den is a repository, offers the fields without requiring them, and shows what git used instead', async () => {
+    const usedOwn: HistoryTurnedOn = {
+      ...TURNED_ON,
+      steps: [...TURNED_ON.steps, 'Git already has a name for this den (Ash Calloway), so the one given (Mara Voss) wasn’t used.'],
+    }
+    const { sent } = stubTurnOn(() => noHistory({ needsName: true, needsEmail: true, identityCertain: false }), () => usedOwn)
+    const dialog = await openTurnOn()
+
+    expect(dialog.textContent).toMatch(/doesn't seem to have them/)
+    const name = within(dialog).getByLabelText('Name') as HTMLInputElement
+    expect(name.required).toBe(false)
+    fireEvent.change(name, { target: { value: 'Mara Voss' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Turn on history' }))
+
+    const done = await screen.findByRole('dialog', { name: 'History is on' })
+    expect(sent).toEqual([{ firstCheckpoint: true, authorName: 'Mara Voss' }])
+    expect(within(done).getByText(/so the one given \(Mara Voss\) wasn’t used/)).toBeTruthy()
   })
 
   it('asks only for what’s missing', async () => {

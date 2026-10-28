@@ -40,6 +40,12 @@ export interface TurnOnView {
   needsName: boolean
   /** True if git has no email for the den, so the writer gives one (a placeholder will do). */
   needsEmail: boolean
+  /**
+   * True if needsName and needsEmail are final. False before the den is a
+   * repository: git may have them for it after all (includeIf "gitdir:…"),
+   * so the fields are optional, and the server asks again only if needed.
+   */
+  identityCertain: boolean
 }
 
 export interface CheckpointStatus {

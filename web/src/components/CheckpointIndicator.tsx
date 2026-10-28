@@ -455,6 +455,10 @@ function TurnOnDialog({ status, onClose }: { status: CheckpointStatus; onClose: 
   const identityAsked = mutation.error instanceof ApiRequestError && mutation.error.code === 'identity_needed'
   const askName = (turnOn?.needsName ?? false) || identityAsked
   const askEmail = (turnOn?.needsEmail ?? false) || identityAsked
+  // Before the den is a repository, git may have a name and email for it after all (a setting
+  // that depends on where the repository is), so the fields are optional until the server says
+  // they're really missing.
+  const required = (turnOn?.identityCertain ?? true) || identityAsked
   const busy = mutation.isPending
 
   useEffect(() => {
@@ -471,13 +475,13 @@ function TurnOnDialog({ status, onClose }: { status: CheckpointStatus; onClose: 
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    if (askName && name.trim() === '') {
+    if (required && askName && name.trim() === '') {
       setMissing('name')
       document.getElementById(nameId)?.focus()
       return
     }
 
-    if (askEmail && email.trim() === '') {
+    if (required && askEmail && email.trim() === '') {
       setMissing('email')
       document.getElementById(emailId)?.focus()
       return
@@ -485,11 +489,11 @@ function TurnOnDialog({ status, onClose }: { status: CheckpointStatus; onClose: 
 
     setMissing(null)
     const request: TurnOnRequest = { firstCheckpoint: first }
-    if (askName) {
+    if (askName && name.trim() !== '') {
       request.authorName = name.trim()
     }
 
-    if (askEmail) {
+    if (askEmail && email.trim() !== '') {
       request.authorEmail = email.trim()
     }
 
@@ -557,8 +561,11 @@ function TurnOnDialog({ status, onClose }: { status: CheckpointStatus; onClose: 
               <fieldset className="turn-on-identity">
                 <legend>Who makes the checkpoints</legend>
                 <p className="muted">
-                  Git records a name and email with each checkpoint, and has none for this den yet. Any name will do, a pen name included, and
-                  the email can be a placeholder, such as you@example.com. They're saved for this den only.
+                  {required
+                    ? 'Git records a name and email with each checkpoint, and has none for this den yet.'
+                    : "Git records a name and email with each checkpoint, and doesn't seem to have them for this den. Some git setups give them only once the den's folder is a repository: then git uses those, and says so. If not, Wolfden asks again."}{' '}
+                  Any name will do, a pen name included, and the email can be a placeholder, such as you@example.com. They're saved for this
+                  den only.
                 </p>
                 {askName && (
                   <>
@@ -570,8 +577,8 @@ function TurnOnDialog({ status, onClose }: { status: CheckpointStatus; onClose: 
                       type="text"
                       autoComplete="name"
                       maxLength={200}
-                      required
-                      aria-required="true"
+                      required={required}
+                      aria-required={required}
                       aria-invalid={missing === 'name'}
                       aria-describedby={missing === 'name' ? errorId : undefined}
                       value={name}
@@ -591,8 +598,8 @@ function TurnOnDialog({ status, onClose }: { status: CheckpointStatus; onClose: 
                       inputMode="email"
                       autoComplete="email"
                       maxLength={200}
-                      required
-                      aria-required="true"
+                      required={required}
+                      aria-required={required}
                       aria-invalid={missing === 'email'}
                       aria-describedby={missing === 'email' ? errorId : undefined}
                       value={email}
