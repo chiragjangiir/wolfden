@@ -116,7 +116,7 @@ public sealed partial class DenTools
     /// </summary>
     public WriteResult AddIdea(
         string text, string? entity = null, string? section = null, string? expectedHash = null, string? name = null, string? type = null,
-        string? universe = null, string? series = null, string? book = null, JsonElement? fields = null)
+        string? universe = null, string? series = null, string? book = null, JsonElement? fields = null, bool allowRelinks = false)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -148,7 +148,7 @@ public sealed partial class DenTools
 
         CheckName(name);
         var fieldValues = fields is { } f ? FieldValues(f) : [];
-        return Create((type ?? "idea").Trim(), name, universe, series, book, null, null, "idea", null, fieldValues, text, allowRelinks: true);
+        return Create((type ?? "idea").Trim(), name, universe, series, book, null, null, "idea", null, fieldValues, text, allowRelinks);
     }
 
     /// <summary>
@@ -618,7 +618,7 @@ public sealed partial class DenTools
             {
                 made = NewEntity.Create(den, scope, type, id, new NewEntityRequest(name.Trim())
                 {
-                    Slug = slug?.Trim(), Aliases = aliases, Status = status?.Trim(), From = from?.Trim(), Fields = fields,
+                    Slug = slug?.Trim(), Aliases = aliases, Status = status?.Trim(), From = string.IsNullOrWhiteSpace(from) ? null : from.Trim(), Fields = fields,
                 });
             }
             catch (ArgumentException e) when (e.Message.Contains("is taken", StringComparison.Ordinal))
@@ -688,7 +688,7 @@ public sealed partial class DenTools
     /// </summary>
     private void CheckFrom(Universe universe, string? from)
     {
-        if (from is null)
+        if (string.IsNullOrWhiteSpace(from))
         {
             return;
         }

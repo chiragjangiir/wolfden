@@ -50,6 +50,9 @@ public static partial class WriteEndpoints
     {
         FindEntity = "use the search box",
         AllowRelinks = "choose Create anyway",
+
+        // The web UI's writes take no slug, so a refusal doesn't offer one.
+        Slug = "",
         CheckDen = "run 'wolfden check' in the den's folder",
         CheckTool = "run 'wolfden check' in the den's folder",
         CheckPath = "open '{0}' in your editor, or run 'wolfden check' in the den's folder,",

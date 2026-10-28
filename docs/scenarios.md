@@ -1755,13 +1755,19 @@ Mina from Buda-Pesth, to the book, from chapter 8.
   nothing is written, as for `copy_entity`. Beside the original, in the
   book, it's `jonathan-harker-2.md` and moves nothing. With
   `allow_relinks: true` it's made, and `effects` list the links that
-  moved.
+  moved. `add_idea` does the same for a new idea entity: an idea named
+  "Renfield" in the universe would take `seward-asylum.md`'s
+  `[[renfield]]`, so it's refused unless its own `allow_relinks`.
+- A `from` that's empty or only spaces is no `from`, as on disk
+  (F-ENT-6): the note is made without one.
 
 Spec: types.md F-TPL-6, F-TPL-7, F-ID-6, format.md F-POS-4, F-ENT-6. Covered by:
 `WriteToolTests.ANewEntityComesFromItsTemplateWithAnIdNoFileUses`,
 `WriteToolTests.ASlugIsMadeFromTheNameAsTheTemplateRuleSays`,
 `WriteToolTests.ANewEntitysFromMustResolveAndOneInAnotherBookIsAWarning`,
 `WriteToolTests.ANewEntityThatWouldTakeLinksFromAnotherIsRefusedUnlessAllowed`,
+`WriteToolTests.ANewIdeaThatWouldTakeLinksIsRefusedUnlessAllowed`,
+`WriteToolTests.AnEmptyFromIsNoFrom`,
 `WriteToolTests.ANameIsOneLineOfAtMost200Characters`.
 
 ### SC-MCP-16. My assistant changes a note's fields
@@ -3929,7 +3935,8 @@ Spec: types.md F-TPL-6, design.md §9 (#29). Covered by:
   and `/api/types` GET only.
 - A name that would take links from another note (a second Jonathan
   Harker in the universe) is refused, 400 `bad_argument` with the links in
-  `relinks`; the form lists them, moves focus there, and offers **Create
+  `relinks`, and its message suggests no slug, since the endpoint takes
+  none; the form lists them, moves focus there, and offers **Create
   anyway**, which resends with `allowRelinks: true` and opens the new
   note. Changing the name ends the refusal, and Cancel still closes.
 - A book's note given a `from` in another book is made, with the F-ENT-6

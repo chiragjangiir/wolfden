@@ -163,7 +163,7 @@ public sealed partial class DenTools
                 ToolErrorCodes.BadArgument,
                 $"{relinked.Count} link(s) would change which entity they reach: {string.Join("; ", listed)}" +
                 $"{(relinked.Count > ListedLinkChanges ? $"; and {relinked.Count - ListedLinkChanges} more" : "")}. Nothing was {done}. " +
-                $"Choose another name (or {Words.Slug}), link those by id first, or {Words.AllowRelinks} to {anyway}.")
+                $"Choose another name{(Words.Slug.Length == 0 ? "" : $" (or {Words.Slug})")}, link those by id first, or {Words.AllowRelinks} to {anyway}.")
             {
                 Relinks = relinked.Count > ListedLinkChanges ? [.. listed, $"and {relinked.Count - ListedLinkChanges} more"] : listed,
             };

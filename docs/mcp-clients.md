@@ -211,7 +211,7 @@ prompts. This list is for knowing what the assistant can do.
 | `create_entity` | A new entity from its type's template. If its name would take links from another entity, it's refused unless `allow_relinks`. |
 | `update_fields` | Set, add to, or remove anything in an entity's frontmatter (its fields, `status`, `from`), and add aliases. |
 | `append_section` | Add text to a section, or add a new section. |
-| `add_idea` | Record undecided material with `status: idea`, as its own entity or as a section of one. |
+| `add_idea` | Record undecided material with `status: idea`, as its own entity or as a section of one. A new idea entity whose name would take links from another entity is refused unless `allow_relinks`. |
 | `rename_section` | Rename a section and rewrite the links to it, den-wide. |
 | `rename_entity` | Rename an entity and rewrite the links that used the old name, or keep the old name as an alias. |
 | `change_alias` | Change or remove an alias, rewriting its links the same way. |

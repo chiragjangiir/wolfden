@@ -998,8 +998,10 @@ store, so an edit changes only what it means to (format.md §12):
   ambiguous refuses the create (`bad_argument`, naming each link) unless
   `allow_relinks`; with it, `effects` list the links that moved, as do
   links that were broken and now reach the new entity. It's the copy's
-  check, the same code. `add_idea` makes its new idea entity with the
-  links listed in `effects` but not refused, as before #29.
+  check, the same code, and `add_idea`'s new idea entity gets it too,
+  with its own `allow_relinks`. A `from` that's empty or only spaces is
+  no `from`, as on disk (F-ENT-6). The web UI's refusal doesn't suggest
+  a slug, since its create takes none.
   `update_fields` puts a new top-level key in template order too
   (F-TPL-7); `append_section` puts a new standard section in the
   type's section order and a custom one at the end (F-TPL-8).

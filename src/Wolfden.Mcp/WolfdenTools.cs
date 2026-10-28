@@ -230,7 +230,9 @@ public sealed class WolfdenTools
         "Records undecided material with status idea, so canon views leave it out until the writer settles it. With 'entity', it adds a " +
         "new section to that entity (named by 'section', 'Idea' by default) marked status=idea, and needs expected_hash. Without it, it " +
         "creates a new entity with status idea, named 'name', of 'type' (by default 'idea', for an idea that isn't yet a thing of any " +
-        "one type; a character who might exist is a 'character'), with the text in its lead." + WriteHelp)]
+        "one type; a character who might exist is a 'character'), with the text in its lead. If the new entity's name or file name " +
+        "would change which entity an existing link reaches (another one, or none because it becomes ambiguous; a nearer scope wins, " +
+        "F-LINK-7), nothing is created unless allow_relinks is true; a broken link it now mends is listed in effects." + WriteHelp)]
     public CallToolResult AddIdea(
         [Description("The idea, in markdown.")] string text,
         [Description("Add the idea to this existing entity.")] string? entity = null,
@@ -241,8 +243,9 @@ public sealed class WolfdenTools
         [Description(UniverseHelp)] string? universe = null,
         [Description("Without entity: file it in this series.")] string? series = null,
         [Description("Without entity: file it in this book.")] string? book = null,
-        [Description("Without entity: field values, such as {\"about\": [\"[[count-dracula]]\"]}.")] JsonElement? fields = null) =>
-        Respond(() => _tools.AddIdea(text, entity, section, expected_hash, name, type, universe, series, book, fields));
+        [Description("Without entity: field values, such as {\"about\": [\"[[count-dracula]]\"]}.")] JsonElement? fields = null,
+        [Description("Without entity: " + RelinksHelp)] bool allow_relinks = false) =>
+        Respond(() => _tools.AddIdea(text, entity, section, expected_hash, name, type, universe, series, book, fields, allow_relinks));
 
     /// <summary>The <c>rename_section</c> tool.</summary>
     [McpServerTool(Name = "rename_section", Title = "Rename a section", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]

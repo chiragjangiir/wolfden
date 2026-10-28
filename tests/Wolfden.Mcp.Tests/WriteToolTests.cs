@@ -116,6 +116,43 @@ public sealed class WriteToolTests : IDisposable
 
     [Fact]
     [Trait("Scenario", "SC-MCP-15")]
+    public void ANewIdeaThatWouldTakeLinksIsRefusedUnlessAllowed()
+    {
+        const string Asylum = "universes/dracula/entities/locations/seward-asylum.md";
+        const string Idea = "universes/dracula/entities/ideas/renfield.md";
+
+        // Seward's asylum, a universe note, links [[renfield]] to the book's Renfield; a universe-scope idea of that name is nearer (F-LINK-7).
+        var refused = Assert.Throws<DenToolException>(() => Tools.AddIdea("Renfield as a recurring figure in later books.", name: "Renfield"));
+
+        Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
+        Assert.Contains(Asylum, refused.Message, StringComparison.Ordinal);
+        Assert.Contains("Nothing was created.", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("pass allow_relinks: true", refused.Message, StringComparison.Ordinal);
+        Assert.NotNull(refused.Relinks);
+        Assert.False(File.Exists(Path.Combine(_den.Root, Idea)));
+
+        var made = Tools.AddIdea("Renfield as a recurring figure in later books.", name: "Renfield", allowRelinks: true);
+
+        Assert.Equal(Idea, made.Path);
+        Assert.Equal("idea", made.Entity!.Status);
+        Assert.Contains(made.Effects, e => e.Contains(Asylum, StringComparison.Ordinal) && e.Contains($"now reaches 'Renfield' ({Idea})", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-15")]
+    public void AnEmptyFromIsNoFrom()
+    {
+        foreach (var from in new[] { "", "   " })
+        {
+            var made = Tools.CreateEntity("note", $"Empty from {from.Length}", from: from);
+            Assert.Null(made.Entity!.From);
+            Assert.DoesNotContain("\nfrom:", _den.Read(made.Path), StringComparison.Ordinal);
+            Assert.Contains(made.Effects, e => e.Contains("It has no 'from'", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-15")]
     public void ANameIsOneLineOfAtMost200Characters()
     {
         // U+2028 and U+2029 would split the '# name' heading; a control character too; and a name runs on past 200.

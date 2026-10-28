@@ -91,6 +91,11 @@ public sealed class CreateEndpointTests : IDisposable
         Assert.Equal("dracula:5", second.GetProperty("entity").GetProperty("from").GetString());
         Assert.Contains("\nstatus: draft\nfrom: ", den.Read("universes/dracula/entities/characters/mina-s-aunt.md"), StringComparison.Ordinal);
 
+        // An empty 'from' is no 'from' (F-ENT-6).
+        var (empty, emptyJson) = await PostAsync(server, "/api/entity/create", new { type = "note", name = "Empty from", from = "  " });
+        Assert.Equal(HttpStatusCode.Created, empty);
+        Assert.Equal(JsonValueKind.Null, emptyJson.GetProperty("entity").GetProperty("from").ValueKind);
+
         var (third, thirdJson) = await PostAsync(server, "/api/entity/create", new { type = "character", name = "Mina's Aunt", book = "dracula" });
         Assert.Equal(HttpStatusCode.Created, third);
         Assert.Equal("universes/dracula/books/dracula/entities/characters/mina-s-aunt-2.md", thirdJson.GetProperty("path").GetString());
@@ -177,6 +182,9 @@ public sealed class CreateEndpointTests : IDisposable
         Assert.Contains("Nothing was created.", message, StringComparison.Ordinal);
         Assert.Contains("choose Create anyway", message, StringComparison.Ordinal);
         Assert.DoesNotContain("allow_relinks", message, StringComparison.Ordinal);
+        // The endpoint takes no slug, so the refusal doesn't offer one.
+        Assert.Contains("Choose another name, link those by id first, or choose Create anyway", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("slug", message, StringComparison.Ordinal);
         var relinks = refusedJson.GetProperty("relinks").EnumerateArray().Select(r => r.GetString()!).ToList();
         Assert.NotEmpty(relinks);
         Assert.All(relinks, r => Assert.Contains($"and would reach 'Jonathan Harker' ({Stub})", r, StringComparison.Ordinal));
