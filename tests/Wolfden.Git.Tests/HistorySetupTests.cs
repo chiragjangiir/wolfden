@@ -140,6 +140,7 @@ public sealed class HistorySetupTests : IDisposable
         Assert.Contains("placeholder", refused.Problem, StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(den, ".git")));
         Assert.False(File.Exists(Path.Combine(den, ".gitignore")));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(den, ".git*")); // the folder moved aside was deleted too
 
         // Given: a pen name and a placeholder email, saved in the repository's own config.
         var result = setup.TurnOn(new HistorySetupRequest("  Ash Calloway ", "ash@example.invalid"), Token);
@@ -392,6 +393,31 @@ public sealed class HistorySetupTests : IDisposable
         Assert.Equal(configBefore, File.ReadAllText(Path.Combine(repo.Root, ".git", "config")));
         Assert.Throws<InvalidOperationException>(() => repo.Git("rev-parse", "--verify", "HEAD"));
         Assert.False(File.Exists(Path.Combine(repo.DenRoot, ".gitignore")));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-17")]
+    public void AnOrphanLinkedWorktreeIsRefusedAndTheMainRepositorysConfigIsLeftAlone()
+    {
+        // git worktree add --orphan: the den's folder is the worktree's top level, with no commits,
+        // but its config is the main repository's, shared.
+        using var repo = TestRepo.Create();
+        repo.CommitAll("Start");
+        var den = Path.Combine(Folder(), "kestrel");
+        repo.Git("worktree", "add", "--quiet", "--orphan", "-b", "kestrel-notes", den);
+        File.WriteAllText(Path.Combine(den, "den.yaml"), "format: 1\n", new UTF8Encoding(false));
+        var configBefore = File.ReadAllText(Path.Combine(repo.Root, ".git", "config"));
+        var setup = new GitHistorySetup(den, Without(Config("")));
+
+        var result = setup.TurnOn(new HistorySetupRequest("Ash Calloway", "ash@example.invalid"), Token);
+
+        Assert.Equal(HistorySetupStatus.Refused, result.Status);
+        Assert.Equal(HistorySetupCodes.InRepository, result.Code);
+        Assert.Contains("linked worktree", result.Problem, StringComparison.Ordinal);
+        Assert.False(setup.Check(Token).Possible);
+        Assert.Equal(configBefore, File.ReadAllText(Path.Combine(repo.Root, ".git", "config")));
+        Assert.False(File.Exists(Path.Combine(den, ".gitignore")));
+        repo.Git("worktree", "remove", "--force", den);
     }
 
     [Fact]

@@ -29,7 +29,17 @@ namespace Wolfden.Git;
 /// <b>Its own repository</b> is one whose top level, as git says
 /// (<c>git rev-parse --show-prefix</c> is empty), is the den's folder; a
 /// <c>.git</c> there that git doesn't take for a repository, inside a larger
-/// one, leaves the den in the larger one, and that's refused.
+/// one, leaves the den in the larger one, and that's refused. So is a linked
+/// worktree of another repository (<c>git worktree add --orphan</c>):
+/// <c>--git-dir</c> and <c>--git-common-dir</c> differ, and its config is
+/// the other repository's, shared.
+/// </para>
+/// <para>
+/// <b>Taking a new repository away</b> is one rename first: <c>.git</c> is
+/// moved to a hidden folder in the den, then deleted. If the rename fails,
+/// nothing is removed and the result says the den is an empty repository;
+/// if the delete fails, the den has no repository and the result names the
+/// folder left behind.
 /// </para>
 /// <para>
 /// <b>.gitignore</b> is created if there's none, and otherwise
@@ -73,13 +83,18 @@ public sealed class GitHistorySetup : IHistorySetup
                 return Refuse(HistorySetupCodes.HistoryFailed, $"Git can't use the den's folder ({Sentence(location.Problem)} So history can't be turned on: fix what git says, then try again.");
             case GitLocationKind.InRepository:
                 bool own;
+                string? sharedWith;
                 bool hasCommits;
                 try
                 {
                     // The den's own repository only if git's top level is the den's folder, as git
                     // itself says: a .git there that git doesn't take for one doesn't count (#205 review).
                     own = IsTopLevel(cancellationToken);
-                    hasCommits = own && HasCommits(cancellationToken);
+
+                    // And only if it's a repository of its own, not a linked worktree of another
+                    // (git worktree add --orphan): its config is that repository's, shared (#205 review).
+                    sharedWith = own ? SharedRepository(cancellationToken) : null;
+                    hasCommits = own && sharedWith is null && HasCommits(cancellationToken);
                 }
                 catch (HistoryException e)
                 {
@@ -91,6 +106,14 @@ public sealed class GitHistorySetup : IHistorySetup
                     return Refuse(
                         HistorySetupCodes.InRepository,
                         $"The den is inside the git repository at '{location.Root}', which keeps its history already, for the den's files only. There's nothing to turn on.");
+                }
+
+                if (sharedWith is not null)
+                {
+                    return Refuse(
+                        HistorySetupCodes.InRepository,
+                        $"The den's folder is a linked worktree of the git repository at '{sharedWith}', which keeps history, and settings, for more than this den. " +
+                        "Wolfden won't turn on history or save a name and email there. Nothing was changed.");
                 }
 
                 if (hasCommits)
@@ -282,12 +305,24 @@ public sealed class GitHistorySetup : IHistorySetup
         // is taken away again, so nothing is changed. A finished one was there before.
         HistorySetupResult Undo(string code, string problem, bool needsName = false, bool needsEmail = false)
         {
-            if (made && !RemoveNewRepository(cancellationToken))
+            var removal = made ? RemoveNewRepository(cancellationToken) : null;
+            if (removal is { Leftover: { } leftover })
+            {
+                // The den is clean, and a retry works; only the moved-aside folder is left.
+                return new HistorySetupResult(
+                    HistorySetupStatus.Refused,
+                    code,
+                    $"{problem} The empty git repository Wolfden made first was moved out of the way, so the den has no repository, " +
+                    $"but Wolfden couldn't delete it: delete the folder '{leftover}' in the den's folder.",
+                    [], null, false, null, [], null, needsName, needsEmail);
+            }
+
+            if (removal is { Removed: false } failed)
             {
                 return new HistorySetupResult(
                     HistorySetupStatus.Incomplete,
                     code,
-                    $"{problem} The den's folder was made a git repository first, and Wolfden couldn't take it away again, so it's an empty repository now. " +
+                    $"{problem} The den's folder was made a git repository first, and Wolfden couldn't take it away again ({failed.Why}), so it's an empty repository now. " +
                     "Try again with what's missing: it picks up where this stopped.",
                     ["Made the den's folder a git repository."],
                     _denRoot,
@@ -381,35 +416,73 @@ public sealed class GitHistorySetup : IHistorySetup
     /// Takes away the repository this run just made, before anything else was
     /// done in it: only if it still has no commits. True if it's gone.
     /// </summary>
-    private bool RemoveNewRepository(CancellationToken cancellationToken)
+    private Removal RemoveNewRepository(CancellationToken cancellationToken)
     {
-        try
-        {
-            if (HasCommits(cancellationToken))
-            {
-                return false;
-            }
-        }
-        catch (HistoryException)
-        {
-            return false;
-        }
-
         var git = Path.Combine(_denRoot, ".git");
         try
         {
-            foreach (var file in Directory.EnumerateFiles(git, "*", SearchOption.AllDirectories))
+            if (!Directory.Exists(git) || HasCommits(cancellationToken))
+            {
+                return new Removal(false, "it has a commit now, or isn't a folder", null);
+            }
+        }
+        catch (HistoryException e)
+        {
+            return new Removal(false, e.Message, null);
+        }
+
+        // One step first: the .git is moved aside in one rename, so the den is either still a
+        // repository or not one at all, never a half-deleted one (#205 review).
+        var aside = Path.Combine(_denRoot, $".git-removed-by-wolfden-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.Move(git, aside);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return new Removal(false, Sentence(e.Message)[..^1], null);
+        }
+
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(aside, "*", SearchOption.AllDirectories))
             {
                 File.SetAttributes(file, FileAttributes.Normal);
             }
 
-            Directory.Delete(git, recursive: true);
-            return true;
+            Directory.Delete(aside, recursive: true);
+            return new Removal(true, null, null);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return false;
+            return new Removal(true, null, Path.GetFileName(aside));
         }
+    }
+
+    /// <summary>What taking away a repository this run made did.</summary>
+    /// <param name="Removed">True if the den's folder has no <c>.git</c> any more.</param>
+    /// <param name="Why">Why it's still there, when it is.</param>
+    /// <param name="Leftover">The hidden folder in the den it was moved to and couldn't be deleted from, or null.</param>
+    private sealed record Removal(bool Removed, string? Why, string? Leftover);
+
+    /// <summary>
+    /// The repository the den's folder is a linked worktree of (its common
+    /// git folder's parent), or null if the den's repository is its own:
+    /// <c>git rev-parse --git-dir</c> and <c>--git-common-dir</c> are the same folder.
+    /// </summary>
+    private string? SharedRepository(CancellationToken cancellationToken)
+    {
+        var run = Run(["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"], cancellationToken);
+        var lines = run.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (!run.Succeeded || !run.OutputComplete || lines.Length != 2)
+        {
+            throw new HistoryException($"Git couldn't tell whether the den's repository is its own: {run.Said}");
+        }
+
+        var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var gitDir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(lines[0]));
+        var common = Path.TrimEndingDirectorySeparator(Path.GetFullPath(lines[1]));
+        return string.Equals(gitDir, common, comparison) ? null : Path.GetDirectoryName(common) ?? common;
     }
 
     private bool HasOwnGit()
