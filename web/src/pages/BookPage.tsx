@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, getRouteApi } from '@tanstack/react-router'
 import { hierarchyQuery, positionsQuery, type BookNode, type SeriesNode, type UniverseNode } from '../api'
+import { FreezeControl } from '../components/FreezeControl'
 import { ErrorState, Loading } from '../components/States'
 import { useDocumentTitle, usePosition } from '../hooks'
 import { ordinalOf } from '../story'
@@ -68,6 +69,7 @@ export function BookPage() {
       </nav>
       <p className="eyebrow">Book{b.status === 'final' ? ', final' : ''}</p>
       <h1>{b.name}</h1>
+      <FreezeControl universe={universe} book={b.key} />
       <h2>Chapters</h2>
       {b.chapters.length === 0 ? (
         <p className="muted">This book has no chapters yet.</p>

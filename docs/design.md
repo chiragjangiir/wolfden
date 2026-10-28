@@ -320,10 +320,50 @@ refused unless explicitly unfrozen. When the den has git history (§6),
 freezing also adds a tag as an extra snapshot. This replaces hand-made
 `_FINAL` copies. **Decided (#31):** the tag is
 `book/<universe>/<book>/final` (`book/vael/ember/final`), since book keys
-are unique only within a universe (format.md F-KEY-5). Tags belong to the
-whole repository, so if the tag is already there (from an earlier freeze,
-or another den in the same repository), freezing says so and leaves it
-where it is: Wolfden never moves or replaces a tag.
+are unique only within a universe (format.md F-KEY-5).
+
+**Decided (maintainer, 2026-10-25 and 2026-10-28, #31):**
+
+- **Freezing** takes three steps, in this order: set `status: final` in
+  the book's `book.md` (edited in place, the rest of the file kept);
+  checkpoint the den (§6), a commit that holds that change and, like any
+  checkpoint, the whole den; then tag that commit. The tag then always
+  names a snapshot where the book already says it's final. Without
+  history, the first step alone is the freeze, and the result says no
+  snapshot was taken.
+- **If a step fails,** what's done stands. A checkpoint that fails (a
+  hook refuses it, say) leaves the book final with no commit or tag; a
+  tag that fails leaves the commit. Freezing again picks up where it
+  stopped.
+- **Re-freezing gets a numbered tag.** Tags never move and are never
+  deleted, so each freeze keeps its own snapshot: the first is
+  `…/final`, and each later freeze of the same book adds the next name,
+  `final-2`, `final-3`, and so on. Tags belong to the whole repository,
+  and Wolfden can't tell its own earlier tag from one another den in the
+  same repository made, so it counts up past that too. The result names
+  the tag added.
+- **Unfreezing** writes `status: draft` (rather than removing the line),
+  then checkpoints, with no tag, so the history shows when the book was
+  reopened. If the checkpoint fails, the change stands and the result
+  says so.
+- **For the writer only.** Freezing and unfreezing are in the web UI
+  (the book's page) and the CLI (`wolfden freeze`, `wolfden unfreeze`).
+  MCP agents get no tools for them in v0; their `frozen` errors already
+  tell them to ask the writer (§8).
+
+v0 behaviour, not recorded decisions (#31): a freeze or unfreeze takes
+the hash of the `book.md` it's based on and is refused with `stale_file`
+if the file has changed since, as other writes are (§8); the CLI reads
+the file and writes it in one go, so it passes none. The tag's number is
+one more than the highest of the book's freeze tags already there, so
+the highest is always the latest freeze. Freezing a book that's already
+final tells "done" from "a step is missing" by its history alone: if the
+latest checkpoint doesn't hold `book.md` as it is now, it checkpoints and
+tags, as a first freeze would; if it does, it tags the latest checkpoint
+that changed `book.md` (the one that made it final), unless one of the
+book's freeze tags already names that checkpoint, in which case it does
+nothing. The web UI uses the same test to offer **Finish freezing** on a
+final book whose snapshot isn't finished.
 
 ## 6. History and versioning
 
@@ -623,7 +663,7 @@ don't fit the timeline, and open threads at a frozen book's end.
 
 ### The command line (v0)
 
-**v0 behaviour, not a recorded decision** (#17). The CLI has eight
+**v0 behaviour, not a recorded decision** (#17). The CLI has ten
 commands, and `wolfden <command> --help` describes each one:
 
 | Command | What it does |
@@ -633,6 +673,8 @@ commands, and `wolfden <command> --help` describes each one:
 | `wolfden index [<den>] [--watch]` | Rebuilds `.wolfden/index.db` from the files and says what it holds. `--watch` then keeps it up to date as files change (#14), printing one line for each batch of changes it applies (with `--json`, one JSON object per line), until Ctrl+C. Only one watcher runs per den; a second exits 2. |
 | `wolfden query [<universe>] [--universe <key>] [--at <position>]` | Canon as of a position (format.md F-VIEW-1), from the index, of one universe (see "Which universe" below; `*` is refused, since a view is of one universe). `--series` or `--book` narrows the view, `--type` (any type an enabled pack defines) and `--entity` (matched as a link is, F-LINK-6, among the entities in the view, so one the reader meets later can't shadow one they've met) pick entities out of it, `--pinned` gives pinned canon (F-VIEW-2), and `--brief` lists one line per entity. |
 | `wolfden copy <entity> <new name> [--to <scope>] [--universe <key>] [--slug <slug>] [--allow-relinks]` | Copies an entity under a new name, with a new id, as the MCP tool `copy_entity` does (§8, #129): beside the original, or `--to` a universe (`<universe>`, or `<universe>/`) or one of its series or books (`<universe>/<key>`, or `<universe>/series:<key>` or `<universe>/book:<key>` when a series and a book share the key). In a den with one universe, a bare series or book key (or `series:<key>`, `book:<key>`) will do (as for `check`, #127), unless it's also the universe's key, which is refused with every spelling suggested. It writes the den's files only. Its messages name its options (`--allow-relinks`, `--slug`) and commands (`wolfden check`), not the tool's parameters: the tools take the words their advice uses as a setting, and names the writer gave come through as written. It exits 2 when the copy is refused. |
+| `wolfden freeze <book> [--universe <key>]` | Freezes a finished book (§5, #31): `status: final` in its `book.md`, then, when the den has git history, a checkpoint of the whole den and a tag on it, `book/<universe>/<book>/final` (or `final-2`, `final-3`, … for a book frozen before). `--universe` names the book's universe, when the den has several (see "Which universe" below). Freezing a book that's already final finishes a freeze whose checkpoint or tag failed, and otherwise does nothing. It prints the result's message, and exits 0 when the book is frozen (with its snapshot, or with no history to take one in), and 2 when it's refused (no such book) or a step in the history failed; then the message, on standard error, says what to do. |
+| `wolfden unfreeze <book> [--universe <key>]` | Unfreezes a book (§5, #31): `status: draft` in its `book.md`, then a checkpoint, with no tag, when the den has history. A book that isn't final is left as it is. It exits 0 when the book is unfrozen (or wasn't frozen), and 2 when it's refused or the checkpoint failed. |
 | `wolfden new-id [<count>]` | Prints new ids for files made by hand (format.md F-ID-5). |
 | `wolfden serve [<den>] [--universe <key>] [--port <n>] [--no-open] [--no-watch]` | Serves the web UI and the API on 127.0.0.1 (§9, #23), opens the default browser unless `--no-open`, and runs until Ctrl+C. The port is 9653 by default (WOLF on a phone keypad); `--port 0` picks a free one, and the address is printed either way. A port in use, or one the system won't let it use (reserved, or below 1024 on Linux), exits 2 and says so. `--universe` serves only that universe, as `mcp --universe` pins one; a key the den doesn't have exits 2. It hosts the same watcher as `mcp`, unless `--no-watch`. It's the one command that makes automatic checkpoints, when `den.yaml` sets `auto_checkpoint` (§6). Without a built UI, the API still works and the page says how to build the UI. |
 | `wolfden mcp [<den>] [--universe <key>] [--no-watch]` | Runs the MCP server over stdio for an AI client (§8, #20) until the client disconnects or Ctrl+C. `--universe` pins the session to one universe (§8); a key the den doesn't have exits 2. Standard output carries only the protocol; log messages go to standard error. It exits 2 if there's no den and 3 if it stops because of a failure after it started, but serves a den whose `den.yaml` doesn't load, so the client can call `check` to find out why. |
@@ -862,7 +904,10 @@ store, so an edit changes only what it means to (format.md §12):
   Closing it would need a lock every editor honours.
 - **Frozen and pinned** (maintainer decision, 2026-10-22). Nothing in
   a final book's scope is written (`frozen`): its entities, `book.md`,
-  or outline (format.md F-BOOK-1). Edits to pinned canon are made, and
+  or outline (format.md F-BOOK-1). There are no tools to freeze or
+  unfreeze a book (maintainer decision, 2026-10-28, #31): that's the
+  writer's, in the web UI or the CLI (§5), and a `frozen` error is the
+  agent's cue to ask them. Edits to pinned canon are made, and
   `pinned_canon` in the result lists each pinned fact touched. A
   series' or universe's `chapter_defaults` isn't in a book's scope, but
   reaches its chapters, so `update_chapter_defaults` refuses an edit
@@ -1747,6 +1792,37 @@ docs/
     indicator and the History tabs (#27) ask again, so the new
     checkpoint shows. Without history, the dialog explains how to turn
     it on instead.
+
+- **Freezing in the web UI** (#31; the steps and the tags are the
+  maintainer's decisions in §5; the rest is v0 behaviour, not a recorded
+  decision).
+  - **The API.** `GET /api/book/freeze?book=<key>&universe=<key>` gives
+    the book's name, status, the hash of its `book.md`, whether the den
+    has history (and why not), for a draft book the tag a freeze would
+    add (`nextTag`), and for a final one whether its freeze is
+    `unfinished` (by the test in §5). `POST /api/book/freeze` and
+    `POST /api/book/unfreeze` take `{book, universe, expectedHash}` as
+    `application/json` and answer with what was done: the status now,
+    `snapshot` (`tagged`, `already_tagged`, `no_history`,
+    `checkpoint_failed`, `tag_failed`, `not_tagged`, `checkpointed`,
+    `not_checkpointed`, or `not_frozen`), the checkpoint and tag by name,
+    and a `message` for the writer. A step in the history that fails
+    isn't an HTTP error, since the status change stands: it's a
+    `snapshot` and a message that says what to do. A stale hash is 409
+    `stale_file`. They write through the editing endpoints' `DenTools`,
+    so one write runs at a time and the save lands in the server's
+    ledger, and the checkpoint goes through the same ledger as the
+    checkpoint dialog's. The checkpoint's result names only its id, not
+    its files, so a pinned server names nothing in other universes.
+  - **The page.** The book's page has **Freeze…** (or **Unfreeze…** for
+    a final book) under its title. It asks first, in the page, saying
+    what will happen: what can't be edited, and, with history, the
+    checkpoint and the tag it will add (or, without, that no snapshot
+    is taken). Escape or Cancel closes it. Afterwards it shows the
+    result's message, marked as a warning when a step failed, and every
+    cached answer is asked again, so the book's notes lose (or regain)
+    their edit controls. A final book whose freeze is unfinished also
+    has **Finish freezing…**, which freezes again.
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and
   unknown content. This gets heavy test coverage, since it decides whether
   people trust the tool with their notes.

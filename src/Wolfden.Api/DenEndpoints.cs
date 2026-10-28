@@ -76,9 +76,11 @@ public static class DenEndpoints
         api.Map("/{**rest}", (HttpContext context, string? rest) =>
         {
             var path = rest?.TrimEnd('/') ?? "";
-            var method = CheckpointEndpoints.Paths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "GET, POST"
+            var method = CheckpointEndpoints.Paths.Contains(path, StringComparer.OrdinalIgnoreCase)
+                    || FreezeEndpoints.GetPostPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "GET, POST"
                 : GetPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "GET"
-                : WriteEndpoints.PostPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "POST"
+                : WriteEndpoints.PostPaths.Contains(path, StringComparer.OrdinalIgnoreCase)
+                    || FreezeEndpoints.PostPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "POST"
                 : null;
             if (method is not null)
             {

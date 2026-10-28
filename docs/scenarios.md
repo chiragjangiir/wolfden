@@ -1244,6 +1244,28 @@ Spec: format.md F-ID-3, F-ID-4, design.md §7, §8 (#129). Covered by:
 `CopyCommandTests.ANameThatLooksLikeAParameterComesThroughAsWritten`,
 `CopyCommandTests.JsonPrintsTheWriteResult`.
 
+### SC-CLI-14. I freeze a finished book from the command line
+
+The writer runs `wolfden freeze dracula`, and later `wolfden unfreeze
+dracula`.
+
+- Without history, `freeze` writes `status: final`, prints that no
+  snapshot was taken, and exits 0; the book's notes can't be copied
+  into or edited after. With git, it prints the checkpoint and the tag
+  it added. `unfreeze` writes `status: draft`, and checkpoints with
+  git; freezing again adds `final-2`. `--universe` names the book's
+  universe, and `--json` prints the result.
+- If git refuses the checkpoint, `freeze` exits 2 and says on standard
+  error that the book is final but nothing was committed, and to freeze
+  it again; doing so once the hook is gone exits 0 and tags it. An
+  unknown book, or no book, exits 2.
+
+Spec: design.md §5, §7 (#31). Covered by:
+`FreezeCommandTests.WithoutHistoryFreezeMarksTheBookFinalAndUnfreezeWritesDraft`,
+`FreezeCommandTests.WithGitFreezeCheckpointsAndTagsAndUnfreezeCheckpoints`,
+`FreezeCommandTests.AFailedCheckpointExitsTwoAndSaysToFreezeAgain`,
+`FreezeCommandTests.AnUnknownBookOrNoBookExitsTwo`.
+
 ## WATCH: keeping the index up to date while notes change
 
 Background: `wolfden index --watch` (design.md §7, #14) keeps the index up
@@ -2384,7 +2406,8 @@ Spec: F-BOOK-1, design.md §5, §6. Covered by:
 `HistoryProviderTests.ADenWithoutHistoryStillLoadsAndChecks`,
 `GitHistoryTests.ADenOutsideAnyRepositoryHasNoHistory`,
 `GitHistoryTests.AGitAboveACeilingDirectoryDoesntCount`,
-`FreezeTagTests.WithoutHistoryTheBookIsStillFrozenButNotTagged`.
+`FreezeTagTests.WithoutHistoryTheBookIsStillFrozenButNotTagged`,
+`FreezeBookTests.WithoutHistoryFreezingIsStatusFinalAloneAndSaysNoSnapshotWasTaken`.
 
 The scenarios below have a den in a git repository, read through the git
 provider (design.md §6), which runs the writer's own `git`.
@@ -2512,20 +2535,33 @@ The writer freezes Ember, book `ember` of universe `vael`, and later
 adds more notes. Another den in the same repository also has a book
 `ember` in a universe `vael`, and is frozen afterwards.
 
-- The tag `book/vael/ember/final` names the latest checkpoint of the
-  den. Freezing again, or freezing the other den's Ember, leaves the
-  tag where it is and says the repository already has it; Wolfden never
-  moves or replaces a tag. In a repository where nothing in the den has
-  been checkpointed yet, there's nothing to tag, and freezing says so
-  (the book is still frozen). A tag name git doesn't accept, or one
-  git would read as something else (`HEAD`, `@`, `refs/...`), is
-  refused. A tag without a message works even when the writer's git
-  signs tags.
+- Freezing writes `status: final` in Ember's `book.md`, in place, and
+  keeps the rest of the file. Then it makes one checkpoint of the whole
+  den, "Freeze book 'ember' of universe 'vael'", which holds that change
+  and anything else the writer hadn't checkpointed, and tags it
+  `book/vael/ember/final`, so the tag names a snapshot where Ember
+  already says it's final. The result names the checkpoint and the tag.
+  Freezing Ember again does nothing, and says it's already frozen and
+  tagged.
+- Freezing the other den's Ember adds `book/vael/ember/final-2`, since
+  the name is taken and Wolfden can't tell the other den's tag from its
+  own; the first tag stays where it is. Wolfden never moves or deletes a
+  tag. A freeze tag's number is one more than the highest there
+  (`final-08` or `finale` isn't one of them). In a repository where
+  nothing in the den has been checkpointed yet, there's nothing to tag,
+  and the tag step says so. A tag name git doesn't accept, or one git
+  would read as something else (`HEAD`, `@`, `refs/...`), is refused.
+  A tag without a message works even when the writer's git signs tags.
+- A freeze based on a `book.md` that changed since the writer looked is
+  refused (`stale_file`), and nothing is written.
 
-Spec: F-BOOK-1, design.md §5 (maintainer decision, #31). Covered by:
+Spec: F-BOOK-1, design.md §5 (maintainer decisions, #31). Covered by:
+`FreezeBookTests.FreezingCheckpointsTheWholeDenAndTagsThatCheckpoint`,
+`FreezeBookTests.AFreezeBasedOnAStaleBookIsRefusedAndWritesNothing`,
 `FreezeTagTests.TheTagIsNamedForTheUniverseAndTheBook`,
-`FreezeTagTests.FreezingTagsTheLatestCheckpointOnceAndNeverMovesTheTag`,
-`FreezeTagTests.AnotherDenInTheRepositoryWithTheSameKeysDoesntMoveTheTag`,
+`FreezeTagTests.OnlyTheBooksOwnFreezeTagsHaveANumber`,
+`FreezeTagTests.EachFreezeAddsTheNextNumberAndNeverMovesATag`,
+`FreezeTagTests.AnotherDenInTheRepositoryWithTheSameKeysCountsUpAndDoesntMoveTheTag`,
 `FreezeTagTests.BeforeAnyCheckpointThereIsNothingToTag`,
 `GitHistoryTests.ATagNamesTheLatestCheckpointAndIsNeverMoved`,
 `GitHistoryTests.ATagNameMustBeOneGitAccepts`,
@@ -2607,6 +2643,45 @@ changed since it last worked.
 Spec: F-GEN-2, design.md §8, §9 (#181). Covered by:
 `HistoryEndpointTests.ANoteWithErrorsHasAHistoryByItsPath`.
 
+### SC-HIST-12. I unfreeze a book to fix it, then freeze it again
+
+The writer froze Dracula, then finds a mistake in Lucy's note. They
+unfreeze the book, fix the note, and freeze it again.
+
+- Unfreezing writes `status: draft` in `book.md` (a `book.md` that had
+  no `status` line gets one, and the line is never removed), so the
+  book's notes can be edited again. With history, it makes a
+  checkpoint, "Unfreeze book 'dracula' of universe 'dracula'", with no
+  tag, so the history shows when the book was reopened; the first
+  freeze's tag stays where it is. Freezing again adds
+  `book/dracula/dracula/final-2` on the new checkpoint, so each freeze
+  keeps its own snapshot. Unfreezing a book that isn't frozen changes
+  nothing and says so.
+
+Spec: F-BOOK-1, design.md §5 (maintainer decision, 2026-10-28, #31).
+Covered by:
+`FreezeBookTests.UnfreezingCheckpointsWithoutATagAndFreezingAgainAddsTheNextTag`,
+`FreezeBookTests.UnfreezingWritesStatusDraftRatherThanRemovingTheLine`.
+
+### SC-HIST-13. Git refuses my freeze's checkpoint or tag
+
+The writer's pre-commit hook refuses the freeze's checkpoint. Another
+time, git can't make the tag.
+
+- When the checkpoint fails, the book stays final in `book.md`, with no
+  commit and no tag, and the result says why and to freeze the book
+  again once that's fixed. Freezing again (the book is already final)
+  makes the checkpoint and adds the tag.
+- When the tag fails, the checkpoint stands, and the result says so.
+  Freezing again tags the checkpoint that made the book final, even if
+  the writer has checkpointed other work since.
+- Until a freeze is finished, the book's freeze status says it's
+  unfinished, so the web UI can offer to finish it.
+
+Spec: design.md §5 (maintainer decision, 2026-10-25, #31). Covered by:
+`FreezeBookTests.ACheckpointGitRefusesLeavesTheBookFinalAndFreezingAgainResumes`,
+`FreezeBookTests.ATagGitRefusesLeavesTheCheckpointAndFreezingAgainTagsIt`.
+
 ## WEB: the den in a browser
 
 Background: `wolfden serve` (design.md §7, §9, #23) hosts the web UI and
@@ -2619,7 +2694,7 @@ search page, and SC-WEB-22 and SC-WEB-23 the history page. SC-WEB-24
 and SC-WEB-25 describe field search (#179). SC-WEB-35 to SC-WEB-39
 cover images in notes and what a page may load (#180, #186). SC-WEB-40
 to SC-WEB-46 cover editing a note's lead and sections in the browser
-(#28, part a).
+(#28, part a). SC-WEB-66 covers freezing a book (#31).
 
 ### SC-WEB-1. I open my den in the browser
 
@@ -3695,3 +3770,28 @@ Spec: format.md §12, F-RT-1, F-RT-3. Covered by:
 Spec: design.md §8 "Stale files", §9. Covered by:
 `FieldEditEndpointTests.AStaleFrozenOrInvalidFieldEditIsRefusedAndNothingIsWritten`,
 `FieldEditing.test.tsx` (web).
+
+### SC-WEB-66. I freeze and unfreeze a book on its page
+
+The writer opens Dracula's page and freezes it, then unfreezes it.
+
+- **Freeze…** asks first, in the page: book.md will say
+  `status: final`, the book's notes, chapters, and outline can't be
+  edited until it's unfrozen, and, with history, Wolfden makes a
+  checkpoint and tags it (naming the tag), or, without, no snapshot is
+  taken. Escape or Cancel closes it and nothing is sent. Afterwards the
+  page shows what was done, and the book's notes say they're in a
+  final book. **Unfreeze…** asks the same way, and says the freeze tags
+  stay.
+- A freeze whose checkpoint or tag failed shows its message as a
+  warning, and the final book then offers **Finish freezing…**, which
+  freezes again. A freeze based on a `book.md` that changed since is
+  refused (`stale_file`), the prompt shows why, and the page looks at
+  the book again. The endpoints take only `book`, `universe`, and
+  `expectedHash`, as JSON; `/api/book/unfreeze` answers POST only.
+
+Spec: design.md §5, §9 (#31). Covered by:
+`FreezeEndpointTests.FreezingCheckpointsAndTagsAndUnfreezingCheckpointsAndTheBooksNotesFollow`,
+`FreezeEndpointTests.WithoutHistoryFreezingSaysNoSnapshotWasTaken`,
+`FreezeEndpointTests.AStaleOrMalformedFreezeIsRefusedAndWritesNothing`,
+`Freeze.test.tsx` (web).

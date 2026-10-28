@@ -31,8 +31,8 @@ namespace Wolfden.Core.History;
 /// <b>Tags belong to the whole repository.</b> A backend's tags, such as
 /// git's, aren't scoped to the den: a tag name is shared with everything
 /// else in the repository, other dens in it included. <see cref="Tags"/>
-/// lists them all, and a tag name must be chosen so it can't clash. How
-/// freeze tags are named is decided with the freeze workflow.
+/// lists them all, and a tag name must be chosen so it can't clash: freeze
+/// tags take the next free number (<see cref="FreezeTag"/>, #31).
 /// </para>
 /// <para>
 /// <b>Unavailable isn't an error.</b> An operation the backend can't do,
