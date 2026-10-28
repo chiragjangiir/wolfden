@@ -15,23 +15,28 @@ namespace Wolfden.Index.Writing;
 /// <para>
 /// <b>Freezing</b> takes three steps, in this order (maintainer decision,
 /// 2026-10-25): <c>status: final</c> in <c>book.md</c>, edited in place
-/// like any field write; then, when the den has history, a checkpoint of
-/// the whole den with that change; then a tag on that checkpoint
-/// (<see cref="FreezeTag"/>), so a tag never names a snapshot where the
-/// book is still a draft. Without history, the first step alone is the
-/// freeze. If the checkpoint fails, the book stays final with no commit or
-/// tag; if the tag fails, the commit stands. Either way, freezing again
-/// picks up where it stopped.
+/// like any field write; then, when the den has history, a checkpoint with
+/// that change; then a tag on that checkpoint (<see cref="FreezeTag"/>),
+/// so a tag never names a snapshot where the book is still a draft.
+/// Without history, the first step alone is the freeze. If the checkpoint
+/// fails, the book stays final with no commit or tag; if the tag fails, the
+/// commit stands. Either way, freezing again picks up where it stopped. The
+/// checkpoint records the whole den, as every checkpoint does by default
+/// (design choice, #31), and the result counts the files it took in from
+/// outside the book, without naming them.
 /// </para>
 /// <para>
-/// <b>Picking up where it stopped</b> (design choice, #31). Freezing a
-/// book that's already final changes nothing in <c>book.md</c>, and goes
-/// by its history: if the latest checkpoint doesn't hold <c>book.md</c> as
-/// it is now, it checkpoints and tags, as a first freeze would; if it does,
-/// it looks at the latest checkpoint that changed <c>book.md</c>, which is
-/// the one that made it final, and tags that one unless one of the book's
-/// freeze tags already names it. So a freeze is only done once
-/// <c>book.md</c> is checkpointed and that checkpoint is tagged.
+/// <b>Done, or a step missing</b> (design choice, #31) is decided by the
+/// book, not by <c>book.md</c> alone, so a book marked final by hand, then
+/// edited, is snapshotted as it is now. When anything in the book's folder
+/// (its <c>book.md</c>, outline, and notes) differs from the latest
+/// checkpoint, freezing checkpoints. Then it looks at the latest checkpoint
+/// that changed the book's folder, which holds the book as it is now: if a
+/// freeze tag of the book names that checkpoint or a later one, the freeze
+/// is done; otherwise it tags that checkpoint. A tag from an earlier freeze
+/// doesn't count, so a book frozen again gets its own tag.
+/// After a tag that failed, that's the freeze's own checkpoint, even if
+/// other work was checkpointed since.
 /// </para>
 /// <para>
 /// <b>Unfreezing</b> writes <c>status: draft</c> (not removing the line),
@@ -57,6 +62,7 @@ public sealed partial class DenTools
         var bytes = target.File.ToBytes();
         string? nextTag = null;
         var unfinished = false;
+        var others = 0;
         try
         {
             if (canTag && target.Status != BookStatus.Final)
@@ -64,7 +70,12 @@ public sealed partial class DenTools
                 nextTag = FreezeTag.NextName(history, universeKey, target.Key);
             }
 
-            unfinished = canCheckpoint && target.Status == BookStatus.Final && !FreezeFinished(history, universeKey, target, bytes);
+            if (canCheckpoint)
+            {
+                var pending = PendingChanges(history);
+                others = pending?.Count(c => !InFolder(c, target.Path)) ?? 0;
+                unfinished = target.Status == BookStatus.Final && FreezeTarget(history, universeKey, target, bytes, pending) is not { Done: true };
+            }
         }
         catch (HistoryException)
         {
@@ -73,29 +84,7 @@ public sealed partial class DenTools
 
         return new BookFreezeView(
             DenReader.ResultVersion, universeKey, target.Key, target.Name, target.FilePath, HashOf(bytes), StatusWord(target.Status),
-            history.Name, canCheckpoint, canCheckpoint ? null : history.CheckpointUnavailable, nextTag, unfinished);
-    }
-
-    /// <summary>
-    /// True if a final book's freeze is finished: the latest checkpoint
-    /// holds its <c>book.md</c> as <paramref name="bytes"/>, and, if the
-    /// history can make tags, one of the book's freeze tags names the
-    /// latest checkpoint that changed it. Freezing again finishes one that isn't.
-    /// </summary>
-    private static bool FreezeFinished(IHistoryProvider history, string universeKey, Book target, byte[] bytes)
-    {
-        if (!HoldsAtLatest(history, target.FilePath, bytes))
-        {
-            return false;
-        }
-
-        if (!history.Capabilities.HasFlag(HistoryCapabilities.Tag))
-        {
-            return true;
-        }
-
-        var log = history.Log(new HistoryLogQuery(target.FilePath, Limit: 1));
-        return log.IsAvailable && log.Value.Count > 0 && FreezeTag.Existing(history, universeKey, target.Key).Any(t => t.Id == log.Value[0].Id);
+            history.Name, canCheckpoint, canCheckpoint ? null : history.CheckpointUnavailable, nextTag, unfinished, others);
     }
 
     /// <summary>
@@ -115,9 +104,10 @@ public sealed partial class DenTools
             var said = $"Book '{target.Name}'";
             var history = History();
             HistoryEntry? made = null;
+            var others = 0;
             FreezeResult Frozen(string snapshot, string? checkpoint, string? tag, string message) => new(
                 DenReader.ResultVersion, universeKey, target.Key, target.FilePath, HashOf(bytes), "final", changed, history.Name, snapshot,
-                checkpoint ?? made?.Id, tag, message, warnings, idAdded);
+                checkpoint ?? made?.Id, tag, message + Others(others), warnings, idAdded, others);
 
             if (history.CheckpointUnavailable is { } why)
             {
@@ -126,14 +116,15 @@ public sealed partial class DenTools
                     : $"{said} is already frozen (status: final). No snapshot was taken: {why}");
             }
 
-            // Step 2: a checkpoint, unless the latest one already holds book.md as it is.
+            // Step 2: a checkpoint, unless the latest one already holds the book as it is.
             try
             {
-                if (changed || !HoldsAtLatest(history, target.FilePath, bytes))
+                if (changed || !BookHeld(history, target, bytes, PendingChanges(history)))
                 {
                     made = SessionWritten.Checkpoint(history, new CheckpointRequest($"Freeze book '{target.Key}' of universe '{universeKey}'")).Result is { IsAvailable: true } r
                         ? r.Value
                         : null;
+                    others = made?.Changes.Count(c => !InFolder(c, target.Path)) ?? 0;
                 }
             }
             catch (HistoryException e)
@@ -143,26 +134,25 @@ public sealed partial class DenTools
                     "Once that's fixed, freeze the book again to take the snapshot.");
             }
 
-            // Step 3: tag the checkpoint that made book.md final, unless it's tagged already.
+            // Step 3: tag the checkpoint that holds the book as it is, unless a freeze tag already holds it.
             string? at = made?.Id;
             try
             {
-                var log = history.Log(new HistoryLogQuery(target.FilePath, Limit: 1));
-                if (log.IsAvailable && log.Value.Count > 0)
+                if (FreezeTarget(history, universeKey, target, bytes, PendingChanges(history)) is not { } found)
                 {
-                    at = log.Value[0].Id;
-                }
-
-                if (at is null)
-                {
+                    // The checkpoint recorded nothing of the book (git ignores book.md, say), so no checkpoint
+                    // holds it final: a tag now could name one where it's a draft.
                     return Frozen(FreezeSnapshot.NotTagged, null, null,
-                        $"{said} is final in book.md, but book.md isn't in any checkpoint, so there's nothing to tag. Make a checkpoint, then freeze the book again to tag it.");
+                        $"{said} is final in book.md, but no checkpoint holds the book as it is now{(made is null ? "" : $" (git recorded {Short(made.Id)} without it)")}, " +
+                        "so no tag was added: git may be ignoring some of its files. Check 'git status', then freeze the book again.");
                 }
 
-                if (made is null && FreezeTag.Existing(history, universeKey, target.Key).FirstOrDefault(t => t.Id == at) is { } tagged)
+                at = found.At;
+                if (found.Tag is { } tagged)
                 {
-                    return Frozen(FreezeSnapshot.AlreadyTagged, at, tagged.Name,
-                        $"{said} is already frozen, and its snapshot is tagged '{tagged.Name}'. Nothing changed.");
+                    return Frozen(FreezeSnapshot.AlreadyTagged, at, tagged.Name, changed
+                        ? $"Froze book '{target.Name}' again: book.md says status: final, and the snapshot tagged '{tagged.Name}' already holds the book as it is, so no tag was added.{Checkpointed(made, sentence: true)}"
+                        : $"{said} is already frozen, and its snapshot is tagged '{tagged.Name}'. Nothing changed.");
                 }
 
                 var tag = FreezeTag.Add(history, universeKey, target.Key, at);
@@ -185,6 +175,93 @@ public sealed partial class DenTools
         }
     }
 
+    /// <summary>Where a final book's freeze tag goes: the checkpoint that holds the book as it is, and the freeze tag already holding it, if any.</summary>
+    /// <param name="At">The latest checkpoint that changed the book's folder.</param>
+    /// <param name="Tag">A freeze tag of the book that holds the book's folder as <paramref name="At"/> does, or null.</param>
+    /// <param name="Done">True if the freeze is done: a tag holds the book, or the history can't make tags.</param>
+    private sealed record FreezeTargetResult(string At, HistoryTag? Tag, bool Done);
+
+    /// <summary>
+    /// Where a final book's freeze tag goes, or null if no checkpoint holds
+    /// the book as it is now (something in its folder isn't checkpointed).
+    /// </summary>
+    private static FreezeTargetResult? FreezeTarget(
+        IHistoryProvider history, string universeKey, Book target, byte[] bytes, IReadOnlyList<HistoryFileChange>? pending)
+    {
+        if (!BookHeld(history, target, bytes, pending))
+        {
+            return null;
+        }
+
+        var log = history.Log(new HistoryLogQuery(target.Path, Limit: 1));
+        if (!log.IsAvailable || log.Value.Count == 0)
+        {
+            return null;
+        }
+
+        var at = log.Value[0].Id;
+        if (!history.Capabilities.HasFlag(HistoryCapabilities.Tag))
+        {
+            return new FreezeTargetResult(at, null, true);
+        }
+
+        // A tag at that checkpoint, or at a later one, which holds the book's folder the same since
+        // nothing changed it after. A tag from before it (an earlier freeze) doesn't count, even if
+        // the book reads the same, so a book frozen again gets its own tag (maintainer decision, 2026-10-28).
+        var tags = FreezeTag.Existing(history, universeKey, target.Key);
+        var tag = tags.LastOrDefault(t => t.Id == at);
+        if (tag is null && tags.Count > 0)
+        {
+            var later = CheckpointsAfter(history, at);
+            tag = tags.LastOrDefault(t => later.Contains(t.Id));
+        }
+
+        return new FreezeTargetResult(at, tag, tag is not null);
+    }
+
+    /// <summary>The checkpoints listed before <paramref name="at"/> in the den's log from the latest: those made after it.</summary>
+    private static HashSet<string> CheckpointsAfter(IHistoryProvider history, string at)
+    {
+        var after = new HashSet<string>(StringComparer.Ordinal);
+        string? before = null;
+        while (true)
+        {
+            var page = history.Log(new HistoryLogQuery(Limit: 100, Before: before));
+            if (!page.IsAvailable || page.Value.Count == 0)
+            {
+                return after;
+            }
+
+            foreach (var entry in page.Value)
+            {
+                if (entry.Id == at)
+                {
+                    return after;
+                }
+
+                after.Add(entry.Id);
+            }
+
+            before = page.Value[^1].Id;
+        }
+    }
+
+    /// <summary>
+    /// True if the latest checkpoint holds the book as it is now: its
+    /// <c>book.md</c> as <paramref name="bytes"/>, and nothing in its folder
+    /// changed since (<paramref name="pending"/>; null if the history couldn't say, which counts as changed).
+    /// </summary>
+    private static bool BookHeld(IHistoryProvider history, Book target, byte[] bytes, IReadOnlyList<HistoryFileChange>? pending) =>
+        HoldsAtLatest(history, target.FilePath, bytes) && pending is not null && !pending.Any(c => InFolder(c, target.Path));
+
+    /// <summary>What a checkpoint now would record, or null if the history can't say.</summary>
+    private static IReadOnlyList<HistoryFileChange>? PendingChanges(IHistoryProvider history) =>
+        history.Pending() is { IsAvailable: true } p ? p.Value : null;
+
+    /// <summary>True if the change is to a file in <paramref name="folder"/>, on either side of a rename.</summary>
+    private static bool InFolder(HistoryFileChange change, string folder) =>
+        IsAtOrUnder(change.Path, folder) || (change.OldPath is { } old && IsAtOrUnder(old, folder));
+
     /// <summary>
     /// Unfreezes a book: <c>status: draft</c> in its <c>book.md</c>, then,
     /// when the den has history, a checkpoint, with no tag. A book that
@@ -201,9 +278,10 @@ public sealed partial class DenTools
             var (target, bytes, changed, idAdded, warnings) = SetStatus(universeKey, key, expectedHash, BookStatus.Draft);
             var said = $"Book '{target.Name}'";
             var history = History();
+            var others = 0;
             FreezeResult Unfrozen(string snapshot, string? checkpoint, string message) => new(
                 DenReader.ResultVersion, universeKey, target.Key, target.FilePath, HashOf(bytes), StatusWord(changed ? BookStatus.Draft : target.Status), changed,
-                history.Name, snapshot, checkpoint, null, message, warnings, idAdded);
+                history.Name, snapshot, checkpoint, null, message + Others(others), warnings, idAdded, others);
 
             if (!changed)
             {
@@ -219,9 +297,13 @@ public sealed partial class DenTools
             try
             {
                 var made = SessionWritten.Checkpoint(history, new CheckpointRequest($"Unfreeze book '{target.Key}' of universe '{universeKey}'")).Result;
-                return made is { IsAvailable: true, Value: { } entry }
-                    ? Unfrozen(FreezeSnapshot.Checkpointed, entry.Id, $"{done} Checkpointed the den ({Short(entry.Id)}).")
-                    : Unfrozen(FreezeSnapshot.NotCheckpointed, null, $"{done} No checkpoint was made: {made.Reason ?? "there was nothing to record."}");
+                if (made is { IsAvailable: true, Value: { } entry })
+                {
+                    others = entry.Changes.Count(c => !InFolder(c, target.Path));
+                    return Unfrozen(FreezeSnapshot.Checkpointed, entry.Id, $"{done} Checkpointed the den ({Short(entry.Id)}).");
+                }
+
+                return Unfrozen(FreezeSnapshot.NotCheckpointed, null, $"{done} No checkpoint was made: {made.Reason ?? "there was nothing to record."}");
             }
             catch (HistoryException e)
             {
@@ -284,6 +366,14 @@ public sealed partial class DenTools
     private static string Checkpointed(HistoryEntry? made, bool sentence = false) =>
         made is null ? "" : sentence ? $" Checkpointed the den ({Short(made.Id)})." : $" and checkpointed ({Short(made.Id)})";
 
+    /// <summary>What the checkpoint took in from outside the book, counted, never named (a pinned server mustn't name other universes' files).</summary>
+    private static string Others(int others) => others switch
+    {
+        0 => "",
+        1 => " The checkpoint also recorded 1 other changed file outside the book.",
+        _ => $" The checkpoint also recorded {others} other changed files outside the book.",
+    };
+
     private static string Short(string id) => id.Length > 7 ? id[..7] : id;
 
     private static string StatusWord(BookStatus status) => status == BookStatus.Final ? "final" : "draft";
@@ -295,7 +385,7 @@ public static class FreezeSnapshot
     /// <summary>Freeze: the snapshot was tagged (after a checkpoint, if one was needed).</summary>
     public const string Tagged = "tagged";
 
-    /// <summary>Freeze: the book was already final, checkpointed, and tagged, so nothing was done.</summary>
+    /// <summary>Freeze: a freeze tag already holds the book as it is, so no tag was added.</summary>
     public const string AlreadyTagged = "already_tagged";
 
     /// <summary>The den has no history, so no snapshot was taken; the book's status still changed.</summary>
@@ -307,7 +397,7 @@ public static class FreezeSnapshot
     /// <summary>Freeze: the checkpoint stands, but the tag failed. Freezing again adds it.</summary>
     public const string TagFailed = "tag_failed";
 
-    /// <summary>Freeze: the history can't make tags, or had nothing to tag, so no tag was added.</summary>
+    /// <summary>Freeze: the history can't make tags, or no checkpoint holds the book as it is, so no tag was added.</summary>
     public const string NotTagged = "not_tagged";
 
     /// <summary>Unfreeze: the change was checkpointed.</summary>

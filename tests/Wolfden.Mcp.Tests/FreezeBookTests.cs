@@ -15,6 +15,7 @@ public sealed class FreezeBookTests : IDisposable
 {
     private const string BookFile = "universes/dracula/books/dracula/book.md";
     private const string LucyFile = "universes/dracula/books/dracula/entities/characters/lucy-westenra.md";
+    private const string PurfleetFile = "universes/dracula/entities/locations/purfleet.md";
     private const string Tag = "book/dracula/dracula/final";
 
     private readonly TempDen _den = TempDen.Dracula();
@@ -110,10 +111,12 @@ public sealed class FreezeBookTests : IDisposable
         RunGit("init", "--quiet");
         var start = Commit("Start the Dracula notes");
         _den.Write(LucyFile, _den.Read(LucyFile) + "\nShe walks in her sleep.\n");
+        _den.Write(PurfleetFile, _den.Read(PurfleetFile) + "\nCarfax is here.\n");
         var tools = WithGit();
         var status = tools.GetBookFreeze("dracula");
         Assert.True(status.History);
         Assert.Equal(Tag, status.NextTag);
+        Assert.Equal(1, status.OtherChanges);
 
         var frozen = tools.FreezeBook("dracula", status.Hash);
 
@@ -124,9 +127,13 @@ public sealed class FreezeBookTests : IDisposable
         Assert.Equal(head, frozen.Checkpoint);
         Assert.Equal(head, RunGit("rev-parse", $"{Tag}^{{commit}}").Trim());
         Assert.Equal("Freeze book 'dracula' of universe 'dracula'", RunGit("log", "-1", "--format=%B").TrimEnd());
-        Assert.Equal([BookFile, LucyFile], RunGit("show", "--name-only", "--format=", "HEAD").Split('\n', StringSplitOptions.RemoveEmptyEntries).Order(StringComparer.Ordinal));
+        Assert.Equal([BookFile, LucyFile, PurfleetFile], RunGit("show", "--name-only", "--format=", "HEAD").Split('\n', StringSplitOptions.RemoveEmptyEntries).Order(StringComparer.Ordinal));
         Assert.Contains("\nstatus: final\n", RunGit("show", $"{Tag}:{BookFile}"), StringComparison.Ordinal);
-        Assert.Equal($"Froze book 'Dracula': book.md now says status: final. Checkpointed the den ({head[..7]}). Tagged the snapshot '{Tag}'.", frozen.Message);
+        Assert.Equal(1, frozen.OtherFiles);
+        Assert.Equal(
+            $"Froze book 'Dracula': book.md now says status: final. Checkpointed the den ({head[..7]}). Tagged the snapshot '{Tag}'. " +
+            "The checkpoint also recorded 1 other changed file outside the book.",
+            frozen.Message);
 
         // Freezing again: it's done, so nothing happens.
         var again = tools.FreezeBook("dracula", null);
@@ -237,6 +244,89 @@ public sealed class FreezeBookTests : IDisposable
         Assert.Equal(frozenAt, resumed.Checkpoint);
         Assert.Equal(frozenAt, RunGit("rev-parse", $"{Tag}^{{commit}}").Trim());
         Assert.Equal($"Book 'Dracula' was already final. Tagged its snapshot '{Tag}'.", resumed.Message);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-13")]
+    public void ABookMarkedFinalByHandIsTaggedWithItsLatestContent()
+    {
+        RunGit("init", "--quiet");
+        _den.Write(BookFile, _den.Read(BookFile).Replace("status: draft\n", "status: final\n", StringComparison.Ordinal));
+        var markedFinal = Commit("Mark Dracula final by hand");
+
+        // An editor outside Wolfden doesn't enforce the freeze.
+        _den.Write(LucyFile, _den.Read(LucyFile) + "\nA late fix.\n");
+        var later = Commit("A late fix to Lucy");
+        var tools = WithGit();
+        Assert.True(tools.GetBookFreeze("dracula").Unfinished);
+
+        var frozen = tools.FreezeBook("dracula", null);
+
+        Assert.False(frozen.Changed);
+        Assert.Equal(FreezeSnapshot.Tagged, frozen.Snapshot);
+        Assert.Equal(later, frozen.Checkpoint);
+        Assert.NotEqual(markedFinal, RunGit("rev-parse", $"{Tag}^{{commit}}").Trim());
+        Assert.Contains("A late fix.", RunGit("show", $"{Tag}:{LucyFile}"), StringComparison.Ordinal);
+        Assert.False(tools.GetBookFreeze("dracula").Unfinished);
+
+        // A change in the book's folder that isn't checkpointed yet goes in a new checkpoint and tag.
+        _den.Write(LucyFile, _den.Read(LucyFile) + "\nAnother fix.\n");
+        Assert.True(tools.GetBookFreeze("dracula").Unfinished);
+        var again = tools.FreezeBook("dracula", null);
+
+        Assert.Equal(FreezeSnapshot.Tagged, again.Snapshot);
+        Assert.Equal(Tag + "-2", again.Tag);
+        var head = RunGit("rev-parse", "HEAD").Trim();
+        Assert.NotEqual(later, head);
+        Assert.Equal(head, RunGit("rev-parse", $"{Tag}-2^{{commit}}").Trim());
+        Assert.Contains("Another fix.", RunGit("show", $"{Tag}-2:{LucyFile}"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-13")]
+    public void RefreezingAfterAnUnfreezeWhoseCheckpointFailedSaysTheSnapshotAlreadyHoldsIt()
+    {
+        RunGit("init", "--quiet");
+        Commit("Start the Dracula notes");
+        var tools = WithGit();
+        var first = tools.FreezeBook("dracula", null);
+        WriteHook("pre-commit", "#!/bin/sh\nexit 1\n");
+
+        var unfrozen = tools.UnfreezeBook("dracula", null);
+        Assert.Equal(FreezeSnapshot.CheckpointFailed, unfrozen.Snapshot);
+        Assert.Contains("\nstatus: draft\n", _den.Read(BookFile), StringComparison.Ordinal);
+
+        var refrozen = tools.FreezeBook("dracula", null);
+
+        Assert.True(refrozen.Changed);
+        Assert.Equal(FreezeSnapshot.AlreadyTagged, refrozen.Snapshot);
+        Assert.Equal(Tag, refrozen.Tag);
+        Assert.Equal(first.Checkpoint, refrozen.Checkpoint);
+        Assert.Equal(
+            $"Froze book 'Dracula' again: book.md says status: final, and the snapshot tagged '{Tag}' already holds the book as it is, so no tag was added.",
+            refrozen.Message);
+        Assert.Equal(Tag + "\n", RunGit("tag", "--list"));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-12")]
+    public void FreezingAndUnfreezingKeepTheRestOfBookMdByteForByte()
+    {
+        var original = "﻿" + _den.Read(BookFile).TrimStart('﻿')
+            .Replace("status: draft\n", "status: draft  # until the proofs are back\n", StringComparison.Ordinal)
+            .ReplaceLineEndings("\r\n");
+        var path = Path.Combine(_den.Root, BookFile.Replace('/', Path.DirectorySeparatorChar));
+        File.WriteAllText(path, original, new UTF8Encoding(false));
+        var before = File.ReadAllBytes(path);
+        var tools = new DenTools(_den.Root);
+
+        tools.FreezeBook("dracula", null);
+        Assert.Equal(
+            new UTF8Encoding(false).GetBytes(original.Replace("status: draft  #", "status: final  #", StringComparison.Ordinal)),
+            File.ReadAllBytes(path));
+
+        tools.UnfreezeBook("dracula", null);
+        Assert.Equal(before, File.ReadAllBytes(path));
     }
 
     [Fact]

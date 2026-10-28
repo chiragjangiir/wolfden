@@ -184,6 +184,7 @@ function answer(path: string, params: URLSearchParams, at: string | null, option
         reason: null,
         nextTag: 'book/dracula/dracula/final',
         unfinished: false,
+        otherChanges: 0,
       }
     case '/api/positions':
       return { version: 1, universe: 'dracula', count: positions.length, positions } satisfies PositionsResult

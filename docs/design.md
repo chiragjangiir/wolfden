@@ -326,8 +326,8 @@ are unique only within a universe (format.md F-KEY-5).
 
 - **Freezing** takes three steps, in this order: set `status: final` in
   the book's `book.md` (edited in place, the rest of the file kept);
-  checkpoint the den (§6), a commit that holds that change and, like any
-  checkpoint, the whole den; then tag that commit. The tag then always
+  checkpoint (§6), a commit that holds that change; then tag that
+  commit. The tag then always
   names a snapshot where the book already says it's final. Without
   history, the first step alone is the freeze, and the result says no
   snapshot was taken.
@@ -354,16 +354,27 @@ are unique only within a universe (format.md F-KEY-5).
 v0 behaviour, not recorded decisions (#31): a freeze or unfreeze takes
 the hash of the `book.md` it's based on and is refused with `stale_file`
 if the file has changed since, as other writes are (§8); the CLI reads
-the file and writes it in one go, so it passes none. The tag's number is
-one more than the highest of the book's freeze tags already there, so
-the highest is always the latest freeze. Freezing a book that's already
-final tells "done" from "a step is missing" by its history alone: if the
-latest checkpoint doesn't hold `book.md` as it is now, it checkpoints and
-tags, as a first freeze would; if it does, it tags the latest checkpoint
-that changed `book.md` (the one that made it final), unless one of the
-book's freeze tags already names that checkpoint, in which case it does
-nothing. The web UI uses the same test to offer **Finish freezing** on a
-final book whose snapshot isn't finished.
+the file and writes it in one go, so it passes none. The checkpoint (of
+a freeze or an unfreeze) records the whole den, as every checkpoint does
+by default (§8, "Files only; commits by `checkpoint`"), so it can take in
+other work not checkpointed yet; the confirmation says how many other
+changed files it will record, and the result how many it did, counted
+and never named (so a pinned server names nothing in another universe).
+The tag's number is one more than the highest of the book's freeze tags
+already there, so the highest is always the latest freeze. Freezing a
+book that's already final tells "done" from "a step is missing" by its
+history and the whole book, not `book.md` alone, since a writer can mark
+a book final by hand and edit it after: if anything in the book's folder
+(`book.md`, the outline, its notes) differs from the latest checkpoint,
+it checkpoints; then it tags the latest checkpoint that changed the
+book's folder, which holds the book as it is now, unless one of the
+book's freeze tags already names that checkpoint or a later one, in
+which case it does nothing. A tag from an earlier freeze doesn't count,
+so a book unfrozen and frozen again gets its own tag. If git records
+nothing of the book (it ignores `book.md`, say), no tag is added, since
+no checkpoint would hold the book final. The web UI uses the same test
+to offer **Finish freezing** on a final book whose snapshot isn't
+finished.
 
 ## 6. History and versioning
 
@@ -1800,7 +1811,9 @@ docs/
     the book's name, status, the hash of its `book.md`, whether the den
     has history (and why not), for a draft book the tag a freeze would
     add (`nextTag`), and for a final one whether its freeze is
-    `unfinished` (by the test in §5). `POST /api/book/freeze` and
+    `unfinished` (by the test in §5), and how many changed files outside
+    the book a checkpoint now would also record (`otherChanges`).
+    `POST /api/book/freeze` and
     `POST /api/book/unfreeze` take `{book, universe, expectedHash}` as
     `application/json` and answer with what was done: the status now,
     `snapshot` (`tagged`, `already_tagged`, `no_history`,
@@ -1812,15 +1825,18 @@ docs/
     `stale_file`. They write through the editing endpoints' `DenTools`,
     so one write runs at a time and the save lands in the server's
     ledger, and the checkpoint goes through the same ledger as the
-    checkpoint dialog's. The checkpoint's result names only its id, not
-    its files, so a pinned server names nothing in other universes.
+    checkpoint dialog's. The result names the checkpoint only by its id,
+    and counts the files it recorded outside the book (`otherFiles`)
+    without naming them, so a pinned server names nothing in other
+    universes.
   - **The page.** The book's page has **Freeze…** (or **Unfreeze…** for
     a final book) under its title. It asks first, in the page, saying
     what will happen: what can't be edited, and, with history, the
-    checkpoint and the tag it will add (or, without, that no snapshot
-    is taken). Escape or Cancel closes it. Afterwards it shows the
-    result's message, marked as a warning when a step failed, and every
-    cached answer is asked again, so the book's notes lose (or regain)
+    checkpoint and the tag it will add, with the count of other changed
+    files it takes in (or, without, that no snapshot is taken). Escape
+    or Cancel closes it. Afterwards it shows the result's message,
+    marked as a warning when a step failed, and every cached answer is
+    asked again (the control waits only for its own status), so the book's notes lose (or regain)
     their edit controls. A final book whose freeze is unfinished also
     has **Finish freezing…**, which freezes again.
 - **Parsing round-trips.** Read-modify-write keeps formatting, ordering, and

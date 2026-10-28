@@ -259,7 +259,8 @@ Freezing does three things, in order:
 1. It marks the book `status: final` in its `book.md`. That's the freeze
    itself.
 2. If the den has history, it makes a checkpoint of the whole den, so
-   anything you hadn't checkpointed yet goes in too.
+   anything you hadn't checkpointed yet goes in too. Before you
+   confirm, Wolfden says how many other changed files that is.
 3. It tags that checkpoint `book/<universe>/<book>/final`, such as
    `book/dracula/dracula/final`: a snapshot you can always come back to,
    because Wolfden never moves or deletes a tag.
@@ -278,7 +279,8 @@ each version you froze is kept.
 still frozen, and Wolfden says what went wrong. Fix that, then freeze the
 book again: the page offers **Finish freezing…**, and `wolfden freeze`
 does the same. It makes only the checkpoint and the tag that are
-missing.
+missing. The same goes for a book you marked `status: final` by hand:
+freezing it takes a snapshot of the book as it is now.
 
 AI assistants can't freeze or unfreeze a book. If one tries to edit a
 frozen book, it's told the book is frozen, and should ask you.

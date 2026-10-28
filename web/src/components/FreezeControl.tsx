@@ -28,8 +28,12 @@ export function FreezeControl({ universe, book }: { universe: string; book: stri
       setConfirming(null)
       setOutcome(result)
       // The book's status reaches every page in it: its notes' edit controls, the
-      // chapters, the checkpoint indicator, and the history.
-      await client.invalidateQueries()
+      // chapters, the checkpoint indicator, and the history. Those refetch in the
+      // background; only this control's own status is waited for, so it never
+      // offers the old action on a stale hash.
+      const own = bookFreezeQuery(universe, book).queryKey
+      void client.invalidateQueries({ predicate: (q) => q.queryKey[0] !== own[0] })
+      await client.invalidateQueries({ queryKey: own })
     },
     onError: async () => {
       // book.md may have changed: ask again, so a retry is based on the file as it is now.
@@ -142,6 +146,17 @@ export function FreezeControl({ universe, book }: { universe: string; book: stri
 const LABEL: Record<Action, string> = { freeze: 'Freeze book', finish: 'Finish freezing', unfreeze: 'Unfreeze book' }
 const BUSY: Record<Action, string> = { freeze: 'Freezing…', finish: 'Freezing…', unfreeze: 'Unfreezing…' }
 
+/** The other changed files the checkpoint takes in, counted (never named), as the checkpoint dialog counts other universes' files. */
+function others(current: BookFreeze): string {
+  if (!current.history || current.otherChanges === 0) {
+    return ''
+  }
+
+  return current.otherChanges === 1
+    ? ' The checkpoint also records 1 other changed file outside this book.'
+    : ` The checkpoint also records ${current.otherChanges} other changed files outside this book.`
+}
+
 /** What the confirmation says the action will do. */
 function prompt(action: Action, current: BookFreeze): ReactNode {
   switch (action) {
@@ -151,6 +166,7 @@ function prompt(action: Action, current: BookFreeze): ReactNode {
           Unfreeze {current.name}? Its notes, chapters, and outline can be edited again. book.md will say <code>status: draft</code>
           {current.history ? ', and Wolfden makes a checkpoint, so the history shows when the book was reopened.' : '.'} Its freeze tags stay
           where they are.
+          {others(current)}
         </>
       )
     case 'finish':
@@ -158,6 +174,7 @@ function prompt(action: Action, current: BookFreeze): ReactNode {
         <>
           Finish freezing {current.name}? It's already final, but its snapshot isn't finished: Wolfden makes the checkpoint and adds the tag that
           are missing.
+          {others(current)}
         </>
       )
     default:
@@ -168,6 +185,7 @@ function prompt(action: Action, current: BookFreeze): ReactNode {
           {current.history
             ? `Wolfden then makes a checkpoint of the whole den${current.nextTag ? ` and tags it ${current.nextTag}` : ''}, a snapshot to come back to.`
             : 'This den has no history, so no snapshot is taken.'}
+          {others(current)}
         </>
       )
   }

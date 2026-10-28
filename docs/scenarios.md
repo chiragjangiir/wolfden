@@ -2540,7 +2540,9 @@ adds more notes. Another den in the same repository also has a book
   den, "Freeze book 'ember' of universe 'vael'", which holds that change
   and anything else the writer hadn't checkpointed, and tags it
   `book/vael/ember/final`, so the tag names a snapshot where Ember
-  already says it's final. The result names the checkpoint and the tag.
+  already says it's final. The result names the checkpoint and the tag,
+  and counts the changed files outside the book that the checkpoint took
+  in, without naming them.
   Freezing Ember again does nothing, and says it's already frozen and
   tagged.
 - Freezing the other den's Ember adds `book/vael/ember/final-2`, since
@@ -2656,12 +2658,15 @@ unfreeze the book, fix the note, and freeze it again.
   freeze's tag stays where it is. Freezing again adds
   `book/dracula/dracula/final-2` on the new checkpoint, so each freeze
   keeps its own snapshot. Unfreezing a book that isn't frozen changes
-  nothing and says so.
+  nothing and says so. Freezing then unfreezing gives back `book.md`
+  byte for byte: a byte order mark, CRLF line endings, and a comment
+  after `status` are kept.
 
 Spec: F-BOOK-1, design.md §5 (maintainer decision, 2026-10-28, #31).
 Covered by:
 `FreezeBookTests.UnfreezingCheckpointsWithoutATagAndFreezingAgainAddsTheNextTag`,
-`FreezeBookTests.UnfreezingWritesStatusDraftRatherThanRemovingTheLine`.
+`FreezeBookTests.UnfreezingWritesStatusDraftRatherThanRemovingTheLine`,
+`FreezeBookTests.FreezingAndUnfreezingKeepTheRestOfBookMdByteForByte`.
 
 ### SC-HIST-13. Git refuses my freeze's checkpoint or tag
 
@@ -2677,10 +2682,21 @@ time, git can't make the tag.
   the writer has checkpointed other work since.
 - Until a freeze is finished, the book's freeze status says it's
   unfinished, so the web UI can offer to finish it.
+- A book the writer marked final by hand, then edited in another
+  editor, is tagged at the latest checkpoint that changed anything in
+  the book's folder, so the snapshot holds the later edit; an edit in
+  the folder that isn't checkpointed yet is checkpointed first, and
+  tagged `final-2` if an older tag exists.
+- If an unfreeze's checkpoint failed (so the latest checkpoint still
+  holds the book final and tagged), freezing again writes
+  `status: final` back and says the tagged snapshot already holds the
+  book as it is, so no tag is added.
 
 Spec: design.md §5 (maintainer decision, 2026-10-25, #31). Covered by:
 `FreezeBookTests.ACheckpointGitRefusesLeavesTheBookFinalAndFreezingAgainResumes`,
-`FreezeBookTests.ATagGitRefusesLeavesTheCheckpointAndFreezingAgainTagsIt`.
+`FreezeBookTests.ATagGitRefusesLeavesTheCheckpointAndFreezingAgainTagsIt`,
+`FreezeBookTests.ABookMarkedFinalByHandIsTaggedWithItsLatestContent`,
+`FreezeBookTests.RefreezingAfterAnUnfreezeWhoseCheckpointFailedSaysTheSnapshotAlreadyHoldsIt`.
 
 ## WEB: the den in a browser
 
@@ -3789,9 +3805,13 @@ The writer opens Dracula's page and freezes it, then unfreezes it.
   refused (`stale_file`), the prompt shows why, and the page looks at
   the book again. The endpoints take only `book`, `universe`, and
   `expectedHash`, as JSON; `/api/book/unfreeze` answers POST only.
+- The prompt counts the other changed files the checkpoint will take
+  in, without naming them. A server pinned to one universe won't show
+  or freeze another universe's book.
 
 Spec: design.md §5, §9 (#31). Covered by:
 `FreezeEndpointTests.FreezingCheckpointsAndTagsAndUnfreezingCheckpointsAndTheBooksNotesFollow`,
 `FreezeEndpointTests.WithoutHistoryFreezingSaysNoSnapshotWasTaken`,
 `FreezeEndpointTests.AStaleOrMalformedFreezeIsRefusedAndWritesNothing`,
+`FreezeEndpointTests.APinnedServerWontShowOrFreezeAnotherUniversesBook`,
 `Freeze.test.tsx` (web).

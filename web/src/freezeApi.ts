@@ -26,6 +26,8 @@ export interface BookFreeze {
   nextTag: string | null
   /** For a final book in a den with history: its snapshot isn't finished (git refused the checkpoint or the tag), and freezing again finishes it. */
   unfinished: boolean
+  /** With history, how many changed files outside the book a checkpoint now would also record (counted, never named). */
+  otherChanges: number
 }
 
 /** What a step in the den's history did. */
@@ -57,6 +59,8 @@ export interface FreezeResult {
   message: string
   warnings: DiagnosticView[]
   idAdded: string | null
+  /** How many files outside the book the checkpoint also recorded. */
+  otherFiles: number
 }
 
 /** Snapshots where a step in the history failed: the status changed, but the writer has something to do. */

@@ -155,6 +155,26 @@ public sealed class FreezeEndpointTests : IDisposable
         Assert.Equal(before, den.Read(BookFile));
     }
 
+    [Fact]
+    [Trait("Scenario", "SC-WEB-66")]
+    public async Task APinnedServerWontShowOrFreezeAnotherUniversesBook()
+    {
+        var den = Den(TempDen.Starfall());
+        const string Tide = "universes/drift/books/tide/book.md";
+        var before = den.Read(Tide);
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root) { PinnedUniverse = "starfall" });
+
+        using var get = await server.Client.GetAsync("/api/book/freeze?book=tide&universe=drift", Token);
+        Assert.Equal(HttpStatusCode.BadRequest, get.StatusCode);
+        var (bare, _) = await PostAsync(server, "/api/book/freeze", new { book = "tide", expectedHash = "0" });
+        Assert.Equal(HttpStatusCode.NotFound, bare);
+        var (named, _) = await PostAsync(server, "/api/book/freeze", new { book = "tide", universe = "drift", expectedHash = "0" });
+        Assert.Equal(HttpStatusCode.BadRequest, named);
+
+        Assert.Equal(before, den.Read(Tide));
+        Assert.Equal("ash", (await server.GetJsonAsync("/api/book/freeze?book=ash", HttpStatusCode.OK)).GetProperty("book").GetString());
+    }
+
     // ------------------------------------------------------------ helpers
 
     private TempDen Den(TempDen den)

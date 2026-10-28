@@ -25,6 +25,7 @@ function freezeStatus(extra: Partial<BookFreeze> = {}): BookFreeze {
     reason: null,
     nextTag: TAG,
     unfinished: false,
+    otherChanges: 0,
     ...extra,
   }
 }
@@ -45,6 +46,7 @@ function result(extra: Partial<FreezeResult> = {}): FreezeResult {
     message: `Froze book 'Dracula': book.md now says status: final. Checkpointed the den (c2aaaaa). Tagged the snapshot '${TAG}'.`,
     warnings: [],
     idAdded: null,
+    otherFiles: 0,
     ...extra,
   }
 }
@@ -120,6 +122,15 @@ describe('SC-WEB-66: I freeze and unfreeze a book on its page', () => {
 
     // The page catches up: the book is final now, and offers to unfreeze it.
     expect(await screen.findByRole('button', { name: 'Unfreeze…' })).toBeTruthy()
+  })
+
+  it('counts the other changed files the checkpoint takes in, without naming them', async () => {
+    stubFreeze(() => freezeStatus({ otherChanges: 3 }), () => result())
+    await openBook()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Freeze…' }))
+
+    expect(confirmPrompt().textContent).toContain('The checkpoint also records 3 other changed files outside this book.')
   })
 
   it('says no snapshot is taken in a den without history', async () => {
