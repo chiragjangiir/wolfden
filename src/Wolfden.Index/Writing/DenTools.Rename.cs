@@ -50,9 +50,11 @@ public sealed partial class DenTools
     public WriteResult RenameEntity(string entity, string newName, string expectedHash, bool keepOldName = false, string? universe = null, bool allowRelinks = false)
     {
         var hash = RequireHash(expectedHash);
-        if (string.IsNullOrWhiteSpace(newName) || newName.Any(char.IsControl))
+        if (NewEntity.NameProblem(newName) is { } problem)
         {
-            throw new DenToolException(ToolErrorCodes.BadArgument, "Give the entity's new name in 'new_name': one line of text.");
+            throw new DenToolException(
+                ToolErrorCodes.BadArgument,
+                $"Give the entity's new name in 'new_name': one line of text, at most {NewEntity.MaxNameLength} characters. That one can't be used: {problem}.");
         }
 
         newName = newName.Trim();

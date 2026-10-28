@@ -131,6 +131,22 @@ public sealed class CreateEndpointTests : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, noBook);
         Assert.Equal("unknown_scope", noBookJson.GetProperty("code").GetString());
 
+        // A 'from' that doesn't resolve (F-POS-4) would leave the note out of every view: refused.
+        foreach (var from in new[] { "dracul:5", "dracula:999", "not a position" })
+        {
+            var (badFrom, badFromJson) = await PostAsync(server, "/api/entity/create", new { type = "character", name = "Someone", from });
+            Assert.Equal(HttpStatusCode.BadRequest, badFrom);
+            Assert.Equal("bad_position", badFromJson.GetProperty("code").GetString());
+        }
+
+        // A name that would break its heading line, or runs on.
+        foreach (var name in new[] { "x\u2028## Injected", "x\u2029y", new string('a', 201) })
+        {
+            var (badName, badNameJson) = await PostAsync(server, "/api/entity/create", new { type = "character", name });
+            Assert.Equal(HttpStatusCode.BadRequest, badName);
+            Assert.Equal("bad_argument", badNameJson.GetProperty("code").GetString());
+        }
+
         var (form, _) = await PostAsync(server, "/api/entity/create", "type=character&name=Someone", "application/x-www-form-urlencoded");
         Assert.Equal(HttpStatusCode.UnsupportedMediaType, form);
 

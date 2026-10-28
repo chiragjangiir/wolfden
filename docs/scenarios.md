@@ -1285,8 +1285,12 @@ dracula:8`.
   `--from` sets where the reader first meets it, and `--slug` the file
   name. `--json` prints the write result.
 - A note in a final book, a type no enabled pack defines (the error lists
-  the types), a slug that's taken, an unknown book, a missing or blank
-  name, or a `den.yaml` that doesn't load exits 2 and writes nothing.
+  the types), a slug that's taken, an unknown book, a `--from` that
+  doesn't resolve in the universe (`dracul:5`, `dracula:999`: written, it
+  would leave the note out of every canon view, F-POS-4), a missing or
+  blank name, one with a line break in it (U+2028 and U+2029 included),
+  or one over 200 characters, or a `den.yaml` that doesn't load exits 2
+  and writes nothing.
 
 Spec: types.md F-TPL-6, design.md §7 (#29). Covered by:
 `NewCommandTests.ANewNoteComesFromItsTemplateInTheUniverseWithANewId`,
@@ -1731,10 +1735,21 @@ Mina from Buda-Pesth, to the book, from chapter 8.
   gets `sister-agatha-2.md`; a slug asked for that's taken is refused
   (`already_exists`), and so is a type no pack defines (`unknown_type`).
   A name with nothing to make a slug from uses the type key.
+- A `from` that doesn't resolve in the universe (`dracul:5`,
+  `dracula:999`) is refused (`bad_position`), since the note would be in
+  no canon view (F-POS-4); a bare book key resolves. A book's note whose
+  `from` is in another book is made, with the F-ENT-6 warning.
+- A name is one line of at most 200 characters: one with a control
+  character or a Unicode line or paragraph separator (U+2028, U+2029),
+  which would split its `# name` heading, or a longer one, is refused
+  (`bad_argument`), by `create_entity`, `add_idea`, `copy_entity`, and
+  `rename_entity` alike. A 200-character name gets a 64-character slug.
 
-Spec: types.md F-TPL-6, F-TPL-7, F-ID-6. Covered by:
+Spec: types.md F-TPL-6, F-TPL-7, F-ID-6, format.md F-POS-4, F-ENT-6. Covered by:
 `WriteToolTests.ANewEntityComesFromItsTemplateWithAnIdNoFileUses`,
-`WriteToolTests.ASlugIsMadeFromTheNameAsTheTemplateRuleSays`.
+`WriteToolTests.ASlugIsMadeFromTheNameAsTheTemplateRuleSays`,
+`WriteToolTests.ANewEntitysFromMustResolveAndOneInAnotherBookIsAWarning`,
+`WriteToolTests.ANameIsOneLineOfAtMost200Characters`.
 
 ### SC-MCP-16. My assistant changes a note's fields
 
@@ -3867,14 +3882,21 @@ then Character, names her "Sister Agatha", and creates her.
   indicator ask again. Leaving the page ends the notice.
 - Each type's list in the contents tree has **New <type>**, with the type
   and that place filled in; both can still be changed.
-- Viewing at a story position, the form offers "Enters the story at
-  <position>", off by default; ticked, the note gets `from:` that
-  position. Escape or Cancel closes the form, sends nothing, and returns
-  focus to what opened it.
+- Viewing at a story position the universe has, the form offers "Enters
+  the story at <position>", off by default; ticked, the note gets `from:`
+  that position. It's offered only where the chosen place can see the
+  position (the universe, the series it's in, or its own book), so
+  choosing another book takes it away and clears it; a position the
+  universe doesn't have is never offered. Escape or Cancel closes the
+  form, sends nothing, and returns focus to what opened it.
+- After a create every cached answer is asked again, as after any save,
+  and the checkpoint dialog lists the new file as added and "saved in
+  Wolfden".
 
 Spec: types.md F-TPL-6, design.md §9 (#29). Covered by:
 `CreateEndpointTests.TheTypesAreTheDensEnabledTypesBuiltInAndDenLocal`,
 `CreateEndpointTests.ANewNoteIsMadeFromItsTemplateWhereTheWriterSaysAndTheAnswerNamesIt`,
+`CheckpointEndpointTests.ANoteCreatedThroughThisServerIsMarkedSavedHere`,
 `WriteToolTests.TheTypesANewEntityCanBeMadeFromAreTheEnabledOnesByName` (MCP),
 `NewEntity.test.tsx` (web).
 
@@ -3886,9 +3908,15 @@ Spec: types.md F-TPL-6, design.md §9 (#29). Covered by:
   open with the name kept, and nothing is written.
 - `POST /api/entity/create` takes only `type`, `name`, `universe`,
   `series`, `book`, and `from`, as JSON; a blank name, a series and a
-  book together, a type no enabled pack defines (`unknown_type`), or a
-  book the universe doesn't have (`unknown_scope`) is refused and writes
-  nothing. It answers POST only, and `/api/types` GET only.
+  book together, a type no enabled pack defines (`unknown_type`), a
+  book the universe doesn't have (`unknown_scope`), a `from` that doesn't
+  resolve in the universe (`bad_position`, F-POS-4), or a name with a
+  line break (U+2028 and U+2029 included) or over 200 characters
+  (`bad_argument`) is refused and writes nothing. It answers POST only,
+  and `/api/types` GET only.
+- A book's note given a `from` in another book is made, with the F-ENT-6
+  warning in the result. A second Create while one is in flight sends
+  nothing.
 - A server pinned to one universe creates only in it.
 
 Spec: format.md F-BOOK-1, design.md §9 (#29). Covered by:

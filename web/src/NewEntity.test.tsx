@@ -213,7 +213,7 @@ describe('SC-WEB-67: I make a new note from its type', () => {
     await screen.findByRole('heading', { name: 'Dracula', level: 1 })
 
     const form = await openFromMenu('Character')
-    const check = within(form).getByRole('checkbox', { name: 'Enters the story at Dracula chapter 3' }) as HTMLInputElement
+    const check = (await within(form).findByRole('checkbox', { name: 'Enters the story at Dracula chapter 3' })) as HTMLInputElement
     expect(check.checked).toBe(false)
     fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Sister Agatha' } })
 
@@ -221,6 +221,67 @@ describe('SC-WEB-67: I make a new note from its type', () => {
     fireEvent.click(within(form).getByRole('button', { name: 'Create' }))
 
     await waitFor(() => expect(posted).toEqual([{ type: 'character', name: 'Sister Agatha', universe: 'dracula', book: 'dracula', from: 'dracula:3' }]))
+  })
+
+  it('offers the position only where the chosen place can see it, and clears it when it can’t', async () => {
+    const twoBooks = {
+      ...hierarchy,
+      universe: {
+        ...hierarchy.universe,
+        books: [
+          ...hierarchy.universe.books,
+          { ...hierarchy.universe.books[0], key: 'guest', name: "Dracula's Guest", id: 'B2', path: 'universes/dracula/books/guest', chapters: [] },
+        ],
+      },
+    }
+    const { posted } = stubCreate(() => result(), twoBooks)
+    renderApp('/u/dracula/b/dracula?at=dracula:3')
+    await screen.findByRole('heading', { name: 'Dracula', level: 1 })
+
+    const form = await openFromMenu('Character')
+    fireEvent.click(await within(form).findByRole('checkbox', { name: 'Enters the story at Dracula chapter 3' }))
+
+    // Another book can't see Dracula chapter 3: the box goes, and so does the tick.
+    const where = within(form).getByLabelText('Where it goes')
+    fireEvent.change(where, { target: { value: 'book:guest' } })
+    expect(within(form).queryByRole('checkbox')).toBeNull()
+    expect(within(form).getByText("It's canon from the start of Dracula's Guest.")).toBeTruthy()
+
+    // The universe can: the box is back, unticked.
+    fireEvent.change(where, { target: { value: 'universe:dracula' } })
+    expect((within(form).getByRole('checkbox') as HTMLInputElement).checked).toBe(false)
+
+    fireEvent.change(where, { target: { value: 'book:guest' } })
+    fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'The guest' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Create' }))
+    await waitFor(() => expect(posted).toEqual([{ type: 'character', name: 'The guest', universe: 'dracula', book: 'guest' }]))
+  })
+
+  it('offers no position the universe doesn’t have', async () => {
+    stubCreate()
+    renderApp('/u/dracula/b/dracula?at=dracula:99')
+    await screen.findAllByText(/Dracula/)
+
+    const form = await openFromMenu('Character')
+
+    await waitFor(() => expect((within(form).getByLabelText('Where it goes') as HTMLSelectElement).value).toBe('book:dracula'))
+    expect(within(form).queryByRole('checkbox')).toBeNull()
+    expect(form.textContent).not.toContain('dracula:99')
+  })
+
+  it('asks for everything again after a create, as every save does', async () => {
+    const { calls } = stubCreate()
+    renderApp('/u/dracula/b/dracula')
+    await screen.findByRole('heading', { name: 'Dracula', level: 1 })
+    const form = await openFromMenu('Character')
+    fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Sister Agatha' } })
+    await waitFor(() => expect(calls.some((c) => c.startsWith('/api/positions'))).toBe(true))
+    const before = calls.filter((c) => c.startsWith('/api/positions') || c.startsWith('/api/types')).length
+
+    fireEvent.click(within(form).getByRole('button', { name: 'Create' }))
+
+    // Not only the lists: positions and types too, which a narrower refresh would leave cached.
+    await waitFor(() => expect(calls.filter((c) => c.startsWith('/api/positions') || c.startsWith('/api/types')).length).toBeGreaterThan(before))
   })
 })
 

@@ -6,6 +6,7 @@ using Wolfden.Core.Editing;
 using Wolfden.Core.Entities;
 using Wolfden.Core.History;
 using Wolfden.Core.Links;
+using Wolfden.Core.Positions;
 using Wolfden.Core.Structure;
 using Wolfden.Core.Types;
 using Wolfden.Core.Yaml;
@@ -605,6 +606,7 @@ public sealed partial class DenTools
                     ToolErrorCodes.Frozen, $"Book '{frozen.Key}' is final (frozen), so nothing can be added to it until it's unfrozen (F-BOOK-1).");
             }
 
+            CheckFrom(u, from);
             var type = structure.Types.Find(typeKey) ?? throw new DenToolException(
                 ToolErrorCodes.UnknownType,
                 $"No enabled pack defines the type '{typeKey}', so there's no template to make it from. Enabled types: " +
@@ -653,9 +655,47 @@ public sealed partial class DenTools
                 effects.Add($"It has no 'from', so it enters canon at {scope.StartDescription} (F-ENT-6).");
             }
 
+            var warnings = Warnings(check);
+            if (scope is Book home && entity.FromResolution?.Resolved is { } entry && entry.Book != home
+                && !warnings.Any(w => w.Path == made.Path && w.Rule == "F-ENT-6"))
+            {
+                // The write check reads the file, not continuity; this one the writer should hear about now.
+                warnings.Add(new DiagnosticView(
+                    made.Path, entity.File.Frontmatter?["from"]?.Line, "warning", "F-ENT-6",
+                    $"from {entity.From} is in book '{entry.Book.Key}', but this entity is filed in book '{home.Key}'. Views still use it, but an entity of a book should enter canon in that book: check the position, or file the entity in the scope where the reader meets it."));
+            }
+
             return new WriteResult(
-                DenReader.ResultVersion, true, made.Path, HashOf(bytes), Summary(entity), effects, [], Warnings(check),
+                DenReader.ResultVersion, true, made.Path, HashOf(bytes), Summary(entity), effects, [], warnings,
                 [new WrittenFileView(made.Path, HashOf(bytes), Created: true)]);
+        }
+    }
+
+    /// <summary>
+    /// Refuses a new entity's <c>from</c> that isn't a position, or names a
+    /// book or chapter <paramref name="universe"/> doesn't have (F-POS-4):
+    /// written anyway, it would leave the entity out of every canon view,
+    /// and a typo would go unnoticed until <c>check</c>.
+    /// </summary>
+    private void CheckFrom(Universe universe, string? from)
+    {
+        if (from is null)
+        {
+            return;
+        }
+
+        var text = from.Trim();
+        if (!StoryPosition.TryParse(text, out var position, out var error))
+        {
+            throw new DenToolException(ToolErrorCodes.BadPosition, $"'from' isn't a story position: {error.Message} Give one such as 'dracula:5' (book:chapter).");
+        }
+
+        if (universe.Resolve(position).Problem is { } problem)
+        {
+            throw new DenToolException(
+                ToolErrorCodes.BadPosition,
+                $"'from' {text} doesn't resolve in universe '{universe.Key}': {problem} An entity whose 'from' doesn't resolve is left out of every canon view, " +
+                "so nothing was created. Leave 'from' out to start where it's filed.");
         }
     }
 
@@ -1508,9 +1548,9 @@ public sealed partial class DenTools
 
     private static void CheckName(string name)
     {
-        if (string.IsNullOrWhiteSpace(name) || name.Any(char.IsControl))
+        if (NewEntity.NameProblem(name) is { } problem)
         {
-            throw new DenToolException(ToolErrorCodes.BadArgument, "Give the entity's name in 'name': one line of text.");
+            throw new DenToolException(ToolErrorCodes.BadArgument, $"Give the entity's name in 'name': one line of text, at most {NewEntity.MaxNameLength} characters. That one can't be used: {problem}.");
         }
     }
 

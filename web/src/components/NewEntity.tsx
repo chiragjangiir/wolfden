@@ -11,12 +11,12 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
-import { entitiesQuery, hierarchyQuery, positionsQuery, type UniverseNode } from '../api'
-import { CHECKPOINT_STATUS_KEY } from '../checkpointApi'
+import { entitiesQuery, hierarchyQuery, positionsQuery, type PositionView, type UniverseNode } from '../api'
 import { createEntity, typesQuery, type NewScope, type TypeView } from '../createApi'
 import type { WriteResult } from '../editApi'
+import { useAfterSave } from './Editing'
 import { usePosition } from '../hooks'
 import { describePosition } from '../story'
 import '../newEntity.css'
@@ -422,7 +422,7 @@ function NewEntityDialog({
   const frozenId = useId()
   const dialogRef = useRef<HTMLDivElement>(null)
   const nameRef = useRef<HTMLInputElement>(null)
-  const client = useQueryClient()
+  const afterSave = useAfterSave()
   const navigate = useNavigate()
   const { at } = usePosition()
   const types = useQuery(typesQuery)
@@ -439,12 +439,21 @@ function NewEntityDialog({
   const place = places.find((p) => p.value === where)
   const typeList = types.data?.types ?? []
   const chosenType = typeList.find((t) => t.key === type)
-  // A position to offer as the note's entry: only a real one, never the blank `at` that fails closed.
-  const position = at === undefined || at === '' ? undefined : at
+  // The position to offer as the note's entry: only one the universe has (F-POS-4), and only where the
+  // chosen place can see it, so a book's note never enters in another book (F-ENT-6).
+  const viewed = at ? positions.data?.positions.find((p) => p.position === at || (p.chapter === null && p.book === at)) : undefined
+  const position = viewed && place && placeSees(place, viewed) ? at : undefined
 
   useEffect(() => {
     nameRef.current?.focus()
   }, [])
+
+  // A place that can't see the position takes the box away, and clears it.
+  useEffect(() => {
+    if (!position) {
+      setEntersHere(false)
+    }
+  }, [position])
 
   // The type list may arrive after the form opens: with none chosen, take the first.
   useEffect(() => {
@@ -464,10 +473,8 @@ function NewEntityDialog({
         from: entersHere && position ? position : undefined,
       }),
     onSuccess: (result) => {
-      // The new note shows in the tree, the lists, the counts, search, and the checkpoint indicator.
-      for (const key of [['hierarchy'], ['entities'], ['search'], ['fields'], CHECKPOINT_STATUS_KEY]) {
-        void client.invalidateQueries({ queryKey: key })
-      }
+      // Everything is asked again, as after any save: the tree, the lists, search, link pickers, the checkpoint indicator.
+      void afterSave()
 
       onCreated(result, chosenType?.name ?? type)
       void navigate({ to: '/u/$universe/e/$', params: { universe, _splat: result.entity!.key }, search: {} })
@@ -496,7 +503,8 @@ function NewEntityDialog({
       return
     }
 
-    if (!type || !place || place.final) {
+    // Belt and braces with the disabled button: one create per submit.
+    if (create.isPending || !type || !place || place.final) {
       return
     }
 
@@ -625,6 +633,21 @@ function NewEntityDialog({
       </div>
     </div>
   )
+}
+
+/**
+ * True if a note filed at `place` can enter the story at `position`: anywhere
+ * in the universe, in a series' own books, and in a book only within it.
+ */
+function placeSees(place: Place, position: PositionView): boolean {
+  switch (place.scope.kind) {
+    case 'book':
+      return position.book === place.scope.key
+    case 'series':
+      return position.series === place.scope.key
+    default:
+      return true
+  }
 }
 
 /** Where the new note enters canon without a position of its own (F-ENT-6). */

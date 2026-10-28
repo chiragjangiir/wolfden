@@ -80,9 +80,9 @@ internal static class NewCommand
         }
 
         var name = line.Arguments[1];
-        if (string.IsNullOrWhiteSpace(name) || name.Any(char.IsControl))
+        if (Wolfden.Core.Editing.NewEntity.NameProblem(name) is { } nameProblem)
         {
-            error.WriteLine("wolfden new: give the note a name: one line of text.");
+            error.WriteLine($"wolfden new: give the note a name of one line, at most {Wolfden.Core.Editing.NewEntity.MaxNameLength} characters. That one can't be used: {nameProblem}.");
             return CliApp.ExitUsage;
         }
 

@@ -102,6 +102,20 @@ public sealed class NewCommandTests : IDisposable
         Assert.Equal(CliApp.ExitUsage, noBook.ExitCode);
         Assert.Contains("has no book 'sequel'", noBook.Error, StringComparison.Ordinal);
 
+        // A typo in --from would make a note no canon view shows (F-POS-4).
+        foreach (var from in new[] { "dracul:5", "dracula:999" })
+        {
+            var badFrom = New("character", "Someone", "--from", from);
+            Assert.Equal(CliApp.ExitUsage, badFrom.ExitCode);
+            Assert.Contains($"'from' {from} doesn't resolve in universe 'dracula'", badFrom.Error, StringComparison.Ordinal);
+        }
+
+        // A name is one line, of at most 200 characters.
+        var separator = New("character", "x\u2028## Injected");
+        Assert.Equal(CliApp.ExitUsage, separator.ExitCode);
+        Assert.Contains("one line", separator.Error, StringComparison.Ordinal);
+        Assert.Contains("at most 200", New("character", new string('a', 201)).Error, StringComparison.Ordinal);
+
         Assert.Equal(CliApp.ExitUsage, New("character").ExitCode);
         Assert.Equal(CliApp.ExitUsage, New("character", "  ").ExitCode);
         Assert.Equal(CliApp.ExitUsage, New("character", "A", "B").ExitCode);

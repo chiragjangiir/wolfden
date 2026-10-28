@@ -34,7 +34,11 @@ A new note is canon from the start of where it goes. If you're viewing the
 story at a chapter, the form also offers **Enters the story at** that
 chapter: tick it when the reader first meets this character (or place, or
 thread) there, and the note gets `from:` that chapter. Leave it off for
-something that's been true all along.
+something that's been true all along. It's offered only when the note
+goes somewhere that chapter belongs: the universe, the chapter's series,
+or its own book. A note filed in another book should enter in that book.
+
+A name is one line, up to 200 characters.
 
 From the command line, `wolfden new` does the same:
 
@@ -43,7 +47,9 @@ wolfden new character "Sister Agatha" --in dracula/book:dracula --from dracula:8
 ```
 
 `--in` takes the same places as `wolfden copy --to`; leave it out to file
-the note in the universe, when your den has one. `--from` is optional.
+the note in the universe, when your den has one. `--from` is optional,
+and has to be a chapter (or book) your universe has: a typo is refused
+rather than making a note no view shows.
 
 ## Editing notes
 

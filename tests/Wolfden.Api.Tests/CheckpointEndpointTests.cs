@@ -153,6 +153,25 @@ public sealed class CheckpointEndpointTests : IDisposable
     }
 
     [Fact]
+    [Trait("Scenario", "SC-WEB-67")]
+    public async Task ANoteCreatedThroughThisServerIsMarkedSavedHere()
+    {
+        var den = Repository(TempDen.Dracula());
+        Commit(den, "Start");
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root) { History = () => GitHistory.ForDen(den.Root, Git) });
+
+        using var content = new StringContent(JsonSerializer.Serialize(new { type = "character", name = "Sister Agatha" }), Encoding.UTF8, "application/json");
+        using var response = await server.Client.PostAsync("/api/entity/create", content, Token);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        // The create goes through the server's ledger, so the checkpoint dialog marks it "saved in Wolfden" (#29).
+        var status = await server.GetJsonAsync("/api/checkpoint", HttpStatusCode.OK);
+        Assert.Equal(
+            [("universes/dracula/entities/characters/sister-agatha.md", "added", true)],
+            status.GetProperty("changes").EnumerateArray().Select(c => (c.GetProperty("path").GetString(), c.GetProperty("kind").GetString(), c.GetProperty("savedHere").GetBoolean())));
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-WEB-50")]
     public async Task ASaveThroughThisServerIsToldApartFromAChangeMadeElsewhere()
     {
