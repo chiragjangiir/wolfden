@@ -43,7 +43,15 @@ public interface IHistorySetup
 /// <param name="NeedsName">True if git has no <c>user.name</c> for the den's repository, so one must be given.</param>
 /// <param name="NeedsEmail">True if git has no <c>user.email</c> for the den's repository, so one must be given.</param>
 /// <param name="Finishing">True if the den already has its own repository with no checkpoints, so turning on finishes it rather than making one.</param>
-public sealed record HistorySetupCheck(bool Possible, string? Code, string? Reason, bool NeedsName, bool NeedsEmail, bool Finishing = false);
+/// <param name="IdentityCertain">
+/// True if <paramref name="NeedsName"/> and <paramref name="NeedsEmail"/> are
+/// git's final answer, because the den's repository exists. Before it does,
+/// git can't apply a setting that depends on where the repository is
+/// (<c>includeIf "gitdir:…"</c>), so a name or email it seems to lack may
+/// turn up once it's made: then nothing needs to be given.
+/// </param>
+public sealed record HistorySetupCheck(
+    bool Possible, string? Code, string? Reason, bool NeedsName, bool NeedsEmail, bool Finishing = false, bool IdentityCertain = false);
 
 /// <summary>What turning history on is asked to do.</summary>
 /// <param name="AuthorName">The name to save for the den's repository if git has none, or null. Ignored when git already has one.</param>

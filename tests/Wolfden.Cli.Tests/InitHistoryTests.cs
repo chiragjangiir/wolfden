@@ -98,6 +98,31 @@ public class InitHistoryTests
     }
 
     [Fact]
+    [Trait("Scenario", "SC-HIST-15")]
+    public void ANameAndEmailGitGivesOnlyInsideTheRepositoryAreUsedAndOnesGivenSaySoIfNotUsed()
+    {
+        using var den = TempDen.DraculaCopy();
+        using var config = TempDen.Empty();
+        var included = Path.Combine(config.Root, "included");
+        File.WriteAllText(included, "[user]\n\tname = Ash Calloway\n\temail = ash@example.invalid\n", new UTF8Encoding(false));
+        var global = Path.Combine(config.Root, "gitconfig");
+        File.WriteAllText(
+            global, $"[includeIf \"gitdir/i:**/{Path.GetFileName(den.Root)}/\"]\n\tpath = {included.Replace('\\', '/')}\n", new UTF8Encoding(false));
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = InitCommand.Run([den.Root, "--git", "--author-name", "Mara Voss"], output, error, NoIdentity(global));
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Empty(error.ToString());
+        Assert.Contains(
+            "Git already has a name for this den (Ash Calloway), so the one given (Mara Voss) wasn't used.\n",
+            output.ToString().ReplaceLineEndings("\n"),
+            StringComparison.Ordinal);
+        Assert.Equal("Ash Calloway", GitHistory.ForDen(den.Root, NoIdentity(global), Token).Log(new HistoryLogQuery(), Token).Value[0].Author);
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-CLI-12")]
     [Trait("Scenario", "SC-HIST-15")]
     public void ANewDenWithoutANameOrEmailIsMadeButItsHistoryIsntTurnedOn()

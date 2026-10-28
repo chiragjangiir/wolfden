@@ -16,15 +16,26 @@ namespace Wolfden.Git;
 /// den's folder, so the user's global and system settings count. They're
 /// asked for only when one is missing, and saved with <c>git config
 /// --local</c>, in that repository only, never globally; an existing
-/// setting is never changed. They're checked before anything is made, so a
-/// missing one refuses with nothing changed, and again once the repository
-/// exists, since a setting can depend on where the repository is (git's
-/// <c>includeIf "gitdir:…"</c>), and only a missing one is saved.
+/// setting is never changed. They're checked once the repository exists,
+/// right after <c>git init</c>, since a setting can depend on where the
+/// repository is (git's <c>includeIf "gitdir:…"</c>), which git can't
+/// apply before. A missing one that wasn't given, or a pair git won't
+/// record (<c>git var GIT_COMMITTER_IDENT</c>), refuses: the repository
+/// this run just made, with no commit yet, is taken away again, so nothing
+/// is changed. One given when git already has one isn't used, and the
+/// result says so.
+/// </para>
+/// <para>
+/// <b>Its own repository</b> is one whose top level, as git says
+/// (<c>git rev-parse --show-prefix</c> is empty), is the den's folder; a
+/// <c>.git</c> there that git doesn't take for a repository, inside a larger
+/// one, leaves the den in the larger one, and that's refused.
 /// </para>
 /// <para>
 /// <b>.gitignore</b> is created if there's none, and otherwise
-/// <c>.wolfden/</c> is added at its end if no line already names it; the
-/// rest of the file is never changed.
+/// <c>.wolfden/</c> is added at its end unless git says the file already
+/// leaves it out (<c>git check-ignore</c>); the rest of the file is never
+/// changed.
 /// </para>
 /// </remarks>
 public sealed class GitHistorySetup : IHistorySetup
@@ -59,20 +70,27 @@ public sealed class GitHistorySetup : IHistorySetup
                     HistorySetupCodes.GitNotInstalled,
                     "Git isn't installed, or Wolfden can't find it on the PATH, so history can't be turned on. Install git, then try again.");
             case GitLocationKind.Unusable:
-                return Refuse(HistorySetupCodes.HistoryFailed, $"Git can't use the den's folder ({location.Problem}), so history can't be turned on. Fix what git says, then try again.");
-            case GitLocationKind.InRepository when !HasOwnGit():
-                return Refuse(
-                    HistorySetupCodes.InRepository,
-                    $"The den is inside the git repository at '{location.Root}', which keeps its history already, for the den's files only. There's nothing to turn on.");
+                return Refuse(HistorySetupCodes.HistoryFailed, $"Git can't use the den's folder ({Sentence(location.Problem)} So history can't be turned on: fix what git says, then try again.");
             case GitLocationKind.InRepository:
+                bool own;
                 bool hasCommits;
                 try
                 {
-                    hasCommits = HasCommits(cancellationToken);
+                    // The den's own repository only if git's top level is the den's folder, as git
+                    // itself says: a .git there that git doesn't take for one doesn't count (#205 review).
+                    own = IsTopLevel(cancellationToken);
+                    hasCommits = own && HasCommits(cancellationToken);
                 }
                 catch (HistoryException e)
                 {
                     return Refuse(HistorySetupCodes.HistoryFailed, e.Message);
+                }
+
+                if (!own)
+                {
+                    return Refuse(
+                        HistorySetupCodes.InRepository,
+                        $"The den is inside the git repository at '{location.Root}', which keeps its history already, for the den's files only. There's nothing to turn on.");
                 }
 
                 if (hasCommits)
@@ -93,7 +111,10 @@ public sealed class GitHistorySetup : IHistorySetup
         try
         {
             var (name, email) = Identity(cancellationToken);
-            return new HistorySetupCheck(true, null, null, name is null, email is null, finishing);
+
+            // Outside a repository, git can't apply a setting that depends on where the
+            // repository is (includeIf "gitdir:…"), so its answer isn't final.
+            return new HistorySetupCheck(true, null, null, name is null, email is null, finishing, IdentityCertain: finishing);
         }
         catch (HistoryException e)
         {
@@ -125,19 +146,13 @@ public sealed class GitHistorySetup : IHistorySetup
             return Refused(check.Code!, check.Reason!);
         }
 
-        if (Missing(check.NeedsName, check.NeedsEmail, name, email) is { } missing)
-        {
-            return new HistorySetupResult(
-                HistorySetupStatus.Refused, HistorySetupCodes.IdentityNeeded, $"{missing} Nothing was changed.", [], null, false, null, [], null,
-                check.NeedsName && name is null, check.NeedsEmail && email is null);
-        }
-
         var steps = new List<string>();
         var made = false;
         string? gitIgnore = null;
         var saved = new List<string>();
 
-        // 1. The repository.
+        // 1. The repository. The name and email are checked once it's there, since what
+        // git has for it can depend on where it is (includeIf "gitdir:…").
         if (!check.Finishing)
         {
             var created = GitRepository.Create(_denRoot, _options, cancellationToken);
@@ -145,22 +160,41 @@ public sealed class GitHistorySetup : IHistorySetup
             {
                 return Stop(
                     created.Kind == GitLocationKind.GitNotInstalled ? HistorySetupCodes.GitNotInstalled : HistorySetupCodes.HistoryFailed,
-                    $"Git couldn't make the den's folder a repository: {created.Problem}.",
+                    $"Git couldn't make the den's folder a repository: {Sentence(created.Problem)}",
                     "Nothing else was done.");
             }
 
             made = true;
-            steps.Add("Made the den's folder a git repository.");
-        }
-        else
-        {
-            steps.Add("Used the git repository already in the den's folder, which had no checkpoints yet.");
         }
 
-        // 2. .gitignore.
+        // 2. The name and email git will use: refused, with the repository just made taken
+        // away again, if one is missing and not given, or if git won't record them.
+        string? hasName;
+        string? hasEmail;
         try
         {
-            gitIgnore = EnsureIgnored();
+            (hasName, hasEmail) = Identity(cancellationToken);
+            if (Missing(hasName is null, hasEmail is null, name, email) is { } missing)
+            {
+                return Undo(HistorySetupCodes.IdentityNeeded, missing, hasName is null && name is null, hasEmail is null && email is null);
+            }
+
+            if ((hasName is null || hasEmail is null) && Unrecordable(hasName ?? name!, hasEmail ?? email!, cancellationToken) is { } unrecordable)
+            {
+                return Undo(HistorySetupCodes.BadArgument, unrecordable);
+            }
+        }
+        catch (HistoryException e)
+        {
+            return Stop(HistorySetupCodes.HistoryFailed, $"Couldn't read the name and email git has for the den's repository: {e.Message}", NotDone(identity: true));
+        }
+
+        steps.Add(made ? "Made the den's folder a git repository." : "Used the git repository already in the den's folder, which had no checkpoints yet.");
+
+        // 3. .gitignore.
+        try
+        {
+            gitIgnore = EnsureIgnored(cancellationToken);
             steps.Add(gitIgnore switch
             {
                 "created" => $"Created .gitignore, with {IgnoreLine}, so Wolfden's index stays out of the history.",
@@ -170,18 +204,12 @@ public sealed class GitHistorySetup : IHistorySetup
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return Stop(HistorySetupCodes.WriteFailed, $"Couldn't update .gitignore: {e.Message}.", NotDone(identity: true));
+            return Stop(HistorySetupCodes.WriteFailed, $"Couldn't update .gitignore: {Sentence(e.Message)}", NotDone(identity: true));
         }
 
-        // 3. The name and email, if git has none for the repository.
+        // 4. Save what's missing; say what was given but not needed.
         try
         {
-            var (hasName, hasEmail) = Identity(cancellationToken);
-            if (Missing(hasName is null, hasEmail is null, name, email) is { } stillMissing)
-            {
-                return Stop(HistorySetupCodes.IdentityNeeded, stillMissing, NotDone(identity: true), hasName is null && name is null, hasEmail is null && email is null);
-            }
-
             if (hasName is null)
             {
                 SetLocal("user.name", name!, cancellationToken);
@@ -205,7 +233,17 @@ public sealed class GitHistorySetup : IHistorySetup
             steps.Add($"Saved {what} for this den's repository only.");
         }
 
-        // 4. The first checkpoint.
+        if (hasName is not null && name is not null && name != hasName)
+        {
+            steps.Add($"Git already has a name for this den ({hasName}), so the one given ({name}) wasn't used.");
+        }
+
+        if (hasEmail is not null && email is not null && email != hasEmail)
+        {
+            steps.Add($"Git already has an email for this den ({hasEmail}), so the one given ({email}) wasn't used.");
+        }
+
+        // 5. The first checkpoint.
         HistoryEntry? first = null;
         if (!request.FirstCheckpoint)
         {
@@ -224,9 +262,11 @@ public sealed class GitHistorySetup : IHistorySetup
                 }
 
                 first = result.Value;
-                steps.Add(first is null
-                    ? "Made no first checkpoint: the den has no files to record yet."
-                    : $"Made the first checkpoint, \"{HistorySetup.FirstCheckpointMessage}\", of {Count(first.Changes.Count)}.");
+                steps.Add(first is not null
+                    ? $"Made the first checkpoint, \"{HistorySetup.FirstCheckpointMessage}\", of {Count(first.Changes.Count)}."
+                    : HasCommits(cancellationToken)
+                        ? "Made no first checkpoint: the den's files were already recorded, by another checkpoint made meanwhile."
+                        : "Made no first checkpoint: the den has no files to record yet.");
             }
             catch (HistoryException e)
             {
@@ -238,11 +278,40 @@ public sealed class GitHistorySetup : IHistorySetup
 
         HistorySetupResult Refused(string code, string problem) => new(HistorySetupStatus.Refused, code, problem, [], null, false, null, [], null);
 
+        // Refused after git init: the repository this run made, still without a commit,
+        // is taken away again, so nothing is changed. A finished one was there before.
+        HistorySetupResult Undo(string code, string problem, bool needsName = false, bool needsEmail = false)
+        {
+            if (made && !RemoveNewRepository(cancellationToken))
+            {
+                return new HistorySetupResult(
+                    HistorySetupStatus.Incomplete,
+                    code,
+                    $"{problem} The den's folder was made a git repository first, and Wolfden couldn't take it away again, so it's an empty repository now. " +
+                    "Try again with what's missing: it picks up where this stopped.",
+                    ["Made the den's folder a git repository."],
+                    _denRoot,
+                    true,
+                    null,
+                    [],
+                    null,
+                    needsName,
+                    needsEmail);
+            }
+
+            return new HistorySetupResult(HistorySetupStatus.Refused, code, $"{problem} Nothing was changed.", [], null, false, null, [], null, needsName, needsEmail);
+        }
+
         HistorySetupResult Stop(string code, string problem, string notDone, bool needsName = false, bool needsEmail = false)
         {
             var status = steps.Count == 0 && !made ? HistorySetupStatus.Refused : HistorySetupStatus.Incomplete;
+            if (made && steps.Count == 0)
+            {
+                steps.Add("Made the den's folder a git repository.");
+            }
+
             var text = status == HistorySetupStatus.Refused ? $"{problem} {notDone}" : $"{problem} {notDone} {HowToFinish}";
-            return new HistorySetupResult(status, code, text, steps, steps.Count == 0 && !made ? null : _denRoot, made, gitIgnore, saved, null, needsName, needsEmail);
+            return new HistorySetupResult(status, code, text, steps, status == HistorySetupStatus.Refused ? null : _denRoot, made, gitIgnore, saved, null, needsName, needsEmail);
         }
 
         string NotDone(bool identity) => request.FirstCheckpoint
@@ -275,6 +344,74 @@ public sealed class GitHistorySetup : IHistorySetup
             "such as you@example.com.";
     }
 
+    /// <summary>Ends <paramref name="text"/> with one full stop (or other closing mark), never two.</summary>
+    private static string Sentence(string? text)
+    {
+        var t = (text ?? "").TrimEnd();
+        return t.Length > 0 && t[^1] is '.' or '!' or '?' ? t : t + ".";
+    }
+
+    /// <summary>True if git's top level for the den's folder is the folder itself (<c>git rev-parse --show-prefix</c> is empty).</summary>
+    private bool IsTopLevel(CancellationToken cancellationToken)
+    {
+        var run = Run(["rev-parse", "--show-prefix"], cancellationToken);
+        if (!run.Succeeded || !run.OutputComplete)
+        {
+            throw new HistoryException($"Git couldn't tell where the den's repository starts: {run.Said}");
+        }
+
+        return run.Output.Trim().Length == 0;
+    }
+
+    /// <summary>
+    /// Why git won't record <paramref name="name"/> and <paramref name="email"/>
+    /// on a checkpoint, in git's words, or null if it will: git's own rules,
+    /// through <c>git var GIT_COMMITTER_IDENT</c>, which refuses, say, a name
+    /// made only of characters git strips (<c>;</c>, <c>,</c>, …).
+    /// </summary>
+    private string? Unrecordable(string name, string email, CancellationToken cancellationToken)
+    {
+        var run = Run(["-c", $"user.name={name}", "-c", $"user.email={email}", "var", "GIT_COMMITTER_IDENT"], cancellationToken);
+        return run.Succeeded
+            ? null
+            : $"Git won't record that name and email on a checkpoint ({Sentence(run.Said)[..^1]}). Choose another; any ordinary name will do, a pen name included.";
+    }
+
+    /// <summary>
+    /// Takes away the repository this run just made, before anything else was
+    /// done in it: only if it still has no commits. True if it's gone.
+    /// </summary>
+    private bool RemoveNewRepository(CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (HasCommits(cancellationToken))
+            {
+                return false;
+            }
+        }
+        catch (HistoryException)
+        {
+            return false;
+        }
+
+        var git = Path.Combine(_denRoot, ".git");
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(git, "*", SearchOption.AllDirectories))
+            {
+                File.SetAttributes(file, FileAttributes.Normal);
+            }
+
+            Directory.Delete(git, recursive: true);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     private bool HasOwnGit()
     {
         var git = Path.Combine(_denRoot, ".git");
@@ -289,6 +426,28 @@ public sealed class GitHistorySetup : IHistorySetup
             0 => true,
             1 => false,
             _ => throw new HistoryException($"Git couldn't tell whether the den's repository has checkpoints: {run.Said}"),
+        };
+    }
+
+    /// <summary>True if the den's own <c>.gitignore</c> leaves out <c>.wolfden/</c>, as git decides; false if not; null if git can't say.</summary>
+    private bool? IgnoredByGitignore(CancellationToken cancellationToken)
+    {
+        GitRun run;
+        try
+        {
+            run = Run(["check-ignore", "--verbose", "--no-index", "--", ".wolfden/"], cancellationToken);
+        }
+        catch (HistoryException)
+        {
+            return null;
+        }
+
+        return run.ExitCode switch
+        {
+            // "<source>:<line>:<pattern>\t<path>": ignored, but say so only when the source is the den's .gitignore.
+            0 => run.Output.StartsWith(".gitignore:", StringComparison.Ordinal),
+            1 => false,
+            _ => null,
         };
     }
 
@@ -337,8 +496,14 @@ public sealed class GitHistorySetup : IHistorySetup
         }
     }
 
-    /// <summary>Makes sure the den's <c>.gitignore</c> leaves out <c>.wolfden/</c>: <c>created</c>, <c>added</c>, or <c>present</c>.</summary>
-    private string EnsureIgnored()
+    /// <summary>
+    /// Makes sure the den's <c>.gitignore</c> leaves out <c>.wolfden/</c>:
+    /// <c>created</c>, <c>added</c>, or <c>present</c>. Whether it does is
+    /// git's own answer (<c>git check-ignore</c>, from the den's
+    /// <c>.gitignore</c> itself, so a later <c>!.wolfden/</c> counts, and a
+    /// global excludes file doesn't); if git can't say, a line naming it does.
+    /// </summary>
+    private string EnsureIgnored(CancellationToken cancellationToken)
     {
         var path = Path.Combine(_denRoot, ".gitignore");
         if (!File.Exists(path))
@@ -356,8 +521,7 @@ public sealed class GitHistorySetup : IHistorySetup
         }
 
         var text = File.ReadAllText(path);
-        var lines = text.Split('\n').Select(l => l.Trim());
-        if (lines.Any(l => IgnoreSpellings.Contains(l, StringComparer.Ordinal)))
+        if (IgnoredByGitignore(cancellationToken) ?? text.Split('\n').Select(l => l.Trim()).Any(l => IgnoreSpellings.Contains(l, StringComparer.Ordinal)))
         {
             return "present";
         }

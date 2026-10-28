@@ -82,7 +82,11 @@ public sealed class HistorySetupTests : IDisposable
     [InlineData("*.tmp\r\n", "*.tmp\r\n.wolfden/\r\n", "added")]
     [InlineData("", ".wolfden/\n", "added")]
     [InlineData("*.tmp\n.wolfden\n", "*.tmp\n.wolfden\n", "present")]
-    [InlineData("  /.wolfden/  \r\n", "  /.wolfden/  \r\n", "present")]
+    [InlineData("/.wolfden/  \r\n", "/.wolfden/  \r\n", "present")]
+
+    // Git's own answer: a leading space is part of the pattern, and a later negation wins.
+    [InlineData(" .wolfden/\n", " .wolfden/\n.wolfden/\n", "added")]
+    [InlineData(".wolfden/\n!.wolfden/\n", ".wolfden/\n!.wolfden/\n.wolfden/\n", "added")]
     public void AnExistingGitignoreKeepsWhatItHasAndGetsTheLineOnlyIfItsMissing(string before, string after, string outcome)
     {
         var den = Den();
@@ -124,8 +128,9 @@ public sealed class HistorySetupTests : IDisposable
         Assert.True(check.Possible);
         Assert.True(check.NeedsName);
         Assert.True(check.NeedsEmail);
+        Assert.False(check.IdentityCertain);
 
-        // Not given: refused, and nothing is made.
+        // Not given: refused, and the repository made to ask git is taken away again.
         var refused = setup.TurnOn(new HistorySetupRequest(), Token);
         Assert.Equal(HistorySetupStatus.Refused, refused.Status);
         Assert.Equal(HistorySetupCodes.IdentityNeeded, refused.Code);
@@ -170,6 +175,7 @@ public sealed class HistorySetupTests : IDisposable
         Assert.Equal(HistorySetupStatus.Done, result.Status);
         Assert.Equal(["user.email"], result.IdentitySaved);
         Assert.Contains("Saved your email for this den's repository only.", result.Steps);
+        Assert.Contains("Git already has a name for this den (Ash Calloway), so the one given (Someone Else) wasn't used.", result.Steps);
         Assert.DoesNotContain("name", File.ReadAllText(Path.Combine(den, ".git", "config")), StringComparison.Ordinal);
         Assert.Equal("Ash Calloway", GitHistory.ForDen(den, options, Token).Log(new HistoryLogQuery(), Token).Value[0].Author);
         Assert.Equal("[user]\n\tname = Ash Calloway\n", File.ReadAllText(global));
@@ -311,6 +317,95 @@ public sealed class HistorySetupTests : IDisposable
         Assert.Equal(HistorySetupCodes.GitNotInstalled, result.Code);
         Assert.StartsWith("Git isn't installed", result.Problem, StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Combine(den, ".gitignore")));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-15")]
+    public void ANameAndEmailGitGivesOnlyInsideTheRepositoryAreUsedAndNothingIsAsked()
+    {
+        // includeIf "gitdir:…" applies only once the den's folder is a repository.
+        var den = Den();
+        var included = Config("[user]\n\tname = Ash Calloway\n\temail = ash@example.invalid\n");
+        var global = Config($"[includeIf \"gitdir/i:**/{Path.GetFileName(den)}/\"]\n\tpath = {included.Replace('\\', '/')}\n");
+        var options = Without(global);
+        var setup = new GitHistorySetup(den, options);
+        var check = setup.Check(Token);
+        Assert.True(check.NeedsName);
+        Assert.False(check.IdentityCertain);
+
+        var result = setup.TurnOn(new HistorySetupRequest(), Token);
+
+        Assert.Equal(HistorySetupStatus.Done, result.Status);
+        Assert.Empty(result.IdentitySaved);
+        Assert.Equal("Ash Calloway", GitHistory.ForDen(den, options, Token).Log(new HistoryLogQuery(), Token).Value[0].Author);
+        Assert.DoesNotContain("[user]", File.ReadAllText(Path.Combine(den, ".git", "config")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-15")]
+    public void ANameAndEmailGivenWhenGitHasThemAfterAllAreNotUsedAndItSaysSo()
+    {
+        var den = Den();
+        var included = Config("[user]\n\tname = Ash Calloway\n\temail = ash@example.invalid\n");
+        var global = Config($"[includeIf \"gitdir/i:**/{Path.GetFileName(den)}/\"]\n\tpath = {included.Replace('\\', '/')}\n");
+
+        var result = new GitHistorySetup(den, Without(global)).TurnOn(new HistorySetupRequest("Mara Voss", "mara@example.invalid"), Token);
+
+        Assert.Equal(HistorySetupStatus.Done, result.Status);
+        Assert.Empty(result.IdentitySaved);
+        Assert.Contains("Git already has a name for this den (Ash Calloway), so the one given (Mara Voss) wasn't used.", result.Steps);
+        Assert.Contains("Git already has an email for this den (ash@example.invalid), so the one given (mara@example.invalid) wasn't used.", result.Steps);
+    }
+
+    [Theory]
+    [Trait("Scenario", "SC-HIST-15")]
+    [InlineData(";")]
+    [InlineData(" ,;: ")]
+    public void ANameGitWontRecordIsRefusedBeforeAnythingIsSaved(string name)
+    {
+        var den = Den();
+        var setup = new GitHistorySetup(den, Without(Config("")));
+
+        var result = setup.TurnOn(new HistorySetupRequest(name, "ash@example.invalid"), Token);
+
+        Assert.Equal(HistorySetupStatus.Refused, result.Status);
+        Assert.Equal(HistorySetupCodes.BadArgument, result.Code);
+        Assert.StartsWith("Git won't record that name and email on a checkpoint", result.Problem, StringComparison.Ordinal);
+        Assert.EndsWith("Nothing was changed.", result.Problem, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(den, ".git")));
+        Assert.False(File.Exists(Path.Combine(den, ".gitignore")));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-HIST-17")]
+    public void AnEmptyDotGitInsideALargerRepositoryDoesntMakeTheDenItsOwnRepository()
+    {
+        // A half-synced or half-deleted .git: git doesn't take it for a repository, so the den is in the larger one.
+        using var repo = TestRepo.Create("notes/kestrel");
+        Directory.CreateDirectory(Path.Combine(repo.DenRoot, ".git"));
+        var configBefore = File.ReadAllText(Path.Combine(repo.Root, ".git", "config"));
+
+        var result = new GitHistorySetup(repo.DenRoot, TestRepo.Options).TurnOn(new HistorySetupRequest("Ash Calloway", "ash@example.invalid"), Token);
+
+        Assert.Equal(HistorySetupStatus.Refused, result.Status);
+        Assert.Equal(HistorySetupCodes.InRepository, result.Code);
+        Assert.Equal(configBefore, File.ReadAllText(Path.Combine(repo.Root, ".git", "config")));
+        Assert.Throws<InvalidOperationException>(() => repo.Git("rev-parse", "--verify", "HEAD"));
+        Assert.False(File.Exists(Path.Combine(repo.DenRoot, ".gitignore")));
+    }
+
+    [Fact]
+    public void AGitignoreThatCantBeWrittenSaysSoWithOneFullStop()
+    {
+        var den = Den();
+        Directory.CreateDirectory(Path.Combine(den, ".gitignore"));
+
+        var result = new GitHistorySetup(den, TestRepo.Options).TurnOn(new HistorySetupRequest(), Token);
+
+        Assert.Equal(HistorySetupStatus.Incomplete, result.Status);
+        Assert.Equal(HistorySetupCodes.WriteFailed, result.Code);
+        Assert.StartsWith("Couldn't update .gitignore: ", result.Problem, StringComparison.Ordinal);
+        Assert.DoesNotContain("..", result.Problem, StringComparison.Ordinal);
     }
 
     /// <summary>A den without history: a den.yaml and one note, in a folder outside any repository.</summary>
