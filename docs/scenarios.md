@@ -2814,15 +2814,25 @@ email. They turn on history for their den.
   --local`), never in the writer's global settings, and the first
   checkpoint is recorded under that name.
 - When git has one but not the other, only the missing one is asked for
-  and saved; the one git has is left alone, even if another was given.
+  and saved; the one git has is left alone, even if another was given,
+  and the output says the one given wasn't used.
+- When git gives a name and email only inside a repository (`includeIf
+  "gitdir:…"`), nothing is asked: they turn up once the folder is a
+  repository, and they're used. The dialog's fields are optional while
+  it can't be sure.
 - A name or email of more than one line, with a control character, or
-  with `<` or `>`, is refused.
+  with `<` or `>`, is refused, and so is a name git won't record (only
+  characters it strips, such as `;`), before anything is saved.
 
 Spec: design.md §6, "Turning history on" (maintainer decision,
 2026-10-28, #195). Covered by:
 `HistorySetupTests.AMissingNameAndEmailAreAskedForAndSavedForTheDensRepositoryOnly`,
 `HistorySetupTests.OnlyTheMissingHalfIsSavedAndAnExistingSettingIsLeftAlone`,
 `HistorySetupTests.ANameOrEmailThatGitCantRecordIsRefused`,
+`HistorySetupTests.ANameAndEmailGitGivesOnlyInsideTheRepositoryAreUsedAndNothingIsAsked`,
+`HistorySetupTests.ANameAndEmailGivenWhenGitHasThemAfterAllAreNotUsedAndItSaysSo`,
+`HistorySetupTests.ANameGitWontRecordIsRefusedBeforeAnythingIsSaved`,
+`InitHistoryTests.ANameAndEmailGitGivesOnlyInsideTheRepositoryAreUsedAndOnesGivenSaySoIfNotUsed`,
 `InitHistoryTests.AMissingNameAndEmailAreAskedForThenSavedForTheDenOnly`,
 `HistorySetupEndpointTests.AMissingNameAndEmailAreAskedForAndSavedForTheDenOnly`,
 `Checkpoint.test.tsx` (web).
@@ -2858,12 +2868,17 @@ checkpoints. A third time, on a computer without git.
   `writing/` already has history there, scoped to its files, so there's
   nothing to turn on; the den with checkpoints already has history on;
   and without git, it says to install git.
+- A den in `writing/` with an empty `.git` folder of its own (half
+  synced, or half deleted), which git doesn't take for a repository, is
+  still in `writing/`, and refused the same way: nothing is saved in
+  `writing/`'s config or committed there.
 
 Spec: design.md §6, "Turning history on", "A den inside a larger
 repository" (maintainer decision, 2026-10-28, #195). Covered by:
 `HistorySetupTests.ADenInsideALargerRepositoryIsRefusedWithNothingChanged`,
 `HistorySetupTests.ADenWhoseOwnRepositoryHasCheckpointsIsRefused`,
 `HistorySetupTests.WithoutGitItSaysSoAndChangesNothing`,
+`HistorySetupTests.AnEmptyDotGitInsideALargerRepositoryDoesntMakeTheDenItsOwnRepository`,
 `InitHistoryTests.ADenInsideALargerRepositoryIsRefused`,
 `InitHistoryTests.ADenWithHistoryAlreadyIsRefused`,
 `InitHistoryTests.WithoutGitInstalledAnExistingDenIsRefused`,
@@ -3855,6 +3870,7 @@ on…**, then **Turn on history**.
   here (no git, say), the dialog says why and offers no button.
 - A server pinned to one universe may turn it on: history covers the
   whole den, and the result names no files.
+- An automatic checkpoint doesn't run while history is being turned on.
 - The request is refused from another site or without JSON, as a
   checkpoint is.
 
@@ -3866,6 +3882,7 @@ Spec: design.md §6, "Turning history on", §9 (maintainer decision,
 `HistorySetupEndpointTests.HistoryCantBeTurnedOnFromAnotherSiteOrWithoutJson`,
 `HistorySetupEndpointTests.AServerThatCantTurnItOnSaysSo`,
 `HistorySetupEndpointTests.APinnedServerTurnsItOnForTheWholeDenAndNamesNoFiles`,
+`AutoCheckpointTests.APollSkipsWhileHistoryIsBeingTurnedOn`,
 `Checkpoint.test.tsx` (web).
 
 ### SC-WEB-60. I edit a field with a control that fits it

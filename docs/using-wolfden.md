@@ -250,7 +250,11 @@ wolfden init --git --author-name "Ash Calloway" --author-email ash@example.com
 
 Any name will do, a pen name included, and the email can be a
 placeholder. They're saved for this den only, never for the rest of your
-computer. If git already has a name and email, nothing is asked.
+computer. If git already has a name and email, nothing is asked, and if
+you give one anyway, Wolfden says it used git's instead. (If your git
+settings give a name only inside certain folders, the dialog can't tell
+until the den is a repository: it shows the fields, but you can leave
+them empty, and Wolfden asks again only if they're really needed.)
 
 A few things to know:
 

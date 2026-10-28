@@ -524,34 +524,47 @@ rest is v0 behaviour). A den without history gets it from `wolfden init
 --git` in its folder or from **Turn on history** in the web UI's
 checkpoint dialog (§9), which share one implementation
 (`IHistorySetup`, git's in `Wolfden.Git`). In order: `git init` in the
-den's folder; `.wolfden/` in the den's `.gitignore` (created if there's
-none, appended if no line names it, otherwise left alone); a name and
-email for the repository if git has none; and a first checkpoint, "Start
-of history", of the whole den, unless the writer opts out (a checkbox,
-ticked by default, or `--no-checkpoint`). The name and email are what
-git itself would use for the den's repository (`git config user.name`
-and `user.email`, which count the global and system settings). Only a
-missing one is asked for, and it's saved with `git config --local`, in
-that repository only, never globally; an existing setting is never
-changed. Any name will do, a pen name included, and the email can be a
-placeholder. They're checked before anything is made, so a missing one
-refuses with nothing changed, and again once the repository exists,
-since a setting can depend on where the repository is (`includeIf
-"gitdir:…"`). It refuses, with nothing changed: a den inside a larger
-repository (which keeps its history already), a den whose own
-repository already has checkpoints, a missing git, and a name or email
-that isn't one line of at most 200 characters without control
-characters or `<`/`>`. A step that fails stops the rest, and the result
-says what was done and what wasn't. A den whose folder is the top of its
-own repository with no checkpoints yet (made by `git init`, or by a
-turn-on that stopped part way) is finished rather than refused: every
-step but `git init` runs, so trying again is safe, and the web UI's
-checkpoint dialog, which sees history there, offers that den's first
-checkpoint as usual. A server pinned with `serve --universe` may turn
-history on: it covers the whole den, as its checkpoints do, and its
-result names no files. The server asks for the den's history provider on
-each request, so checkpoints, the History tab, freezing, and automatic
-checkpoints work at once, without a restart.
+den's folder; then the name and email git will use for it (below); then
+`.wolfden/` in the den's `.gitignore` (created if there's none; appended
+unless `git check-ignore` says the file already leaves it out, so a later
+`!.wolfden/` or a line with a leading space doesn't count; otherwise
+left alone); then any missing name or email saved; and a first
+checkpoint, "Start of history", of the whole den, unless the writer opts
+out (a checkbox, ticked by default, or `--no-checkpoint`). The name and
+email are what git itself would use for the den's repository (`git
+config user.name` and `user.email`, which count the global and system
+settings), read once the repository exists, since a setting can depend on
+where the repository is (`includeIf "gitdir:…"`), which git can't apply
+before. Only a missing one is asked for, and it's saved with `git config
+--local`, in that repository only, never globally; an existing setting
+is never changed, and a name or email given when git already has one
+isn't used, and the result says so. Any name will do, a pen name
+included, and the email can be a placeholder, as long as git will record
+the pair (`git var GIT_COMMITTER_IDENT`: a name made only of characters
+git strips, such as `;`, is refused). A missing one that wasn't given,
+or a pair git won't record, refuses with nothing changed: the repository
+the run just made, still without a commit, is taken away again (if it
+can't be, the result says the den is now an empty repository, and trying
+again picks up from there). Before the den is a repository, the web
+status can only say a name or email *seems* missing (`identityCertain`
+is false), so the dialog's fields are optional then. It also refuses,
+with nothing changed: a den inside a larger repository (which keeps its
+history already), a den whose own repository already has checkpoints, a
+missing git, and a name or email that isn't one line of at most 200
+characters without control characters or `<`/`>`. A step that fails
+stops the rest, and the result says what was done and what wasn't. A den
+whose folder is the top of its own repository (as git says: `git
+rev-parse --show-prefix` is empty there, so a `.git` folder git doesn't
+recognise, inside a larger repository, doesn't count) with no
+checkpoints yet (made by `git init`, or by a turn-on that stopped part
+way) is finished rather than refused: every step but `git init` runs, so
+trying again is safe, and the web UI's checkpoint dialog, which sees
+history there, offers that den's first checkpoint as usual. A server
+pinned with `serve --universe` may turn history on: it covers the whole
+den, as its checkpoints do, and its result names no files. The server
+asks for the den's history provider on each request, so checkpoints, the
+History tab, freezing, and automatic checkpoints work at once, without a
+restart; while a turn-on runs, an automatic checkpoint skips its poll.
 
 **Git or a synced folder, not both.** A git repository inside a synced
 folder (Dropbox, OneDrive, iCloud) can be corrupted when two machines
@@ -1834,7 +1847,10 @@ docs/
     by default, for the first checkpoint, and name and email fields when
     the status says git needs them (or when the server answers
     `identity_needed`), which say a pen name and a placeholder email will
-    do. `POST /api/history/turn-on` takes `{"authorName"?, "authorEmail"?,
+    do. Before the den is a repository, the status can't be sure
+    (`turnOn.identityCertain` is false), so the fields are optional: git
+    may have a name and email for the repository once it's made, and the
+    server asks again only if it doesn't. `POST /api/history/turn-on` takes `{"authorName"?, "authorEmail"?,
     "firstCheckpoint"?}` (it defaults to true), with the same guards as
     the checkpoint POST (cross-site, `application/json`, no query, 64 KB),
     and answers with the steps done, in words, `repositoryMade`,
@@ -1847,7 +1863,8 @@ docs/
     without a way to turn it on is 409 `history_unavailable`; a step that
     fails part way is 500 `history_failed` (or `write_failed` for
     `.gitignore`), with what was done and what wasn't. Two requests take
-    turns. The first checkpoint goes through the server's
+    turns, and automatic checkpoints skip their poll meanwhile. The
+    status's git calls stop when the request is aborted. The first checkpoint goes through the server's
     `CheckpointLedger`. After it, the page asks for everything again.
   - **Pinned.** A checkpoint covers the den (§6), as the
     MCP tool's does in a pinned session, so `serve --universe` records
