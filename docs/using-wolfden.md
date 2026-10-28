@@ -268,6 +268,11 @@ A few things to know:
   make the first checkpoint from the dialog once the problem is fixed, or
   run `wolfden init --git` again: it picks up where it stopped.
 - **A new den** can start with history: `wolfden init my-notes --git`.
+- **For scripts:** `wolfden init` exits 0 when its main job is done. For
+  a new den that job is making the den, so a new den inside a larger
+  repository, or on a computer without git, still exits 0. For an
+  existing den the job is turning on history, so the same situations
+  exit 2.
 
 ### The habit: one checkpoint per notes pass
 
