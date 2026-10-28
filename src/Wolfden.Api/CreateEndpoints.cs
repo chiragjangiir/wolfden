@@ -13,13 +13,16 @@ namespace Wolfden.Api;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A create takes a JSON body, <c>{type, name, universe, series, book, from}</c>,
+/// A create takes a JSON body, <c>{type, name, universe, series, book, from, allowRelinks}</c>,
 /// sent as <c>application/json</c>, as the editing endpoints do. It writes
 /// through the server's one set of write tools, so it runs one write at a
 /// time and lands in the server's checkpoint ledger. It's refused in a final
 /// book (<c>frozen</c>), with a type no enabled pack defines
 /// (<c>unknown_type</c>), and, on a server pinned to a universe, in any
-/// other. The answer is the write's result: the new file's path, and the
+/// other. A name that would take links from the entity they reach now is
+/// refused (<c>bad_argument</c>, naming the links) unless
+/// <c>allowRelinks</c> is true, as for a copy (maintainer decision on #29,
+/// 2026-10-28). The answer is the write's result: the new file's path, and the
 /// entity, whose key the page navigates to.
 /// </para>
 /// <para>
@@ -36,7 +39,7 @@ public static class CreateEndpoints
     /// <summary>The paths under <c>/api</c> that answer POST.</summary>
     public static readonly IReadOnlyList<string> PostPaths = ["entity/create"];
 
-    private static readonly string[] Members = ["type", "name", "universe", "series", "book", "from"];
+    private static readonly string[] Members = ["type", "name", "universe", "series", "book", "from", "allowRelinks"];
 
     /// <summary>Maps the endpoints onto <paramref name="api"/>, writing through <paramref name="tools"/>, the server's one set of write tools.</summary>
     internal static void Map(RouteGroupBuilder api, DenTools tools)
@@ -82,12 +85,13 @@ public static class CreateEndpoints
                 throw new DenToolException(ToolErrorCodes.BadArgument, "Give 'series' or 'book', not both: a note goes in one place.");
             }
 
-            var result = tools.CreateEntity(type, name, body.OptionalText("universe"), series, book, from: body.OptionalText("from"));
+            var result = tools.CreateEntity(
+                type, name, body.OptionalText("universe"), series, book, from: body.OptionalText("from"), allowRelinks: body.OptionalBool("allowRelinks") ?? false);
             return Results.Json(result, statusCode: StatusCodes.Status201Created);
         }
         catch (DenToolException e)
         {
-            return Results.Json(new ApiError(e.Code, e.Message, e.Candidates), statusCode: ReadEndpoints.StatusOf(e.Code));
+            return Results.Json(new ApiError(e.Code, e.Message, e.Candidates, Relinks: e.Relinks), statusCode: ReadEndpoints.StatusOf(e.Code));
         }
     }
 }

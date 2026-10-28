@@ -43,9 +43,25 @@ export interface CreateRequest {
   book?: string
   /** Where the reader first meets it; left out, it's canon from the start of where it goes. */
   from?: string
+  /** Make it even though links that reach another note would reach this one (they're listed in the result's effects). */
+  allowRelinks?: boolean
 }
 
-/** Creates a note from its type's template, sent as JSON (the API takes nothing else), and returns the write's result, or throws an ApiRequestError. */
+/**
+ * A create the API refused. For one refused because links that reach
+ * another note would reach the new one (#29), `relinks` lists them, in
+ * words, and the form offers Create anyway.
+ */
+export class CreateError extends ApiRequestError {
+  readonly relinks: string[] | null
+
+  constructor(code: string, message: string, relinks: string[] | null) {
+    super(code, message)
+    this.relinks = relinks
+  }
+}
+
+/** Creates a note from its type's template, sent as JSON (the API takes nothing else), and returns the write's result, or throws a CreateError. */
 export async function createEntity(body: CreateRequest): Promise<WriteResult> {
   const response = await fetch('/api/entity/create', {
     method: 'POST',
@@ -53,11 +69,13 @@ export async function createEntity(body: CreateRequest): Promise<WriteResult> {
     body: JSON.stringify(body),
   })
   const answer: unknown = await response.json().catch(() => undefined)
-  const json = typeof answer === 'object' && answer !== null ? (answer as Partial<ApiError>) : null
+  const json = typeof answer === 'object' && answer !== null ? (answer as Partial<ApiError> & { relinks?: unknown }) : null
   if (!response.ok) {
-    throw new ApiRequestError(
+    const relinks = Array.isArray(json?.relinks) ? json.relinks.filter((r): r is string => typeof r === 'string') : null
+    throw new CreateError(
       typeof json?.code === 'string' ? json.code : 'http_error',
       typeof json?.message === 'string' ? json.message : `The server answered ${response.status}.`,
+      relinks && relinks.length > 0 ? relinks : null,
     )
   }
 

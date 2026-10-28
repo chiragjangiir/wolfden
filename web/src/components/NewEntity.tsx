@@ -14,7 +14,7 @@ import {
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { entitiesQuery, hierarchyQuery, positionsQuery, type PositionView, type UniverseNode } from '../api'
-import { createEntity, typesQuery, type NewScope, type TypeView } from '../createApi'
+import { CreateError, createEntity, typesQuery, type NewScope, type TypeView } from '../createApi'
 import type { WriteResult } from '../editApi'
 import { useAfterSave } from './Editing'
 import { usePosition } from '../hooks'
@@ -463,7 +463,7 @@ function NewEntityDialog({
   }, [type, typeList])
 
   const create = useMutation({
-    mutationFn: () =>
+    mutationFn: (allowRelinks: boolean) =>
       createEntity({
         type,
         name: name.trim(),
@@ -471,6 +471,7 @@ function NewEntityDialog({
         series: place?.scope.kind === 'series' ? place.scope.key : undefined,
         book: place?.scope.kind === 'book' ? place.scope.key : undefined,
         from: entersHere && position ? position : undefined,
+        allowRelinks: allowRelinks || undefined,
       }),
     onSuccess: (result) => {
       // Everything is asked again, as after any save: the tree, the lists, search, link pickers, the checkpoint indicator.
@@ -489,11 +490,29 @@ function NewEntityDialog({
     }
   }, [busy])
 
+  // Links the new note would take from the note they reach now (#29): listed, with Create anyway.
+  const relinks = create.error instanceof CreateError ? create.error.relinks : null
+  const relinkRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
-    if (create.isError) {
+    if (!create.isError) {
+      return
+    }
+
+    // To the refusal, so a screen reader hears which links would move; otherwise back to the name, to try again.
+    if (relinks) {
+      relinkRef.current?.focus()
+    } else {
       nameRef.current?.focus()
     }
-  }, [create.isError])
+  }, [create.isError, relinks])
+
+  /** Any change to what would be sent ends a refusal: it was about the old values. */
+  const changed = () => {
+    if (create.isError) {
+      create.reset()
+    }
+  }
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -509,7 +528,7 @@ function NewEntityDialog({
     }
 
     setMissing(false)
-    create.mutate()
+    create.mutate(false)
   }
 
   const dismiss = () => {
@@ -552,7 +571,10 @@ function NewEntityDialog({
           <label htmlFor={typeId} className="new-entity-label">
             Type
           </label>
-          <select id={typeId} value={type} disabled={busy || typeList.length === 0} onChange={(e) => setType(e.currentTarget.value)}>
+          <select id={typeId} value={type} disabled={busy || typeList.length === 0} onChange={(e) => {
+              setType(e.currentTarget.value)
+              changed()
+            }}>
             {typeList.length === 0 && <option value={type}>{types.isPending ? 'Loading…' : type}</option>}
             {typeList.map((t) => (
               <option key={t.key} value={t.key}>
@@ -577,6 +599,7 @@ function NewEntityDialog({
             disabled={busy}
             onChange={(e) => {
               setName(e.currentTarget.value)
+              changed()
               if (e.currentTarget.value.trim() !== '') {
                 setMissing(false)
               }
@@ -595,7 +618,10 @@ function NewEntityDialog({
             value={where}
             disabled={busy || places.length === 0}
             aria-describedby={place?.final ? frozenId : undefined}
-            onChange={(e) => setWhere(e.currentTarget.value)}
+            onChange={(e) => {
+              setWhere(e.currentTarget.value)
+              changed()
+            }}
           >
             {places.length === 0 && <option value={where}>{hierarchy.isPending ? 'Loading…' : where}</option>}
             {places.map((p) => (
@@ -611,20 +637,44 @@ function NewEntityDialog({
           )}
           {position && (
             <label className="new-entity-check">
-              <input type="checkbox" checked={entersHere} disabled={busy} onChange={(e) => setEntersHere(e.currentTarget.checked)} /> Enters the story at{' '}
+              <input type="checkbox" checked={entersHere} disabled={busy} onChange={(e) => {
+                  setEntersHere(e.currentTarget.checked)
+                  changed()
+                }}
+              /> Enters the story at{' '}
               {describePosition(position, positions.data?.positions ?? [])}
             </label>
           )}
           {!entersHere && <p className="muted new-entity-hint">{entryHint(place)}</p>}
-          {create.isError && (
+          {create.isError && !relinks && (
             <div className="error" role="alert">
               <p>{create.error.message}</p>
             </div>
           )}
+          {relinks && (
+            <div className="banner relink-prompt" role="alert" tabIndex={-1} ref={relinkRef}>
+              <p>
+                A note called {name.trim()} there would take links that now reach another note, so nothing was created. These links would
+                reach the new note instead:
+              </p>
+              <ul>
+                {relinks.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+              <p className="muted">Choose another name or place, or create it anyway and check those links afterwards.</p>
+            </div>
+          )}
           <div className="dialog-actions">
-            <button type="submit" className="primary" disabled={busy || !type || !place || place.final}>
-              {busy ? 'Creating…' : 'Create'}
-            </button>
+            {relinks ? (
+              <button type="button" className="primary" disabled={busy} onClick={() => !create.isPending && create.mutate(true)}>
+                {busy ? 'Creating…' : 'Create anyway'}
+              </button>
+            ) : (
+              <button type="submit" className="primary" disabled={busy || !type || !place || place.final}>
+                {busy ? 'Creating…' : 'Create'}
+              </button>
+            )}
             <button type="button" onClick={onClose} disabled={busy}>
               Cancel
             </button>

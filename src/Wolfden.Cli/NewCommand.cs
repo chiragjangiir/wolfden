@@ -21,7 +21,7 @@ internal static class NewCommand
 {
     internal static readonly CommandSpec Spec = new(
         "new",
-        "usage: wolfden new <type> <name> [--in <scope>] [--from <position>] [--slug <slug>] [--den <den>] [--json]",
+        "usage: wolfden new <type> <name> [--in <scope>] [--from <position>] [--slug <slug>] [--allow-relinks] [--den <den>] [--json]",
         """
         Creates a note from its type's template, such as a new character. It
         gets a new id that no file in the den uses, the name, and a file name
@@ -45,14 +45,19 @@ internal static class NewCommand
                               'dracula:5'; by default, the start of where it goes
           --slug <slug>       the file name without .md; by default, made from the
                               name
+          --allow-relinks     make the note even if links that reach another note
+                              would reach this one or become ambiguous (they're
+                              listed)
           --den <den>         the den's folder; by default, the current folder or
                               the nearest folder above it with a den.yaml
           --json              print one JSON document instead of text
 
-        It prints the new file and where the note enters canon. Exits 0 when
-        the note is made, and 2 if it isn't.
+        If the name would take links from the note they reach now (a note
+        nearer them wins), nothing is made unless --allow-relinks. It prints
+        the new file, where the note enters canon, and the links that reach it
+        now. Exits 0 when the note is made, and 2 if it isn't.
         """,
-        ["--json"],
+        ["--json", "--allow-relinks"],
         ["--den", "--in", "--from", "--slug"],
         [],
         2,
@@ -60,7 +65,7 @@ internal static class NewCommand
 
     /// <summary>The command's options and commands, in place of the MCP tool's parameters and tools, in its messages.</summary>
     internal static readonly ToolWords Words = new(
-        "", "as <name>", "--slug", "with --in", "use 'wolfden query --brief'", "run 'wolfden check'", "run 'wolfden check'", "run 'wolfden check'");
+        "pass --allow-relinks", "as <name>", "--slug", "with --in", "use 'wolfden query --brief'", "run 'wolfden check'", "run 'wolfden check'", "run 'wolfden check'");
 
     /// <summary><c>--in</c>, where the note goes.</summary>
     private static readonly ScopeOption In = new("--in", "create it in", "created");
@@ -102,7 +107,7 @@ internal static class NewCommand
         try
         {
             result = new DenTools(root) { Words = Words }.CreateEntity(
-                line.Arguments[0], name, universe, series, book, line.Value("--slug"), from: line.Value("--from"));
+                line.Arguments[0], name, universe, series, book, line.Value("--slug"), from: line.Value("--from"), allowRelinks: line.Has("--allow-relinks"));
         }
         catch (DenToolException e)
         {

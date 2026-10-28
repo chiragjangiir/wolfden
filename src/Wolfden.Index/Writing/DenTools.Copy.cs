@@ -120,34 +120,7 @@ public sealed partial class DenTools
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal) { [newPath] = bytes };
             var check = Check(den, structure, files);
 
-            // Every link resolved again with the copy there (F-LINK-6, F-LINK-7).
-            var links = LinkIndex.Build(catalog, den);
-            var overlay = new OverlayDenSource(den, files);
-            var afterLinks = LinkIndex.Build(EntityCatalog.Load(check.Structure, overlay), overlay);
-            var changed = LinkChanges.Between(links, afterLinks);
-            // A link that reached an entity and would reach another, or become ambiguous, refuses the copy
-            // unless allow_relinks, as for a rename (maintainer decision, 2026-10-26). A broken or ambiguous
-            // link that now reaches the copy reached nothing before, so it's only reported.
-            var relinked = changed.Where(l => l.Before.Outcome == LinkOutcome.Resolved
-                && (l.After.Outcome != LinkOutcome.Resolved || l.After.Target!.Path != l.Before.Target!.Path)).ToList();
-            if (relinked.Count > 0 && !allowRelinks)
-            {
-                throw new DenToolException(
-                    ToolErrorCodes.BadArgument,
-                    $"{relinked.Count} link(s) would change which entity they reach: " +
-                    $"{string.Join("; ", relinked.Take(ListedLinkChanges).Select(l => $"{Where(l.After)}{(InFinalBook(l.Before) ? " (in a final book)" : "")} reaches {Reached(l.Before)} and would {Outcome(l.After)}"))}" +
-                    $"{(relinked.Count > ListedLinkChanges ? $"; and {relinked.Count - ListedLinkChanges} more" : "")}. Nothing was copied. " +
-                    $"Choose another name (or {Words.Slug}), link those by id first, or {Words.AllowRelinks} to make the copy anyway.");
-            }
-
-            var frozenRelinks = relinked.Where(l => InFinalBook(l.Before)).ToList();
-            if (frozenRelinks.Count > 0 && RefuseRelinksInFinalBooks)
-            {
-                throw new DenToolException(
-                    ToolErrorCodes.Frozen,
-                    $"{frozenRelinks.Count} link(s) in a final (frozen) book would reach the copy (F-BOOK-1): " +
-                    $"{string.Join("; ", frozenRelinks.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} reaches {Reached(l.Before)}"))}. Nothing was copied. Choose another name.");
-            }
+            var (links, afterLinks, changed) = CheckNewEntityLinks(den, catalog, check, files, allowRelinks, "copied", "make the copy anyway", "the copy");
 
             Save(files, null, created: newPath);
             var after = afterLinks.Catalog.FindByPath(newPath) ?? EntityCatalog.ReadEntityFile(check.Structure, newPath, bytes).Entity!;
@@ -156,6 +129,68 @@ public sealed partial class DenTools
                 DenReader.ResultVersion, true, newPath, HashOf(bytes), Summary(after), effects, [], Warnings(check),
                 [new WrittenFileView(newPath, HashOf(bytes), Created: true)]);
         }
+    }
+
+    /// <summary>
+    /// Every link in the den resolved again with a new entity's file there
+    /// (<paramref name="files"/>; F-LINK-6, F-LINK-7), for a copy or a
+    /// create (#29). A link that reached an entity and would reach the new
+    /// one instead, or become ambiguous, refuses the write unless
+    /// <paramref name="allowRelinks"/>, as for a rename (maintainer
+    /// decisions, 2026-10-26, and on #29, 2026-10-28). A broken or
+    /// ambiguous link that now reaches the new entity reached nothing
+    /// before, so it's only reported, in the effects.
+    /// </summary>
+    /// <param name="done">What the refusal says wasn't done: <c>copied</c> or <c>created</c>.</param>
+    /// <param name="anyway">How the refusal says to override: <c>make the copy anyway</c>.</param>
+    /// <param name="newOne">What the refusal calls the new entity: <c>the copy</c>.</param>
+    private (LinkIndex Before, LinkIndex After, IReadOnlyList<LinkChange> Changed) CheckNewEntityLinks(
+        IDenSource den, EntityCatalog catalog, DenWriteCheckResult check, Dictionary<string, byte[]> files, bool allowRelinks,
+        string done, string anyway, string newOne)
+    {
+        var links = LinkIndex.Build(catalog, den);
+        var overlay = new OverlayDenSource(den, files);
+        var afterLinks = LinkIndex.Build(EntityCatalog.Load(check.Structure, overlay), overlay);
+        var changed = LinkChanges.Between(links, afterLinks);
+        var relinked = changed.Where(l => l.Before.Outcome == LinkOutcome.Resolved
+            && (l.After.Outcome != LinkOutcome.Resolved || l.After.Target!.Path != l.Before.Target!.Path)).ToList();
+        if (relinked.Count > 0 && !allowRelinks)
+        {
+            var listed = relinked.Take(ListedLinkChanges)
+                .Select(l => $"{Where(l.After)}{(InFinalBook(l.Before) ? " (in a final book)" : "")} reaches {Reached(l.Before)} and would {Outcome(l.After)}")
+                .ToList();
+            throw new DenToolException(
+                ToolErrorCodes.BadArgument,
+                $"{relinked.Count} link(s) would change which entity they reach: {string.Join("; ", listed)}" +
+                $"{(relinked.Count > ListedLinkChanges ? $"; and {relinked.Count - ListedLinkChanges} more" : "")}. Nothing was {done}. " +
+                $"Choose another name (or {Words.Slug}), link those by id first, or {Words.AllowRelinks} to {anyway}.")
+            {
+                Relinks = relinked.Count > ListedLinkChanges ? [.. listed, $"and {relinked.Count - ListedLinkChanges} more"] : listed,
+            };
+        }
+
+        var frozenRelinks = relinked.Where(l => InFinalBook(l.Before)).ToList();
+        if (frozenRelinks.Count > 0 && RefuseRelinksInFinalBooks)
+        {
+            throw new DenToolException(
+                ToolErrorCodes.Frozen,
+                $"{frozenRelinks.Count} link(s) in a final (frozen) book would reach {newOne} (F-BOOK-1): " +
+                $"{string.Join("; ", frozenRelinks.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} reaches {Reached(l.Before)}"))}. Nothing was {done}. Choose another name.");
+        }
+
+        return (links, afterLinks, changed);
+    }
+
+    /// <summary>Links elsewhere that resolve differently with a new entity there, for its effects.</summary>
+    private List<string> ChangedLinkEffects(IReadOnlyList<LinkChange> changed)
+    {
+        var effects = changed.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} {Now(l.After)}; before, it {Was(l.Before)}.").ToList();
+        if (changed.Count > ListedLinkChanges)
+        {
+            effects.Add($"And {changed.Count - ListedLinkChanges} more link(s) resolve differently now. {ToolWords.Cap(Words.CheckDen)} to see them.");
+        }
+
+        return effects;
     }
 
     /// <summary>The universe, series, or book a copy goes into.</summary>
@@ -305,12 +340,7 @@ public sealed partial class DenTools
         }
 
         // Links elsewhere that resolve differently with the copy there.
-        effects.AddRange(changed.Take(ListedLinkChanges).Select(l => $"{Where(l.After)} {Now(l.After)}; before, it {Was(l.Before)}."));
-        if (changed.Count > ListedLinkChanges)
-        {
-            effects.Add($"And {changed.Count - ListedLinkChanges} more link(s) resolve differently now. {ToolWords.Cap(Words.CheckDen)} to see them.");
-        }
-
+        effects.AddRange(ChangedLinkEffects(changed));
         return effects;
     }
 

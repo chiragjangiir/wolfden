@@ -124,6 +124,28 @@ public sealed class NewCommandTests : IDisposable
 
     [Fact]
     [Trait("Scenario", "SC-CLI-15")]
+    public void ANoteThatWouldTakeLinksNeedsAllowRelinks()
+    {
+        const string Stub = "universes/dracula/entities/characters/jonathan-harker.md";
+
+        var (exitCode, output, error) = New("character", "Jonathan Harker");
+
+        Assert.Equal(CliApp.ExitUsage, exitCode);
+        Assert.Empty(output);
+        Assert.StartsWith("wolfden new: ", error, StringComparison.Ordinal);
+        Assert.Contains("would change which entity they reach", error, StringComparison.Ordinal);
+        Assert.Contains("Choose another name (or --slug), link those by id first, or pass --allow-relinks to create it with those links moving to it.", error, StringComparison.Ordinal);
+        Assert.DoesNotContain("allow_relinks", error, StringComparison.Ordinal);
+        Assert.False(_den.Exists(Stub));
+
+        var made = New("character", "Jonathan Harker", "--allow-relinks");
+        Assert.Equal(CliApp.ExitOk, made.ExitCode);
+        Assert.StartsWith($"Created {Stub}\n", made.Output, StringComparison.Ordinal);
+        Assert.Contains($"now reaches 'Jonathan Harker' ({Stub})", made.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-15")]
     public void ADenWhoseDenYamlDoesntLoadSaysSo()
     {
         _den.Write("den.yaml", "format: [\n");

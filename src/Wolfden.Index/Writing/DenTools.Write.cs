@@ -94,7 +94,8 @@ public sealed partial class DenTools
     /// </summary>
     public WriteResult CreateEntity(
         string type, string name, string? universe = null, string? series = null, string? book = null, string? slug = null,
-        IReadOnlyList<string>? aliases = null, string? status = null, string? from = null, JsonElement? fields = null, string? text = null)
+        IReadOnlyList<string>? aliases = null, string? status = null, string? from = null, JsonElement? fields = null, string? text = null,
+        bool allowRelinks = false)
     {
         if (string.IsNullOrWhiteSpace(type))
         {
@@ -103,7 +104,7 @@ public sealed partial class DenTools
 
         CheckName(name);
         var fieldValues = fields is { } f ? FieldValues(f) : [];
-        return Create(type.Trim(), name, universe, series, book, slug, aliases, status, from, fieldValues, text);
+        return Create(type.Trim(), name, universe, series, book, slug, aliases, status, from, fieldValues, text, allowRelinks);
     }
 
     /// <summary>
@@ -147,7 +148,7 @@ public sealed partial class DenTools
 
         CheckName(name);
         var fieldValues = fields is { } f ? FieldValues(f) : [];
-        return Create((type ?? "idea").Trim(), name, universe, series, book, null, null, "idea", null, fieldValues, text);
+        return Create((type ?? "idea").Trim(), name, universe, series, book, null, null, "idea", null, fieldValues, text, allowRelinks: true);
     }
 
     /// <summary>
@@ -576,7 +577,7 @@ public sealed partial class DenTools
 
     private WriteResult Create(
         string typeKey, string name, string? universe, string? series, string? book, string? slug, IReadOnlyList<string>? aliases, string? status,
-        string? from, IReadOnlyList<KeyValuePair<string, YamlValue>> fields, string? text)
+        string? from, IReadOnlyList<KeyValuePair<string, YamlValue>> fields, string? text, bool allowRelinks)
     {
         var filter = Filter(series, book);
         var (universeKey, ids) = WithIndex(index =>
@@ -642,6 +643,11 @@ public sealed partial class DenTools
             var bytes = file.ToBytes();
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal) { [made.Path] = bytes };
             var check = Check(den, structure, files);
+
+            // A new name can take links from the entity they reach now (F-LINK-7: the nearest scope wins):
+            // refused unless allow_relinks, as for a copy (maintainer decision on #29, 2026-10-28).
+            var (_, _, changed) = CheckNewEntityLinks(
+                den, EntityCatalog.Load(structure, den), check, files, allowRelinks, "created", "create it with those links moving to it", "the new entity");
             Save(files, null, created: made.Path);
             var entity = EntityCatalog.ReadEntityFile(check.Structure, made.Path, bytes).Entity!;
             var effects = new List<string> { $"Created {made.Path} from the '{type.Key}' template, with id {id}." };
@@ -654,6 +660,9 @@ public sealed partial class DenTools
             {
                 effects.Add($"It has no 'from', so it enters canon at {scope.StartDescription} (F-ENT-6).");
             }
+
+            // Links elsewhere that reach it now: ones that reached nothing, and with allow_relinks, ones taken from another entity.
+            effects.AddRange(ChangedLinkEffects(changed));
 
             var warnings = Warnings(check);
             if (scope is Book home && entity.FromResolution?.Resolved is { } entry && entry.Book != home

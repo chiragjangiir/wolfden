@@ -1284,6 +1284,10 @@ dracula:8`.
   leaving out `--in` is refused, saying to name one `with --in`.
   `--from` sets where the reader first meets it, and `--slug` the file
   name. `--json` prints the write result.
+- `wolfden new character "Jonathan Harker"` would take the universe's
+  links to the book's Jonathan (F-LINK-7), so it exits 2, naming them and
+  saying to pass `--allow-relinks`; with it, the note is made and the
+  output lists the links that moved.
 - A note in a final book, a type no enabled pack defines (the error lists
   the types), a slug that's taken, an unknown book, a `--from` that
   doesn't resolve in the universe (`dracul:5`, `dracula:999`: written, it
@@ -1296,6 +1300,7 @@ Spec: types.md F-TPL-6, design.md §7 (#29). Covered by:
 `NewCommandTests.ANewNoteComesFromItsTemplateInTheUniverseWithANewId`,
 `NewCommandTests.InNamesWhereItGoesAndFromWhereTheReaderMeetsIt`,
 `NewCommandTests.ARefusedCreateExitsTwoAndWritesNothing`,
+`NewCommandTests.ANoteThatWouldTakeLinksNeedsAllowRelinks`,
 `NewCommandTests.ADenWhoseDenYamlDoesntLoadSaysSo`,
 `NewCommandTests.JsonPrintsTheWriteResult`.
 
@@ -1744,11 +1749,19 @@ Mina from Buda-Pesth, to the book, from chapter 8.
   which would split its `# name` heading, or a longer one, is refused
   (`bad_argument`), by `create_entity`, `add_idea`, `copy_entity`, and
   `rename_entity` alike. A 200-character name gets a 64-character slug.
+- A second "Jonathan Harker" at universe scope would be nearer than the
+  book's to the universe's notes that link to him (F-LINK-7), so it's
+  refused (`bad_argument`), naming each link that would move, and
+  nothing is written, as for `copy_entity`. Beside the original, in the
+  book, it's `jonathan-harker-2.md` and moves nothing. With
+  `allow_relinks: true` it's made, and `effects` list the links that
+  moved.
 
 Spec: types.md F-TPL-6, F-TPL-7, F-ID-6, format.md F-POS-4, F-ENT-6. Covered by:
 `WriteToolTests.ANewEntityComesFromItsTemplateWithAnIdNoFileUses`,
 `WriteToolTests.ASlugIsMadeFromTheNameAsTheTemplateRuleSays`,
 `WriteToolTests.ANewEntitysFromMustResolveAndOneInAnotherBookIsAWarning`,
+`WriteToolTests.ANewEntityThatWouldTakeLinksFromAnotherIsRefusedUnlessAllowed`,
 `WriteToolTests.ANameIsOneLineOfAtMost200Characters`.
 
 ### SC-MCP-16. My assistant changes a note's fields
@@ -3914,6 +3927,11 @@ Spec: types.md F-TPL-6, design.md §9 (#29). Covered by:
   line break (U+2028 and U+2029 included) or over 200 characters
   (`bad_argument`) is refused and writes nothing. It answers POST only,
   and `/api/types` GET only.
+- A name that would take links from another note (a second Jonathan
+  Harker in the universe) is refused, 400 `bad_argument` with the links in
+  `relinks`; the form lists them, moves focus there, and offers **Create
+  anyway**, which resends with `allowRelinks: true` and opens the new
+  note. Changing the name ends the refusal, and Cancel still closes.
 - A book's note given a `from` in another book is made, with the F-ENT-6
   warning in the result. A second Create while one is in flight sends
   nothing.
@@ -3922,4 +3940,5 @@ Spec: types.md F-TPL-6, design.md §9 (#29). Covered by:
 Spec: format.md F-BOOK-1, design.md §9 (#29). Covered by:
 `CreateEndpointTests.ACreateInAFinalBookOrOfAnUnknownTypeOrMalformedIsRefusedAndWritesNothing`,
 `CreateEndpointTests.APinnedServerCreatesOnlyInItsUniverse`,
+`CreateEndpointTests.ANoteThatWouldTakeLinksIsRefusedUntilTheWriterCreatesItAnyway`,
 `NewEntity.test.tsx` (web).

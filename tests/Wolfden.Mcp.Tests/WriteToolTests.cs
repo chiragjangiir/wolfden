@@ -89,6 +89,33 @@ public sealed class WriteToolTests : IDisposable
 
     [Fact]
     [Trait("Scenario", "SC-MCP-15")]
+    public void ANewEntityThatWouldTakeLinksFromAnotherIsRefusedUnlessAllowed()
+    {
+        const string Stub = "universes/dracula/entities/characters/jonathan-harker.md";
+        var before = Directory.GetFiles(_den.Root, "*.md", SearchOption.AllDirectories).Length;
+
+        // At universe scope, a second Jonathan Harker is nearer to the universe's notes that link to the book's (F-LINK-7).
+        var refused = Assert.Throws<DenToolException>(() => Tools.CreateEntity("character", "Jonathan Harker"));
+
+        Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
+        Assert.Contains("link(s) would change which entity they reach", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("reaches 'Jonathan Harker' (universes/dracula/books/dracula/entities/characters/jonathan-harker.md) and would reach 'Jonathan Harker' (" + Stub + ")", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("Nothing was created.", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("pass allow_relinks: true to create it with those links moving to it", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(before, Directory.GetFiles(_den.Root, "*.md", SearchOption.AllDirectories).Length);
+
+        // In the book, beside the original, it's a -2 file that no link names, so nothing moves.
+        Assert.Equal(Book + "/entities/characters/jonathan-harker-2.md", Tools.CreateEntity("character", "Jonathan Harker", book: "dracula").Path);
+        Assert.True(File.Exists(Path.Combine(_den.Root, Book.Replace('/', Path.DirectorySeparatorChar), "entities", "characters", "jonathan-harker-2.md")));
+
+        // With allow_relinks, it's made, and the effects list the links that moved.
+        var made = Tools.CreateEntity("character", "Jonathan Harker", allowRelinks: true);
+        Assert.Equal(Stub, made.Path);
+        Assert.Contains(made.Effects, e => e.Contains($"now reaches 'Jonathan Harker' ({Stub}); before, it reached 'Jonathan Harker' ({Book}/entities/characters/jonathan-harker.md)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-15")]
     public void ANameIsOneLineOfAtMost200Characters()
     {
         // U+2028 and U+2029 would split the '# name' heading; a control character too; and a name runs on past 200.

@@ -208,7 +208,7 @@ prompts. This list is for knowing what the assistant can do.
 
 | Tool | What it does |
 |---|---|
-| `create_entity` | A new entity from its type's template. |
+| `create_entity` | A new entity from its type's template. If its name would take links from another entity, it's refused unless `allow_relinks`. |
 | `update_fields` | Set, add to, or remove anything in an entity's frontmatter (its fields, `status`, `from`), and add aliases. |
 | `append_section` | Add text to a section, or add a new section. |
 | `add_idea` | Record undecided material with `status: idea`, as its own entity or as a section of one. |

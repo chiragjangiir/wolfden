@@ -40,6 +40,14 @@ or its own book. A note filed in another book should enter in that book.
 
 A name is one line, up to 200 characters.
 
+**If the name would take over links.** Links go to the nearest note of a
+name, so a second "Jonathan Harker" filed in the universe would take the
+links in your universe notes away from the Jonathan in the book. Wolfden
+won't do that quietly: it lists the links that would move and makes
+nothing. Choose another name or place, or choose **Create anyway** if
+those links really should reach the new note (check them afterwards).
+From the command line, that's `--allow-relinks`.
+
 From the command line, `wolfden new` does the same:
 
 ```text

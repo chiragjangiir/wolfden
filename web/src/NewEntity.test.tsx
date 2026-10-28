@@ -310,6 +310,65 @@ describe('SC-WEB-68: New notes are guarded', () => {
     expect(posted).toEqual([])
   })
 
+  it('a name that would take links is refused with the links listed, and Create anyway sends the override', async () => {
+    const link =
+      "[[jonathan-harker]] in universes/dracula/entities/locations/piccadilly-house.md (line 16) reaches 'Jonathan Harker' " +
+      "(universes/dracula/books/dracula/entities/characters/jonathan-harker.md) and would reach 'Jonathan Harker' (universes/dracula/entities/characters/jonathan-harker.md)"
+    const { posted } = stubCreate((body) =>
+      body.allowRelinks === true
+        ? result()
+        : new Response(
+            JSON.stringify({
+              code: 'bad_argument',
+              message: `1 link(s) would change which entity they reach: ${link}. Nothing was created. Choose another name (or slug), link those by id first, or choose Create anyway to create it with those links moving to it.`,
+              relinks: [link],
+            }),
+            { status: 400 },
+          ),
+    )
+    const { history } = renderApp('/u/dracula')
+    await screen.findByRole('heading', { name: 'Dracula', level: 1 })
+
+    const form = await openFromMenu('Character')
+    const name = within(form).getByLabelText('Name')
+    fireEvent.change(name, { target: { value: 'Jonathan Harker' } })
+    await waitFor(() => expect((within(form).getByLabelText('Where it goes') as HTMLSelectElement).value).toBe('universe:dracula'))
+    fireEvent.click(within(form).getByRole('button', { name: 'Create' }))
+
+    // The refusal names the links, takes focus, and offers Create anyway; nothing was made.
+    const prompt = await within(form).findByRole('alert')
+    expect(prompt.textContent).toContain('would take links that now reach another note')
+    expect(within(prompt).getByRole('listitem').textContent).toBe(link)
+    await waitFor(() => expect(document.activeElement).toBe(prompt))
+    expect(history.location.pathname).toBe('/u/dracula')
+    expect(posted).toEqual([{ type: 'character', name: 'Jonathan Harker', universe: 'dracula' }])
+
+    // Editing the name ends the refusal: the plain Create is back.
+    fireEvent.change(name, { target: { value: 'Jonathan Harker ' } })
+    expect(within(form).queryByRole('alert')).toBeNull()
+    fireEvent.click(within(form).getByRole('button', { name: 'Create' }))
+    fireEvent.click(await within(form).findByRole('button', { name: 'Create anyway' }))
+
+    await waitFor(() => expect(history.location.pathname).toBe(`/u/dracula/e/${NEW_KEY}`))
+    expect(posted[2]).toEqual({ type: 'character', name: 'Jonathan Harker', universe: 'dracula', allowRelinks: true })
+  })
+
+  it('Cancel still closes a refused form', async () => {
+    stubCreate(
+      () => new Response(JSON.stringify({ code: 'bad_argument', message: 'Links would move.', relinks: ['a link'] }), { status: 400 }),
+    )
+    renderApp('/u/dracula')
+    await screen.findByRole('heading', { name: 'Dracula', level: 1 })
+    const form = await openFromMenu('Character')
+    fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Jonathan Harker' } })
+    fireEvent.click(within(form).getByRole('button', { name: 'Create' }))
+    await within(form).findByRole('button', { name: 'Create anyway' })
+
+    fireEvent.click(within(form).getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('a refused create shows why, keeps the form, and writes nothing', async () => {
     const { posted } = stubCreate(
       () =>

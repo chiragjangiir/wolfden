@@ -683,7 +683,7 @@ commands, and `wolfden <command> --help` describes each one:
 | `wolfden check [<den>] [--universe <key>] [--no-index] [--fix]` | The continuity lint above. It reads the files directly, not the index. It checks the whole den, every universe included, since it validates files rather than a story view; `--universe` checks only that universe's files and the den-level ones (see "Which universe" below), and `*` means the whole den. Without `--fix` it never writes the den's own files; `--universe` writes only the index (derived data, `.wolfden/`), and `--no-index` keeps it from doing even that. `--fix` first gives every container and entity file that loads without an `id` a new one (format.md F-ID-2, F-ID-6), skipping files in a final book (F-BOOK-1), and then checks the den as it is after the fix. |
 | `wolfden index [<den>] [--watch]` | Rebuilds `.wolfden/index.db` from the files and says what it holds. `--watch` then keeps it up to date as files change (#14), printing one line for each batch of changes it applies (with `--json`, one JSON object per line), until Ctrl+C. Only one watcher runs per den; a second exits 2. |
 | `wolfden query [<universe>] [--universe <key>] [--at <position>]` | Canon as of a position (format.md F-VIEW-1), from the index, of one universe (see "Which universe" below; `*` is refused, since a view is of one universe). `--series` or `--book` narrows the view, `--type` (any type an enabled pack defines) and `--entity` (matched as a link is, F-LINK-6, among the entities in the view, so one the reader meets later can't shadow one they've met) pick entities out of it, `--pinned` gives pinned canon (F-VIEW-2), and `--brief` lists one line per entity. |
-| `wolfden new <type> <name> [--in <scope>] [--from <position>] [--slug <slug>]` | Creates a note from its type's template (types.md F-TPL-6), as the MCP tool `create_entity` does (§8, #29): a new id, the name, and a file name made from it (`-2`, `-3` when it's taken; a `--slug` that's taken is refused). `--in` names where it goes, read exactly as `copy --to` is (the same code, with its messages naming `--in`); without it, the den's universe, when it has one, and with several the error says to name one `with --in`. `--from` gives the position where the reader first meets it, which must resolve in the universe; without it, the note has no `from`. It writes the den's files only, and exits 2 when the create is refused (an unknown type or scope, a final book, a slug that's taken, a `--from` that doesn't resolve, or a name that isn't one line of at most 200 characters). |
+| `wolfden new <type> <name> [--in <scope>] [--from <position>] [--slug <slug>] [--allow-relinks]` | Creates a note from its type's template (types.md F-TPL-6), as the MCP tool `create_entity` does (§8, #29): a new id, the name, and a file name made from it (`-2`, `-3` when it's taken; a `--slug` that's taken is refused). `--in` names where it goes, read exactly as `copy --to` is (the same code, with its messages naming `--in`); without it, the den's universe, when it has one, and with several the error says to name one `with --in`. `--from` gives the position where the reader first meets it, which must resolve in the universe; without it, the note has no `from`. A name that would take links from the entity they reach now (§8, "Creating") is refused, listing them, unless `--allow-relinks`, as for `copy`; the output then lists the links that moved. It writes the den's files only, and exits 2 when the create is refused (an unknown type or scope, a final book, a slug that's taken, a `--from` that doesn't resolve, or a name that isn't one line of at most 200 characters). |
 | `wolfden copy <entity> <new name> [--to <scope>] [--universe <key>] [--slug <slug>] [--allow-relinks]` | Copies an entity under a new name, with a new id, as the MCP tool `copy_entity` does (§8, #129): beside the original, or `--to` a universe (`<universe>`, or `<universe>/`) or one of its series or books (`<universe>/<key>`, or `<universe>/series:<key>` or `<universe>/book:<key>` when a series and a book share the key). In a den with one universe, a bare series or book key (or `series:<key>`, `book:<key>`) will do (as for `check`, #127), unless it's also the universe's key, which is refused with every spelling suggested. It writes the den's files only. Its messages name its options (`--allow-relinks`, `--slug`) and commands (`wolfden check`), not the tool's parameters: the tools take the words their advice uses as a setting, and names the writer gave come through as written. It exits 2 when the copy is refused. |
 | `wolfden freeze <book> [--universe <key>]` | Freezes a finished book (§5, #31): `status: final` in its `book.md`, then, when the den has git history, a checkpoint of the whole den and a tag on it, `book/<universe>/<book>/final` (or `final-2`, `final-3`, … for a book frozen before). `--universe` names the book's universe, when the den has several (see "Which universe" below). Freezing a book that's already final finishes a freeze whose checkpoint or tag failed, and otherwise does nothing. It prints the result's message, and exits 0 when the book is frozen (with its snapshot, or with no history to take one in), and 2 when it's refused (no such book) or a step in the history failed; then the message, on standard error, says what to do. |
 | `wolfden unfreeze <book> [--universe <key>]` | Unfreezes a book (§5, #31): `status: draft` in its `book.md`, then a checkpoint, with no tag, when the den has history. A book that isn't final is left as it is. It exits 0 when the book is unfrozen (or wasn't frozen), and 2 when it's refused or the checkpoint failed. |
@@ -991,7 +991,15 @@ store, so an edit changes only what it means to (format.md §12):
   line (no control characters, and no U+2028 or U+2029, which would
   split the `# name` heading) of at most 200 characters (#29): room for
   any title, and the name never reaches the path, whose slug is cut to
-  64.
+  64. Links are checked as for a copy (maintainer decision on #29,
+  2026-10-28): before the file is written, every link is resolved again
+  with it there, and one that reached an entity and would reach the new
+  one instead (a name in a nearer scope wins, F-LINK-7) or become
+  ambiguous refuses the create (`bad_argument`, naming each link) unless
+  `allow_relinks`; with it, `effects` list the links that moved, as do
+  links that were broken and now reach the new entity. It's the copy's
+  check, the same code. `add_idea` makes its new idea entity with the
+  links listed in `effects` but not refused, as before #29.
   `update_fields` puts a new top-level key in template order too
   (F-TPL-7); `append_section` puts a new standard section in the
   type's section order and a custom one at the end (F-TPL-8).
@@ -1866,12 +1874,15 @@ docs/
     F-PACK-7), and containers and chapters aren't types (F-TYPE-2), so
     every type listed can be created anywhere: none is held back from
     the menu. `POST /api/entity/create` takes `{type, name, universe,
-    series, book, from}` as `application/json` and calls
+    series, book, from, allowRelinks}` as `application/json` and calls
     `create_entity`'s code (`DenTools.CreateEntity`) through the editing
     endpoints' `DenTools`, so it runs one write at a time, lands in the
     server's checkpoint ledger ("saved in Wolfden"), and respects a
     server pinned with `serve --universe`. It answers 201 with the write
-    result, whose `entity.key` the page navigates to. It takes no slug,
+    result, whose `entity.key` the page navigates to. A create refused
+    because links would move to the new note (§8, "Creating") answers 400
+    `bad_argument` with those links in `relinks`, in words; resent with
+    `allowRelinks: true`, it's made. It takes no slug,
     status, aliases, or field values: the form doesn't ask for them, and
     the note's page edits them.
   - **The page.** The top bar's **New ▾** is a menu button (arrow keys,
@@ -1882,7 +1893,11 @@ docs/
     under each place are the type lists, and each has **New <type>**. A
     final book is listed, marked final; choosing it says it takes nothing
     until it's unfrozen, and Create is off (the server refuses it anyway,
-    `frozen`). After a create, every cached answer is asked again, as
+    `frozen`). A name that would take links from another note is
+    refused in the form: it lists the links that would move, takes focus,
+    and offers **Create anyway**, which resends with `allowRelinks`;
+    changing the type, name, place, or position ends the refusal, and
+    Cancel still closes. After a create, every cached answer is asked again, as
     after any save (`useAfterSave`), and the page goes to
     the new note, keeping the story position, with a notice naming the
     file that takes focus and lasts until the writer leaves the page. A

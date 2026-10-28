@@ -41,9 +41,11 @@ public sealed record UniverseResult(string Key, string Name, string? Id, int Ser
 /// <param name="Message">What went wrong, and what to do next.</param>
 /// <param name="Candidates">For <c>ambiguous_entity</c>, the entities the name matches; left out otherwise.</param>
 /// <param name="Current">For an edit refused with <c>stale_file</c>, the file as it is now, if it can still be read (#28); left out otherwise.</param>
+/// <param name="Relinks">For a create refused because links would move to the new note, those links, in words (#29); left out otherwise.</param>
 public sealed record ApiError(
     string Code, string Message, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<EntitySummary>? Candidates = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EntitySourceResult? Current = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EntitySourceResult? Current = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Relinks = null);
 
 /// <summary>
 /// The API's endpoints, under <c>/api</c> (#23). They read the index the

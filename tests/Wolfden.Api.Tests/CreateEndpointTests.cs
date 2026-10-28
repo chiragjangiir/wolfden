@@ -162,6 +162,37 @@ public sealed class CreateEndpointTests : IDisposable
 
     [Fact]
     [Trait("Scenario", "SC-WEB-68")]
+    public async Task ANoteThatWouldTakeLinksIsRefusedUntilTheWriterCreatesItAnyway()
+    {
+        var den = Den(TempDen.Dracula());
+        await using var server = await Server.StartAsync(new WolfdenApiOptions(den.Root));
+        const string Stub = "universes/dracula/entities/characters/jonathan-harker.md";
+
+        var (refused, refusedJson) = await PostAsync(server, "/api/entity/create", new { type = "character", name = "Jonathan Harker" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused);
+        Assert.Equal("bad_argument", refusedJson.GetProperty("code").GetString());
+        var message = refusedJson.GetProperty("message").GetString()!;
+        Assert.Contains("would change which entity they reach", message, StringComparison.Ordinal);
+        Assert.Contains("Nothing was created.", message, StringComparison.Ordinal);
+        Assert.Contains("choose Create anyway", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("allow_relinks", message, StringComparison.Ordinal);
+        var relinks = refusedJson.GetProperty("relinks").EnumerateArray().Select(r => r.GetString()!).ToList();
+        Assert.NotEmpty(relinks);
+        Assert.All(relinks, r => Assert.Contains($"and would reach 'Jonathan Harker' ({Stub})", r, StringComparison.Ordinal));
+        Assert.False(File.Exists(System.IO.Path.Combine(den.Root, Stub)));
+
+        var (bad, _) = await PostAsync(server, "/api/entity/create", new { type = "character", name = "Jonathan Harker", allowRelinks = "yes" });
+        Assert.Equal(HttpStatusCode.BadRequest, bad);
+
+        var (code, made) = await PostAsync(server, "/api/entity/create", new { type = "character", name = "Jonathan Harker", allowRelinks = true });
+        Assert.Equal(HttpStatusCode.Created, code);
+        Assert.Equal(Stub, made.GetProperty("path").GetString());
+        Assert.Contains(made.GetProperty("effects").EnumerateArray(), e => e.GetString()!.Contains($"now reaches 'Jonathan Harker' ({Stub})", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-68")]
     public async Task APinnedServerCreatesOnlyInItsUniverse()
     {
         var den = Den(TempDen.Starfall());
