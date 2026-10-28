@@ -163,7 +163,10 @@ public sealed class WolfdenTools
         "from its type's template, with a new id. It's filed in the universe, or in the series or book given, under " +
         "entities/<type folder>/<slug>.md; the slug is made from the name unless given, and gets -2, -3 if that file is taken. " +
         "Values you give (aliases, status, from, fields) replace the template's; the status defaults to the template's, or draft. " +
-        "The template's sections come with it, empty: fill them with append_section." + WriteHelp)]
+        "The template's sections come with it, empty: fill them with append_section. If the new name or file name would change which " +
+        "entity an existing link reaches (another one, or none because it becomes ambiguous; a nearer scope wins, F-LINK-7), nothing is " +
+        "created unless allow_relinks is true; a broken link the new entity now mends is listed in effects. A 'from' must be a position the " +
+        "universe has (bad_position otherwise)." + WriteHelp)]
     public CallToolResult CreateEntity(
         [Description("The type key, such as 'character'.")] string type,
         [Description("The entity's name.")] string name,
@@ -175,8 +178,9 @@ public sealed class WolfdenTools
         [Description("idea, undecided, candidate, draft, canon, or retconned.")] string? status = null,
         [Description("Where the reader first meets it, as a position such as 'dracula:5'. Leave it out for the start of where it's filed.")] string? from = null,
         [Description("Field values, as an object from field name to value, such as {\"born\": \"1873\", \"occupation\": [\"solicitor\"]}. A value that changes over time is a list of entries: [{\"value\": \"x\", \"from\": \"dracula:3\"}].")] JsonElement? fields = null,
-        [Description("Text for the lead, before the first section.")] string? text = null) =>
-        Respond(() => _tools.CreateEntity(type, name, universe, series, book, slug, aliases, status, from, fields, text));
+        [Description("Text for the lead, before the first section.")] string? text = null,
+        [Description(RelinksHelp)] bool allow_relinks = false) =>
+        Respond(() => _tools.CreateEntity(type, name, universe, series, book, slug, aliases, status, from, fields, text, allow_relinks));
 
     /// <summary>The <c>update_fields</c> tool.</summary>
     [McpServerTool(Name = "update_fields", Title = "Change an entity's fields", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]
@@ -226,7 +230,9 @@ public sealed class WolfdenTools
         "Records undecided material with status idea, so canon views leave it out until the writer settles it. With 'entity', it adds a " +
         "new section to that entity (named by 'section', 'Idea' by default) marked status=idea, and needs expected_hash. Without it, it " +
         "creates a new entity with status idea, named 'name', of 'type' (by default 'idea', for an idea that isn't yet a thing of any " +
-        "one type; a character who might exist is a 'character'), with the text in its lead." + WriteHelp)]
+        "one type; a character who might exist is a 'character'), with the text in its lead. If the new entity's name or file name " +
+        "would change which entity an existing link reaches (another one, or none because it becomes ambiguous; a nearer scope wins, " +
+        "F-LINK-7), nothing is created unless allow_relinks is true; a broken link it now mends is listed in effects." + WriteHelp)]
     public CallToolResult AddIdea(
         [Description("The idea, in markdown.")] string text,
         [Description("Add the idea to this existing entity.")] string? entity = null,
@@ -237,8 +243,9 @@ public sealed class WolfdenTools
         [Description(UniverseHelp)] string? universe = null,
         [Description("Without entity: file it in this series.")] string? series = null,
         [Description("Without entity: file it in this book.")] string? book = null,
-        [Description("Without entity: field values, such as {\"about\": [\"[[count-dracula]]\"]}.")] JsonElement? fields = null) =>
-        Respond(() => _tools.AddIdea(text, entity, section, expected_hash, name, type, universe, series, book, fields));
+        [Description("Without entity: field values, such as {\"about\": [\"[[count-dracula]]\"]}.")] JsonElement? fields = null,
+        [Description("Without entity: " + RelinksHelp)] bool allow_relinks = false) =>
+        Respond(() => _tools.AddIdea(text, entity, section, expected_hash, name, type, universe, series, book, fields, allow_relinks));
 
     /// <summary>The <c>rename_section</c> tool.</summary>
     [McpServerTool(Name = "rename_section", Title = "Rename a section", ReadOnly = false, Idempotent = false, Destructive = true, OpenWorld = false)]

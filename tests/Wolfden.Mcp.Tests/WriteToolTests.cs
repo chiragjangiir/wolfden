@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Wolfden.Core.Editing;
 
 namespace Wolfden.Mcp.Tests;
 
@@ -55,6 +56,143 @@ public sealed class WriteToolTests : IDisposable
         Assert.Equal(ToolErrorCodes.AlreadyExists, Assert.Throws<DenToolException>(() => Tools.CreateEntity("character", "Agatha", book: "dracula", slug: "sister-agatha")).Code);
         Assert.Equal(ToolErrorCodes.UnknownType, Assert.Throws<DenToolException>(() => Tools.CreateEntity("starship", "Demeter")).Code);
         Assert.Equal(ToolErrorCodes.UnknownScope, Assert.Throws<DenToolException>(() => Tools.CreateEntity("character", "X", book: "nope")).Code);
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-15")]
+    public void ANewEntitysFromMustResolveAndOneInAnotherBookIsAWarning()
+    {
+        var before = Directory.GetFiles(_den.Root, "*.md", SearchOption.AllDirectories).Length;
+
+        // F-POS-4: a 'from' the universe doesn't have would leave the entity out of every view.
+        foreach (var from in new[] { "dracul:5", "dracula:999", "dracula 5" })
+        {
+            var refused = Assert.Throws<DenToolException>(() => Tools.CreateEntity("character", "Someone", from: from));
+            Assert.Equal(ToolErrorCodes.BadPosition, refused.Code);
+            Assert.Contains("from", refused.Message, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("doesn't resolve", Assert.Throws<DenToolException>(() => Tools.CreateEntity("character", "Someone", from: "dracula:999")).Message, StringComparison.Ordinal);
+        Assert.Equal(before, Directory.GetFiles(_den.Root, "*.md", SearchOption.AllDirectories).Length);
+
+        // A bare book key is a position (F-POS-7).
+        Assert.Equal("dracula", Tools.CreateEntity("character", "From the start", from: "dracula").Entity!.From);
+
+        // F-ENT-6: a book's entity entering in another book is made, with the warning.
+        _den.Write("universes/dracula/books/aftermath/book.md", "---\nid: 01M4TF5F0EKGGWD5FNVBAEY9A0\nname: Aftermath\nstatus: draft\nchapters: [1]\n---\n");
+        var elsewhere = Tools.CreateEntity("character", "Young Swales", book: "aftermath", from: "dracula:8");
+        var warning = Assert.Single(elsewhere.Warnings, w => w.Rule == "F-ENT-6");
+        Assert.Equal(elsewhere.Path, warning.Path);
+        Assert.Contains("filed in book 'aftermath'", warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(Tools.CreateEntity("character", "At home", book: "dracula", from: "dracula:8").Warnings, w => w.Rule == "F-ENT-6");
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-15")]
+    public void ANewEntityThatWouldTakeLinksFromAnotherIsRefusedUnlessAllowed()
+    {
+        const string Stub = "universes/dracula/entities/characters/jonathan-harker.md";
+        var before = Directory.GetFiles(_den.Root, "*.md", SearchOption.AllDirectories).Length;
+
+        // At universe scope, a second Jonathan Harker is nearer to the universe's notes that link to the book's (F-LINK-7).
+        var refused = Assert.Throws<DenToolException>(() => Tools.CreateEntity("character", "Jonathan Harker"));
+
+        Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
+        Assert.Contains("link(s) would change which entity they reach", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("reaches 'Jonathan Harker' (universes/dracula/books/dracula/entities/characters/jonathan-harker.md) and would reach 'Jonathan Harker' (" + Stub + ")", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("Nothing was created.", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("pass allow_relinks: true to create it with those links moving to it", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(before, Directory.GetFiles(_den.Root, "*.md", SearchOption.AllDirectories).Length);
+
+        // In the book, beside the original, it's a -2 file that no link names, so nothing moves.
+        Assert.Equal(Book + "/entities/characters/jonathan-harker-2.md", Tools.CreateEntity("character", "Jonathan Harker", book: "dracula").Path);
+        Assert.True(File.Exists(Path.Combine(_den.Root, Book.Replace('/', Path.DirectorySeparatorChar), "entities", "characters", "jonathan-harker-2.md")));
+
+        // With allow_relinks, it's made, and the effects list the links that moved.
+        var made = Tools.CreateEntity("character", "Jonathan Harker", allowRelinks: true);
+        Assert.Equal(Stub, made.Path);
+        Assert.Contains(made.Effects, e => e.Contains($"now reaches 'Jonathan Harker' ({Stub}); before, it reached 'Jonathan Harker' ({Book}/entities/characters/jonathan-harker.md)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-15")]
+    public void ANewIdeaThatWouldTakeLinksIsRefusedUnlessAllowed()
+    {
+        const string Asylum = "universes/dracula/entities/locations/seward-asylum.md";
+        const string Idea = "universes/dracula/entities/ideas/renfield.md";
+
+        // Seward's asylum, a universe note, links [[renfield]] to the book's Renfield; a universe-scope idea of that name is nearer (F-LINK-7).
+        var refused = Assert.Throws<DenToolException>(() => Tools.AddIdea("Renfield as a recurring figure in later books.", name: "Renfield"));
+
+        Assert.Equal(ToolErrorCodes.BadArgument, refused.Code);
+        Assert.Contains(Asylum, refused.Message, StringComparison.Ordinal);
+        Assert.Contains("Nothing was created.", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("pass allow_relinks: true", refused.Message, StringComparison.Ordinal);
+        Assert.NotNull(refused.Relinks);
+        Assert.False(File.Exists(Path.Combine(_den.Root, Idea)));
+
+        var made = Tools.AddIdea("Renfield as a recurring figure in later books.", name: "Renfield", allowRelinks: true);
+
+        Assert.Equal(Idea, made.Path);
+        Assert.Equal("idea", made.Entity!.Status);
+        Assert.Contains(made.Effects, e => e.Contains(Asylum, StringComparison.Ordinal) && e.Contains($"now reaches 'Renfield' ({Idea})", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-15")]
+    public void AnEmptyFromIsNoFrom()
+    {
+        foreach (var from in new[] { "", "   " })
+        {
+            var made = Tools.CreateEntity("note", $"Empty from {from.Length}", from: from);
+            Assert.Null(made.Entity!.From);
+            Assert.DoesNotContain("\nfrom:", _den.Read(made.Path), StringComparison.Ordinal);
+            Assert.Contains(made.Effects, e => e.Contains("It has no 'from'", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-MCP-15")]
+    public void ANameIsOneLineOfAtMost200Characters()
+    {
+        // U+2028 and U+2029 would split the '# name' heading; a control character too; and a name runs on past 200.
+        foreach (var name in new[] { "x\u2028## Injected", "x\u2029y", "x\ty", new string('a', NewEntity.MaxNameLength + 1) })
+        {
+            Assert.Equal(ToolErrorCodes.BadArgument, Assert.Throws<DenToolException>(() => Tools.CreateEntity("character", name)).Code);
+            Assert.Equal(ToolErrorCodes.BadArgument, Assert.Throws<DenToolException>(() => Tools.AddIdea("text", name: name)).Code);
+            Assert.Equal(ToolErrorCodes.BadArgument, Assert.Throws<DenToolException>(() => Tools.CopyEntity("Mr. Swales", name)).Code);
+            var hash = Tools.GetEntity("Mr. Swales").Entity!.Hash!;
+            Assert.Equal(ToolErrorCodes.BadArgument, Assert.Throws<DenToolException>(() => Tools.RenameEntity("Mr. Swales", name, hash)).Code);
+        }
+
+        Assert.Contains("at most 200", Assert.Throws<DenToolException>(() => Tools.CreateEntity("character", new string('a', 201))).Message, StringComparison.Ordinal);
+        var longest = Tools.CreateEntity("character", new string('a', NewEntity.MaxNameLength));
+        Assert.Equal(NewEntity.MaxNameLength, longest.Entity!.Name.Length);
+        Assert.Equal(new string('a', 64), Path.GetFileNameWithoutExtension(longest.Path));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-WEB-67")]
+    public void TheTypesANewEntityCanBeMadeFromAreTheEnabledOnesByName()
+    {
+        var types = Tools.ListTypes().Types;
+
+        Assert.Equal(
+            ["Character", "Event", "Faction", "Idea", "Item", "Location", "Note", "Thread"], types.Select(t => t.Name));
+        var thread = types.Single(t => t.Key == "thread");
+        Assert.Equal("threads", thread.Plural);
+        Assert.Equal("core", thread.Pack);
+        Assert.True(thread.BuiltIn);
+        Assert.False(string.IsNullOrEmpty(thread.Description));
+
+        // Every one of them can be created.
+        foreach (var type in types)
+        {
+            Assert.True(Tools.CreateEntity(type.Key, $"A new {type.Key}").Changed);
+        }
+
+        _den.Write("den.yaml", "format: [\n");
+        Assert.Equal(ToolErrorCodes.DenNotLoaded, Assert.Throws<DenToolException>(() => Tools.ListTypes()).Code);
     }
 
     [Fact]

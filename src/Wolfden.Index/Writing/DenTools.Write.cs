@@ -6,6 +6,7 @@ using Wolfden.Core.Editing;
 using Wolfden.Core.Entities;
 using Wolfden.Core.History;
 using Wolfden.Core.Links;
+using Wolfden.Core.Positions;
 using Wolfden.Core.Structure;
 using Wolfden.Core.Types;
 using Wolfden.Core.Yaml;
@@ -93,7 +94,8 @@ public sealed partial class DenTools
     /// </summary>
     public WriteResult CreateEntity(
         string type, string name, string? universe = null, string? series = null, string? book = null, string? slug = null,
-        IReadOnlyList<string>? aliases = null, string? status = null, string? from = null, JsonElement? fields = null, string? text = null)
+        IReadOnlyList<string>? aliases = null, string? status = null, string? from = null, JsonElement? fields = null, string? text = null,
+        bool allowRelinks = false)
     {
         if (string.IsNullOrWhiteSpace(type))
         {
@@ -102,7 +104,7 @@ public sealed partial class DenTools
 
         CheckName(name);
         var fieldValues = fields is { } f ? FieldValues(f) : [];
-        return Create(type.Trim(), name, universe, series, book, slug, aliases, status, from, fieldValues, text);
+        return Create(type.Trim(), name, universe, series, book, slug, aliases, status, from, fieldValues, text, allowRelinks);
     }
 
     /// <summary>
@@ -114,7 +116,7 @@ public sealed partial class DenTools
     /// </summary>
     public WriteResult AddIdea(
         string text, string? entity = null, string? section = null, string? expectedHash = null, string? name = null, string? type = null,
-        string? universe = null, string? series = null, string? book = null, JsonElement? fields = null)
+        string? universe = null, string? series = null, string? book = null, JsonElement? fields = null, bool allowRelinks = false)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -146,7 +148,7 @@ public sealed partial class DenTools
 
         CheckName(name);
         var fieldValues = fields is { } f ? FieldValues(f) : [];
-        return Create((type ?? "idea").Trim(), name, universe, series, book, null, null, "idea", null, fieldValues, text);
+        return Create((type ?? "idea").Trim(), name, universe, series, book, null, null, "idea", null, fieldValues, text, allowRelinks);
     }
 
     /// <summary>
@@ -575,7 +577,7 @@ public sealed partial class DenTools
 
     private WriteResult Create(
         string typeKey, string name, string? universe, string? series, string? book, string? slug, IReadOnlyList<string>? aliases, string? status,
-        string? from, IReadOnlyList<KeyValuePair<string, YamlValue>> fields, string? text)
+        string? from, IReadOnlyList<KeyValuePair<string, YamlValue>> fields, string? text, bool allowRelinks)
     {
         var filter = Filter(series, book);
         var (universeKey, ids) = WithIndex(index =>
@@ -605,6 +607,7 @@ public sealed partial class DenTools
                     ToolErrorCodes.Frozen, $"Book '{frozen.Key}' is final (frozen), so nothing can be added to it until it's unfrozen (F-BOOK-1).");
             }
 
+            CheckFrom(u, from);
             var type = structure.Types.Find(typeKey) ?? throw new DenToolException(
                 ToolErrorCodes.UnknownType,
                 $"No enabled pack defines the type '{typeKey}', so there's no template to make it from. Enabled types: " +
@@ -615,7 +618,7 @@ public sealed partial class DenTools
             {
                 made = NewEntity.Create(den, scope, type, id, new NewEntityRequest(name.Trim())
                 {
-                    Slug = slug?.Trim(), Aliases = aliases, Status = status?.Trim(), From = from?.Trim(), Fields = fields,
+                    Slug = slug?.Trim(), Aliases = aliases, Status = status?.Trim(), From = string.IsNullOrWhiteSpace(from) ? null : from.Trim(), Fields = fields,
                 });
             }
             catch (ArgumentException e) when (e.Message.Contains("is taken", StringComparison.Ordinal))
@@ -640,6 +643,11 @@ public sealed partial class DenTools
             var bytes = file.ToBytes();
             var files = new Dictionary<string, byte[]>(StringComparer.Ordinal) { [made.Path] = bytes };
             var check = Check(den, structure, files);
+
+            // A new name can take links from the entity they reach now (F-LINK-7: the nearest scope wins):
+            // refused unless allow_relinks, as for a copy (maintainer decision on #29, 2026-10-28).
+            var (_, _, changed) = CheckNewEntityLinks(
+                den, EntityCatalog.Load(structure, den), check, files, allowRelinks, "created", "create it with those links moving to it", "the new entity");
             Save(files, null, created: made.Path);
             var entity = EntityCatalog.ReadEntityFile(check.Structure, made.Path, bytes).Entity!;
             var effects = new List<string> { $"Created {made.Path} from the '{type.Key}' template, with id {id}." };
@@ -653,9 +661,50 @@ public sealed partial class DenTools
                 effects.Add($"It has no 'from', so it enters canon at {scope.StartDescription} (F-ENT-6).");
             }
 
+            // Links elsewhere that reach it now: ones that reached nothing, and with allow_relinks, ones taken from another entity.
+            effects.AddRange(ChangedLinkEffects(changed));
+
+            var warnings = Warnings(check);
+            if (scope is Book home && entity.FromResolution?.Resolved is { } entry && entry.Book != home
+                && !warnings.Any(w => w.Path == made.Path && w.Rule == "F-ENT-6"))
+            {
+                // The write check reads the file, not continuity; this one the writer should hear about now.
+                warnings.Add(new DiagnosticView(
+                    made.Path, entity.File.Frontmatter?["from"]?.Line, "warning", "F-ENT-6",
+                    $"from {entity.From} is in book '{entry.Book.Key}', but this entity is filed in book '{home.Key}'. Views still use it, but an entity of a book should enter canon in that book: check the position, or file the entity in the scope where the reader meets it."));
+            }
+
             return new WriteResult(
-                DenReader.ResultVersion, true, made.Path, HashOf(bytes), Summary(entity), effects, [], Warnings(check),
+                DenReader.ResultVersion, true, made.Path, HashOf(bytes), Summary(entity), effects, [], warnings,
                 [new WrittenFileView(made.Path, HashOf(bytes), Created: true)]);
+        }
+    }
+
+    /// <summary>
+    /// Refuses a new entity's <c>from</c> that isn't a position, or names a
+    /// book or chapter <paramref name="universe"/> doesn't have (F-POS-4):
+    /// written anyway, it would leave the entity out of every canon view,
+    /// and a typo would go unnoticed until <c>check</c>.
+    /// </summary>
+    private void CheckFrom(Universe universe, string? from)
+    {
+        if (string.IsNullOrWhiteSpace(from))
+        {
+            return;
+        }
+
+        var text = from.Trim();
+        if (!StoryPosition.TryParse(text, out var position, out var error))
+        {
+            throw new DenToolException(ToolErrorCodes.BadPosition, $"'from' isn't a story position: {error.Message} Give one such as 'dracula:5' (book:chapter).");
+        }
+
+        if (universe.Resolve(position).Problem is { } problem)
+        {
+            throw new DenToolException(
+                ToolErrorCodes.BadPosition,
+                $"'from' {text} doesn't resolve in universe '{universe.Key}': {problem} An entity whose 'from' doesn't resolve is left out of every canon view, " +
+                "so nothing was created. Leave 'from' out to start where it's filed.");
         }
     }
 
@@ -1508,9 +1557,9 @@ public sealed partial class DenTools
 
     private static void CheckName(string name)
     {
-        if (string.IsNullOrWhiteSpace(name) || name.Any(char.IsControl))
+        if (NewEntity.NameProblem(name) is { } problem)
         {
-            throw new DenToolException(ToolErrorCodes.BadArgument, "Give the entity's name in 'name': one line of text.");
+            throw new DenToolException(ToolErrorCodes.BadArgument, $"Give the entity's name in 'name': one line of text, at most {NewEntity.MaxNameLength} characters. That one can't be used: {problem}.");
         }
     }
 

@@ -136,6 +136,14 @@ public sealed class DenToolException : Exception
     /// <summary>For <c>ambiguous_entity</c>, the matches.</summary>
     public IReadOnlyList<EntitySummary>? Candidates { get; }
 
+    /// <summary>
+    /// For a write refused because links would change which entity they
+    /// reach (a create or copy without <c>allow_relinks</c>), each such
+    /// link, in words; null otherwise. The web UI lists them and offers to
+    /// go ahead anyway (#29).
+    /// </summary>
+    public IReadOnlyList<string>? Relinks { get; init; }
+
 }
 
 /// <summary>One line about an entity: enough to tell it apart and to ask for it.</summary>

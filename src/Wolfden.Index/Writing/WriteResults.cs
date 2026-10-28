@@ -248,3 +248,17 @@ public sealed record BookFreezeView(
 public sealed record FreezeResult(
     int Version, string Universe, string Book, string Path, string Hash, string Status, bool Changed, string Backend, string Snapshot,
     string? Checkpoint, string? Tag, string Message, IReadOnlyList<DiagnosticView> Warnings, string? IdAdded = null, int OtherFiles = 0);
+
+/// <summary>One type a new entity can be made from (types.md §3), in <see cref="TypeListResult"/>.</summary>
+/// <param name="Key">The type key, as entities write it in <c>type</c>, such as <c>character</c>.</param>
+/// <param name="Name">Its display name, such as <c>Character</c>.</param>
+/// <param name="Plural">Its folder name under <c>entities/</c>, such as <c>characters</c>.</param>
+/// <param name="Description">What it's for, or null.</param>
+/// <param name="Pack">The key of the pack that defines it, such as <c>core</c>.</param>
+/// <param name="BuiltIn">True if a built-in pack defines it; false for a den-local pack.</param>
+public sealed record TypeView(string Key, string Name, string Plural, string? Description, string Pack, bool BuiltIn);
+
+/// <summary>The den's enabled types, built-in and den-local (types.md F-PACK-7): what <see cref="DenTools.CreateEntity"/> can make (#29).</summary>
+/// <param name="Version">The shape version.</param>
+/// <param name="Types">The types, by display name, then key.</param>
+public sealed record TypeListResult(int Version, IReadOnlyList<TypeView> Types);

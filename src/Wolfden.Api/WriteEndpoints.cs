@@ -49,6 +49,10 @@ public static partial class WriteEndpoints
     public static readonly ToolWords Words = ReadEndpoints.Words with
     {
         FindEntity = "use the search box",
+        AllowRelinks = "choose Create anyway",
+
+        // The web UI's writes take no slug, so a refusal doesn't offer one.
+        Slug = "",
         CheckDen = "run 'wolfden check' in the den's folder",
         CheckTool = "run 'wolfden check' in the den's folder",
         CheckPath = "open '{0}' in your editor, or run 'wolfden check' in the den's folder,",
@@ -78,6 +82,9 @@ public static partial class WriteEndpoints
         };
 
         FreezeEndpoints.Map(api, tools);
+
+        // New notes from type templates (#29), through the same tools, so they run one write at a time and land in the ledger.
+        CreateEndpoints.Map(api, tools);
 
         api.MapGet("/entity/source", (HttpContext c) => ReadEndpoints.Answer(
             c, ["entity", "universe"], q => tools.GetSource(Entity(q.Text("entity")), q.Text("universe"))));
@@ -327,6 +334,22 @@ public static partial class WriteEndpoints
 
             text = text.Trim();
             return text.Length == 0 ? null : text;
+        }
+
+        /// <summary>A true-or-false member, or null if it's missing or null.</summary>
+        public bool? OptionalBool(string name)
+        {
+            if (!_members.TryGetValue(name, out var value) || value.ValueKind == JsonValueKind.Null)
+            {
+                return null;
+            }
+
+            return value.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                _ => throw new DenToolException(ToolErrorCodes.BadArgument, $"'{name}' must be true or false."),
+            };
         }
 
         /// <summary>A JSON member as given; refused if it's missing.</summary>

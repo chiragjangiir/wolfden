@@ -1266,6 +1266,44 @@ Spec: design.md §5, §7 (#31). Covered by:
 `FreezeCommandTests.AFailedCheckpointExitsTwoAndSaysToFreezeAgain`,
 `FreezeCommandTests.AnUnknownBookOrNoBookExitsTwo`.
 
+### SC-CLI-15. I start a new character from the command line
+
+The writer runs `wolfden new character "Sister Agatha"`, then `wolfden
+new location "Buda-Pesth hospital" --in dracula/book:dracula --from
+dracula:8`.
+
+- The first is `universes/dracula/entities/characters/sister-agatha.md`,
+  made from the character template: a new id, `type`, `name`, and
+  `status: draft`, and the template's sections. The output names the new
+  file and says where it enters canon, as `create_entity` does
+  (SC-MCP-15). The same name again gets `-2`, and `check` finds nothing
+  wrong with either.
+- `--in` takes what `wolfden copy --to` takes (SC-CLI-13), from the same
+  code, and its messages name `--in`: `--in dracula` names the universe
+  and its book, so it's refused with both spellings. With two universes,
+  leaving out `--in` is refused, saying to name one `with --in`.
+  `--from` sets where the reader first meets it, and `--slug` the file
+  name. `--json` prints the write result.
+- `wolfden new character "Jonathan Harker"` would take the universe's
+  links to the book's Jonathan (F-LINK-7), so it exits 2, naming them and
+  saying to pass `--allow-relinks`; with it, the note is made and the
+  output lists the links that moved.
+- A note in a final book, a type no enabled pack defines (the error lists
+  the types), a slug that's taken, an unknown book, a `--from` that
+  doesn't resolve in the universe (`dracul:5`, `dracula:999`: written, it
+  would leave the note out of every canon view, F-POS-4), a missing or
+  blank name, one with a line break in it (U+2028 and U+2029 included),
+  or one over 200 characters, or a `den.yaml` that doesn't load exits 2
+  and writes nothing.
+
+Spec: types.md F-TPL-6, design.md §7 (#29). Covered by:
+`NewCommandTests.ANewNoteComesFromItsTemplateInTheUniverseWithANewId`,
+`NewCommandTests.InNamesWhereItGoesAndFromWhereTheReaderMeetsIt`,
+`NewCommandTests.ARefusedCreateExitsTwoAndWritesNothing`,
+`NewCommandTests.ANoteThatWouldTakeLinksNeedsAllowRelinks`,
+`NewCommandTests.ADenWhoseDenYamlDoesntLoadSaysSo`,
+`NewCommandTests.JsonPrintsTheWriteResult`.
+
 ## WATCH: keeping the index up to date while notes change
 
 Background: `wolfden index --watch` (design.md §7, #14) keeps the index up
@@ -1702,10 +1740,35 @@ Mina from Buda-Pesth, to the book, from chapter 8.
   gets `sister-agatha-2.md`; a slug asked for that's taken is refused
   (`already_exists`), and so is a type no pack defines (`unknown_type`).
   A name with nothing to make a slug from uses the type key.
+- A `from` that doesn't resolve in the universe (`dracul:5`,
+  `dracula:999`) is refused (`bad_position`), since the note would be in
+  no canon view (F-POS-4); a bare book key resolves. A book's note whose
+  `from` is in another book is made, with the F-ENT-6 warning.
+- A name is one line of at most 200 characters: one with a control
+  character or a Unicode line or paragraph separator (U+2028, U+2029),
+  which would split its `# name` heading, or a longer one, is refused
+  (`bad_argument`), by `create_entity`, `add_idea`, `copy_entity`, and
+  `rename_entity` alike. A 200-character name gets a 64-character slug.
+- A second "Jonathan Harker" at universe scope would be nearer than the
+  book's to the universe's notes that link to him (F-LINK-7), so it's
+  refused (`bad_argument`), naming each link that would move, and
+  nothing is written, as for `copy_entity`. Beside the original, in the
+  book, it's `jonathan-harker-2.md` and moves nothing. With
+  `allow_relinks: true` it's made, and `effects` list the links that
+  moved. `add_idea` does the same for a new idea entity: an idea named
+  "Renfield" in the universe would take `seward-asylum.md`'s
+  `[[renfield]]`, so it's refused unless its own `allow_relinks`.
+- A `from` that's empty or only spaces is no `from`, as on disk
+  (F-ENT-6): the note is made without one.
 
-Spec: types.md F-TPL-6, F-TPL-7, F-ID-6. Covered by:
+Spec: types.md F-TPL-6, F-TPL-7, F-ID-6, format.md F-POS-4, F-ENT-6. Covered by:
 `WriteToolTests.ANewEntityComesFromItsTemplateWithAnIdNoFileUses`,
-`WriteToolTests.ASlugIsMadeFromTheNameAsTheTemplateRuleSays`.
+`WriteToolTests.ASlugIsMadeFromTheNameAsTheTemplateRuleSays`,
+`WriteToolTests.ANewEntitysFromMustResolveAndOneInAnotherBookIsAWarning`,
+`WriteToolTests.ANewEntityThatWouldTakeLinksFromAnotherIsRefusedUnlessAllowed`,
+`WriteToolTests.ANewIdeaThatWouldTakeLinksIsRefusedUnlessAllowed`,
+`WriteToolTests.AnEmptyFromIsNoFrom`,
+`WriteToolTests.ANameIsOneLineOfAtMost200Characters`.
 
 ### SC-MCP-16. My assistant changes a note's fields
 
@@ -3815,3 +3878,74 @@ Spec: design.md §5, §9 (#31). Covered by:
 `FreezeEndpointTests.AStaleOrMalformedFreezeIsRefusedAndWritesNothing`,
 `FreezeEndpointTests.APinnedServerWontShowOrFreezeAnotherUniversesBook`,
 `Freeze.test.tsx` (web).
+
+### SC-WEB-67. I make a new character where I am
+
+On Dracula's book page, the writer chooses **New ▾** in the top bar,
+then Character, names her "Sister Agatha", and creates her.
+
+- The menu lists the den's enabled types, built-in and from the den's
+  own packs, by name (`GET /api/types`). It's a menu button: the arrow
+  keys, Home, and End move through it, Escape closes it and returns to
+  the button, and Enter on a type opens the form.
+- The form asks for the type, the name, and where the note goes, which
+  starts as where the writer is: the book on a book or chapter page, the
+  note's own place on a note's page, and otherwise the universe. A name
+  is required before anything is sent. The file isn't named until it's
+  made.
+- **Create** sends `POST /api/entity/create` with the type, name, and
+  place, which makes the file from the template as `create_entity` does
+  (SC-MCP-15): a new id, a slug from the name (`-2` when it's taken),
+  and no `from`. The page opens the new note, says which file was made,
+  and moves focus there; the tree, the counts, search, and the checkpoint
+  indicator ask again. Leaving the page ends the notice.
+- Each type's list in the contents tree has **New <type>**, with the type
+  and that place filled in; both can still be changed.
+- Viewing at a story position the universe has, the form offers "Enters
+  the story at <position>", off by default; ticked, the note gets `from:`
+  that position. It's offered only where the chosen place can see the
+  position (the universe, the series it's in, or its own book), so
+  choosing another book takes it away and clears it; a position the
+  universe doesn't have is never offered. Escape or Cancel closes the
+  form, sends nothing, and returns focus to what opened it.
+- After a create every cached answer is asked again, as after any save,
+  and the checkpoint dialog lists the new file as added and "saved in
+  Wolfden".
+
+Spec: types.md F-TPL-6, design.md §9 (#29). Covered by:
+`CreateEndpointTests.TheTypesAreTheDensEnabledTypesBuiltInAndDenLocal`,
+`CreateEndpointTests.ANewNoteIsMadeFromItsTemplateWhereTheWriterSaysAndTheAnswerNamesIt`,
+`CheckpointEndpointTests.ANoteCreatedThroughThisServerIsMarkedSavedHere`,
+`WriteToolTests.TheTypesANewEntityCanBeMadeFromAreTheEnabledOnesByName` (MCP),
+`NewEntity.test.tsx` (web).
+
+### SC-WEB-68. New notes are guarded
+
+- A final book can be chosen as the place, marked "final", but the form
+  says nothing can be added to it until it's unfrozen, and Create is off.
+  If the server refuses anyway (`frozen`, 409), the form shows why, stays
+  open with the name kept, and nothing is written.
+- `POST /api/entity/create` takes only `type`, `name`, `universe`,
+  `series`, `book`, and `from`, as JSON; a blank name, a series and a
+  book together, a type no enabled pack defines (`unknown_type`), a
+  book the universe doesn't have (`unknown_scope`), a `from` that doesn't
+  resolve in the universe (`bad_position`, F-POS-4), or a name with a
+  line break (U+2028 and U+2029 included) or over 200 characters
+  (`bad_argument`) is refused and writes nothing. It answers POST only,
+  and `/api/types` GET only.
+- A name that would take links from another note (a second Jonathan
+  Harker in the universe) is refused, 400 `bad_argument` with the links in
+  `relinks`, and its message suggests no slug, since the endpoint takes
+  none; the form lists them, moves focus there, and offers **Create
+  anyway**, which resends with `allowRelinks: true` and opens the new
+  note. Changing the name ends the refusal, and Cancel still closes.
+- A book's note given a `from` in another book is made, with the F-ENT-6
+  warning in the result. A second Create while one is in flight sends
+  nothing.
+- A server pinned to one universe creates only in it.
+
+Spec: format.md F-BOOK-1, design.md §9 (#29). Covered by:
+`CreateEndpointTests.ACreateInAFinalBookOrOfAnUnknownTypeOrMalformedIsRefusedAndWritesNothing`,
+`CreateEndpointTests.APinnedServerCreatesOnlyInItsUniverse`,
+`CreateEndpointTests.ANoteThatWouldTakeLinksIsRefusedUntilTheWriterCreatesItAnyway`,
+`NewEntity.test.tsx` (web).

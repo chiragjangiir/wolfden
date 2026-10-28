@@ -1,0 +1,81 @@
+/* New notes from type templates (#29): the top bar's New menu, the type lists' New buttons, and the form. */
+
+.new-menu {
+  position: relative;
+}
+
+.new-menu > button {
+  font-family: var(--font-ui);
+  white-space: nowrap;
+}
+
+.new-menu-list {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  z-index: 40;
+  min-width: 12rem;
+  max-height: 60vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.25rem 0;
+  list-style: none;
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 0.25);
+  font-family: var(--font-ui);
+}
+
+.new-menu-list [role='menuitem'] {
+  padding: 0.35rem 0.85rem;
+  cursor: pointer;
+}
+
+.new-menu-list [role='menuitem'][aria-disabled='true'] {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.new-menu-list [role='menuitem']:hover:not([aria-disabled='true']),
+.new-menu-list [role='menuitem']:focus {
+  background: var(--bg-sunken);
+  outline: 2px solid var(--link);
+  outline-offset: -2px;
+}
+
+.new-type {
+  margin: 0.25rem 0 0.5rem;
+  padding: 0.1rem 0.5rem;
+  font-family: var(--font-ui);
+  font-size: 0.85rem;
+}
+
+.new-entity-label {
+  display: block;
+  margin-top: 0.75rem;
+  font-weight: 600;
+}
+
+.new-entity-dialog input[type='text'],
+.new-entity-dialog select {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.25rem;
+  font: inherit;
+}
+
+.new-entity-check {
+  display: block;
+  margin-top: 0.75rem;
+}
+
+.new-entity-hint {
+  margin: 0.25rem 0;
+  font-size: 0.9rem;
+}
+
+.created-notice code {
+  overflow-wrap: anywhere;
+}

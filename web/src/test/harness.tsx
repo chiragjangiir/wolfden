@@ -14,6 +14,7 @@ import type {
   PositionView,
   PositionsResult,
 } from '../api'
+import type { TypeListResult, TypeView } from '../createApi'
 
 // A small den for the UI's tests, from Dracula (public domain): one book of
 // five chapters and a closing note, and a few of its notes.
@@ -76,6 +77,14 @@ export function inViewAt(at: string): EntitySummary[] {
   const ordinal = (p: string) => (p === 'dracula' ? -0.5 : positions.findIndex((x) => x.position === p))
   return entities.filter((e) => ['canon', 'draft'].includes(e.status) && ordinal(e.from ?? 'dracula') <= ordinal(at))
 }
+
+/** The den's types: some of the core pack's, by display name. */
+export const types: TypeView[] = [
+  { key: 'character', name: 'Character', plural: 'characters', description: 'A person in the story.', pack: 'core', builtIn: true },
+  { key: 'event', name: 'Event', plural: 'events', description: null, pack: 'core', builtIn: true },
+  { key: 'location', name: 'Location', plural: 'locations', description: null, pack: 'core', builtIn: true },
+  { key: 'note', name: 'Note', plural: 'notes', description: null, pack: 'core', builtIn: true },
+]
 
 export const hierarchy: HierarchyResult = {
   version: 1,
@@ -188,6 +197,8 @@ function answer(path: string, params: URLSearchParams, at: string | null, option
       }
     case '/api/positions':
       return { version: 1, universe: 'dracula', count: positions.length, positions } satisfies PositionsResult
+    case '/api/types':
+      return { version: 1, types } satisfies TypeListResult
     case '/api/hierarchy':
       return { ...hierarchy, position: at }
     case '/api/fields': {

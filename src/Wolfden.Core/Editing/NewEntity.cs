@@ -45,6 +45,39 @@ public static class NewEntity
 {
     private static readonly string[] OwnKeys = ["id", "type", "name", "aliases", "status", "from", "fields"];
 
+    /// <summary>
+    /// The longest name a writer gives a new, copied, or renamed entity, in
+    /// UTF-16 code units: room for any real name or title, and a typo-sized
+    /// paste stays a clear error rather than a heading that runs on. The
+    /// name is never part of the path (the slug is cut to 64 characters,
+    /// F-TPL-6), so this has nothing to do with path limits.
+    /// </summary>
+    public const int MaxNameLength = 200;
+
+    /// <summary>
+    /// Why <paramref name="name"/> can't be an entity's name, or null if it
+    /// can: it's empty, longer than <see cref="MaxNameLength"/>, or holds a
+    /// character that would break the one-line <c># name</c> heading, a
+    /// control character or a Unicode line or paragraph separator
+    /// (U+2028, U+2029), which a template's body would turn into a line
+    /// break.
+    /// </summary>
+    public static string? NameProblem(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "it's empty";
+        }
+
+        if (name.Any(c => char.IsControl(c) || CharUnicodeInfo.GetUnicodeCategory(c) is UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator))
+        {
+            return "it has a line break or another control character in it, and a name is one line of text";
+        }
+
+        var trimmed = name.Trim();
+        return trimmed.Length > MaxNameLength ? $"it's {trimmed.Length} characters long, and a name is at most {MaxNameLength}" : null;
+    }
+
     /// <summary>The folder a new entity of <paramref name="type"/> goes in, in <paramref name="scope"/> (F-TPL-6, step 1).</summary>
     public static string FolderFor(Container scope, TypeDefinition type)
     {
@@ -159,9 +192,9 @@ public static class NewEntity
         ArgumentNullException.ThrowIfNull(id);
         ArgumentNullException.ThrowIfNull(request);
         var name = request.Name;
-        if (string.IsNullOrWhiteSpace(name) || name.Any(char.IsControl))
+        if (NameProblem(name) is { } nameProblem)
         {
-            throw new ArgumentException("A name is one line of text, not empty.", nameof(request));
+            throw new ArgumentException($"That can't be a name: {nameProblem}.", nameof(request));
         }
 
         if (request.Aliases?.Any(a => string.IsNullOrWhiteSpace(a) || a.Any(char.IsControl)) == true)
