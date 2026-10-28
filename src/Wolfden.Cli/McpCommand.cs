@@ -41,7 +41,7 @@ internal static class McpCommand
         get_chapter_defaults, check, and get_history, from git when the den
         is in a git repository) and write to it (create_entity, update_fields,
         append_section, add_idea, rename_section, rename_entity, change_alias, copy_entity,
-        update_chapter_fields, and update_chapter_defaults, which change the
+        move_entity, update_chapter_fields, and update_chapter_defaults, which change the
         files only, and checkpoint, which commits them with git). It keeps the den's index up to date as files change while it runs.
         If another Wolfden is already watching the den (such as 'wolfden index
         --watch'), it relies on that one, and on a check of the files before

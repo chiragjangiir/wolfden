@@ -16,6 +16,7 @@ public class McpCommandTests
         Assert.StartsWith("usage: wolfden mcp [<den>] [--den <den>] [--universe <key>] [--no-watch]", output, StringComparison.Ordinal);
         Assert.Contains("(search, get_entity, list_entities, canon_as_of, get_chapter,\nget_chapter_defaults, check, and get_history", output, StringComparison.Ordinal);
         Assert.Contains("and checkpoint, which commits them with git", output, StringComparison.Ordinal);
+        Assert.Contains("move_entity", output, StringComparison.Ordinal);
         Assert.Contains("mcp [<den>]", Cli.Run("--help").Output, StringComparison.Ordinal);
     }
 
