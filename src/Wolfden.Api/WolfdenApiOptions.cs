@@ -63,8 +63,12 @@ public sealed class WolfdenApiOptions
     /// </summary>
     public IHistorySetup? HistorySetup { get; init; }
 
-    /// <summary>Keeps two requests from turning history on at once.</summary>
-    internal Lock TurnOnLock { get; } = new();
+    /// <summary>
+    /// Held while history is being turned on, so a second request waits its
+    /// turn, and an automatic checkpoint skips its poll rather than landing
+    /// in the middle (#205 review).
+    /// </summary>
+    internal SemaphoreSlim HistorySetupGate { get; } = new(1, 1);
 
     /// <summary>
     /// The den files this server saved since a checkpoint last recorded

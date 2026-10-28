@@ -66,7 +66,7 @@ public static class CheckpointEndpoints
         api.MapGet("/checkpoint", (HttpContext c) => Answer(() =>
         {
             ReadEndpoints.ApiQuery.Of(c, []);
-            return Results.Json(Status(options));
+            return Results.Json(Status(options, c.RequestAborted));
         }));
         api.MapPost("/checkpoint", async (HttpContext c) =>
         {
@@ -98,7 +98,7 @@ public static class CheckpointEndpoints
     }
 
     /// <summary>Whether the den has history, the latest checkpoint, and what a checkpoint now would record.</summary>
-    internal static CheckpointStatusResult Status(WolfdenApiOptions options)
+    internal static CheckpointStatusResult Status(WolfdenApiOptions options, CancellationToken cancellationToken = default)
     {
         var auto = AutoView(options);
         var history = options.History();
@@ -106,7 +106,7 @@ public static class CheckpointEndpoints
         {
             return new CheckpointStatusResult(
                 ResultVersion, history.Name, false, why, history is NoHistory ? EnableHistory : null, null, null, 0, [], 0, auto,
-                history is NoHistory ? HistorySetupEndpoints.View(options) : null);
+                history is NoHistory ? HistorySetupEndpoints.View(options, cancellationToken) : null);
         }
 
         try

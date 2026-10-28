@@ -27,6 +27,11 @@ namespace Wolfden.Api;
 /// every den file. Its result names no files, only how many.
 /// </para>
 /// <para>
+/// <b>One at a time.</b> A turn-on holds <see cref="WolfdenApiOptions.HistorySetupGate"/>:
+/// a second request waits its turn (and is then refused, since history is
+/// on), and an automatic checkpoint skips its poll.
+/// </para>
+/// <para>
 /// <b>The running server notices.</b> The server asks for the den's history
 /// provider on each request (<see cref="WolfdenApiOptions.History"/>), so
 /// checkpoints, the History tab, freezing, and automatic checkpoints work
@@ -68,7 +73,7 @@ public static class HistorySetupEndpoints
                     return Error(StatusCodes.Status413PayloadTooLarge, "too_large", $"A request to turn history on is at most {CheckpointEndpoints.LargestBody / 1024} KB.");
                 }
 
-                return TurnOn(options, Request(c, text));
+                return await TurnOn(options, Request(c, text), c.RequestAborted).ConfigureAwait(false);
             }
             catch (DenToolException e)
             {
@@ -78,18 +83,18 @@ public static class HistorySetupEndpoints
     }
 
     /// <summary>For the status of a den without history: whether this server can turn it on, and what git still needs.</summary>
-    internal static TurnOnView View(WolfdenApiOptions options)
+    internal static TurnOnView View(WolfdenApiOptions options, CancellationToken cancellationToken = default)
     {
         if (options.HistorySetup is not { } setup)
         {
-            return new TurnOnView(false, CantHere, false, false);
+            return new TurnOnView(false, CantHere, false, false, true);
         }
 
-        var check = setup.Check();
-        return new TurnOnView(check.Possible, check.Reason, check.NeedsName, check.NeedsEmail);
+        var check = setup.Check(cancellationToken);
+        return new TurnOnView(check.Possible, check.Reason, check.NeedsName, check.NeedsEmail, check.IdentityCertain);
     }
 
-    private static IResult TurnOn(WolfdenApiOptions options, HistorySetupRequest request)
+    private static async Task<IResult> TurnOn(WolfdenApiOptions options, HistorySetupRequest request, CancellationToken cancellationToken)
     {
         if (options.HistorySetup is not { } setup)
         {
@@ -97,10 +102,16 @@ public static class HistorySetupEndpoints
         }
 
         HistorySetupResult result;
-        lock (options.TurnOnLock)
+        await options.HistorySetupGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
             // The first checkpoint goes through the server's ledger, as its other checkpoints do.
+            // Once started, it isn't cancelled: git init and a commit are never stopped part way.
             result = setup.TurnOn(request with { Checkpoint = (history, checkpoint) => options.Ledger.Checkpoint(history, checkpoint).Result });
+        }
+        finally
+        {
+            options.HistorySetupGate.Release();
         }
 
         if (result.Status == HistorySetupStatus.Done)
@@ -168,7 +179,14 @@ public static class HistorySetupEndpoints
 /// <param name="Reason">Why it can't, in words for the writer, or null.</param>
 /// <param name="NeedsName">True if git has no name for the den, so the writer must give one.</param>
 /// <param name="NeedsEmail">True if git has no email for the den, so the writer must give one (a placeholder will do).</param>
-public sealed record TurnOnView(bool Possible, string? Reason, bool NeedsName, bool NeedsEmail);
+/// <param name="IdentityCertain">
+/// True if <paramref name="NeedsName"/> and <paramref name="NeedsEmail"/> are
+/// final. False before the den is a repository: git may then have a name
+/// and email for it after all (<c>includeIf "gitdir:…"</c>), so the fields
+/// are optional, and the server asks again (<c>identity_needed</c>) only if
+/// they're still missing.
+/// </param>
+public sealed record TurnOnView(bool Possible, string? Reason, bool NeedsName, bool NeedsEmail, bool IdentityCertain);
 
 /// <summary>What <c>POST /api/history/turn-on</c> answers when history is on.</summary>
 /// <param name="Version">The shape of this result.</param>

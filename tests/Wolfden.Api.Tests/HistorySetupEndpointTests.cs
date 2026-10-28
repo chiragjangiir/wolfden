@@ -125,6 +125,7 @@ public sealed class HistorySetupEndpointTests : IDisposable
         Assert.True(turnOn.GetProperty("possible").GetBoolean(), turnOn.ToString());
         Assert.True(turnOn.GetProperty("needsName").GetBoolean());
         Assert.True(turnOn.GetProperty("needsEmail").GetBoolean());
+        Assert.False(turnOn.GetProperty("identityCertain").GetBoolean()); // before git init, includeIf "gitdir:" can't apply
 
         var (refusedCode, refused) = await Post(server, "/api/history/turn-on", """{"firstCheckpoint": true}""");
         Assert.Equal(HttpStatusCode.BadRequest, refusedCode);

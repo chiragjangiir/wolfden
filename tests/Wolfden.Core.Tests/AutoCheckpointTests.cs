@@ -418,6 +418,34 @@ public sealed class AutoCheckpointTests : IDisposable
 
     // ------------------------------------------------------------ helpers
 
+    [Fact]
+    [Trait("Scenario", "SC-WEB-55")]
+    public void APollSkipsWhileHistoryIsBeingTurnedOn()
+    {
+        var clock = new ManualClock();
+        var history = new FakeHistory { Pending = [new HistoryFileChange(HistoryChangeKind.Modified, "universes/u/a.md")] };
+        var files = new Files { Setting = new AutoCheckpointSetting(TimeSpan.FromMinutes(30), null, null) };
+        using var gate = new SemaphoreSlim(1, 1);
+        var auto = new AutoCheckpointer(_root, () => history, new CheckpointLedger(new FileSystemDenStore(_root)), clock, _ => { })
+        {
+            Fingerprint = () => files.Print,
+            Setting = () => files.Setting,
+            Gate = gate,
+        };
+        auto.Start();
+        auto.Dispose();
+        clock.Advance(TimeSpan.FromMinutes(30));
+
+        // A turn-on holds the gate: the poll skips, and tries again on the next one.
+        gate.Wait(TestContext.Current.CancellationToken);
+        Assert.Equal(AutoCheckpointOutcome.Busy, auto.Tick());
+        Assert.Empty(history.Made);
+
+        gate.Release();
+        Assert.Equal(AutoCheckpointOutcome.Recorded, auto.Tick());
+        Assert.Equal(1, gate.CurrentCount);
+    }
+
     private (AutoCheckpointer Auto, ManualClock Clock, FakeHistory History, Files Files) Make(TimeSpan? every) => Make(every, out _);
 
     private (AutoCheckpointer Auto, ManualClock Clock, FakeHistory History, Files Files) Make(TimeSpan? every, out List<string> log)
