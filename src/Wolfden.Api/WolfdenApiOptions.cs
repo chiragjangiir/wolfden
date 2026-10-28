@@ -57,6 +57,16 @@ public sealed class WolfdenApiOptions
     public Func<IHistoryProvider> History { get; init; } = () => NoHistory.Instance;
 
     /// <summary>
+    /// Turns history on for a den that has none (#195), for the checkpoint
+    /// dialog's Turn on history, or null if this server can't (then the
+    /// status says so). <c>wolfden serve</c> uses git's.
+    /// </summary>
+    public IHistorySetup? HistorySetup { get; init; }
+
+    /// <summary>Keeps two requests from turning history on at once.</summary>
+    internal Lock TurnOnLock { get; } = new();
+
+    /// <summary>
     /// The den files this server saved since a checkpoint last recorded
     /// them (#30), so the checkpoint dialog can tell the web UI's own saves
     /// from changes made some other way. The write endpoints record each

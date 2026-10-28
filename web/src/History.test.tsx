@@ -385,7 +385,7 @@ describe('SC-WEB-23: I look at a note’s history in the browser', () => {
 
     const banner = await screen.findByText(/isn't in a git repository/)
     const box = banner.closest('.banner')!
-    expect(box.textContent).toContain('git init')
+    expect(box.textContent).toContain('Turn on…')
     expect(box.textContent).toContain('wolfden init --git')
     expect(screen.queryByRole('heading', { name: 'Checkpoints' })).toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()

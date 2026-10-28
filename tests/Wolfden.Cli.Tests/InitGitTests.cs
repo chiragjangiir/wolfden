@@ -4,7 +4,7 @@ using Wolfden.Git;
 
 namespace Wolfden.Cli.Tests;
 
-/// <summary><c>wolfden init --git</c>: optionally making the new den a git repository (#122).</summary>
+/// <summary><c>wolfden init --git</c>: turning on a new den's history (#122, #195).</summary>
 public class InitGitTests
 {
     [Fact]
@@ -18,20 +18,42 @@ public class InitGitTests
 
         Assert.Equal(CliApp.ExitOk, exitCode);
         Assert.Empty(error);
-        Assert.Contains(
-            $"Created a den at '{folder}'.\nMade it a git repository, so Wolfden can keep the den's history. Nothing is committed yet.\n" +
+        Assert.Equal(
+            "created den.yaml\ncreated universes/the-long-dark/universe.md\ncreated .gitignore\n\n" +
+            $"Created a den at '{folder}'.\n" +
+            "Made the den's folder a git repository.\n" +
+            "Created .gitignore, with .wolfden/, so Wolfden's index stays out of the history.\n" +
+            "Made the first checkpoint, \"Start of history\", of 2 files.\n" +
             "Next: add series, books, and entities (format.md §5.1), then run 'wolfden check'.\n",
-            output,
-            StringComparison.Ordinal);
+            output);
         Assert.True(Directory.Exists(Path.Combine(folder, ".git")));
-        Assert.Equal("", TestGit.Run(folder, "log", "--all", "--oneline"));
 
-        // The den checks clean, and its history works: the first checkpoint records it.
+        // The den checks clean, and its history starts with the first checkpoint, of the whole den.
         Assert.Equal(CliApp.ExitOk, Cli.Run("check", folder).ExitCode);
         var history = GitHistory.ForDen(folder, TestGit.Options, TestContext.Current.CancellationToken);
         Assert.Equal(HistoryCapabilities.All, history.Capabilities);
-        var first = history.Checkpoint(new CheckpointRequest("Start the den"), TestContext.Current.CancellationToken).Value!;
+        var first = Assert.Single(history.Log(new HistoryLogQuery(), TestContext.Current.CancellationToken).Value);
+        Assert.Equal("Start of history", first.Message.TrimEnd('\n'));
         Assert.Equal(["den.yaml", "universes/the-long-dark/universe.md"], first.Changes.Select(c => c.Path).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Scenario", "SC-CLI-12")]
+    public void WithNoCheckpointTheNewDensRepositoryHasNothingCommitted()
+    {
+        using var parent = TempDen.Empty();
+        var folder = Path.Combine(parent.Root, "kestrel-notes");
+
+        var (exitCode, output, error) = Cli.Run("init", folder, "--git", "--no-checkpoint", "--json");
+
+        Assert.Equal(CliApp.ExitOk, exitCode);
+        Assert.Empty(error);
+        using var json = JsonDocument.Parse(output);
+        Assert.Equal(["den.yaml", ".gitignore"], json.RootElement.GetProperty("created").EnumerateArray().Select(e => e.GetString()));
+        var git = json.RootElement.GetProperty("git");
+        Assert.Equal("created", git.GetProperty("outcome").GetString());
+        Assert.False(git.TryGetProperty("checkpoint", out _));
+        Assert.Equal("", TestGit.Run(folder, "log", "--all", "--oneline"));
     }
 
     [Fact]
@@ -74,7 +96,7 @@ public class InitGitTests
         Assert.False(Directory.Exists(Path.Combine(folder.Root, ".git")));
         Assert.Contains(
             "Git isn't installed, or Wolfden can't find it on the PATH, so the den wasn't made a repository. " +
-            "The den works without one; to keep its history, install git and run 'git init' in the den's folder.",
+            "The den works without one; to keep its history, install git and run 'wolfden init --git' in the den's folder.",
             output.ToString(),
             StringComparison.Ordinal);
     }
@@ -90,7 +112,7 @@ public class InitGitTests
         Assert.Equal(CliApp.ExitOk, exitCode);
         Assert.False(Directory.Exists(Path.Combine(folder.Root, ".git")));
         Assert.EndsWith(
-            "Next: add a universe (format.md §6.2), then run 'wolfden check'. Wolfden doesn't run git unless asked (--git); 'git init' makes the den a repository.\n",
+            "Next: add a universe (format.md §6.2), then run 'wolfden check'. Wolfden doesn't run git unless asked (--git); 'wolfden init --git' in the den turns on its history.\n",
             output,
             StringComparison.Ordinal);
         Assert.Same(NoHistory.Instance, GitHistory.ForDen(folder.Root, TestGit.Options, TestContext.Current.CancellationToken));

@@ -115,6 +115,7 @@ internal static class ServeCommand
             Version = CliApp.Version,
             Log = log,
             History = () => GitHistory.ForDen(root, CliApp.Git),
+            HistorySetup = new GitHistorySetup(root, CliApp.Git),
 
             // serve is the one command that makes automatic checkpoints (F-DEN-9, #30).
             AutoCheckpoints = true,

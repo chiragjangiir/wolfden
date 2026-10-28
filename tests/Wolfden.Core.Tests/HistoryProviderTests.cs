@@ -44,7 +44,7 @@ public sealed class HistoryProviderTests
             Assert.EndsWith(NoHistory.Hint, r.Reason, StringComparison.Ordinal);
         });
         Assert.Equal(
-            "This den has no history, so a note's history isn't available. Wolfden can keep history with git if the den is in a git repository that isn't in a synced folder (Dropbox, OneDrive, iCloud); use a private remote for backup.",
+            "This den has no history, so a note's history isn't available. To keep history, run 'wolfden init --git' in the den's folder, or use Turn on history in the web UI's checkpoint dialog. Wolfden keeps it with git, which shouldn't be in a synced folder (Dropbox, OneDrive, iCloud); use a private remote for backup.",
             results[0].Reason);
         Assert.Equal(
             "This den has no history, so a checkpoint isn't available. Your edits are still saved in the files. " + NoHistory.Hint,
@@ -55,7 +55,7 @@ public sealed class HistoryProviderTests
     [Trait("Scenario", "SC-HIST-1")]
     public void TheMessagesSendTheWriterNowhereTheyCantGo()
     {
-        // No design docs, issue numbers, or commands that don't exist yet.
+        // No design docs, issue numbers, or commands that don't exist: the one command named is 'wolfden init --git' (#195).
         var reasons = new[]
         {
             None.Log(new HistoryLogQuery(), Token).Reason!,
@@ -69,7 +69,7 @@ public sealed class HistoryProviderTests
         {
             Assert.DoesNotContain(".md", r, StringComparison.Ordinal);
             Assert.DoesNotContain("#", r, StringComparison.Ordinal);
-            Assert.DoesNotContain("wolfden ", r, StringComparison.Ordinal);
+            Assert.DoesNotContain("wolfden ", r.Replace("'wolfden init --git'", "", StringComparison.Ordinal), StringComparison.Ordinal);
         });
     }
 

@@ -519,6 +519,40 @@ The den store and the history provider are interfaces in `Wolfden.Core`
 is then scoped to the den's paths: log and diff cover only the den's
 files, and checkpoints commit only them.
 
+**Turning history on** (maintainer decisions, 2026-10-28, #195; the
+rest is v0 behaviour). A den without history gets it from `wolfden init
+--git` in its folder or from **Turn on history** in the web UI's
+checkpoint dialog (§9), which share one implementation
+(`IHistorySetup`, git's in `Wolfden.Git`). In order: `git init` in the
+den's folder; `.wolfden/` in the den's `.gitignore` (created if there's
+none, appended if no line names it, otherwise left alone); a name and
+email for the repository if git has none; and a first checkpoint, "Start
+of history", of the whole den, unless the writer opts out (a checkbox,
+ticked by default, or `--no-checkpoint`). The name and email are what
+git itself would use for the den's repository (`git config user.name`
+and `user.email`, which count the global and system settings). Only a
+missing one is asked for, and it's saved with `git config --local`, in
+that repository only, never globally; an existing setting is never
+changed. Any name will do, a pen name included, and the email can be a
+placeholder. They're checked before anything is made, so a missing one
+refuses with nothing changed, and again once the repository exists,
+since a setting can depend on where the repository is (`includeIf
+"gitdir:…"`). It refuses, with nothing changed: a den inside a larger
+repository (which keeps its history already), a den whose own
+repository already has checkpoints, a missing git, and a name or email
+that isn't one line of at most 200 characters without control
+characters or `<`/`>`. A step that fails stops the rest, and the result
+says what was done and what wasn't. A den whose folder is the top of its
+own repository with no checkpoints yet (made by `git init`, or by a
+turn-on that stopped part way) is finished rather than refused: every
+step but `git init` runs, so trying again is safe, and the web UI's
+checkpoint dialog, which sees history there, offers that den's first
+checkpoint as usual. A server pinned with `serve --universe` may turn
+history on: it covers the whole den, as its checkpoints do, and its
+result names no files. The server asks for the den's history provider on
+each request, so checkpoints, the History tab, freezing, and automatic
+checkpoints work at once, without a restart.
+
 **Git or a synced folder, not both.** A git repository inside a synced
 folder (Dropbox, OneDrive, iCloud) can be corrupted when two machines
 sync while git is writing. Use git with a private remote, or a synced
@@ -679,7 +713,7 @@ commands, and `wolfden <command> --help` describes each one:
 
 | Command | What it does |
 |---|---|
-| `wolfden init [<folder>] [--name <name>] [--universe <key>] [--git]` | Creates a den: a `den.yaml`, and with `--universe` a first universe with an id. It never overwrites anything, and refuses a folder inside another den or one that holds a den up to four folder levels below it (format.md F-LAY-1; the downward search skips hidden folders and folder links, and stops after 2,000 folders). The new den passes `check` with no warnings. By default the den is a plain folder; `--git` also runs `git init` in it (maintainer decision, #57, #122), unless the folder is already inside a repository, which it then names and leaves as it is (§6, "A den inside a larger repository"). Without git installed, the den is still made, and `init` says the repository wasn't (exit 0); if git fails, the den is kept and `init` exits 2. |
+| `wolfden init [<folder>] [--name <name>] [--universe <key>] [--git [--no-checkpoint] [--author-name <name>] [--author-email <email>]]` | Creates a den: a `den.yaml`, and with `--universe` a first universe with an id. It never overwrites anything, and refuses a folder inside another den or one that holds a den up to four folder levels below it (format.md F-LAY-1; the downward search skips hidden folders and folder links, and stops after 2,000 folders). The new den passes `check` with no warnings. By default the den is a plain folder; `--git` also turns on its history (maintainer decisions, #57, #122, #195; §6, "Turning history on"): `git init`, `.wolfden/` in its `.gitignore`, a name and email if git has none, and a first checkpoint, "Start of history", unless `--no-checkpoint`. A new den already inside a repository is left as it is, and `init` names the repository (§6, "A den inside a larger repository"). Without git installed, the den is still made, and `init` says the repository wasn't (exit 0); if a step fails, or git needs a name or email that wasn't given, the den is kept and `init` exits 2. On a folder that's already a den, `init` refuses (exit 2) unless `--git` is given: then it turns on that den's history, refusing `--name` and `--universe`, a den inside a larger repository, and one whose own repository already has checkpoints. |
 | `wolfden check [<den>] [--universe <key>] [--no-index] [--fix]` | The continuity lint above. It reads the files directly, not the index. It checks the whole den, every universe included, since it validates files rather than a story view; `--universe` checks only that universe's files and the den-level ones (see "Which universe" below), and `*` means the whole den. Without `--fix` it never writes the den's own files; `--universe` writes only the index (derived data, `.wolfden/`), and `--no-index` keeps it from doing even that. `--fix` first gives every container and entity file that loads without an `id` a new one (format.md F-ID-2, F-ID-6), skipping files in a final book (F-BOOK-1), and then checks the den as it is after the fix. |
 | `wolfden index [<den>] [--watch]` | Rebuilds `.wolfden/index.db` from the files and says what it holds. `--watch` then keeps it up to date as files change (#14), printing one line for each batch of changes it applies (with `--json`, one JSON object per line), until Ctrl+C. Only one watcher runs per den; a second exits 2. |
 | `wolfden query [<universe>] [--universe <key>] [--at <position>]` | Canon as of a position (format.md F-VIEW-1), from the index, of one universe (see "Which universe" below; `*` is refused, since a view is of one universe). `--series` or `--book` narrows the view, `--type` (any type an enabled pack defines) and `--entity` (matched as a link is, F-LINK-6, among the entities in the view, so one the reader meets later can't shadow one they've met) pick entities out of it, `--pinned` gives pinned canon (F-VIEW-2), and `--brief` lists one line per entity. |
@@ -1775,9 +1809,11 @@ docs/
     (anything else is 415 `unsupported_media_type`), which a page on
     another site can't send without a CORS preflight the server never
     answers. Without history, the status says why and how to turn it
-    on (`git init` in the den's folder, or `wolfden init --git` for a
-    new den, which refuses a folder that's already a den), and a POST
-    is 409 `history_unavailable`. A refusal by git (a hook, signing,
+    on (**Turn on history**, or `wolfden init --git` in the den's
+    folder), with `turnOn`: whether this server can (`possible`, or a
+    `reason` why not) and whether git needs a name or email first
+    (`needsName`, `needsEmail`); and a POST is 409
+    `history_unavailable`. A refusal by git (a hook, signing,
     a lock) or a git that didn't finish in time is 500
     `history_failed`, with git's reason. A checkpoint made while git is
     in the middle of something says so in its result (`inProgress`).
@@ -1793,6 +1829,26 @@ docs/
     checkpoint (one waiting on a passphrase prompt, say). A file saved
     while a checkpoint runs may or may not be in it, so it stays the
     server's; the next checkpoint forgets it if the history holds it.
+  - **Turning history on** (#195; §6, "Turning history on"). The
+    no-history dialog offers **Turn on history**, with a checkbox, ticked
+    by default, for the first checkpoint, and name and email fields when
+    the status says git needs them (or when the server answers
+    `identity_needed`), which say a pen name and a placeholder email will
+    do. `POST /api/history/turn-on` takes `{"authorName"?, "authorEmail"?,
+    "firstCheckpoint"?}` (it defaults to true), with the same guards as
+    the checkpoint POST (cross-site, `application/json`, no query, 64 KB),
+    and answers with the steps done, in words, `repositoryMade`,
+    `gitIgnore` (`created`, `added`, or `present`), `identitySaved`, and
+    the first checkpoint (its id, time, author, message, and file count,
+    never file names). A name or email that's refused is 400
+    `bad_argument`, a missing one 400 `identity_needed`; a den in a
+    larger repository, one with checkpoints already, or no git is 409
+    (`in_repository`, `has_repository`, `git_not_installed`); a server
+    without a way to turn it on is 409 `history_unavailable`; a step that
+    fails part way is 500 `history_failed` (or `write_failed` for
+    `.gitignore`), with what was done and what wasn't. Two requests take
+    turns. The first checkpoint goes through the server's
+    `CheckpointLedger`. After it, the page asks for everything again.
   - **Pinned.** A checkpoint covers the den (§6), as the
     MCP tool's does in a pinned session, so `serve --universe` records
     every den file too. It doesn't name files in other universes, as for

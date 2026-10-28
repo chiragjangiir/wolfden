@@ -50,13 +50,13 @@ public static class CheckpointEndpoints
     public const int LongestMessage = 5000;
 
     /// <summary>The largest request body a POST takes.</summary>
-    private const int LargestBody = 64 * 1024;
+    internal const int LargestBody = 64 * 1024;
 
     /// <summary>What to do for a den without history, for the page.</summary>
     internal const string EnableHistory =
-        "To keep history, make the den's folder a git repository: run 'git init' in it, or start a new den with 'wolfden init --git'. " +
-        "Don't keep a git repository in a synced folder (Dropbox, OneDrive, iCloud): use a private remote for backup instead. " +
-        "Checkpoints work as soon as the repository is there, without restarting Wolfden.";
+        "To keep history, turn it on: with Turn on history in the checkpoint dialog, or by running 'wolfden init --git' in the den's folder. " +
+        "Wolfden keeps it with git, and a git repository shouldn't be kept in a synced folder (Dropbox, OneDrive, iCloud): use a private remote for backup instead. " +
+        "Checkpoints work as soon as history is on, without restarting Wolfden.";
 
     /// <summary>Maps the checkpoint endpoints onto <paramref name="api"/>.</summary>
     public static void Map(RouteGroupBuilder api, WolfdenApiOptions options)
@@ -105,7 +105,8 @@ public static class CheckpointEndpoints
         if (history.CheckpointUnavailable is { } why)
         {
             return new CheckpointStatusResult(
-                ResultVersion, history.Name, false, why, history is NoHistory ? EnableHistory : null, null, null, 0, [], 0, auto);
+                ResultVersion, history.Name, false, why, history is NoHistory ? EnableHistory : null, null, null, 0, [], 0, auto,
+                history is NoHistory ? HistorySetupEndpoints.View(options) : null);
         }
 
         try
@@ -220,7 +221,7 @@ public static class CheckpointEndpoints
         return parts.Length > 2 && parts[0] == "universes" ? parts[1] : null;
     }
 
-    private static CheckpointSummary Summary(HistoryEntry e) => new(e.Id, e.When, e.Author, e.Message, e.Changes.Count);
+    internal static CheckpointSummary Summary(HistoryEntry e) => new(e.Id, e.When, e.Author, e.Message, e.Changes.Count);
 
     private static AutoCheckpointView AutoView(WolfdenApiOptions options)
     {
@@ -287,7 +288,7 @@ public static class CheckpointEndpoints
     }
 
     /// <summary>The request's body as text, or null if it's larger than <see cref="LargestBody"/>.</summary>
-    private static async Task<string?> ReadBody(HttpRequest request)
+    internal static async Task<string?> ReadBody(HttpRequest request)
     {
         if (request.ContentLength > LargestBody)
         {
@@ -332,9 +333,10 @@ public static class CheckpointEndpoints
 /// <param name="Changes">The changed den files a checkpoint now would record, in path order (not those in <paramref name="OtherUniverses"/>).</param>
 /// <param name="OtherUniverses">For a pinned server, how many changed files are in other universes; they're recorded too, but not named.</param>
 /// <param name="AutoCheckpoint">What <c>auto_checkpoint</c> says (F-DEN-9).</param>
+/// <param name="TurnOn">For a den without history, whether this server can turn it on (#195); otherwise null.</param>
 public sealed record CheckpointStatusResult(
     int Version, string Backend, bool Available, string? Reason, string? Enable, LatestCheckpoint? Latest, string? InProgress, int Count,
-    IReadOnlyList<PendingChange> Changes, int OtherUniverses, AutoCheckpointView AutoCheckpoint);
+    IReadOnlyList<PendingChange> Changes, int OtherUniverses, AutoCheckpointView AutoCheckpoint, TurnOnView? TurnOn = null);
 
 /// <summary>
 /// The den's latest checkpoint, as the status gives it: its id and time

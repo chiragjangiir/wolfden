@@ -152,8 +152,8 @@ function NoHistory({ result }: { result: HistoryResult }) {
       <p>{result.reason ?? "This den's history isn't available."}</p>
       {result.backend === 'none' && (
         <p>
-          Your notes are safe as they are. To keep a history of them, make the den's folder a git repository: run <code>git init</code> in it,
-          then commit your notes with git. A new den can start with one: <code>wolfden init --git</code>.
+          Your notes are safe as they are. To keep a history of them, turn history on: choose <strong>No history · Turn on…</strong> at the
+          top of the page, or run <code>wolfden init --git</code> in the den's folder.
         </p>
       )}
     </div>

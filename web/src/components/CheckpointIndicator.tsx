@@ -1,14 +1,16 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { count } from '../api'
+import { ApiRequestError, count } from '../api'
 import {
   CHECKPOINT_STATUS_KEY,
   changeWord,
   checkpointStatusQuery,
   groupChanges,
   makeCheckpoint,
+  turnOnHistory,
   type CheckpointMade,
   type CheckpointStatus,
+  type TurnOnRequest,
 } from '../checkpointApi'
 import '../checkpoint.css'
 
@@ -17,7 +19,7 @@ import '../checkpoint.css'
  * "3 notes changed since the last checkpoint · Checkpoint…". It's hidden
  * when nothing has changed, and opens a dialog that lists the changes and
  * asks the writer to name the checkpoint. Without history, it says history
- * is off, and the dialog says how to turn it on. Saving never makes a
+ * is off, and the dialog offers to turn it on (#195). Saving never makes a
  * checkpoint (#28); only the writer does, here, or an agent, or
  * `auto_checkpoint`.
  */
@@ -135,6 +137,17 @@ function UnavailableDialog({ message, onClose }: { message: string; onClose: () 
 
 /** The checkpoint dialog: what's changed, grouped for review, and the writer's name for it. */
 export function CheckpointDialog({ status, onClose }: { status: CheckpointStatus; onClose: () => void }) {
+  // The status as it was when the dialog opened: turning history on doesn't turn this dialog into another.
+  const [opened] = useState(status)
+  if (!opened.available) {
+    return <TurnOnDialog status={opened} onClose={onClose} />
+  }
+
+  return <MakeCheckpointDialog status={opened} onClose={onClose} />
+}
+
+/** The checkpoint form: what's changed, grouped for review, and the writer's name for it. */
+function MakeCheckpointDialog({ status, onClose }: { status: CheckpointStatus; onClose: () => void }) {
   const titleId = useId()
   const descriptionId = useId()
   const messageId = useId()
@@ -244,24 +257,7 @@ export function CheckpointDialog({ status, onClose }: { status: CheckpointStatus
         aria-busy={busy}
         onKeyDown={onKeyDown}
       >
-        {!shown.available ? (
-          <>
-            <h2 id={titleId}>History is off</h2>
-            <div id={descriptionId}>
-              <p>{shown.reason}</p>
-              {shown.enable && <p>{shown.enable}</p>}
-              <p className="muted">
-                A checkpoint saves a version of the den's notes that you can look back at or compare with later. Without history, your edits
-                are still saved in the files.
-              </p>
-            </div>
-            <div className="dialog-actions">
-              <button type="button" onClick={onClose}>
-                Close
-              </button>
-            </div>
-          </>
-        ) : checkpoint.isSuccess ? (
+        {checkpoint.isSuccess ? (
           <>
             <h2 id={titleId}>{checkpoint.data.recorded ? 'Checkpoint made' : 'Nothing to checkpoint'}</h2>
             <div id={descriptionId} role="status">
@@ -421,5 +417,235 @@ function Outcome({ made }: { made: CheckpointMade }) {
       </p>
       {made.inProgress && <p className="banner checkpoint-warning">Git was in the middle of {made.inProgress}, so the checkpoint is part of it.</p>}
     </>
+  )
+}
+
+/**
+ * The dialog for a den without history (#195): why there's none, and a
+ * Turn on history button that does what `wolfden init --git` does: the den's
+ * folder becomes a git repository, `.wolfden/` goes in its `.gitignore`, and,
+ * unless the writer unticks it, a first checkpoint, "Start of history", is
+ * made. When git has no name or email for the den, the form asks for them;
+ * they're saved for this den only. A server that can't turn it on (or a den
+ * where it can't be) says why, and how to do it from the command line.
+ */
+function TurnOnDialog({ status, onClose }: { status: CheckpointStatus; onClose: () => void }) {
+  const titleId = useId()
+  const descriptionId = useId()
+  const nameId = useId()
+  const emailId = useId()
+  const firstId = useId()
+  const errorId = useId()
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const doneRef = useRef<HTMLButtonElement>(null)
+  const client = useQueryClient()
+  const turnOn = status.turnOn ?? null
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [first, setFirst] = useState(true)
+  const [missing, setMissing] = useState<'name' | 'email' | null>(null)
+
+  const mutation = useMutation({
+    mutationFn: turnOnHistory,
+    // Whether or not every step was done, the den may have history now: everything that shows it looks again.
+    onSettled: () => client.invalidateQueries(),
+  })
+
+  // Git said it needs a name or email after all (it can depend on where the repository is): ask for both.
+  const identityAsked = mutation.error instanceof ApiRequestError && mutation.error.code === 'identity_needed'
+  const askName = (turnOn?.needsName ?? false) || identityAsked
+  const askEmail = (turnOn?.needsEmail ?? false) || identityAsked
+  const busy = mutation.isPending
+
+  useEffect(() => {
+    dialogRef.current?.querySelector<HTMLElement>('input, button')?.focus()
+  }, [])
+
+  useEffect(() => {
+    if (mutation.isSuccess) {
+      doneRef.current?.focus()
+    } else if (busy) {
+      dialogRef.current?.focus()
+    }
+  }, [mutation.isSuccess, busy])
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    if (askName && name.trim() === '') {
+      setMissing('name')
+      document.getElementById(nameId)?.focus()
+      return
+    }
+
+    if (askEmail && email.trim() === '') {
+      setMissing('email')
+      document.getElementById(emailId)?.focus()
+      return
+    }
+
+    setMissing(null)
+    const request: TurnOnRequest = { firstCheckpoint: first }
+    if (askName) {
+      request.authorName = name.trim()
+    }
+
+    if (askEmail) {
+      request.authorEmail = email.trim()
+    }
+
+    mutation.mutate(request)
+  }
+
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation()
+      if (!busy) {
+        onClose()
+      }
+    } else if (e.key === 'Tab') {
+      trapTab(e, dialogRef.current)
+    }
+  }
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
+      <div
+        className="dialog checkpoint-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        ref={dialogRef}
+        tabIndex={-1}
+        aria-busy={busy}
+        onKeyDown={onKeyDown}
+      >
+        {mutation.isSuccess ? (
+          <>
+            <h2 id={titleId}>History is on</h2>
+            <div id={descriptionId} role="status">
+              <ul className="turn-on-steps">
+                {mutation.data.steps.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ul>
+              <p>
+                From now on, a checkpoint saves a version of the den's notes that you can look back at, and each note's History tab lists the
+                ones that changed it.
+              </p>
+            </div>
+            <div className="dialog-actions">
+              <button type="button" ref={doneRef} onClick={onClose}>
+                Close
+              </button>
+            </div>
+          </>
+        ) : turnOn?.possible ? (
+          <form onSubmit={submit} noValidate>
+            <h2 id={titleId}>History is off</h2>
+            <div id={descriptionId}>
+              <p>
+                A checkpoint saves a version of the den's notes that you can look back at or compare with later. Turn on history to start
+                making them. Your edits are saved in the files either way.
+              </p>
+              <p className="muted">
+                Wolfden keeps the history with git, in the den's folder. Don't turn it on for a den in a synced folder (Dropbox, OneDrive,
+                iCloud): use a private remote for backup instead.
+              </p>
+            </div>
+            {(askName || askEmail) && (
+              <fieldset className="turn-on-identity">
+                <legend>Who makes the checkpoints</legend>
+                <p className="muted">
+                  Git records a name and email with each checkpoint, and has none for this den yet. Any name will do, a pen name included, and
+                  the email can be a placeholder, such as you@example.com. They're saved for this den only.
+                </p>
+                {askName && (
+                  <>
+                    <label htmlFor={nameId} className="checkpoint-label">
+                      Name
+                    </label>
+                    <input
+                      id={nameId}
+                      type="text"
+                      autoComplete="name"
+                      maxLength={200}
+                      required
+                      aria-required="true"
+                      aria-invalid={missing === 'name'}
+                      aria-describedby={missing === 'name' ? errorId : undefined}
+                      value={name}
+                      disabled={busy}
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                  </>
+                )}
+                {askEmail && (
+                  <>
+                    <label htmlFor={emailId} className="checkpoint-label">
+                      Email
+                    </label>
+                    <input
+                      id={emailId}
+                      type="text"
+                      inputMode="email"
+                      autoComplete="email"
+                      maxLength={200}
+                      required
+                      aria-required="true"
+                      aria-invalid={missing === 'email'}
+                      aria-describedby={missing === 'email' ? errorId : undefined}
+                      value={email}
+                      disabled={busy}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                  </>
+                )}
+                {missing && (
+                  <p id={errorId} className="field-error" role="alert">
+                    {missing === 'name' ? 'Give a name for the checkpoints. A pen name will do.' : 'Give an email for the checkpoints. A placeholder will do.'}
+                  </p>
+                )}
+              </fieldset>
+            )}
+            <label htmlFor={firstId} className="turn-on-first">
+              <input id={firstId} type="checkbox" checked={first} disabled={busy} onChange={(e) => setFirst(e.target.checked)} /> Make a first
+              checkpoint, “Start of history”, of the den as it is now
+            </label>
+            {mutation.isError && (
+              <div className="error" role="alert">
+                <p>{mutation.error.message}</p>
+              </div>
+            )}
+            <div className="dialog-actions">
+              <button type="submit" className="primary" disabled={busy}>
+                {busy ? 'Turning on history…' : 'Turn on history'}
+              </button>
+              <button type="button" onClick={onClose} disabled={busy}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <>
+            <h2 id={titleId}>History is off</h2>
+            <div id={descriptionId}>
+              <p>{status.reason}</p>
+              {turnOn?.reason && <p>{turnOn.reason}</p>}
+              {!turnOn && status.enable && <p>{status.enable}</p>}
+              <p className="muted">
+                A checkpoint saves a version of the den's notes that you can look back at or compare with later. Without history, your edits
+                are still saved in the files.
+              </p>
+            </div>
+            <div className="dialog-actions">
+              <button type="button" onClick={onClose}>
+                Close
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   )
 }

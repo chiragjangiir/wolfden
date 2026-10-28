@@ -285,7 +285,8 @@ public sealed class AutoCheckpointer : IDisposable
             _noHistorySaid = true;
             _log(
                 "den.yaml sets auto_checkpoint, but the den has no history, so no automatic checkpoints are made. " +
-                "To keep history, run 'git init' in the den's folder (not in a synced folder such as Dropbox, OneDrive, or iCloud).");
+                "To keep history, run 'wolfden init --git' in the den's folder, or use Turn on history in the web UI's checkpoint dialog " +
+                "(not for a den in a synced folder such as Dropbox, OneDrive, or iCloud). Automatic checkpoints start once it's on.");
         }
 
         return AutoCheckpointOutcome.NoHistory;

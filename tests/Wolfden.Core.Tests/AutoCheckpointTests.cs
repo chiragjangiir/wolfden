@@ -383,7 +383,7 @@ public sealed class AutoCheckpointTests : IDisposable
             Setting = () => new AutoCheckpointSetting(TimeSpan.FromMinutes(30), null, null),
         };
         auto.Start();
-        Assert.Single(log, l => l.Contains("no history", StringComparison.Ordinal) && l.Contains("git init", StringComparison.Ordinal));
+        Assert.Single(log, l => l.Contains("no history", StringComparison.Ordinal) && l.Contains("wolfden init --git", StringComparison.Ordinal));
 
         clock.Advance(TimeSpan.FromMinutes(30));
         Assert.Equal(AutoCheckpointOutcome.NoHistory, auto.Tick());

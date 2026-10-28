@@ -104,7 +104,7 @@ public class InitCommandTests
 
         Assert.Equal(CliApp.ExitUsage, exitCode);
         Assert.Empty(output);
-        Assert.Equal($"wolfden init: '{den.Root}' is already a den: it has a den.yaml. Nothing was changed.\n", error);
+        Assert.Equal($"wolfden init: '{den.Root}' is already a den: it has a den.yaml. Nothing was changed. To turn on its history, run 'wolfden init --git' in it.\n", error);
         Assert.Equal("format: 1\nname: Mine\n", den.Read("den.yaml"));
         Assert.False(den.Exists("universes/vael/universe.md"));
     }

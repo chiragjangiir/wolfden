@@ -1195,17 +1195,23 @@ The writer runs `wolfden init kestrel-notes --universe the-long-dark
 `writing/`, which is already a git repository. A third time, git isn't
 installed.
 
-- With git, the new folder is also a git repository, with nothing
-  committed yet, and the output says so; the den checks clean, and its
-  first checkpoint records `den.yaml` and the universe. Inside
-  `writing/`, no new repository is made: the output names the
-  repository the den is in, and its history is scoped to the den's
-  files there. Without git, the den is still made, the output says the
-  repository wasn't and how to make one later, and `init` exits 0.
-  Without `--git`, the den is a plain folder.
+- With git, the new folder is also a git repository with a
+  `.gitignore` for `.wolfden/`, and its history starts with a first
+  checkpoint, "Start of history", of `den.yaml` and the universe; the
+  output lists each step, and the den checks clean. With
+  `--no-checkpoint`, nothing is committed yet. Inside `writing/`, no new
+  repository is made: the output names the repository the den is in,
+  and its history is scoped to the den's files there. Without git, the
+  den is still made, the output says the repository wasn't and how to
+  turn history on later, and `init` exits 0. If git has no name or
+  email, the den is still made, but its history isn't turned on, and
+  `init` says how to give them (SC-HIST-15) and exits 2. Without
+  `--git`, the den is a plain folder.
 
-Spec: F-LAY-1, design.md §6, §7 (maintainer decision, #57, #122). Covered by:
+Spec: F-LAY-1, design.md §6, §7 (maintainer decision, #57, #122, #195). Covered by:
 `InitGitTests.WithGitTheNewDenIsARepositoryWithHistory`,
+`InitGitTests.WithNoCheckpointTheNewDensRepositoryHasNothingCommitted`,
+`InitHistoryTests.ANewDenWithoutANameOrEmailIsMadeButItsHistoryIsntTurnedOn`,
 `InitGitTests.InsideARepositoryItSaysSoAndMakesNoNewOne`,
 `InitGitTests.WithoutGitInstalledTheDenIsStillMadeAndItExplains`,
 `InitGitTests.WithoutTheFlagTheDenIsAPlainFolder`.
@@ -2454,9 +2460,9 @@ The writer keeps the den in a synced folder without git, and asks for a
 note's history, a diff, a checkpoint, or a freeze tag.
 
 - Each says, in words, that the den has no history, so that isn't
-  available, and that Wolfden can keep history with git if the den is in
-  a git repository that isn't in a synced folder, with a private remote
-  for backup. None of them is an error, and none points the writer at
+  available, and how to turn it on: `wolfden init --git` in the den's
+  folder, or **Turn on history** in the web UI's checkpoint dialog (SC-HIST-14),
+  not for a den in a synced folder, with a private remote for backup. None of them is an error, and none points the writer at
   a design document or a command that doesn't exist. A checkpoint's
   message adds that the edits are still saved in the files. The den still loads, checks,
   and indexes, and freezing a book is still `status: final` (F-BOOK-1);
@@ -2760,6 +2766,108 @@ Spec: design.md §5 (maintainer decision, 2026-10-25, #31). Covered by:
 `FreezeBookTests.ATagGitRefusesLeavesTheCheckpointAndFreezingAgainTagsIt`,
 `FreezeBookTests.ABookMarkedFinalByHandIsTaggedWithItsLatestContent`,
 `FreezeBookTests.RefreezingAfterAnUnfreezeWhoseCheckpointFailedSaysTheSnapshotAlreadyHoldsIt`.
+
+The scenarios below start from a den without history and turn it on
+(#195).
+
+### SC-HIST-14. I turn on history for a den I've been using
+
+The writer has kept the Dracula notes in a plain folder for months, with
+a `.gitignore` of their own that ignores `*.bak`. They run `wolfden init
+--git` in the den's folder. Another time, they choose **Turn on
+history** in the web UI's checkpoint dialog instead.
+
+- The den's folder becomes a git repository. `.wolfden/` is added at
+  the end of the writer's `.gitignore`, and the rest of it is left as it
+  was (a `.gitignore` that already names `.wolfden/` isn't touched, and
+  a den without one gets one). A first checkpoint, "Start of history",
+  records every den file as it is, so nothing is left to checkpoint.
+- The output lists each step. With `--no-checkpoint` (or the checkbox
+  unticked), there's no first checkpoint, and every note is listed as
+  not checkpointed yet.
+- `--name` and `--universe` are refused on a den that exists: they're
+  for a new one. Without `--git`, `init` still refuses an existing den,
+  and says `--git` turns on its history.
+
+Spec: design.md §6, "Turning history on", §7 (maintainer decision,
+2026-10-28, #195). Covered by:
+`HistorySetupTests.ADenWithoutHistoryGetsARepositoryAGitignoreAndAFirstCheckpoint`,
+`HistorySetupTests.AnExistingGitignoreKeepsWhatItHasAndGetsTheLineOnlyIfItsMissing`,
+`HistorySetupTests.WithoutTheFirstCheckpointTheRepositoryHasNone`,
+`InitHistoryTests.AnExistingDenGetsHistoryWithAFirstCheckpoint`,
+`InitHistoryTests.FromInsideTheDenWithNoCheckpointItSaysWhatItDidAsJson`,
+`InitHistoryTests.NewDenOptionsAreRefusedForAnExistingDen`,
+`InitHistoryTests.WithoutGitAnExistingDenIsStillRefused`,
+`HistorySetupEndpointTests.TheDialogTurnsHistoryOnAndTheRunningServerUsesItAtOnce`.
+
+### SC-HIST-15. Git doesn't know my name yet
+
+The writer has never used git on this computer, so git has no name or
+email. They turn on history for their den.
+
+- Wolfden asks for a name and an email, and says why: git records who
+  made each checkpoint. Any name will do, a pen name included, and the
+  email can be a placeholder. Until they're given, nothing is changed:
+  no repository, no `.gitignore`.
+- Given (`--author-name` and `--author-email`, or the dialog's fields),
+  they're saved in the den's own repository only (`git config
+  --local`), never in the writer's global settings, and the first
+  checkpoint is recorded under that name.
+- When git has one but not the other, only the missing one is asked for
+  and saved; the one git has is left alone, even if another was given.
+- A name or email of more than one line, with a control character, or
+  with `<` or `>`, is refused.
+
+Spec: design.md §6, "Turning history on" (maintainer decision,
+2026-10-28, #195). Covered by:
+`HistorySetupTests.AMissingNameAndEmailAreAskedForAndSavedForTheDensRepositoryOnly`,
+`HistorySetupTests.OnlyTheMissingHalfIsSavedAndAnExistingSettingIsLeftAlone`,
+`HistorySetupTests.ANameOrEmailThatGitCantRecordIsRefused`,
+`InitHistoryTests.AMissingNameAndEmailAreAskedForThenSavedForTheDenOnly`,
+`HistorySetupEndpointTests.AMissingNameAndEmailAreAskedForAndSavedForTheDenOnly`,
+`Checkpoint.test.tsx` (web).
+
+### SC-HIST-16. Turning on history stops part way
+
+The writer's global git settings run a pre-commit hook that refuses the
+first checkpoint. Another time, the writer had already run `git init` in
+the den's folder by hand, and made no commit.
+
+- When the hook refuses, the output says what was done (the repository,
+  the `.gitignore`) and what wasn't (the first checkpoint), with git's
+  reason, and `init` exits 2. History is on by then: the web UI's
+  checkpoint dialog offers the first checkpoint as usual, and running
+  `wolfden init --git` again once the hook is fixed finishes the job,
+  with the same repository and `.gitignore`.
+- A den whose own repository has no commits is finished the same way,
+  rather than refused.
+
+Spec: design.md §6, "Turning history on" (#195). Covered by:
+`HistorySetupTests.AFailedFirstCheckpointSaysWhatWasDoneAndTryingAgainFinishes`,
+`HistorySetupTests.ADenWhoseOwnRepositoryHasNoCheckpointsIsFinished`,
+`InitHistoryTests.ADenWhoseOwnRepositoryHasNoCheckpointsIsFinished`,
+`HistorySetupEndpointTests.AFailedFirstCheckpointSaysWhatWasDoneAndTheDialogCanFinishIt`.
+
+### SC-HIST-17. Turning on history is refused
+
+The writer runs `wolfden init --git` in a den that's a folder of their
+larger `writing/` repository. Another time, in a den that already has
+checkpoints. A third time, on a computer without git.
+
+- Each is refused with nothing changed, and `init` exits 2: the den in
+  `writing/` already has history there, scoped to its files, so there's
+  nothing to turn on; the den with checkpoints already has history on;
+  and without git, it says to install git.
+
+Spec: design.md §6, "Turning history on", "A den inside a larger
+repository" (maintainer decision, 2026-10-28, #195). Covered by:
+`HistorySetupTests.ADenInsideALargerRepositoryIsRefusedWithNothingChanged`,
+`HistorySetupTests.ADenWhoseOwnRepositoryHasCheckpointsIsRefused`,
+`HistorySetupTests.WithoutGitItSaysSoAndChangesNothing`,
+`InitHistoryTests.ADenInsideALargerRepositoryIsRefused`,
+`InitHistoryTests.ADenWithHistoryAlreadyIsRefused`,
+`InitHistoryTests.WithoutGitInstalledAnExistingDenIsRefused`,
+`HistorySetupEndpointTests.ADenInsideALargerRepositoryIsRefused`.
 
 ## WEB: the den in a browser
 
@@ -3603,12 +3711,13 @@ Covered by:
 The writer keeps the den in a plain folder and opens `wolfden serve`.
 
 - The top bar shows "No history · Turn on…". Its dialog says the den has
-  no history, that edits are still saved in the files, and how to turn
-  history on: `git init` in the den's folder, or `wolfden init --git` for
-  a new den, and not in a synced folder. It offers no checkpoint.
+  no history, that edits are still saved in the files, and offers **Turn
+  on history** (SC-WEB-55), not for a den in a synced folder. It offers
+  no checkpoint. A server that can't turn history on says to run
+  `wolfden init --git` in the den's folder.
 - `POST /api/checkpoint` is 409 `history_unavailable`, with the same
-  advice. Once the folder is a repository, checkpoints work without
-  restarting `serve`.
+  advice. Once history is on, checkpoints work without restarting
+  `serve`.
 
 Spec: design.md §6, §9 (#30). Covered by:
 `CheckpointEndpointTests.WithoutHistoryTheStatusSaysHowToTurnItOnAndACheckpointIsRefused`,
@@ -3727,6 +3836,36 @@ has also edited a note in the `drift` universe and `den.yaml`.
 Spec: design.md §6, §9 (#30). Covered by:
 `CheckpointEndpointTests.APinnedServerCheckpointsTheWholeDenButNamesOnlyItsUniverse`,
 `CheckpointEndpointTests.APinnedServersLatestCheckpointDoesntNameAnotherUniverse`,
+`Checkpoint.test.tsx` (web).
+
+### SC-WEB-55. I turn on history from the checkpoint dialog
+
+The writer serves a den without history, chooses **No history · Turn
+on…**, then **Turn on history**.
+
+- The dialog says what a checkpoint is, and not to turn history on for
+  a den in a synced folder. A checkbox, ticked, makes a first
+  checkpoint, "Start of history". When git has no name or email, the
+  dialog asks for them (SC-HIST-15); otherwise it doesn't.
+- Once it's on, the dialog lists what was done, and the top bar goes
+  quiet: the server uses the new history at once, without a restart, for
+  the indicator, the History tab, the next checkpoint, and freezing.
+- A refusal shows the server's message; if git turns out to need a name
+  and email after all, the fields appear. When it can't be turned on
+  here (no git, say), the dialog says why and offers no button.
+- A server pinned to one universe may turn it on: history covers the
+  whole den, and the result names no files.
+- The request is refused from another site or without JSON, as a
+  checkpoint is.
+
+Spec: design.md §6, "Turning history on", §9 (maintainer decision,
+2026-10-28, #195). Covered by:
+`HistorySetupEndpointTests.TheDialogTurnsHistoryOnAndTheRunningServerUsesItAtOnce`,
+`HistorySetupEndpointTests.WithoutTheFirstCheckpointEveryNoteIsLeftToCheckpoint`,
+`HistorySetupEndpointTests.ABadRequestIsRefusedWithNothingChanged`,
+`HistorySetupEndpointTests.HistoryCantBeTurnedOnFromAnotherSiteOrWithoutJson`,
+`HistorySetupEndpointTests.AServerThatCantTurnItOnSaysSo`,
+`HistorySetupEndpointTests.APinnedServerTurnsItOnForTheWholeDenAndNamesNoFiles`,
 `Checkpoint.test.tsx` (web).
 
 ### SC-WEB-60. I edit a field with a control that fits it

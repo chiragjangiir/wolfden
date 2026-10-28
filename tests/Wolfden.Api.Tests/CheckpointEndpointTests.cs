@@ -68,7 +68,7 @@ public sealed class CheckpointEndpointTests : IDisposable
         Assert.Equal("none", status.GetProperty("backend").GetString());
         Assert.Contains("no history", status.GetProperty("reason").GetString(), StringComparison.Ordinal);
         var enable = status.GetProperty("enable").GetString()!;
-        Assert.Contains("git init", enable, StringComparison.Ordinal);
+        Assert.Contains("Turn on history", enable, StringComparison.Ordinal);
         Assert.Contains("wolfden init --git", enable, StringComparison.Ordinal);
         Assert.Equal(0, status.GetProperty("count").GetInt32());
 
