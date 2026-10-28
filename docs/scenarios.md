@@ -1266,6 +1266,35 @@ Spec: design.md §5, §7 (#31). Covered by:
 `FreezeCommandTests.AFailedCheckpointExitsTwoAndSaysToFreezeAgain`,
 `FreezeCommandTests.AnUnknownBookOrNoBookExitsTwo`.
 
+### SC-CLI-15. I start a new character from the command line
+
+The writer runs `wolfden new character "Sister Agatha"`, then `wolfden
+new location "Buda-Pesth hospital" --in dracula/book:dracula --from
+dracula:8`.
+
+- The first is `universes/dracula/entities/characters/sister-agatha.md`,
+  made from the character template: a new id, `type`, `name`, and
+  `status: draft`, and the template's sections. The output names the new
+  file and says where it enters canon, as `create_entity` does
+  (SC-MCP-15). The same name again gets `-2`, and `check` finds nothing
+  wrong with either.
+- `--in` takes what `wolfden copy --to` takes (SC-CLI-13), from the same
+  code, and its messages name `--in`: `--in dracula` names the universe
+  and its book, so it's refused with both spellings. With two universes,
+  leaving out `--in` is refused, saying to name one `with --in`.
+  `--from` sets where the reader first meets it, and `--slug` the file
+  name. `--json` prints the write result.
+- A note in a final book, a type no enabled pack defines (the error lists
+  the types), a slug that's taken, an unknown book, a missing or blank
+  name, or a `den.yaml` that doesn't load exits 2 and writes nothing.
+
+Spec: types.md F-TPL-6, design.md §7 (#29). Covered by:
+`NewCommandTests.ANewNoteComesFromItsTemplateInTheUniverseWithANewId`,
+`NewCommandTests.InNamesWhereItGoesAndFromWhereTheReaderMeetsIt`,
+`NewCommandTests.ARefusedCreateExitsTwoAndWritesNothing`,
+`NewCommandTests.ADenWhoseDenYamlDoesntLoadSaysSo`,
+`NewCommandTests.JsonPrintsTheWriteResult`.
+
 ## WATCH: keeping the index up to date while notes change
 
 Background: `wolfden index --watch` (design.md §7, #14) keeps the index up
@@ -3815,3 +3844,54 @@ Spec: design.md §5, §9 (#31). Covered by:
 `FreezeEndpointTests.AStaleOrMalformedFreezeIsRefusedAndWritesNothing`,
 `FreezeEndpointTests.APinnedServerWontShowOrFreezeAnotherUniversesBook`,
 `Freeze.test.tsx` (web).
+
+### SC-WEB-67. I make a new character where I am
+
+On Dracula's book page, the writer chooses **New ▾** in the top bar,
+then Character, names her "Sister Agatha", and creates her.
+
+- The menu lists the den's enabled types, built-in and from the den's
+  own packs, by name (`GET /api/types`). It's a menu button: the arrow
+  keys, Home, and End move through it, Escape closes it and returns to
+  the button, and Enter on a type opens the form.
+- The form asks for the type, the name, and where the note goes, which
+  starts as where the writer is: the book on a book or chapter page, the
+  note's own place on a note's page, and otherwise the universe. A name
+  is required before anything is sent. The file isn't named until it's
+  made.
+- **Create** sends `POST /api/entity/create` with the type, name, and
+  place, which makes the file from the template as `create_entity` does
+  (SC-MCP-15): a new id, a slug from the name (`-2` when it's taken),
+  and no `from`. The page opens the new note, says which file was made,
+  and moves focus there; the tree, the counts, search, and the checkpoint
+  indicator ask again. Leaving the page ends the notice.
+- Each type's list in the contents tree has **New <type>**, with the type
+  and that place filled in; both can still be changed.
+- Viewing at a story position, the form offers "Enters the story at
+  <position>", off by default; ticked, the note gets `from:` that
+  position. Escape or Cancel closes the form, sends nothing, and returns
+  focus to what opened it.
+
+Spec: types.md F-TPL-6, design.md §9 (#29). Covered by:
+`CreateEndpointTests.TheTypesAreTheDensEnabledTypesBuiltInAndDenLocal`,
+`CreateEndpointTests.ANewNoteIsMadeFromItsTemplateWhereTheWriterSaysAndTheAnswerNamesIt`,
+`WriteToolTests.TheTypesANewEntityCanBeMadeFromAreTheEnabledOnesByName` (MCP),
+`NewEntity.test.tsx` (web).
+
+### SC-WEB-68. New notes are guarded
+
+- A final book can be chosen as the place, marked "final", but the form
+  says nothing can be added to it until it's unfrozen, and Create is off.
+  If the server refuses anyway (`frozen`, 409), the form shows why, stays
+  open with the name kept, and nothing is written.
+- `POST /api/entity/create` takes only `type`, `name`, `universe`,
+  `series`, `book`, and `from`, as JSON; a blank name, a series and a
+  book together, a type no enabled pack defines (`unknown_type`), or a
+  book the universe doesn't have (`unknown_scope`) is refused and writes
+  nothing. It answers POST only, and `/api/types` GET only.
+- A server pinned to one universe creates only in it.
+
+Spec: format.md F-BOOK-1, design.md §9 (#29). Covered by:
+`CreateEndpointTests.ACreateInAFinalBookOrOfAnUnknownTypeOrMalformedIsRefusedAndWritesNothing`,
+`CreateEndpointTests.APinnedServerCreatesOnlyInItsUniverse`,
+`NewEntity.test.tsx` (web).

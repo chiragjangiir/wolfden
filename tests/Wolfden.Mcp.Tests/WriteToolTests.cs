@@ -58,6 +58,30 @@ public sealed class WriteToolTests : IDisposable
     }
 
     [Fact]
+    [Trait("Scenario", "SC-WEB-67")]
+    public void TheTypesANewEntityCanBeMadeFromAreTheEnabledOnesByName()
+    {
+        var types = Tools.ListTypes().Types;
+
+        Assert.Equal(
+            ["Character", "Event", "Faction", "Idea", "Item", "Location", "Note", "Thread"], types.Select(t => t.Name));
+        var thread = types.Single(t => t.Key == "thread");
+        Assert.Equal("threads", thread.Plural);
+        Assert.Equal("core", thread.Pack);
+        Assert.True(thread.BuiltIn);
+        Assert.False(string.IsNullOrEmpty(thread.Description));
+
+        // Every one of them can be created.
+        foreach (var type in types)
+        {
+            Assert.True(Tools.CreateEntity(type.Key, $"A new {type.Key}").Changed);
+        }
+
+        _den.Write("den.yaml", "format: [\n");
+        Assert.Equal(ToolErrorCodes.DenNotLoaded, Assert.Throws<DenToolException>(() => Tools.ListTypes()).Code);
+    }
+
+    [Fact]
     [Trait("Scenario", "SC-MCP-15")]
     public void ASlugIsMadeFromTheNameAsTheTemplateRuleSays()
     {

@@ -7,6 +7,44 @@ in. It grows as features land. The exact rules are in
 [`design.md`](design.md). For choosing whether a note belongs to the
 universe, a series, or a book, see [Where to file things](where-to-file.md).
 
+## Making a new note
+
+In `wolfden serve`, choose **New ▾** in the top bar and pick a type:
+character, location, event, and so on, plus any types your den's own
+packs add. Or, in the contents tree, open a type's list (Characters, say)
+under a book or the universe and choose **New Character** there: the type
+and the place are filled in for you.
+
+The form asks for three things:
+
+- **Type.** What kind of note it is. Its template decides the fields and
+  sections the note starts with.
+- **Name.** What you'll call it, and what links use (`[[Sister Agatha]]`).
+  The file is named from it.
+- **Where it goes.** The universe, a series, or a book. It starts as the
+  place you're looking at: the book on a book or chapter page, the place a
+  note is filed on that note's page, and otherwise the universe. A book
+  marked final takes nothing new until it's unfrozen.
+
+Choose **Create**, and Wolfden makes the file from the template and opens
+the new note, with the file's name at the top. Fill it in there, one
+field or section at a time, as below.
+
+A new note is canon from the start of where it goes. If you're viewing the
+story at a chapter, the form also offers **Enters the story at** that
+chapter: tick it when the reader first meets this character (or place, or
+thread) there, and the note gets `from:` that chapter. Leave it off for
+something that's been true all along.
+
+From the command line, `wolfden new` does the same:
+
+```text
+wolfden new character "Sister Agatha" --in dracula/book:dracula --from dracula:8
+```
+
+`--in` takes the same places as `wolfden copy --to`; leave it out to file
+the note in the universe, when your den has one. `--from` is optional.
+
 ## Editing notes
 
 `wolfden serve` lets you edit a note on its page, one piece at a time.

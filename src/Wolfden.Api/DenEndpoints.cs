@@ -80,7 +80,8 @@ public static class DenEndpoints
                     || FreezeEndpoints.GetPostPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "GET, POST"
                 : GetPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "GET"
                 : WriteEndpoints.PostPaths.Contains(path, StringComparer.OrdinalIgnoreCase)
-                    || FreezeEndpoints.PostPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "POST"
+                    || FreezeEndpoints.PostPaths.Contains(path, StringComparer.OrdinalIgnoreCase)
+                    || CreateEndpoints.PostPaths.Contains(path, StringComparer.OrdinalIgnoreCase) ? "POST"
                 : null;
             if (method is not null)
             {
@@ -97,7 +98,7 @@ public static class DenEndpoints
     }
 
     /// <summary>The paths under <c>/api</c> that answer GET.</summary>
-    private static readonly string[] GetPaths = ["health", "den", .. ReadEndpoints.Paths, .. WriteEndpoints.GetPaths];
+    private static readonly string[] GetPaths = ["health", "den", .. ReadEndpoints.Paths, .. WriteEndpoints.GetPaths, .. CreateEndpoints.GetPaths];
 
     /// <summary>The den's name and its universes, or the pinned one.</summary>
     internal static IResult Den(WolfdenApiOptions options)

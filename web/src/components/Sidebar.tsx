@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { denQuery, hierarchyQuery, type BookNode, type EntitySummary, type ScopeKind } from '../api'
 import { useEntitiesInView } from '../hooks'
 import { EntityList } from './EntityList'
+import { NewTypeButton } from './NewEntity'
 import { typePlural } from './Links'
 import { ErrorState, Loading } from './States'
 
@@ -11,7 +12,8 @@ import { ErrorState, Loading } from './States'
  * The hierarchy tree (#24): universe → series in story order → books →
  * chapters and entity types → entities. Universe and series notes sit under
  * their own scope. As of a position, each type group lists only what the
- * reader has met, with a peek at the rest.
+ * reader has met, with a peek at the rest, and a New <type> button that
+ * makes another of that type there (#29).
  */
 export function Sidebar({ universe }: { universe: string | undefined }) {
   const den = useQuery(denQuery)
@@ -62,8 +64,8 @@ function UniverseTree({ universe }: { universe: string }) {
   const all = view.all!.entities
   const current = all.find((e) => e.key === params._splat || e.id === params._splat || e.path === params._splat)
   const byScope = groupByScope(all)
-  const scopeGroups = (kind: ScopeKind, key: string) => (
-    <TypeGroups universe={universe} entities={byScope.get(`${kind}:${key}`) ?? []} view={view} current={current} />
+  const scopeGroups = (kind: ScopeKind, key: string, name: string) => (
+    <TypeGroups universe={universe} scope={{ kind, key }} scopeName={name} entities={byScope.get(`${kind}:${key}`) ?? []} view={view} current={current} />
   )
   const book = (b: BookNode) => (
     <TreeNode
@@ -85,7 +87,7 @@ function UniverseTree({ universe }: { universe: string }) {
           </ol>
         </TreeNode>
       )}
-      {scopeGroups('book', b.key)}
+      {scopeGroups('book', b.key, b.name)}
     </TreeNode>
   )
 
@@ -97,10 +99,10 @@ function UniverseTree({ universe }: { universe: string }) {
         </Link>
       </p>
       {view.all!.truncated && <p className="muted">Only the first {all.length} notes are listed.</p>}
-      {scopeGroups('universe', u.key)}
+      {scopeGroups('universe', u.key, u.name)}
       {u.series.map((s) => (
         <TreeNode key={s.key} label={<Link to="/u/$universe/s/$series" params={{ universe, series: s.key }}>{s.name}</Link>} open>
-          {scopeGroups('series', s.key)}
+          {scopeGroups('series', s.key, s.name)}
           {s.books.map(book)}
         </TreeNode>
       ))}
@@ -121,11 +123,15 @@ function groupByScope(entities: readonly EntitySummary[]): Map<string, EntitySum
 
 function TypeGroups({
   universe,
+  scope,
+  scopeName,
   entities,
   view,
   current,
 }: {
   universe: string
+  scope: { kind: ScopeKind; key: string }
+  scopeName: string
   entities: readonly EntitySummary[]
   view: ReturnType<typeof useEntitiesInView>
   current: EntitySummary | undefined
@@ -147,6 +153,7 @@ function TypeGroups({
             open={current !== undefined && current.type === type && entities.includes(current)}
           >
             <EntityList key={view.at ?? ''} universe={universe} shown={shown} hidden={hidden} current={current?.key} />
+            <NewTypeButton type={type} scope={scope} scopeName={scopeName} />
           </TreeNode>
         )
       })}

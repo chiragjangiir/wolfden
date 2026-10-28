@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using Wolfden.Core.Structure;
 using Wolfden.Mcp;
 
 namespace Wolfden.Cli;
@@ -66,6 +65,9 @@ internal static class CopyCommand
         "pass --allow-relinks", "as <new name>", "--slug", "with --universe", "use 'wolfden query --brief'", "run 'wolfden check'", "run 'wolfden check'",
         "run 'wolfden check'");
 
+    /// <summary><c>--to</c>, where the copy goes.</summary>
+    private static readonly ScopeOption To = new("--to", "copy into", "copied");
+
     public static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error)
     {
         if (CommandLine.Parse(Spec, args, output, error, out var line) is { } exit)
@@ -86,7 +88,7 @@ internal static class CopyCommand
         }
 
         string? toUniverse = null, toSeries = null, toBook = null;
-        if (line.Value("--to") is { } to && !TryScope(root, to, out toUniverse, out toSeries, out toBook, out var problem))
+        if (line.Value("--to") is { } to && !To.TryParse(root, to, out toUniverse, out toSeries, out toBook, out var problem))
         {
             error.WriteLine($"wolfden copy: {problem}");
             return CliApp.ExitUsage;
@@ -127,122 +129,5 @@ internal static class CopyCommand
         }
 
         return CliApp.ExitOk;
-    }
-
-    /// <summary>
-    /// Reads <c>--to</c>: <c>&lt;universe&gt;</c> (or <c>&lt;universe&gt;/</c>),
-    /// or <c>&lt;universe&gt;/&lt;key&gt;</c> for a series or book of it, with
-    /// <c>series:</c> or <c>book:</c> before the key to say which. In a den
-    /// with one universe, a bare series or book key is enough (as for
-    /// <c>check</c>, #127), unless it's also the universe's key.
-    /// </summary>
-    private static bool TryScope(string root, string to, out string? universe, out string? series, out string? book, out string problem)
-    {
-        universe = series = book = null;
-        problem = "";
-        var structure = DenStructure.Load(root);
-        if (!structure.IsLoaded)
-        {
-            problem = "den.yaml doesn't load, so --to can't be read and nothing can be copied. Run 'wolfden check' to see why.";
-            return false;
-        }
-
-        var slash = to.IndexOf('/', StringComparison.Ordinal);
-        if (slash < 0)
-        {
-            return TryBareKey(structure, to.Trim(), out universe, out series, out book, out problem);
-        }
-
-        var u = to[..slash].Trim();
-        var rest = to[(slash + 1)..].Trim();
-        var found = structure.FindUniverse(u);
-        if (found is null)
-        {
-            problem = $"the den has no universe '{u}', so --to '{to}' doesn't name a scope. Give --to '<universe>' or '<universe>/<series or book>'.";
-            return false;
-        }
-
-        universe = found.Key;
-        return rest.Length == 0 || TryWork(found, rest, out series, out book, out problem);
-    }
-
-    /// <summary>A <c>--to</c> without <c>/</c>: a universe, or in a den with one universe, a series or book of it.</summary>
-    private static bool TryBareKey(DenStructure structure, string key, out string? universe, out string? series, out string? book, out string problem)
-    {
-        universe = series = book = null;
-        problem = "";
-        var only = structure.Universes.Count == 1 ? structure.Universes[0] : null;
-        if (only is not null && (key.StartsWith("series:", StringComparison.Ordinal) || key.StartsWith("book:", StringComparison.Ordinal)))
-        {
-            universe = only.Key;
-            return TryWork(only, key, out series, out book, out problem);
-        }
-
-        var asUniverse = structure.FindUniverse(key);
-        var kinds = only is null ? [] : new[] { only.Series.Any(s => s.Key == key) ? "series" : null, only.FindBook(key) is not null ? "book" : null }.OfType<string>().ToList();
-        var work = kinds.Count > 0 ? only : null;
-        if (asUniverse is not null && work is not null)
-        {
-            var what = string.Join(" and a ", kinds.Select(k => k + " of it"));
-            var spellings = string.Join(", or ", kinds.Select(k => $"'{work.Key}/{k}:{key}' for the {k}"));
-            problem = $"'{key}' is the universe and a {what}: give --to '{key}/' for the universe, or {spellings}.";
-            return false;
-        }
-
-        if (asUniverse is not null)
-        {
-            universe = asUniverse.Key;
-            return true;
-        }
-
-        if (work is not null)
-        {
-            universe = work.Key;
-            return TryWork(work, key, out series, out book, out problem);
-        }
-
-        var holders = structure.Universes.Where(x => x.Series.Any(s => s.Key == key) || x.FindBook(key) is not null).Select(x => $"'{x.Key}/{key}'").ToList();
-        problem = $"the den has no universe '{key}'" + (only is null ? "" : $", and universe '{only.Key}' has no series or book '{key}'") +
-            $", so --to '{key}' doesn't name a scope." +
-            (holders.Count > 0 ? $" To copy into the series or book '{key}', give --to {string.Join(" or ", holders)}." : "") +
-            " Give --to '<universe>' or '<universe>/<series or book>'.";
-        return false;
-    }
-
-    /// <summary>A series or book key of <paramref name="universe"/>, with <c>series:</c> or <c>book:</c> before it to say which.</summary>
-    private static bool TryWork(Universe universe, string key, out string? series, out string? book, out string problem)
-    {
-        series = book = null;
-        problem = "";
-        if (key.StartsWith("series:", StringComparison.Ordinal))
-        {
-            series = key["series:".Length..].Trim();
-            return true;
-        }
-
-        if (key.StartsWith("book:", StringComparison.Ordinal))
-        {
-            book = key["book:".Length..].Trim();
-            return true;
-        }
-
-        var isSeries = universe.Series.Any(s => s.Key == key);
-        if (isSeries && universe.FindBook(key) is not null)
-        {
-            problem = $"universe '{universe.Key}' has a series and a book named '{key}': give --to '{universe.Key}/series:{key}' or '{universe.Key}/book:{key}'.";
-            return false;
-        }
-
-        if (isSeries)
-        {
-            series = key;
-        }
-        else
-        {
-            // A key that's neither: the copy reports the unknown book, with the books it has.
-            book = key;
-        }
-
-        return true;
     }
 }

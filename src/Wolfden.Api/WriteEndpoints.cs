@@ -79,6 +79,9 @@ public static partial class WriteEndpoints
 
         FreezeEndpoints.Map(api, tools);
 
+        // New notes from type templates (#29), through the same tools, so they run one write at a time and land in the ledger.
+        CreateEndpoints.Map(api, tools);
+
         api.MapGet("/entity/source", (HttpContext c) => ReadEndpoints.Answer(
             c, ["entity", "universe"], q => tools.GetSource(Entity(q.Text("entity")), q.Text("universe"))));
 
