@@ -211,3 +211,40 @@ public sealed record SourceLead(int Line, string Text);
 /// <param name="Pinned">True if it's pinned canon (F-PIN-1), by its own comment or a parent's.</param>
 /// <param name="Parent">The index of the section that holds it, or null for a level-2 section.</param>
 public sealed record SourceSection(int Index, string Name, int Level, int Line, string? Comment, string Body, bool Pinned, int? Parent);
+
+/// <summary>A book's freeze status, for a page that offers to freeze or unfreeze it (#31).</summary>
+/// <param name="Version">The shape version.</param>
+/// <param name="Universe">The book's universe.</param>
+/// <param name="Book">The book's key.</param>
+/// <param name="Name">The book's name.</param>
+/// <param name="Path">Its <c>book.md</c>, relative to the den root.</param>
+/// <param name="Hash">The hash of its <c>book.md</c>, to pass back with a freeze or unfreeze.</param>
+/// <param name="Status"><c>final</c> (frozen) or <c>draft</c> (format.md F-BOOK-1).</param>
+/// <param name="Backend">The history backend: <c>git</c>, or <c>none</c>.</param>
+/// <param name="History">True if the den has history, so freezing checkpoints (and tags) and unfreezing checkpoints.</param>
+/// <param name="Reason">Why it has no history, in words for the writer, or null.</param>
+/// <param name="NextTag">For a draft book in a den whose history can make tags, the tag a freeze would add; otherwise null.</param>
+/// <param name="Unfinished">For a final book in a den with history, true if its freeze is unfinished: its <c>book.md</c> isn't checkpointed as it is, or that checkpoint isn't tagged (a step failed). Freezing again finishes it.</param>
+/// <param name="OtherChanges">With history, how many changed den files outside the book a checkpoint now would also record (counted, never named, so a pinned server names nothing in other universes).</param>
+public sealed record BookFreezeView(
+    int Version, string Universe, string Book, string Name, string Path, string Hash, string Status, string Backend, bool History, string? Reason, string? NextTag, bool Unfinished, int OtherChanges);
+
+/// <summary>What freezing or unfreezing a book did (#31).</summary>
+/// <param name="Version">The shape version.</param>
+/// <param name="Universe">The book's universe.</param>
+/// <param name="Book">The book's key.</param>
+/// <param name="Path">Its <c>book.md</c>, relative to the den root.</param>
+/// <param name="Hash">The hash of its <c>book.md</c> now.</param>
+/// <param name="Status">The book's status now: <c>final</c> or <c>draft</c>.</param>
+/// <param name="Changed">True if <c>book.md</c> was written; false if it already said so.</param>
+/// <param name="Backend">The history backend: <c>git</c>, or <c>none</c>.</param>
+/// <param name="Snapshot">What happened in the den's history, one of <see cref="FreezeSnapshot"/>'s words.</param>
+/// <param name="Checkpoint">The checkpoint made, or for a freeze the one tagged (or to be tagged), by id; null if none.</param>
+/// <param name="Tag">For a freeze, the tag added, or the one already naming the snapshot; otherwise null.</param>
+/// <param name="Message">What happened, in words for the writer, including what to do if a step failed.</param>
+/// <param name="Warnings">Warnings about <c>book.md</c> after the write.</param>
+/// <param name="IdAdded">The id given to a <c>book.md</c> that had none (format.md F-ID-6), or null.</param>
+/// <param name="OtherFiles">How many files outside the book the checkpoint made here also recorded: a checkpoint records the whole den.</param>
+public sealed record FreezeResult(
+    int Version, string Universe, string Book, string Path, string Hash, string Status, bool Changed, string Backend, string Snapshot,
+    string? Checkpoint, string? Tag, string Message, IReadOnlyList<DiagnosticView> Warnings, string? IdAdded = null, int OtherFiles = 0);

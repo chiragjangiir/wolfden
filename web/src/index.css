@@ -856,6 +856,11 @@ button.danger {
   background: var(--bg-sunken);
 }
 
+/* A freeze whose checkpoint or tag failed: the book's status changed, but there's something to do (#31). */
+.save-result.freeze-warning {
+  border-left-color: var(--broken);
+}
+
 .save-result ul {
   margin: 0.25rem 0 0.5rem;
 }

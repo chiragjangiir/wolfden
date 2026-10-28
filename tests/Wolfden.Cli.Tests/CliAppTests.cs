@@ -37,6 +37,8 @@ public class CliAppTests
     [InlineData("index")]
     [InlineData("query")]
     [InlineData("copy")]
+    [InlineData("freeze")]
+    [InlineData("unfreeze")]
     [InlineData("new-id")]
     [InlineData("serve")]
     [InlineData("mcp")]
@@ -55,6 +57,8 @@ public class CliAppTests
     [InlineData("index")]
     [InlineData("query")]
     [InlineData("copy")]
+    [InlineData("freeze")]
+    [InlineData("unfreeze")]
     public void EveryCommandThatReadsADenTakesDenAndJson(string command)
     {
         var (_, output, _) = Cli.Run(command, "--help");

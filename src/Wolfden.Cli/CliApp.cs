@@ -44,7 +44,7 @@ internal static class CliApp
     internal static Wolfden.Git.GitOptions Git { get; set; } = Wolfden.Git.GitOptions.Default;
 
     /// <summary>Commands that work, in the order the usage lists them.</summary>
-    internal static readonly string[] Commands = ["init", "check", "index", "query", "copy", "new-id", "serve", "mcp"];
+    internal static readonly string[] Commands = ["init", "check", "index", "query", "copy", "freeze", "unfreeze", "new-id", "serve", "mcp"];
 
     internal static string Version =>
         typeof(CliApp).Assembly
@@ -65,6 +65,8 @@ internal static class CliApp
           query [<universe>]       show canon as of a story position (--at book:chapter)
           copy <entity> <name>     copy an entity under a new name, with a new id
                                    (--to <scope> puts it elsewhere)
+          freeze <book>            mark a finished book final, and tag its snapshot
+          unfreeze <book>          open a frozen book for editing again
           new-id [<count>]         print new ids for files made by hand
           serve [<den>]            open the den's web UI in a browser (runs until Ctrl+C)
           mcp [<den>]              run the MCP server over stdio for an AI client
@@ -115,6 +117,10 @@ internal static class CliApp
                 return QueryCommand.Run(rest, output, error);
             case ["copy", .. var rest]:
                 return CopyCommand.Run(rest, output, error);
+            case ["freeze", .. var rest]:
+                return FreezeCommand.Run(freeze: true, rest, output, error);
+            case ["unfreeze", .. var rest]:
+                return FreezeCommand.Run(freeze: false, rest, output, error);
             case ["new-id", .. var rest]:
                 return NewIdCommand.Run(rest, output, error);
             case ["serve", .. var rest]:

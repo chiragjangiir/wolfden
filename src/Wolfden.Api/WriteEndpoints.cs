@@ -72,7 +72,12 @@ public static partial class WriteEndpoints
             // Every save records itself in the server's ledger, so the checkpoint
             // dialog marks it "saved in Wolfden" (#30).
             Ledger = options.Ledger,
+
+            // Freezing and unfreezing a book checkpoint (and tag) through the den's history (#31).
+            History = options.History,
         };
+
+        FreezeEndpoints.Map(api, tools);
 
         api.MapGet("/entity/source", (HttpContext c) => ReadEndpoints.Answer(
             c, ["entity", "universe"], q => tools.GetSource(Entity(q.Text("entity")), q.Text("universe"))));

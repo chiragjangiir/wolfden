@@ -169,6 +169,23 @@ function answer(path: string, params: URLSearchParams, at: string | null, option
         otherUniverses: 0,
         autoCheckpoint: { every: null, problem: null, runs: true },
       }
+    case '/api/book/freeze':
+      // The book is a draft, in a den with history.
+      return {
+        version: 1,
+        universe: 'dracula',
+        book: 'dracula',
+        name: 'Dracula',
+        path: 'universes/dracula/books/dracula/book.md',
+        hash: 'h-draft',
+        status: 'draft',
+        backend: 'git',
+        history: true,
+        reason: null,
+        nextTag: 'book/dracula/dracula/final',
+        unfinished: false,
+        otherChanges: 0,
+      }
     case '/api/positions':
       return { version: 1, universe: 'dracula', count: positions.length, positions } satisfies PositionsResult
     case '/api/hierarchy':

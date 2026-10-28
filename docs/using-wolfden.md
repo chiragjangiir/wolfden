@@ -34,7 +34,8 @@ universe, a series, or a book, see [Where to file things](where-to-file.md).
   version in the den's history. Make a checkpoint as you do now.
 
 Notes in a book marked final can't be edited until the book is
-unfrozen; their Edit controls are off, and the page says why.
+unfrozen; their Edit controls are off, and the page says why. See
+[Freezing a finished book](#freezing-a-finished-book).
 
 ### Editing fields
 
@@ -236,3 +237,50 @@ a merge, and makes the checkpoint once that's done. If your git signs
 commits (with GPG, say), keep the passphrase cached (`gpg-agent` does
 this), or an automatic checkpoint waits on the passphrase prompt. Saving
 still works while it waits.
+
+## Freezing a finished book
+
+When a book is done (published, or sent off), **freeze** it. A frozen
+book's notes, chapters, and outline can't be edited, by you in Wolfden or
+by an AI assistant, so what the book says stays as it was published. It
+replaces keeping a `_FINAL` copy of your notes.
+
+In `wolfden serve`, open the book's page and choose **Freeze…**. Wolfden
+says what will happen and asks first. Or, from the command line:
+
+```text
+wolfden freeze dracula
+```
+
+(add `--universe <key>` if your den has more than one universe).
+
+Freezing does three things, in order:
+
+1. It marks the book `status: final` in its `book.md`. That's the freeze
+   itself.
+2. If the den has history, it makes a checkpoint of the whole den, so
+   anything you hadn't checkpointed yet goes in too. Before you
+   confirm, Wolfden says how many other changed files that is.
+3. It tags that checkpoint `book/<universe>/<book>/final`, such as
+   `book/dracula/dracula/final`: a snapshot you can always come back to,
+   because Wolfden never moves or deletes a tag.
+
+Without history, step 1 is the whole freeze, and Wolfden says no
+snapshot was taken.
+
+**To change a frozen book,** unfreeze it: **Unfreeze…** on its page, or
+`wolfden unfreeze dracula`. Its `book.md` then says `status: draft`, and
+with history Wolfden makes a checkpoint, so the history shows when you
+reopened it. When you freeze it again, the new snapshot gets the next
+tag, `final-2`, then `final-3`, and so on, and the earlier tags stay, so
+each version you froze is kept.
+
+**If git refuses** the checkpoint or the tag (a hook, say), the book is
+still frozen, and Wolfden says what went wrong. Fix that, then freeze the
+book again: the page offers **Finish freezing…**, and `wolfden freeze`
+does the same. It makes only the checkpoint and the tag that are
+missing. The same goes for a book you marked `status: final` by hand:
+freezing it takes a snapshot of the book as it is now.
+
+AI assistants can't freeze or unfreeze a book. If one tries to edit a
+frozen book, it's told the book is frozen, and should ask you.
