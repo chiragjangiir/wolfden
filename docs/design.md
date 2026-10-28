@@ -543,9 +543,11 @@ included, and the email can be a placeholder, as long as git will record
 the pair (`git var GIT_COMMITTER_IDENT`: a name made only of characters
 git strips, such as `;`, is refused). A missing one that wasn't given,
 or a pair git won't record, refuses with nothing changed: the repository
-the run just made, still without a commit, is taken away again (if it
-can't be, the result says the den is now an empty repository, and trying
-again picks up from there). Before the den is a repository, the web
+the run just made, still without a commit, is taken away again: moved
+in one rename to a hidden folder in the den, then deleted (if the rename
+fails, the result says the den is now an empty repository, and trying
+again picks up from there; if the delete fails, the den has no
+repository and the result names the folder left behind). Before the den is a repository, the web
 status can only say a name or email *seems* missing (`identityCertain`
 is false), so the dialog's fields are optional then. It also refuses,
 with nothing changed: a den inside a larger repository (which keeps its
@@ -555,7 +557,9 @@ characters without control characters or `<`/`>`. A step that fails
 stops the rest, and the result says what was done and what wasn't. A den
 whose folder is the top of its own repository (as git says: `git
 rev-parse --show-prefix` is empty there, so a `.git` folder git doesn't
-recognise, inside a larger repository, doesn't count) with no
+recognise, inside a larger repository, doesn't count, and nor does a
+linked worktree of another repository, whose `--git-dir` and
+`--git-common-dir` differ and whose config is shared) with no
 checkpoints yet (made by `git init`, or by a turn-on that stopped part
 way) is finished rather than refused: every step but `git init` runs, so
 trying again is safe, and the web UI's checkpoint dialog, which sees

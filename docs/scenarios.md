@@ -2872,6 +2872,9 @@ checkpoints. A third time, on a computer without git.
   synced, or half deleted), which git doesn't take for a repository, is
   still in `writing/`, and refused the same way: nothing is saved in
   `writing/`'s config or committed there.
+- A den that's an orphan linked worktree of `writing/` (`git worktree
+  add --orphan`) has no commits, but its settings are `writing/`'s, so
+  it's refused the same way, and `writing/`'s config is left alone.
 
 Spec: design.md §6, "Turning history on", "A den inside a larger
 repository" (maintainer decision, 2026-10-28, #195). Covered by:
@@ -2879,6 +2882,7 @@ repository" (maintainer decision, 2026-10-28, #195). Covered by:
 `HistorySetupTests.ADenWhoseOwnRepositoryHasCheckpointsIsRefused`,
 `HistorySetupTests.WithoutGitItSaysSoAndChangesNothing`,
 `HistorySetupTests.AnEmptyDotGitInsideALargerRepositoryDoesntMakeTheDenItsOwnRepository`,
+`HistorySetupTests.AnOrphanLinkedWorktreeIsRefusedAndTheMainRepositorysConfigIsLeftAlone`,
 `InitHistoryTests.ADenInsideALargerRepositoryIsRefused`,
 `InitHistoryTests.ADenWithHistoryAlreadyIsRefused`,
 `InitHistoryTests.WithoutGitInstalledAnExistingDenIsRefused`,
