@@ -26,8 +26,8 @@ public static class WolfdenMcpServer
         each filed at one scope: the universe, a series, or a book.
 
         A story position is 'book:chapter' using the den's keys (such as 'dracula:5'), or a bare book key for the start of that
-        book. Facts can carry the position where the reader learns them (from) and where they stop holding (until), so canon
-        changes as the story goes on.
+        book. Chapter keys come from get_chapter; a position the universe doesn't have is refused (bad_position). Facts can carry
+        the position where the reader learns them (from) and where they stop holding (until), so canon changes as the story goes on.
 
         Every tool except check reads one universe. A den with one universe uses it. In a den with several, pass 'universe'
         (its key), or a position whose book only one universe has, which settles it. Only search and list_entities take
@@ -47,13 +47,18 @@ public static class WolfdenMcpServer
 
         The write tools (create_entity, update_fields, append_section, add_idea, rename_section, rename_entity, change_alias, copy_entity,
         move_entity, update_chapter_fields, update_chapter_defaults) change the den's files, keeping everything they don't change as the
-        writer wrote it. A rename or a move rewrites the links that depend on it, in the same change, and a copy gets a new id. Each edit
-        of an existing file takes the hash the file had when you read it (from get_entity, get_chapter, get_chapter_defaults, or
-        your last write), and is refused if the file has changed since. An edit that would leave an error is refused, and
-        nothing in a final (frozen) book can be changed. Edits to hard canon are allowed, but the result lists them: check them
-        with the writer. Writes aren't committed: call checkpoint at a natural stopping point, such as the end of a notes pass
-        or a planning session, with a message that says what the pass was ('Notes pass after drafting ch 12'), naming yourself as
-        co_author.
+        writer wrote it. A rename or a move rewrites the links that depend on it, in the same change, and a copy gets a new id. Make
+        changes through these tools, not by editing the den's files directly, so these checks apply, and never touch .wolfden/ (a
+        rebuildable index) or .git/. Each edit of an existing file takes the hash the file had when you read it (from get_entity,
+        get_chapter, get_chapter_defaults, or your last write), and is refused if the file has changed since (stale_file): the
+        writer may be editing it, so read it again and redo the edit on what's there now. An edit that would leave an error is
+        refused. Nothing in a final (frozen) book can be changed, and only the writer can unfreeze one: on frozen, ask them, and
+        don't work around it. A change that would send existing links to a different entity is refused unless allow_relinks:
+        show the writer the links, and set it only if they agree. Edits to hard canon are allowed, but the result lists them:
+        check them with the writer. Writes aren't committed: call checkpoint at a natural stopping point, such as the end of a
+        notes pass or a planning session, with a message that says what the pass was ('Notes pass after drafting ch 12'), naming
+        yourself as co_author. It records every changed file in the den unless given paths, so tell the writer about any files
+        it lists as changed outside your session.
         """;
 
     /// <summary>The server's options: its name and version, its instructions, and its tools over <paramref name="tools"/>.</summary>

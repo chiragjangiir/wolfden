@@ -43,16 +43,18 @@ folder above it with a `den.yaml`. MCP clients don't always say which
 folder that is, so give `--den` with a full path.
 
 To try the write tools, **copy the Dracula sample out of the clone first**,
-to a new folder that doesn't exist yet, and make it a git repository. From the clone's
+to a new folder that doesn't exist yet, and turn on its history. From the clone's
 root (in PowerShell, use `Copy-Item -Recurse` for `cp -r`):
 
 ```sh
 cp -r samples/dracula <copy>
-cd <copy>
-git init
-git add -A
-git commit -m "Start from the Dracula sample"
+<folder>/wolfden init <copy> --git
 ```
+
+`init --git` makes the copy a git repository and a first checkpoint. If
+git doesn't have your name and email yet, add `--author-name` and
+`--author-email`; they're saved for that den only
+([using-wolfden.md](using-wolfden.md#turning-on-history)).
 
 Inside the clone, the sample is part of Wolfden's own repository, so
 `checkpoint` would commit to Wolfden and `get_history` would show
@@ -275,3 +277,62 @@ described in [Pick a den](#2-pick-a-den).
 | "Rename the faction 'The little band' to 'The Crew of Light', and fix any links." | `get_entity`, then `rename_entity` |
 | "Note an idea, not canon: what if Renfield kept a diary of his own?" | `add_idea` |
 | "Checkpoint this session as 'Renfield notes'." | `checkpoint` |
+
+## 7. Gotchas for AI assistants
+
+What an assistant must do, and must avoid, when it works on a writer's
+den. The server's instructions and tool descriptions say the same in
+fewer words; this list is for you, and for an assistant that reads the
+docs. The writer's own list is in
+[using-wolfden.md](using-wolfden.md#gotchas).
+
+- **Work through the tools, not the files.** An assistant that can
+  also edit files, such as Claude Code, should still change notes with
+  Wolfden's tools. They check each edit as the den reads it, keep
+  links, ids, and finished books safe, and remember what the session
+  wrote for `checkpoint`. A file edited directly gets none of that.
+- **Never touch `.wolfden/` or `.git/`.** `.wolfden/` is Wolfden's
+  index, rebuilt from the files; `.git/` is the den's history. Neither
+  holds anything to edit.
+- **`frozen` means ask the writer.** A book with `status: final` is
+  finished, and nothing in it can be written. There's no tool to unfreeze
+  it, and an assistant mustn't work around the refusal, by editing the
+  file directly or by copying a note out of the book to change it there.
+  Ask the writer, who can unfreeze it in the web UI or with `wolfden
+  unfreeze`.
+- **`stale_file` means read again, then retry.** The file changed after
+  the assistant read it, often because the writer is editing it. Read it
+  again (`get_entity`, `get_chapter`, or `get_chapter_defaults`), and
+  make the edit on what's there now. Never resend the old text over the
+  writer's change.
+- **`allow_relinks` only with the writer's say-so.** A create, copy,
+  rename, or move that would send existing links to a different note is
+  refused, with the links listed. Show them to the writer, and set
+  `allow_relinks` only if they agree. The same goes for
+  `entry_outside_scope` from `move_entity`: the writer picks
+  `keep_entry` or `enter_at_new_scope`.
+- **Positions must resolve.** A position is `book:chapter`, by key
+  (`dracula:5`), and must be a chapter the book lists; `get_chapter`
+  lists them. One that doesn't is `bad_position`, and nothing is
+  written.
+- **Read by position to avoid spoilers.** Without a position,
+  `get_entity`, `list_entities`, and `search` give the author's full
+  view, ideas and later reveals included. To draft or review a chapter,
+  use `canon_as_of` at that chapter, or `get_entity` with `as_of`.
+  `search` and `get_history` have no position.
+- **Writes land at once; only `checkpoint` records them.** The writer
+  sees each write straight away, in the web UI and their editor, but it
+  isn't in the den's history until a checkpoint. Make one at the end of
+  a pass, not after each edit, with a message that says what the pass
+  was and the assistant as `co_author`. It records the whole den unless
+  `paths` names some files, so tell the writer what's in
+  `changed_outside_session`. After `move_entity`, `paths` needs both the
+  old and the new path.
+- **Pinned canon: check with the writer.** An edit to a pinned fact is
+  made, and `pinned_canon` in the result lists it. Confirm it was meant.
+- **A pinned session sees one universe.** With `--universe`, every call
+  reads that universe, and one that names another universe, or `*`, is
+  refused. `checkpoint` still records the whole den.
+- **Images stay put.** `move_entity` and `copy_entity` don't move a
+  note's images or change their paths, so tell the writer when a moved
+  note's images need moving too.

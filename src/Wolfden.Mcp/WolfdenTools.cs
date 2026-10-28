@@ -352,7 +352,7 @@ public sealed class WolfdenTools
 
     private const string RelinksHelp =
         "If true, make the change even though links that reach another entity would change target; they're listed in the result's effects. " +
-        "Check them with the writer first.";
+        "Set it only after the writer has seen those links (the refusal lists them) and agreed.";
 
     /// <summary>The <c>get_chapter</c> tool.</summary>
     [McpServerTool(Name = "get_chapter", Title = "Read a book's chapters", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]

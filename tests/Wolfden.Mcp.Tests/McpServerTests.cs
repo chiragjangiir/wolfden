@@ -64,6 +64,11 @@ public sealed class McpServerTests : IAsyncLifetime
         Assert.Contains("story position", Client.ServerInstructions!, StringComparison.Ordinal);
         Assert.Contains("checkpoint", Client.ServerInstructions!, StringComparison.Ordinal);
 
+        // The traps an agent must know before its first write (#206): each refusal code it can meet, and what to do.
+        Assert.All(
+            new[] { "stale_file", "frozen", "allow_relinks", "bad_position", "co_author", ".wolfden/" },
+            s => Assert.Contains(s, Client.ServerInstructions!, StringComparison.Ordinal));
+
         var tools = await Client.ListToolsAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(ReadToolNames.Concat(WriteToolNames).Order(StringComparer.Ordinal), tools.Select(t => t.Name).Order(StringComparer.Ordinal));
         Assert.All(tools, t =>

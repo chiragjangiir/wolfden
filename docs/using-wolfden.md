@@ -6,6 +6,92 @@ in. It grows as features land. The exact rules are in
 [`format.md`](format.md), and the reasons behind them are in
 [`design.md`](design.md). For choosing whether a note belongs to the
 universe, a series, or a book, see [Where to file things](where-to-file.md).
+Things that tend to surprise people are collected in [Gotchas](#gotchas).
+
+## Getting started
+
+Set things up in this order. Each step builds on the ones before it.
+
+1. **Build Wolfden.** There's no installer yet, so you build it from a
+   clone of the repository. You need the
+   [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), and
+   [Node.js](https://nodejs.org) 22.12 or later for the web UI. Build the
+   web UI first, in the clone's `web/` folder, so the next command
+   includes it:
+
+   ```sh
+   npm ci
+   npm run build
+   ```
+
+   Then, from the clone's root, publish the `wolfden` command to a folder
+   of your choice:
+
+   ```sh
+   dotnet publish src/Wolfden.Cli -c Release -o <folder>
+   ```
+
+   Add that folder to your PATH, so `wolfden` works from any folder; the
+   steps below assume it does. [mcp-clients.md §1](mcp-clients.md#1-build-wolfden)
+   has more detail.
+2. **Try the Dracula sample first (optional).** It's a complete den, so
+   it's a safe place to try everything below before you use your own
+   notes. Copy `samples/dracula` out of the clone to a folder of its own,
+   and turn on its history with `wolfden init <copy> --git`. Inside the
+   clone, it's part of Wolfden's own repository, so its checkpoints would
+   land there ([mcp-clients.md §2](mcp-clients.md#2-pick-a-den)).
+3. **Make your den, with history.** History is what lets you keep
+   versions, see what changed, and freeze a finished book, so turn it on
+   from the start:
+
+   ```sh
+   wolfden init my-notes --universe vael --git
+   ```
+
+   This makes the folder `my-notes`, with a `den.yaml` and a first
+   universe, `vael` (a key: lowercase letters, digits, and hyphens,
+   starting with a letter). It makes the folder a git repository, and
+   makes a first checkpoint. If git doesn't
+   know your name and email yet, add `--author-name` and
+   `--author-email`: a pen name is fine, and they're saved for this den
+   only. For a den you already have, run `wolfden init --git` in its
+   folder instead. Don't put a den with history in Dropbox, OneDrive, or
+   iCloud. See [Turning on history](#turning-on-history).
+4. **Add your series and books.** There's no command for this yet, so
+   you make their folders and files by hand: a `series.md` or a
+   `book.md` with a `name`, and the book's `chapters`, laid out as
+   [format.md §5.1](format.md#51-layout) shows (§13 there has a complete
+   small den). With more than one, list them in reading order: `books` in
+   `series.md`, and `order` in `universe.md`. List the chapters now: a
+   story position, such as "this character enters at chapter 3", only
+   works for a chapter the book lists. Then run `wolfden check --fix`,
+   which gives the new files their ids.
+5. **Run `wolfden check`.** In the den's folder, it checks every note
+   and says what's wrong, file by file. It exits 0 when there are no
+   errors (warnings alone pass) and 1 when there are. A file with an
+   error is left out of Wolfden until it's fixed, so start from a clean
+   check.
+6. **Run `wolfden serve`.** It opens the den in your browser, on this
+   computer only. From there you can [make notes](#making-a-new-note),
+   [edit them](#editing-notes), make
+   [checkpoints](#checkpoints), and
+   [freeze a finished book](#freezing-a-finished-book). Start with a
+   checkpoint of the books you just added. It runs until you press
+   Ctrl+C.
+7. **Connect an AI assistant (optional).** Wolfden's MCP server lets
+   Claude or another assistant read and edit the den through Wolfden's
+   own tools, which keep links, ids, and finished books safe. Follow
+   [mcp-clients.md](mcp-clients.md), from §3; use full paths there.
+8. **Set up your editor (optional).** If you also write in
+   [Obsidian](#using-obsidian) or [VS Code](#using-vs-code), open the
+   den's top folder (the one with `den.yaml`) in it, and change the
+   settings those sections give. Read the
+   [gotchas for other editors](#images-and-other-editors) too.
+9. **Make it a habit.** Make a [checkpoint](#the-habit-one-checkpoint-per-notes-pass)
+   after each notes pass or planning session, with a name that says what
+   it was. When a book is published or sent off,
+   [freeze it](#freezing-a-finished-book). After a big change in another
+   editor, run `wolfden check`.
 
 ## Making a new note
 
@@ -383,3 +469,168 @@ freezing it takes a snapshot of the book as it is now.
 
 AI assistants can't freeze or unfreeze a book. If one tries to edit a
 frozen book, it's told the book is frozen, and should ask you.
+
+## Gotchas
+
+Things that surprise people, with what happens, why, and what to do.
+Each links to the section with the details.
+
+### Setting up
+
+- **`wolfden serve` says it was built without its web UI.** The web UI
+  is built with npm, separately, and `dotnet publish` (or `dotnet
+  build`) includes it only if it was built first. Run `npm ci` and `npm
+  run build` in the clone's `web/` folder, then publish again and
+  restart `serve` ([Getting started](#getting-started), step 1).
+- **Anyone using this computer can open the page.** `wolfden serve`
+  listens on this computer only, never the network, but this version has
+  no accounts, so anyone else signed in to the same computer can open it
+  while it runs. Stop it with Ctrl+C when you're done.
+- **A new den has no books.** `wolfden init` makes the den and, with
+  `--universe`, a first universe. Series and books are folders and
+  files you add by hand for now
+  ([Getting started](#getting-started), step 4).
+
+### History and git
+
+Git is the tool Wolfden uses to keep your den's history. A *repository*
+is a folder whose history git keeps, and a *commit* is one saved version
+in it, which Wolfden calls a checkpoint.
+
+- **Saving isn't a checkpoint.** Every save goes to the file at once,
+  but only a checkpoint puts it in the den's history. The top bar of
+  `wolfden serve` says how many notes have changed since the last one.
+  Make one after each notes pass ([Checkpoints](#checkpoints)).
+- **Automatic checkpoints are off by default.** Turn them on with
+  `auto_checkpoint: 30m` in `den.yaml`. Only `wolfden serve` makes them,
+  while it runs. One takes in edits an AI assistant saved and hasn't
+  checkpointed yet, without the assistant's name on them, so ask the
+  assistant to checkpoint at the end of its pass
+  ([Automatic checkpoints](#automatic-checkpoints)).
+- **A checkpoint records the whole den.** It takes in every changed
+  note: ones you changed in your editor, and ones in other universes when
+  `serve --universe` shows only one. Freezing and unfreezing make one
+  too. The checkpoint dialog lists the changes before you confirm, and
+  the freeze prompt counts them.
+- **Your git name and email are for this den only.** Git records a name
+  and email on every checkpoint. Wolfden asks only when git has none,
+  and saves what you type in this den's repository, never for the rest
+  of your computer. A pen name is fine, and the email can be a
+  placeholder. If your git settings already give a name, perhaps through
+  an `includeIf` rule (one that picks a name by folder), git's is used,
+  and Wolfden says the one you typed wasn't
+  ([Turning on history](#turning-on-history)).
+- **Not in a synced folder.** Git and Dropbox, OneDrive, or iCloud
+  together can corrupt the history when two computers sync while git is
+  writing. Use one or the other: git with a private remote for a backup,
+  or a synced folder without history.
+- **A den inside a larger repository uses that repository.** There's no
+  history to turn on: checkpoints are commits in the larger repository,
+  of the den's files only, and anything else you've staged there (marked
+  for your next commit) stays as it was. Freeze tags belong to the whole repository, so two dens in
+  it with the same universe and book keys share the tag numbers. That's
+  why you try the Dracula sample in a copy outside Wolfden's own clone.
+- **`wolfden init --git` exits 0 when its main job is done.** For a new
+  den, that job is making the den; for an existing one, it's turning on
+  history. So a new den inside a repository, or on a computer without
+  git, exits 0, and the same situations exit 2 for an existing den. Read
+  what it prints.
+- **Automatic checkpoints wait for git.** While you're in the middle of
+  a git rebase or merge (ways of combining two lines of history), they
+  wait until you've finished. If git signs
+  your commits, keep the passphrase cached (`gpg-agent` does this), or
+  they wait on the passphrase prompt.
+
+### Editing
+
+- **Two editors on one note.** If the note changed since you opened it
+  (in Obsidian, say, or by an AI assistant), Wolfden refuses the save
+  and shows both versions, so nothing is lost. Choose which to keep
+  ([Editing notes](#editing-notes)). An assistant's edit is refused the
+  same way, and it reads the note again.
+- **A note with an error disappears.** A file with an error is left out
+  of Wolfden until it's fixed: its page, its links, and every view. An
+  error in a `book.md` leaves out the whole book. Run `wolfden check` to
+  find it.
+- **Copying a note's file by hand makes a duplicate.** Both files have
+  the same `id`, so Wolfden leaves both out of views, and links to them
+  break, until one gets a new id. Copy with `wolfden copy`, or ask an AI
+  assistant, either of which gives the copy a new id. To fix a hand-made
+  copy, replace its `id` with one from `wolfden new-id`.
+- **Notes written by hand need an id.** One without an `id` still works,
+  with a warning, but links can't reach it by id. `wolfden check --fix`
+  adds the missing ids.
+- **Chapter keys are for keeps.** Positions name a chapter by its key
+  (`dracula:5`), not its number. To insert a chapter, give it a new key,
+  such as `2b`, and renumber with `number:`, so existing positions still
+  point where they did ([format.md §6.4](format.md#64-bookmd)).
+- **Hidden files and folder links are ignored.** Anything whose name
+  starts with a dot (`.obsidian/`, `.trash/`) isn't part of the den, so
+  a note moved to `.trash/` is gone from Wolfden. Folder links (symbolic
+  links and junctions) aren't followed; `wolfden check` warns about
+  them.
+- **`.wolfden/` is only an index.** Wolfden keeps its index there and
+  rebuilds it from your notes, so never edit it, and nothing is lost if
+  it's deleted. Git leaves it out.
+
+### Links
+
+- **A new note can take over links.** Links go to the nearest note of a
+  name, so a new note named like an existing one can take its links.
+  Wolfden refuses and lists the links that would move. Choose another
+  name or place, or **Create anyway** (`--allow-relinks`) if they should
+  move ([Making a new note](#making-a-new-note)).
+- **Renaming a note by hand doesn't fix its links.** Changing `name:` in
+  **Edit file** or in your editor leaves the links that used the old
+  name broken. The web UI can't rename a note yet. An AI assistant
+  working through Wolfden can, and rewrites the links, or keeps the old
+  name as an alias.
+- **Moving a note's file can change where links go.** Since the nearest
+  note of a name wins, a file moved to another book, or up to the
+  universe, can take links from another note, or lose its own. An AI
+  assistant's move rewrites links so they reach what they did. After
+  moving files yourself, run `wolfden check`.
+- **Links don't cross universes.** A link reaches only notes in its own
+  universe. `wolfden check` says when a broken link matches a note in
+  another one.
+
+### Books and freezing
+
+- **A frozen book refuses edits, but only in Wolfden.** Wolfden and AI
+  assistants working through it can't change a frozen book. Your own
+  editor can, and Wolfden can't stop it. If that happens, the book's
+  page offers **Finish freezing…**, which takes a new snapshot
+  ([Freezing a finished book](#freezing-a-finished-book)).
+- **Freeze tags never move.** Each freeze keeps its own snapshot, so
+  freezing a book again adds `final-2`, then `final-3`, and the earlier
+  tags stay.
+- **AI assistants can't freeze or unfreeze.** Only you can, on the
+  book's page or with `wolfden freeze` and `wolfden unfreeze`. An
+  assistant that tries to edit a frozen book should ask you.
+- **Spoiler checks are off by default.** `wolfden check` flags a link to
+  something the reader hasn't met yet only with `spoiler_checks: true`
+  in `den.yaml` ([format.md F-DEN-7](format.md)). It sees links, not
+  prose.
+
+### Images and other editors
+
+- **Image paths start from the note's folder,** or from the den's top
+  folder if they start with `/`. Not from wherever the image happens to
+  be ([Images](#images)).
+- **Moving a note doesn't move its images.** Its image paths stay as
+  they were, so move the images too, or use a `/` path.
+- **Website images don't show.** An image from a website is blocked
+  unless `den.yaml` has `remote_images: true`, so opening a note
+  doesn't tell the website.
+- **Obsidian's `![[image]]` embeds show as text.** Wolfden shows only
+  `![what it shows](path)` images. Obsidian writes the embed form when
+  **Use [[Wikilinks]]** is on, so change pasted images to the Markdown
+  form ([Using Obsidian](#using-obsidian), #189).
+- **An image Obsidian shows can be "not found" in Wolfden.** When a path
+  is wrong, Obsidian finds an image by its file name anywhere in the
+  vault. Wolfden follows the path only.
+- **Obsidian's Properties panel can't show `fields`.** It shows a note's
+  nested `fields:` as raw text marked unsupported, and a position such
+  as `from: dracula:1` as a web link. Editing there may rewrite them. In
+  Obsidian's **Settings → Editor**, set **Properties in document** to
+  **Source**, so the frontmatter is plain text you edit yourself (#73).
