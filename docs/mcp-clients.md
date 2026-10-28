@@ -291,6 +291,8 @@ docs. The writer's own list is in
   Wolfden's tools. They check each edit as the den reads it, keep
   links, ids, and finished books safe, and remember what the session
   wrote for `checkpoint`. A file edited directly gets none of that.
+  No tool yet adds a series, a book, or a chapter, or edits an outline;
+  edit those files directly only when the writer asks, then run `check`.
 - **Never touch `.wolfden/` or `.git/`.** `.wolfden/` is Wolfden's
   index, rebuilt from the files; `.git/` is the den's history. Neither
   holds anything to edit.
@@ -313,8 +315,10 @@ docs. The writer's own list is in
   `keep_entry` or `enter_at_new_scope`.
 - **Positions must resolve.** A position is `book:chapter`, by key
   (`dracula:5`), and must be a chapter the book lists; `get_chapter`
-  lists them. One that doesn't is `bad_position`, and nothing is
-  written.
+  lists them. A read, or `create_entity`'s `from`, at one that doesn't
+  is `bad_position`. A `from` or `until` written by `update_fields` or
+  `append_section` isn't checked: it's saved, `check` warns (F-POS-4),
+  and that fact is left out of every canon view.
 - **Read by position to avoid spoilers.** Without a position,
   `get_entity`, `list_entities`, and `search` give the author's full
   view, ideas and later reveals included. To draft or review a chapter,

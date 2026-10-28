@@ -32,8 +32,9 @@ Set things up in this order. Each step builds on the ones before it.
    ```
 
    Add that folder to your PATH, so `wolfden` works from any folder; the
-   steps below assume it does. [mcp-clients.md §1](mcp-clients.md#1-build-wolfden)
-   has more detail.
+   steps below assume it does. After updating your clone, build the web
+   UI again before you publish, or the old one is copied.
+   [mcp-clients.md §1](mcp-clients.md#1-build-wolfden) has more detail.
 2. **Try the Dracula sample first (optional).** It's a complete den, so
    it's a safe place to try everything below before you use your own
    notes. Copy `samples/dracula` out of the clone to a folder of its own,
@@ -358,7 +359,8 @@ A few things to know:
   a new den that job is making the den, so a new den inside a larger
   repository, or on a computer without git, still exits 0. For an
   existing den the job is turning on history, so the same situations
-  exit 2.
+  exit 2. Either way, it exits 2 if git needs a name and email that
+  weren't given, or a step fails; a new den is kept.
 
 ### The habit: one checkpoint per notes pass
 
@@ -510,7 +512,9 @@ in it, which Wolfden calls a checkpoint.
 - **A checkpoint records the whole den.** It takes in every changed
   note: ones you changed in your editor, and ones in other universes when
   `serve --universe` shows only one. Freezing and unfreezing make one
-  too. The checkpoint dialog lists the changes before you confirm, and
+  too. The checkpoint dialog lists the changes before you confirm (with
+  `--universe`, it counts the other universes' changes rather than
+  naming them), and
   the freeze prompt counts them.
 - **Your git name and email are for this den only.** Git records a name
   and email on every checkpoint. Wolfden asks only when git has none,
@@ -530,11 +534,12 @@ in it, which Wolfden calls a checkpoint.
   for your next commit) stays as it was. Freeze tags belong to the whole repository, so two dens in
   it with the same universe and book keys share the tag numbers. That's
   why you try the Dracula sample in a copy outside Wolfden's own clone.
-- **`wolfden init --git` exits 0 when its main job is done.** For a new
-  den, that job is making the den; for an existing one, it's turning on
-  history. So a new den inside a repository, or on a computer without
-  git, exits 0, and the same situations exit 2 for an existing den. Read
-  what it prints.
+- **`wolfden init --git` exit codes differ for new and existing dens.**
+  A new den inside a repository, or on a computer without git, exits 0:
+  the den is made, without a repository of its own. The same situations
+  exit 2 for an existing den, where turning on history is the job.
+  Either way, a missing name and email, or a step that fails, exits 2,
+  and a new den is kept. Read what it prints.
 - **Automatic checkpoints wait for git.** While you're in the middle of
   a git rebase or merge (ways of combining two lines of history), they
   wait until you've finished. If git signs
@@ -571,7 +576,8 @@ in it, which Wolfden calls a checkpoint.
   them.
 - **`.wolfden/` is only an index.** Wolfden keeps its index there and
   rebuilds it from your notes, so never edit it, and nothing is lost if
-  it's deleted. Git leaves it out.
+  it's deleted. Checkpoints leave it out, and turning on history adds it
+  to `.gitignore`.
 
 ### Links
 
@@ -598,8 +604,10 @@ in it, which Wolfden calls a checkpoint.
 
 - **A frozen book refuses edits, but only in Wolfden.** Wolfden and AI
   assistants working through it can't change a frozen book. Your own
-  editor can, and Wolfden can't stop it. If that happens, the book's
-  page offers **Finish freezing…**, which takes a new snapshot
+  editor can, and Wolfden can't stop it. With history, the book's page
+  then offers **Finish freezing…**, which takes a new snapshot that
+  includes the change. If the change was a mistake, undo it first (the
+  note's History tab shows what it was)
   ([Freezing a finished book](#freezing-a-finished-book)).
 - **Freeze tags never move.** Each freeze keeps its own snapshot, so
   freezing a book again adds `final-2`, then `final-3`, and the earlier
